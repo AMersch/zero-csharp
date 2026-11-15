@@ -15,7 +15,9 @@ LongString
 # Binaries (Windows)
 *.exe
 
-# bflat download
+# bflat download (setup.sh)
+bflat/
+bflat.tmp/
 bflat-*/
 bflat.tar.gz
 bflat.zip
@@ -34,7 +36,6 @@ bflat.zip
 
 # IDE
 .vs/
-.vscode/
 *.user
 *.suo
 

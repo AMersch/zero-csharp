@@ -1,15 +1,17 @@
-// Example: Minimal zero-mode "Hello World"
-// Build: bflat build Minimal.cs --stdlib:zero -o Minimal
-// Size: ~45KB - no .NET runtime, just native code!
+// Example: Minimal zero-mode "Hello World" (~45 KB, no .NET runtime).
+// Build: ./build.sh Minimal
+//
+// Under the updated memory safety rules, creating a pointer (stackalloc) is
+// safe; only the call that reads through it needs an unsafe block.
 
 using System.Runtime.InteropServices;
 
-unsafe class Program
+public static class Program
 {
     [DllImport("libc")]
-    static extern int puts(byte* s);
+    static unsafe extern int puts(byte* s);
 
-    static int Main()
+    public static int Main()
     {
         byte* msg = stackalloc byte[] {
             (byte)'H', (byte)'e', (byte)'l', (byte)'l', (byte)'o',
@@ -17,7 +19,7 @@ unsafe class Program
             (byte)' ', (byte)'z', (byte)'e', (byte)'r', (byte)'o',
             (byte)'-', (byte)'m', (byte)'o', (byte)'d', (byte)'e', (byte)'!', 0
         };
-        puts(msg);
+        unsafe { puts(msg); } // SAFETY: msg is NUL-terminated.
         return 0;
     }
 }

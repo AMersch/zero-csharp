@@ -1,51 +1,45 @@
-# Build all examples for Windows
-# Assumes bflat is in PATH or in .\bflat-* directory
+# Builds the samples with the bflat fork on Windows; mirrors build.sh.
+# UNTESTED on Windows: the samples P/Invoke into "libc", which may not
+# resolve there. See README.
+#
+# Usage: .\build.ps1 [Sample ...]     default: all samples
+# Env:   BFLAT_DIR (default ..\bflat\layouts\windows-x64)
+
+param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Samples)
 
 $ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
 
-# Find bflat
-$BFLAT = Get-Command bflat -ErrorAction SilentlyContinue
-if (-not $BFLAT) {
-    $BFLAT_DIR = Get-ChildItem -Directory -Filter "bflat-*" | Select-Object -First 1
-    if ($BFLAT_DIR) {
-        $BFLAT = Join-Path $BFLAT_DIR.FullName "bflat.exe"
-    } else {
-        Write-Host "Error: bflat not found. Run .\setup.ps1 first or add bflat to PATH" -ForegroundColor Red
-        exit 1
-    }
-} else {
-    $BFLAT = $BFLAT.Source
+$Sources = [ordered]@{
+    Tiny        = @("samples/Tiny.cs")
+    Minimal     = @("samples/Minimal.cs")
+    Arena       = @("samples/Arena.cs", "lib/Arena.cs", "lib/Out.cs")
+    Collections = @("samples/Collections.cs", "lib/Arena.cs", "lib/List.cs", "lib/Dict.cs", "lib/Out.cs")
+    VirtualTest = @("samples/VirtualTest.cs", "lib/Out.cs")
+    Simd        = @("samples/Simd.cs", "lib/Arena.cs", "lib/Out.cs")
+}
+if (-not $Samples) { $Samples = @($Sources.Keys) }
+foreach ($name in $Samples) {
+    if (-not $Sources.Contains($name)) { throw "Unknown sample: $name (known: $($Sources.Keys -join ', '))" }
 }
 
-Write-Host "Using: $BFLAT"
-Write-Host ""
+$BflatDir = if ($env:BFLAT_DIR) { $env:BFLAT_DIR } else { "..\bflat\layouts\windows-x64" }
+$Bflat = Join-Path $BflatDir "bflat.exe"
+if (-not (Test-Path $Bflat)) { throw "No bflat at $BflatDir. Build the fork's layouts (README) or set BFLAT_DIR." }
 
-# Create output directory
 New-Item -ItemType Directory -Force -Path "bin" | Out-Null
 
-Write-Host "=== Building Zero Mode Examples ===" -ForegroundColor Cyan
+foreach ($name in $Samples) {
+    Write-Host "[bflat] $name -> bin/$name.exe"
+    $flags = switch ($name) {
+        "Tiny" { @("-Os") }
+        "Simd" { @("-m", "x86-64-v3") }   # AVX2/FMA baseline; zero mode has no CPU detection
+        default { @() }
+    }
+    & $Bflat build @($Sources[$name]) --stdlib:zero `
+        --langversion preview --compiler-feature updated-memory-safety-rules `
+        @flags -o "bin/$name.exe"
+    if ($LASTEXITCODE -ne 0) { throw "Build failed for $name" }
+}
 
-Write-Host "[1/5] Building Tiny (smallest binary)..."
-& $BFLAT build Tiny.cs --stdlib:zero -Os -o bin\Tiny.exe
-
-Write-Host "[2/5] Building Minimal..."
-& $BFLAT build Minimal.cs --stdlib:zero -o bin\Minimal.exe
-
-Write-Host "[3/5] Building Arena (memory allocator)..."
-& $BFLAT build Arena.cs --stdlib:zero -o bin\Arena.exe
-
-Write-Host "[4/5] Building Collections (List, Dict)..."
-& $BFLAT build Collections.cs --stdlib:zero -o bin\Collections.exe
-
-Write-Host "[5/5] Building VirtualTest (polymorphism)..."
-& $BFLAT build VirtualTest.cs --stdlib:zero -o bin\VirtualTest.exe
-
-Write-Host ""
-Write-Host "=== Build Complete ===" -ForegroundColor Green
-Get-ChildItem bin\*.exe | Format-Table Name, @{N='Size (KB)';E={[math]::Round($_.Length/1KB,1)}}
-Write-Host ""
-Write-Host "Run examples:"
-Write-Host "  .\bin\Minimal.exe"
-Write-Host "  .\bin\Arena.exe"
-Write-Host "  .\bin\Collections.exe"
-Write-Host "  .\bin\VirtualTest.exe"
+Get-ChildItem bin\*.exe | Format-Table Name, @{ N = "Size (KB)"; E = { [math]::Round($_.Length / 1KB, 1) } }

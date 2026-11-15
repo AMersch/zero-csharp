@@ -28,7 +28,9 @@ Windows: `.\setup.ps1` and `.\build.ps1` use the fork's `windows-x64` layout but
 The samples need a bflat fork, [OnurGumus/bflat](https://github.com/OnurGumus/bflat) (branch `csharp15`), which differs from upstream bflat 10.0.0-rc.1 in two ways:
 
 - **It compiles C# 15.** Roslyn is bumped to 5.12.0, the version shipped with the .NET 11 SDK. A new `--compiler-feature` option (the same as `csc -features:`) turns on the updated memory safety rules.
-- **SIMD.** zerolib defines `Vector64/128/256<T>` and a subset of the hardware intrinsics (`AdvSimd` on arm64; `Sse`, `Avx`, `Fma` on x64). The compiler treats them as real intrinsics.
+- **SIMD.** zerolib defines `Vector64/128/256<T>` (with `Create` and `As*`) and a subset of the hardware intrinsics: `AdvSimd` and `Dp` (SDOT) on arm64; `Sse`, `Avx`, `Avx2` and `Fma` on x64. That covers float arithmetic, FMA, min/max, rounding, conversions, divide and int8 dot products. The compiler treats them as real intrinsics.
+- **Atomics and half floats.** `Interlocked` (compiled to `lock xadd`/`cmpxchg` and `ldaxr`/`stlxr`), `Volatile`, `Half`, `BFloat16` and the `BitConverter` bit conversions. Half/BFloat16 conversions are bit-for-bit identical to .NET 11's.
+- **Instruction sets beyond the baseline come only from `-m`.** Zero mode has no run-time CPU detection, and upstream bflat failed to link on arm64 when code checked e.g. `Dp.IsSupported` without `-m`. Now such checks are simply `false` unless the instruction set is given with `-m`.
 - **The .NET 10 GA JIT.** Upstream bflat 10.0.0-rc.1 ships the .NET 10 RC1 JIT, which miscompiles some static-field stores on x64. The fork's build swaps in Microsoft's GA JIT, which fixes them.
 - **zerolib fixes.** `ThrowOverflowException` is added, so checked arithmetic and **integer division on arm64** compile. `Console.WriteLine(int)` is fixed.
 
@@ -61,7 +63,7 @@ bflat build samples/Arena.cs lib/Arena.cs lib/Out.cs --stdlib:zero \
 
 - `--arch` for the target (default: this machine's architecture; set `BFLAT_ARCH=x64` or `arm64` to cross-compile).
 - `-Os --no-pie` plus `strip` for Tiny.
-- `-m x86-64-v3` for Simd on x64, so AVX2/FMA are available.
+- For Simd and Kernels: `-m x86-64-v3` on x64 (AVX2/FMA; Haswell or newer) and `-m dotprod` on arm64 (SDOT; ARMv8.2+, e.g. Apple M1).
 - On arm64, `--ldflags "-z max-page-size=4096"`. Without it, the default 64 KB segment alignment pads even Tiny to ~200 KB. 4 KB-page binaries don't load on 16 KB/64 KB-page kernels (Asahi Linux, some servers); set `ARM64_MAX_PAGE_SIZE=65536` for those.
 
 ## Updated memory safety rules
@@ -90,6 +92,7 @@ unsafe { Arena.Reset(); }                // SAFETY: p is not used after this
 | `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of the arena | ~80 KB |
 | `samples/VirtualTest.cs` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | ~51 KB |
 | `samples/Simd.cs` | Float dot product with NEON (arm64) or AVX + FMA (x64), checked against scalar and timed (12x faster on Apple Silicon) | ~58 KB |
+| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~72 KB |
 
 Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is stripped); x64 is within a few KB. Run `strip` to shrink the others.
 
@@ -101,6 +104,7 @@ Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is s
 | `List.cs` | Growable array. It's a handle to an arena header, so copies share contents. `default(List<T>)` is safe to use: reads see an empty list and `Add` returns false. |
 | `Dict.cs` | Open-addressing hash map (FNV-1a, power-of-two capacity). Keys are compared by raw bytes: fine for integers and padding-free structs, not for floats. |
 | `Out.cs` | Buffered stdout writer. zerolib's `Console` makes one syscall per character. |
+| `Kernels.cs` | SIMD math for LLM inference: `Dot`, `MatVec`, `DotI8`, `Exp`, `Softmax`, `Silu`, `RmsNorm`. Each has NEON, AVX2+FMA and scalar paths and handles any length. |
 
 ## What zero mode supports
 
@@ -118,8 +122,9 @@ Zero mode has no garbage collector, no exceptions (failures call `Environment.Fa
 | Upstream zerolib lacks `ThrowOverflowException`, so checked arithmetic and integer `/` and `%` on arm64 don't compile | Fixed in the fork |
 | Upstream zerolib's `Console.WriteLine(int)` prints a stray NUL before every number and garbage for negatives | Fixed in the fork |
 | On x64, `staticStructField.FixedBuffer[variableIndex] = x` is miscompiled into a store to a bogus absolute address (segfault). This is a .NET 10 RC1 JIT bug, fixed in .NET 10 GA | Fixed in the fork (GA JIT) |
-| No `System.Runtime.Intrinsics` (SIMD) | Added in the fork (a subset; see `samples/Simd.cs`) |
-| AVX/AVX2/FMA report `IsSupported == false` by default on x64: zero mode has no run-time CPU detection | Build with `-m x86-64-v3` (Haswell or newer); `build.sh` does this for Simd |
+| No `System.Runtime.Intrinsics` (SIMD), `Interlocked`, `Volatile`, `Half` or `BFloat16` | Added in the fork |
+| On arm64, checking a non-baseline instruction set (`Dp.IsSupported`, ...) without `-m` fails to link (`undefined symbol: g_cpuFeatures`) | Fixed in the fork: such checks are `false` unless the set is given with `-m` |
+| Non-baseline instruction sets (AVX2, FMA, dotprod) report `IsSupported == false` by default: zero mode has no run-time CPU detection | Build with `-m x86-64-v3` / `-m dotprod`; `build.sh` does this for Simd and Kernels |
 | `Environment.TickCount64` fails to link in zero mode (`undefined symbol: minipal_hires_ticks`) | Call libc `clock_gettime` instead (see `samples/Simd.cs`) |
 | `[DllImport("libm")]` aborts at runtime | Use `[DllImport("libm.so.6")]` |
 | `Math` has no `Sqrt`/`Exp`/... | libm via P/Invoke |

@@ -17,6 +17,7 @@ $Sources = [ordered]@{
     Collections = @("samples/Collections.cs", "lib/Arena.cs", "lib/List.cs", "lib/Dict.cs", "lib/Out.cs")
     VirtualTest = @("samples/VirtualTest.cs", "lib/Out.cs")
     Simd        = @("samples/Simd.cs", "lib/Arena.cs", "lib/Out.cs")
+    Kernels     = @("samples/Kernels.cs", "lib/Kernels.cs", "lib/Arena.cs", "lib/Out.cs")
 }
 if (-not $Samples) { $Samples = @($Sources.Keys) }
 foreach ($name in $Samples) {
@@ -33,7 +34,7 @@ foreach ($name in $Samples) {
     Write-Host "[bflat] $name -> bin/$name.exe"
     $flags = switch ($name) {
         "Tiny" { @("-Os") }
-        "Simd" { @("-m", "x86-64-v3") }   # AVX2/FMA baseline; zero mode has no CPU detection
+        { $_ -in "Simd", "Kernels" } { @("-m", "x86-64-v3") }   # AVX2/FMA baseline; zero mode has no CPU detection
         default { @() }
     }
     & $Bflat build @($Sources[$name]) --stdlib:zero `

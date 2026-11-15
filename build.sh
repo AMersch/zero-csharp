@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
 
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Simd)
+ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Simd Kernels)
 
 # Language version and memory safety rules for every sample.
 CSHARP_FLAGS=(--langversion preview --compiler-feature updated-memory-safety-rules)
@@ -24,6 +24,7 @@ sources() {
         Collections) echo samples/Collections.cs lib/Arena.cs lib/List.cs lib/Dict.cs lib/Out.cs ;;
         VirtualTest) echo samples/VirtualTest.cs lib/Out.cs ;;
         Simd)        echo samples/Simd.cs lib/Arena.cs lib/Out.cs ;;
+        Kernels)     echo samples/Kernels.cs lib/Kernels.cs lib/Arena.cs lib/Out.cs ;;
         *) echo "Unknown sample: $1 (known: ${ALL_SAMPLES[*]})" >&2; return 1 ;;
     esac
 }
@@ -31,9 +32,11 @@ sources() {
 bflat_flags() {
     case "$1" in
         Tiny) echo -Os --no-pie ;;
-        # Zero mode has no runtime CPU detection, so AVX2/FMA must be part of the
-        # baseline (Haswell, 2013, or newer). arm64 always has NEON.
-        Simd) if [ "$BFLAT_ARCH" = x64 ]; then echo -m x86-64-v3; fi ;;
+        # Zero mode has no runtime CPU detection, so SIMD extensions must be part of
+        # the baseline. x64: AVX2/FMA (Haswell, 2013, or newer). arm64 always has
+        # NEON; dotprod (SDOT, for int8) needs ARMv8.2+, e.g. Apple M1 or Cortex-A76.
+        Simd | Kernels)
+            if [ "$BFLAT_ARCH" = x64 ]; then echo -m x86-64-v3; else echo -m dotprod; fi ;;
     esac
 }
 

@@ -28,3 +28,22 @@ ensure_image() {
         docker build --platform "$DOCKER_PLATFORM" -t "$IMAGE" docker
     fi
 }
+
+# WebAssembly (./setup.sh --wasm, ./build.sh --wasm, ./run.sh --wasm).
+# WASM builds don't use bflat's own compiler: NativeAOT-LLVM compiles to LLVM
+# bitcode, the WASI SDK's clang compiles and links it, and wasmtime runs it.
+# All three are Linux builds for this machine's architecture (on macOS they run
+# in the build container), stored in WASM_TOOLS. These versions are tested;
+# NativeAOT-LLVM expects WASI SDK 29, and 34 works with --no-stack-first.
+NAOT_LLVM_VERSION=10.0.0-rc.1.26357.1
+WASI_SDK_VERSION=34.0
+WASMTIME_VERSION=v50.0.1
+WASM_TOOLS=${WASM_TOOLS:-tools/wasm}
+
+case "$HOST_ARCH" in
+    x64)   WASM_HOST_NUGET=linux-x64;   WASI_SDK_ARCH=x86_64; WASMTIME_ARCH=x86_64 ;;
+    arm64) WASM_HOST_NUGET=linux-arm64; WASI_SDK_ARCH=arm64;  WASMTIME_ARCH=aarch64 ;;
+esac
+WASM_ILC=$WASM_TOOLS/ilc-$NAOT_LLVM_VERSION/tools/ilc
+WASI_SDK=$WASM_TOOLS/wasi-sdk-$WASI_SDK_VERSION-$WASI_SDK_ARCH-linux
+WASMTIME=$WASM_TOOLS/wasmtime-$WASMTIME_VERSION-$WASMTIME_ARCH-linux/wasmtime

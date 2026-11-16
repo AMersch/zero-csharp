@@ -5,8 +5,11 @@
 # On macOS bflat runs in a Linux container (see docker/Dockerfile); the
 # binaries in ./bin are Linux binaries, so use ./run.sh to run them.
 #
-# Usage:  ./build.sh [Sample ...]     default: all samples
-# Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH (see env.sh)
+# With --wasm, builds WebAssembly modules (bin/wasm/*.wasm, WASI) instead, with
+# NativeAOT-LLVM and the WASI SDK (./setup.sh --wasm downloads them).
+#
+# Usage:  ./build.sh [--wasm] [Sample ...]     default: all samples
+# Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS (see env.sh)
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
@@ -61,12 +64,16 @@ check_bflat() {
     fi
 }
 
-build_native() {
-    local name
-    check_bflat
+build_lib() {
     mkdir -p bin
     echo "[bflat] lib/*.cs -> $LIB"
     "$BFLAT_DIR/bflat" build-il lib/*.cs -O --stdlib:zero "${CSHARP_FLAGS[@]}" --target Shared -o "$LIB"
+}
+
+build_native() {
+    local name
+    check_bflat
+    build_lib
     for name in "$@"; do
         echo "[bflat] $name -> bin/$name"
         # shellcheck disable=SC2046
@@ -82,11 +89,78 @@ build_native() {
     done
 }
 
-# Internal entry point used inside the container.
+WASI_ZEROLIB=$BFLAT_DIR/lib/wasi/wasm/zerolib.dll
+
+check_wasm() {
+    if [ ! -x "$WASM_ILC" ] || [ ! -x "$WASI_SDK/bin/clang" ]; then
+        echo "Error: no WebAssembly toolchain in $WASM_TOOLS. Run ./setup.sh --wasm" >&2
+        exit 1
+    fi
+    if [ ! -f "$WASI_ZEROLIB" ]; then
+        echo "Error: no $WASI_ZEROLIB (the bflat layout predates WASI support; rebuild the fork)" >&2
+        exit 1
+    fi
+}
+
+# Source -> IL (bflat, as for the native build) -> LLVM bitcode (NativeAOT-LLVM,
+# against zerolib's WASI build) -> WASM objects (clang) -> one module, linked with
+# wasm/runtime.c (the zero-mode runtime) and WASI's C library.
+build_wasm() {
+    local name obj bc
+    check_bflat
+    check_wasm
+    build_lib
+    for name in "$@"; do
+        echo "[wasm]  $name -> bin/wasm/$name.wasm"
+        obj=bin/wasm/obj/$name
+        rm -rf "$obj"
+        mkdir -p "$obj"
+
+        "$BFLAT_DIR/bflat" build-il "samples/$name.cs" -r "$LIB" -O --stdlib:zero "${CSHARP_FLAGS[@]}" -o "$obj/$name.dll"
+
+        # --directpinvoke binds [DllImport("libc")] and ("libm.so.6") at link time,
+        # to WASI's C library.
+        if ! "$WASM_ILC" "$obj/$name.dll" -r "$LIB" -r "$WASI_ZEROLIB" --systemmodule:zerolib \
+                --targetos:wasi --targetarch:wasm -O --wasm-global-base:1024 \
+                --codegenopt:Target=wasm32-unknown-wasip2 --codegenopt:LlvmExceptionHandlingModel=emulated \
+                --directpinvoke:libc --directpinvoke:libm.so.6 -o:"$obj/$name.bc" > "$obj/ilc.log" 2>&1; then
+            cat "$obj/ilc.log" >&2
+            exit 1
+        fi
+
+        # $name.N.bc are bitcode; $name.bc itself is already a WASM object (the
+        # module's data), and $name.external.o needs no compiling.
+        for bc in "$obj/$name".*.bc; do
+            "$WASI_SDK/bin/clang" "$bc" -c -o "${bc%.bc}.o" -target wasm32-unknown-wasip2 -O2 \
+                -mllvm -combiner-global-alias-analysis=false -mllvm -disable-lsr
+        done
+        cp "$obj/$name.bc" "$obj/$name.data.o"
+
+        # wasip1, not wasip2: a WASI 0.2 exit only says success or failure, and the
+        # samples report failures in their exit code. --no-stack-first: WASI SDK 34
+        # puts the stack first by default, which clashes with the 1 KB global base.
+        "$WASI_SDK/bin/clang" -target wasm32-wasip1 -Os "$obj"/*.o wasm/runtime.c -lm -o "bin/wasm/$name.wasm" \
+            -Wl,--no-stack-first -Wl,--global-base=1024 -Wl,-z,stack-size=1048576 \
+            -Wl,--strip-all -Wl,--gc-sections
+    done
+}
+
+# Internal entry points used inside the container.
 if [ "${1:-}" = "--native" ]; then
     shift
     build_native "$@"
     exit 0
+fi
+if [ "${1:-}" = "--native-wasm" ]; then
+    shift
+    build_wasm "$@"
+    exit 0
+fi
+
+WASM=0
+if [ "${1:-}" = "--wasm" ]; then
+    WASM=1
+    shift
 fi
 
 if [ $# -eq 0 ]; then
@@ -96,18 +170,30 @@ for name in "$@"; do
     check_sample "$name"
 done
 
+if [ "$WASM" = 1 ]; then
+    entry=--native-wasm
+    output() { echo "bin/wasm/$1.wasm"; }
+else
+    entry=--native
+    output() { echo "bin/$1"; }
+fi
+
 if [ "$(uname -s)" = Darwin ]; then
     check_bflat
     ensure_image
+    # WASM_TOOLS must be inside this directory to be visible in the container.
     docker run --rm --platform "$DOCKER_PLATFORM" \
         -v "$PWD:/w" -v "$(cd "$BFLAT_DIR" && pwd):/bflat:ro" -w /w \
         -e BFLAT_DIR=/bflat -e BFLAT_ARCH="$BFLAT_ARCH" -e ARM64_MAX_PAGE_SIZE="$ARM64_MAX_PAGE_SIZE" \
-        "$IMAGE" ./build.sh --native "$@"
+        -e WASM_TOOLS="$WASM_TOOLS" \
+        "$IMAGE" ./build.sh $entry "$@"
+elif [ "$WASM" = 1 ]; then
+    build_wasm "$@"
 else
     build_native "$@"
 fi
 
 echo
 for name in "$@"; do
-    printf '%-12s %8d bytes\n' "$name" "$(wc -c < "bin/$name")"
+    printf '%-12s %8d bytes\n' "$name" "$(wc -c < "$(output "$name")")"
 done

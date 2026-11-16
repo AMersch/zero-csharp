@@ -13,6 +13,10 @@ Exploring [bflat](https://flattened.net/) `--stdlib:zero` mode: C# compiled to t
 ./build.sh            # builds every sample into ./bin
 ./build.sh Arena      # or just one
 ./run.sh Arena        # runs it (in the container on macOS)
+
+./setup.sh --wasm     # WebAssembly: also downloads the toolchain (see below)
+./build.sh --wasm     # builds every sample into ./bin/wasm/*.wasm
+./run.sh --wasm Arena # runs it with wasmtime
 ```
 
 Prerequisites:
@@ -40,6 +44,7 @@ The samples need a bflat fork, [OnurGumus/bflat](https://github.com/OnurGumus/bf
   - Top-level statements, which need a `string[] args`.
   - Static constructors that build strings no longer crash the compiler: its static preinitializer looks up string's length field by its CoreLib name, `_stringLength`.
   - `new` zeroes memory (calloc instead of malloc), as C# requires.
+- **A WASI build of zerolib** (`lib/wasi/wasm/zerolib.dll`), for [WebAssembly](#webassembly). It calls WASI's C library directly (no `libSystem.Native`) and uses 32-bit pointers.
 
   To update only zerolib in existing layouts, without the full build below, run `bflat build-il --deterministic --stdlib:none -d LINUX -d ARM64 -o:<layout>/lib/linux/arm64/zerolib.dll` (and so on per target) in `src/zerolib`, as `src/bflat/bflat.csproj` does; then rebuild `arenalib`, which references it.
 
@@ -82,6 +87,26 @@ This is how you ship a bflat library without header files. The assembly's metada
 - For Simd and Kernels: `-m x86-64-v3` on x64 (AVX2/FMA; Haswell or newer) and `-m dotprod` on arm64 (SDOT; ARMv8.2+, e.g. Apple M1).
 - On arm64, `--ldflags "-z max-page-size=4096"`. Without it, the default 64 KB segment alignment pads even Tiny to ~200 KB. 4 KB-page binaries don't load on 16 KB/64 KB-page kernels (Asahi Linux, some servers); set `ARM64_MAX_PAGE_SIZE=65536` for those.
 
+## WebAssembly
+
+`./build.sh --wasm` compiles the same samples and `lib/` to WebAssembly modules for WASI, from 15 KB (Tiny) to 72 KB (Strings), stripped. All eight run under wasmtime: Strings passes its 136 checks and prints exactly what the native build prints, and the others match too, apart from what depends on the platform (below).
+
+bflat can't target WebAssembly, so this uses a different compiler for the last step:
+
+1. **bflat** compiles each sample to IL, exactly as for the native build, against `bin/BflatLib.dll`.
+2. **[NativeAOT-LLVM](https://github.com/dotnet/runtimelab/tree/feature/NativeAOT-LLVM)**, an experimental NativeAOT compiler from dotnet/runtimelab, compiles the IL to LLVM bitcode. It uses the fork's WASI build of zerolib (`lib/wasi/wasm/zerolib.dll` in the layout) instead of .NET's runtime.
+3. **The WASI SDK's clang** compiles the bitcode and links it with [`wasm/runtime.c`](wasm/runtime.c) and WASI's C library. `runtime.c` is the whole zero-mode runtime for WebAssembly, under 80 lines of code: entry point, allocation with `calloc`, and the transitions NativeAOT-LLVM's code calls, all trivial without a GC.
+
+`./setup.sh --wasm` downloads all three tools, pinned in `env.sh` (NativeAOT-LLVM 10.0.0-rc.1.26357.1, WASI SDK 34.0, wasmtime 50.0.1), into `tools/wasm`: about 900 MB, mostly the WASI SDK. They're Linux builds and run in the build container on macOS, like bflat. The fork's layout must include `lib/wasi/wasm/zerolib.dll`; older layouts don't.
+
+Differences from the native build:
+
+- **32-bit pointers.** Structs that hold pointers are smaller, so the arena byte counts printed by Arena and Collections are lower (Collections: 5 `List`/`Dict` headers × 4 bytes = 20 bytes).
+- **No SIMD.** Simd and Kernels take their scalar paths. WebAssembly has 128-bit SIMD, but `lib/Kernels.cs` has no path for it yet.
+- **Clocks.** Simd and Kernels call `clock_gettime(1, ...)`, Linux's numeric `CLOCK_MONOTONIC`. In WASI's C library a clock ID is a pointer, so this reads the clock ID from address 1, which is zero: the realtime clock. That still measures durations. zerolib's own `Environment.TickCount64` uses the right WASI call.
+- **Exit codes.** Modules are linked for WASI 0.1, which passes exit codes through. WASI 0.2 only reports success or failure.
+- **Not supported:** callbacks from native code into C# (`[UnmanagedCallersOnly]` reverse P/Invoke inside a running program), and `build.ps1` (Windows).
+
 ## Editor support
 
 The `.csproj` files and `BflatTest.slnx` exist only so VS Code (C# Dev Kit) and other IDEs give IntelliSense that matches zero mode. bflat ignores them, so keep building with `build.sh`.
@@ -110,7 +135,7 @@ unsafe { Arena.Reset(); }                // SAFETY: p is not used after this
 
 ## Examples
 
-| Sample | Shows | Size |
+| Sample | Shows | Size (Linux arm64) |
 |---|---|---|
 | `samples/Tiny.cs` | Smallest binary (`-Os --no-pie`, stripped) | ~16 KB |
 | `samples/Minimal.cs` | Hello world via `puts` | ~49 KB |

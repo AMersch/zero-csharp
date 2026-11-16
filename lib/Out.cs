@@ -1,10 +1,15 @@
 // Buffered stdout writer for --stdlib:zero.
 //
 // zerolib's Console makes one syscall per character, and only prints string
-// and int. This writer buffers a line, prints long and bool too, and hands
-// the line to libc write() in one call.
+// and int. This writer buffers output, encodes it as UTF-8, prints numbers,
+// bools and spans, and hands each line to libc write() in one call.
+//
+// Out.Line($"x = {x}, name = {name,-8}, ratio = {r:F2}") formats every hole
+// straight into the buffer: no string is built. See Fmt (lib/Str.cs) for the
+// format strings.
 
 using System;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 public static class Out
@@ -22,35 +27,67 @@ public static class Out
     static Buffer s_buffer;
     static int s_length;
 
-    public static void Write(string text)
+    public static void Write(ReadOnlySpan<char> text)
     {
         for (int i = 0; i < text.Length; i++)
         {
             char c = text[i];
-            Put(c <= 0x7F ? (byte)c : (byte)'?');
+            if (c < 0x80)
+            {
+                Put((byte)c);
+            }
+            else if (c < 0x800)
+            {
+                Put((byte)(0xC0 | (c >> 6)));
+                Put((byte)(0x80 | (c & 0x3F)));
+            }
+            else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < text.Length && text[i + 1] >= 0xDC00 && text[i + 1] <= 0xDFFF)
+            {
+                int codePoint = 0x10000 + ((c - 0xD800) << 10) + (text[++i] - 0xDC00);
+                Put((byte)(0xF0 | (codePoint >> 18)));
+                Put((byte)(0x80 | ((codePoint >> 12) & 0x3F)));
+                Put((byte)(0x80 | ((codePoint >> 6) & 0x3F)));
+                Put((byte)(0x80 | (codePoint & 0x3F)));
+            }
+            else
+            {
+                if (c >= 0xD800 && c <= 0xDFFF)
+                    c = (char)0xFFFD; // unpaired surrogate
+                Put((byte)(0xE0 | (c >> 12)));
+                Put((byte)(0x80 | ((c >> 6) & 0x3F)));
+                Put((byte)(0x80 | (c & 0x3F)));
+            }
         }
+    }
+
+    public static void Write(string text) => Write(text.AsSpan());
+
+    public static void Write(char value)
+    {
+        Span<char> one = stackalloc char[1];
+        one[0] = value;
+        Write(one);
     }
 
     public static void Write(long value)
     {
-        // Work on the magnitude as ulong so long.MinValue is handled too.
-        ulong magnitude = value < 0 ? (ulong)(-(value + 1)) + 1 : (ulong)value;
-        if (value < 0)
-            Put((byte)'-');
-
-        Span<byte> digits = stackalloc byte[20];
-        int n = 0;
-        do
-        {
-            digits[n++] = (byte)('0' + (int)(magnitude % 10));
-            magnitude /= 10;
-        } while (magnitude != 0);
-
-        while (n > 0)
-            Put(digits[--n]);
+        Span<char> buffer = stackalloc char[Fmt.MaxChars];
+        Write(buffer.Slice(0, Fmt.Int(value, buffer)));
     }
 
-    public static void Write(bool value) => Write(value ? "true" : "false");
+    /// <summary>Default: up to 6 decimals, trailing zeros removed. "F2" etc. gives fixed decimals.</summary>
+    public static void Write(double value, string format = null)
+    {
+        Span<char> buffer = stackalloc char[Fmt.MaxChars];
+        Write(buffer.Slice(0, Fmt.Double(value, format, buffer)));
+    }
+
+    public static void Write(bool value) => Write(Fmt.Bool(value));
+
+    /// <summary>Writes $"..." straight into the buffer.</summary>
+    public static void Write(ref InterpolatedHandler handler)
+    {
+    }
 
     public static void Line()
     {
@@ -58,11 +95,20 @@ public static class Out
         Flush();
     }
 
+    public static void Line(ReadOnlySpan<char> text)
+    {
+        Write(text);
+        Line();
+    }
+
     public static void Line(string text)
     {
         Write(text);
         Line();
     }
+
+    /// <summary>Writes $"..." straight into the buffer, then a newline.</summary>
+    public static void Line(ref InterpolatedHandler handler) => Line();
 
     public static void Line(string text, long value)
     {
@@ -114,5 +160,66 @@ public static class Out
             // ships the .NET 10 GA JIT, which fixes it.)
             s_buffer.Bytes[s_length++] = b;
         }
+    }
+
+    static void Pad(int count)
+    {
+        for (; count > 0; count--)
+            Put((byte)' ');
+    }
+
+    // alignment > 0 pads on the left (right-aligns), < 0 pads on the right.
+    static void Aligned(ReadOnlySpan<char> text, int alignment)
+    {
+        int padding = (alignment < 0 ? -alignment : alignment) - text.Length;
+        if (alignment > 0)
+            Pad(padding);
+        Write(text);
+        if (alignment < 0)
+            Pad(padding);
+    }
+
+    /// <summary>
+    /// Lets Out.Write and Out.Line take $"...". Each part is written as the
+    /// compiler visits it, so nothing is buffered beyond Out's own buffer.
+    /// Supports {x,alignment} and {x:format}.
+    /// </summary>
+    [InterpolatedStringHandler]
+    public ref struct InterpolatedHandler
+    {
+        public InterpolatedHandler(int literalLength, int formattedCount)
+        {
+        }
+
+        public void AppendLiteral(string value) => Write(value);
+
+        public void AppendFormatted(ReadOnlySpan<char> value, int alignment = 0, string format = null) => Aligned(value, alignment);
+
+        public void AppendFormatted(char value, int alignment = 0)
+        {
+            Span<char> one = stackalloc char[1];
+            one[0] = value;
+            Aligned(one, alignment);
+        }
+
+        public void AppendFormatted(long value, int alignment = 0, string format = null)
+        {
+            Span<char> buffer = stackalloc char[Fmt.MaxChars];
+            Aligned(buffer.Slice(0, Fmt.Long(value, format, buffer)), alignment);
+        }
+
+        public void AppendFormatted(ulong value, int alignment = 0, string format = null)
+        {
+            Span<char> buffer = stackalloc char[Fmt.MaxChars];
+            Aligned(buffer.Slice(0, Fmt.ULong(value, format, buffer)), alignment);
+        }
+
+        public void AppendFormatted(double value, int alignment = 0, string format = null)
+        {
+            Span<char> buffer = stackalloc char[Fmt.MaxChars];
+            Aligned(buffer.Slice(0, Fmt.Double(value, format, buffer)), alignment);
+        }
+
+        public void AppendFormatted(bool value, int alignment = 0) => Aligned(Fmt.Bool(value), alignment);
     }
 }

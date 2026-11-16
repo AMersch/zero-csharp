@@ -10,7 +10,7 @@ param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Samples)
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$AllSamples = @("Tiny", "Minimal", "Arena", "Collections", "VirtualTest", "Simd", "Kernels")
+$AllSamples = @("Tiny", "Minimal", "Arena", "Collections", "VirtualTest", "Simd", "Kernels", "Strings")
 if (-not $Samples) { $Samples = $AllSamples }
 foreach ($name in $Samples) {
     if ($name -notin $AllSamples) { throw "Unknown sample: $name (known: $($AllSamples -join ', '))" }

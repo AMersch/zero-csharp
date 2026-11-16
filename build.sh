@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
 
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Simd Kernels)
+ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Simd Kernels Strings)
 
 # Language version and memory safety rules for every sample.
 CSHARP_FLAGS=(--langversion preview --compiler-feature updated-memory-safety-rules)

@@ -25,7 +25,7 @@ Windows: `.\setup.ps1` and `.\build.ps1` use the fork's `windows-x64` layout but
 
 ## Getting bflat
 
-The samples need a bflat fork, [OnurGumus/bflat](https://github.com/OnurGumus/bflat) (branch `csharp15`), which differs from upstream bflat 10.0.0-rc.1 in two ways:
+The samples need a bflat fork, [OnurGumus/bflat](https://github.com/OnurGumus/bflat) (branch `csharp15`), which differs from upstream bflat 10.0.0-rc.1 in these ways:
 
 - **It compiles C# 15.** Roslyn is bumped to 5.12.0, the version shipped with the .NET 11 SDK. A new `--compiler-feature` option (the same as `csc -features:`) turns on the updated memory safety rules.
 - **SIMD.** zerolib defines `Vector64/128/256<T>` (with `Create` and `As*`) and a subset of the hardware intrinsics: `AdvSimd` and `Dp` (SDOT) on arm64; `Sse`, `Avx`, `Avx2` and `Fma` on x64. That covers float arithmetic, FMA, min/max, rounding, conversions, divide and int8 dot products. The compiler treats them as real intrinsics.
@@ -33,6 +33,15 @@ The samples need a bflat fork, [OnurGumus/bflat](https://github.com/OnurGumus/bf
 - **Instruction sets beyond the baseline come only from `-m`.** Zero mode has no run-time CPU detection, and upstream bflat failed to link on arm64 when code checked e.g. `Dp.IsSupported` without `-m`. Now such checks are simply `false` unless the instruction set is given with `-m`.
 - **The .NET 10 GA JIT.** Upstream bflat 10.0.0-rc.1 ships the .NET 10 RC1 JIT, which miscompiles some static-field stores on x64. The fork's build swaps in Microsoft's GA JIT, which fixes them.
 - **zerolib fixes.** `ThrowOverflowException` is added, so checked arithmetic and **integer division on arm64** compile. `Console.WriteLine(int)` is fixed.
+- **Strings, arrays, statics and casts in zerolib.** Upstream zero mode can't compile or run a lot of ordinary C#; the fork makes these work:
+  - `string` gets `==`, `!=`, `Equals`, `IsNullOrEmpty` and `Concat`, so `a == b`, `a + b` (string operands) and `switch` on strings compile. `+` allocates with malloc and is never freed, like every allocation in zero mode.
+  - Static fields of reference types (`static string`, objects, arrays). Upstream segfaults on the first store: the compiler expects the runtime to allocate their storage at startup, and zerolib didn't. It now does, before `Main`.
+  - `new T[n]` links (`RhpNewArrayFast`/`RhpNewPtrArrayFast`). Arrays of reference types (`string[]`, `object[]`) and class casts (`(T)x`, `is`, `as`) compile (`System.Runtime.TypeCast`). Casts to interface and array types still aren't supported.
+  - Top-level statements, which need a `string[] args`.
+  - Static constructors that build strings no longer crash the compiler: its static preinitializer looks up string's length field by its CoreLib name, `_stringLength`.
+  - `new` zeroes memory (calloc instead of malloc), as C# requires.
+
+  To update only zerolib in existing layouts, without the full build below, run `bflat build-il --deterministic --stdlib:none -d LINUX -d ARM64 -o:<layout>/lib/linux/arm64/zerolib.dll` (and so on per target) in `src/zerolib`, as `src/bflat/bflat.csproj` does; then rebuild `arenalib`, which references it.
 
 The fork is AGPL-3.0, like upstream bflat's source. Binaries built with it contain its zerolib.
 
@@ -104,12 +113,13 @@ unsafe { Arena.Reset(); }                // SAFETY: p is not used after this
 | Sample | Shows | Size |
 |---|---|---|
 | `samples/Tiny.cs` | Smallest binary (`-Os --no-pie`, stripped) | ~16 KB |
-| `samples/Minimal.cs` | Hello world via `puts` | ~46 KB |
-| `samples/Arena.cs` | Growable arena: Fibonacci growth, dedicated blocks for large allocations, per-allocation alignment, `Reset` that keeps capacity | ~61 KB |
-| `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of the arena | ~81 KB |
-| `samples/VirtualTest.cs` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | ~52 KB |
-| `samples/Simd.cs` | Float dot product with NEON (arm64) or AVX + FMA (x64), checked against scalar and timed (12x faster on Apple Silicon) | ~59 KB |
-| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~73 KB |
+| `samples/Minimal.cs` | Hello world via `puts` | ~49 KB |
+| `samples/Arena.cs` | Growable arena: Fibonacci growth, dedicated blocks for large allocations, per-allocation alignment, `Reset` that keeps capacity | ~66 KB |
+| `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of the arena | ~89 KB |
+| `samples/VirtualTest.cs` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | ~61 KB |
+| `samples/Simd.cs` | Float dot product with NEON (arm64) or AVX + FMA (x64), checked against scalar and timed (12x faster on Apple Silicon) | ~64 KB |
+| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~81 KB |
+| `samples/Strings.cs` | Tests the string support (136 checks): span operations, parsing integers, hex and doubles (bit-exact), `$"..."` formatting with alignment and format strings, arena strings, `StrBuilder`, and the fork's `==`, `+`, string `switch` and static string fields; prints a table and UTF-8 text through `Out` | ~171 KB |
 
 Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is stripped); x64 is within a few KB. Run `strip` to shrink the others.
 
@@ -120,17 +130,58 @@ Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is s
 | `Arena.cs` | Growable bump allocator. Normal blocks grow 128, 128, 256, 384, 640, ...; an allocation too big for the next block gets its own block without changing that sequence. Alignment is per allocation, and a failed allocation returns null and leaves the arena untouched. |
 | `List.cs` | Growable array. It's a handle to an arena header, so copies share contents. `default(List<T>)` is safe to use: reads see an empty list and `Add` returns false. |
 | `Dict.cs` | Open-addressing hash map (FNV-1a, power-of-two capacity). Keys are compared by raw bytes: fine for integers and padding-free structs, not for floats. |
-| `Out.cs` | Buffered stdout writer. zerolib's `Console` makes one syscall per character. |
+| `Out.cs` | Buffered stdout writer, UTF-8 encoded. zerolib's `Console` makes one syscall per character. `Out.Line($"...")` formats straight into the buffer. |
+| `Str.cs` | String support (see [Strings](#strings)): span operations as `System.MemoryExtensions`, `Str.TryParse`, `Str.Compare`, and new strings in the arena with `Str.Format` and `Str.Concat`. |
+| `StrBuilder.cs` | Growable string buffer in the arena, with `Append($"...")`. A handle like `List<T>`. |
 | `Kernels.cs` | SIMD math for LLM inference: `Dot`, `MatVec`, `DotI8`, `Exp`, `Softmax`, `Silu`, `RmsNorm`. Each has NEON, AVX2+FMA and scalar paths and handles any length. |
 
 ## What zero mode supports
 
 Zero mode has no garbage collector, no exceptions (failures call `Environment.FailFast`), no async/await, no LINQ, and almost no base class library. On the other hand, these all work:
 
-- `Span<T>`
+- `Span<T>`, and arrays: `new T[n]`, including arrays of strings and objects (fork)
+- Static fields of every type, including strings, objects and arrays (fork)
+- Strings: `==`, `+`, `switch` (fork), plus `lib/` for the rest (see [Strings](#strings))
+- Class casts: `(T)x`, `is`, `as` (fork). Not to interface or array types.
+- Top-level statements (fork)
 - Generics, including constrained calls and **static abstract interface members**. These are resolved at compile time, which suits per-format compute kernels.
 - Classes with virtual methods and interface dispatch. Every `new` calls malloc and is never freed.
 - Function pointers, `[UnmanagedCallersOnly]` callbacks, and P/Invoke. pthreads work, for example.
+
+## Strings
+
+Upstream zerolib's `string` has only `Length`, an indexer and pointer constructors. The fork adds `==`, `!=`, `+`, `Equals`, `IsNullOrEmpty` and string `switch`. `lib/Str.cs`, `lib/StrBuilder.cs` and `lib/Out.cs` add the rest, without a garbage collector:
+
+```csharp
+foreach (ReadOnlySpan<char> field in line.Split(','))       // no allocation
+    if (field.Trim().StartsWith("#")) ...
+
+Out.Line($"{name,-8}|{qty,5}|{price,9:F2}");                // straight to stdout
+
+string label = Str.Format($"item {id:D4}");                 // a real string, in the arena
+```
+
+| .NET | Zero mode with `lib/` | Allocates |
+|---|---|---|
+| `a == b`, `a != b`, `switch (s)` | the same (fork) | no |
+| `a + b` | the same (fork): malloc, never freed. In a loop use `Str.Concat(a, b)` | malloc |
+| `a == b` on a span | `span.SequenceEqual(other)` | no |
+| `s.Substring(i, n)` | `s.AsSpan(i, n)` | no |
+| `s.StartsWith`, `EndsWith`, `IndexOf`, `LastIndexOf`, `Contains`, `Trim` | same names, on strings and spans; `Trim` returns a span | no |
+| `s.Split(',')` | `s.Split(',')`, used in `foreach`, yields spans | no |
+| `int.Parse`, `long.Parse`, `ulong.Parse`, `double.Parse` | `Str.TryParse(s, out int v)` (or `long`, `ulong`, `double`) | no |
+| `long.Parse(s, NumberStyles.HexNumber)` | `Str.TryParseHex(s, out ulong v)` (`0x` prefix optional) | no |
+| `string.CompareOrdinal(a, b)` | `Str.Compare(a, b)` | no |
+| `Console.WriteLine($"...")` | `Out.Line($"...")` | no |
+| `$"..."` as a string | `Str.Format($"...")` (with only string holes, plain `$"..."` works too, through `+`) | arena |
+| `a + b` without leaking | `Str.Concat(a, b)` | arena |
+| `StringBuilder` | `StrBuilder` | arena |
+
+- **Every string converts to `ReadOnlySpan<char>` implicitly.** C# 14 adds that conversion when `System.MemoryExtensions.AsSpan(string)` exists, which `lib/Str.cs` defines. So any span parameter takes a string. A null string acts as an empty one.
+- **Arena strings are real strings.** A zero-mode string object is a method-table pointer, a length and the characters, allocated with plain `malloc`. `Str.Format` and `Str.Concat` lay one out in arena memory, so the result works anywhere a string does. It's freed by `Arena.Reset()`, like the rest of the arena, so don't use it afterwards. `Str.Format` and `Str.Concat` return null if the arena isn't initialized or is full.
+- **Holes in `$"..."`** take integers, `double` and `float`, `bool`, `char`, strings and spans, with an optional alignment (`{x,8}`, `{x,-8}`) and format: `D`/`Dn` and `X`/`x`/`Xn` for integers, `F`/`Fn` for doubles. Without a format, a double prints up to 6 decimals with trailing zeros removed. Values of 1.8e19 and up print as `1.00e+20`. Unlike .NET, `bool` prints as `true`/`false`, and `{-1:X}` prints 16 hex digits for any integer type, since every integer is formatted as a 64-bit `long` or `ulong`.
+- **Parsing is strict and invariant:** no surrounding whitespace (call `Trim()` first), no thousands separators. `TryParse(s, out double)` is correctly rounded: 5,000 decimal strings across the whole range, denormals included, came out bit-identical to Python's `float()`. It accepts `.5`, `5.`, exponents, `NaN` and `Infinity`; too large gives Infinity and too small gives 0, like .NET.
+- **Not supported:** culture-aware anything, `char`/number operands in `+` (`"n=" + 5`; use `Str.Format($"n={5}")`), and `string.Format`.
 
 ## Known issues
 
@@ -145,6 +196,13 @@ Zero mode has no garbage collector, no exceptions (failures call `Environment.Fa
 | `Environment.TickCount64` fails to link in zero mode (`undefined symbol: minipal_hires_ticks`) | Call libc `clock_gettime` instead (see `samples/Simd.cs`) |
 | `[DllImport("libm")]` aborts at runtime | Use `[DllImport("libm.so.6")]` |
 | `Math` has no `Sqrt`/`Exp`/... | libm via P/Invoke |
+| Assigning a static field of a reference type (`static string`, objects, arrays) segfaults: zerolib never allocates their storage | Fixed in the fork |
+| Upstream zerolib's `string` has no `==` or `+`, so those and string `switch` fail with `CS0656` | Fixed in the fork |
+| `string` has no `$"..."` with non-string holes, `Substring` or parsing (`CS0117`/`CS1061`) | Use `lib/Str.cs` (see [Strings](#strings)) |
+| `new T[n]` fails to link (`undefined symbol: RhpNewArrayFast` / `RhpNewPtrArrayFast`) | Fixed in the fork |
+| Arrays of reference types, class casts and top-level statements fail with "Expected type 'System.Runtime.TypeCast' not found" | Fixed in the fork (class casts; casts to interface or array types aren't supported) |
+| A static constructor that builds a string crashes the compiler (`NullReferenceException` in `TypePreinit`) | Fixed in the fork |
+| Objects from `new` aren't zeroed (malloc) | Fixed in the fork (calloc) |
 
 ## Resources
 

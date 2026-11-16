@@ -139,9 +139,12 @@ build_wasm() {
         # wasip1, not wasip2: a WASI 0.2 exit only says success or failure, and the
         # samples report failures in their exit code. --no-stack-first: WASI SDK 34
         # puts the stack first by default, which clashes with the 1 KB global base.
+        # --fatal-warnings: if wasm/runtime.c's signature for a function no longer
+        # matches what NativeAOT-LLVM's code calls, wasm-ld only warns and links a
+        # trap; this makes it a build error instead.
         "$WASI_SDK/bin/clang" -target wasm32-wasip1 -Os "$obj"/*.o wasm/runtime.c -lm -o "bin/wasm/$name.wasm" \
             -Wl,--no-stack-first -Wl,--global-base=1024 -Wl,-z,stack-size=1048576 \
-            -Wl,--strip-all -Wl,--gc-sections
+            -Wl,--strip-all -Wl,--gc-sections -Wl,--fatal-warnings
     done
 }
 

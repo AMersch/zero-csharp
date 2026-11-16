@@ -3,7 +3,7 @@
 # With --wasm, also downloads the WebAssembly toolchain (see env.sh) into
 # $WASM_TOOLS: about 900 MB unpacked, most of it the WASI SDK.
 #
-# bflat comes from the fork (OnurGumus/bflat, branch csharp15), which must be
+# bflat comes from the fork (OnurGumus/bflat, branch master), which must be
 # built first; see README, "Getting bflat".
 #
 # Usage: ./setup.sh [--wasm]

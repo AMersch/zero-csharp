@@ -35,6 +35,13 @@ ensure_image() {
 # All three are Linux builds for this machine's architecture (on macOS they run
 # in the build container), stored in WASM_TOOLS. These versions are tested;
 # NativeAOT-LLVM expects WASI SDK 29, and 34 works with --no-stack-first.
+#
+# Treat them as a set. wasm/runtime.c implements NativeAOT-LLVM's internal
+# runtime functions, whose names and signatures aren't documented anywhere:
+# they were read from the compiler's output. A new NativeAOT-LLVM can change
+# them. A changed signature fails the link (--fatal-warnings), but a changed
+# meaning only shows when the program runs. After changing any version, run
+# ./build.sh --wasm and compare each sample's output with the native build.
 NAOT_LLVM_VERSION=10.0.0-rc.1.26357.1
 WASI_SDK_VERSION=34.0
 WASMTIME_VERSION=v50.0.1

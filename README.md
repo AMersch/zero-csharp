@@ -29,7 +29,7 @@ Windows: `.\setup.ps1` and `.\build.ps1` use the fork's `windows-x64` layout but
 
 ## Getting bflat
 
-The samples need a bflat fork, [OnurGumus/bflat](https://github.com/OnurGumus/bflat) (branch `csharp15`), which differs from upstream bflat 10.0.0-rc.1 in these ways:
+The samples need a bflat fork, [OnurGumus/bflat](https://github.com/OnurGumus/bflat) (branch `master`), which differs from upstream bflat 10.0.0-rc.1 in these ways:
 
 - **It compiles C# 15.** Roslyn is bumped to 5.12.0, the version shipped with the .NET 11 SDK. A new `--compiler-feature` option (the same as `csc -features:`) turns on the updated memory safety rules.
 - **SIMD.** zerolib defines `Vector64/128/256<T>` (with `Create` and `As*`) and a subset of the hardware intrinsics: `AdvSimd` and `Dp` (SDOT) on arm64; `Sse`, `Avx`, `Avx2` and `Fma` on x64. That covers float arithmetic, FMA, min/max, rounding, conversions, divide and int8 dot products. The compiler treats them as real intrinsics.
@@ -105,6 +105,7 @@ Differences from the native build:
 - **No SIMD.** Simd and Kernels take their scalar paths. WebAssembly has 128-bit SIMD, but `lib/Kernels.cs` has no path for it yet.
 - **Clocks.** Simd and Kernels call `clock_gettime(1, ...)`, Linux's numeric `CLOCK_MONOTONIC`. In WASI's C library a clock ID is a pointer, so this reads the clock ID from address 1, which is zero: the realtime clock. That still measures durations. zerolib's own `Environment.TickCount64` uses the right WASI call.
 - **Exit codes.** Modules are linked for WASI 0.1, which passes exit codes through. WASI 0.2 only reports success or failure.
+- **One exact compiler version.** `wasm/runtime.c` implements NativeAOT-LLVM's internal runtime functions (`RhpNewArray` and others). Their names and signatures aren't documented; they were read from the compiler's output. A newer NativeAOT-LLVM can change them. A changed signature fails the link, since `build.sh` turns `wasm-ld`'s signature warnings into errors, but a changed meaning only shows up when a program runs. So treat the versions in `env.sh` as a set, and after changing any of them, rerun the WASM samples and compare their output with the native build.
 - **Not supported:** callbacks from native code into C# (`[UnmanagedCallersOnly]` reverse P/Invoke inside a running program), and `build.ps1` (Windows).
 
 ## Editor support

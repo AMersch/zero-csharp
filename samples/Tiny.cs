@@ -3,6 +3,8 @@
 
 using System.Runtime.InteropServices;
 
+namespace TinySample;
+
 public static class Program
 {
     [DllImport("libc")]

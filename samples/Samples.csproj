@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Editor support only (see Directory.Build.props). Build with ./build.sh.
+    Every sample is a separate program with its own Main, so each has its own
+    namespace (ArenaSample, TinySample, ...), and this is a Library rather than
+    an Exe so the Mains don't conflict.
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <ProjectReference Include="../lib/BflatLib.csproj" />
+  </ItemGroup>
+</Project>

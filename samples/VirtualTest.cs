@@ -11,6 +11,8 @@
 
 // ---- 1. Function-pointer vtable --------------------------------------------
 
+namespace VirtualTestSample;
+
 public struct Shape
 {
     public delegate*<Shape*, int> GetArea;

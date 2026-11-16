@@ -2,25 +2,8 @@
 bin/
 obj/
 
-# Binaries (Linux)
-Minimal
-Tiny
-Arena
-Collections
-VirtualTest
-Program
-HeapDemo
-LongString
-
 # Binaries (Windows)
 *.exe
-
-# bflat download (setup.sh)
-bflat/
-bflat.tmp/
-bflat-*/
-bflat.tar.gz
-bflat.zip
 
 # Debug files
 *.dwo

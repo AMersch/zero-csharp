@@ -4,6 +4,8 @@
 // Both collections take their memory from the Arena and work with any
 // unmanaged element type.
 
+namespace CollectionsSample;
+
 public struct Point
 {
     public int X;

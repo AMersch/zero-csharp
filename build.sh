@@ -16,15 +16,18 @@ ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Simd Kernels)
 # Language version and memory safety rules for every sample.
 CSHARP_FLAGS=(--langversion preview --compiler-feature updated-memory-safety-rules)
 
-sources() {
-    case "$1" in
-        Tiny)        echo samples/Tiny.cs ;;
-        Minimal)     echo samples/Minimal.cs ;;
-        Arena)       echo samples/Arena.cs lib/Arena.cs lib/Out.cs ;;
-        Collections) echo samples/Collections.cs lib/Arena.cs lib/List.cs lib/Dict.cs lib/Out.cs ;;
-        VirtualTest) echo samples/VirtualTest.cs lib/Out.cs ;;
-        Simd)        echo samples/Simd.cs lib/Arena.cs lib/Out.cs ;;
-        Kernels)     echo samples/Kernels.cs lib/Kernels.cs lib/Arena.cs lib/Out.cs ;;
+# lib/ is compiled once into an IL assembly that the samples reference with -r,
+# the way a C program links a library, except the assembly's metadata replaces
+# the header files. It holds IL, not native code: each sample's bflat build
+# compiles the parts it uses, for its own -m flags, into a single binary.
+# -O matters: unlike bflat build, build-il doesn't optimize unless asked.
+# Don't name it ZeroLib: zero mode's core library is an assembly called zerolib,
+# and assembly names are case-insensitive.
+LIB=bin/BflatLib.dll
+
+check_sample() {
+    case " ${ALL_SAMPLES[*]} " in
+        *" $1 "*) ;;
         *) echo "Unknown sample: $1 (known: ${ALL_SAMPLES[*]})" >&2; return 1 ;;
     esac
 }
@@ -62,10 +65,12 @@ build_native() {
     local name
     check_bflat
     mkdir -p bin
+    echo "[bflat] lib/*.cs -> $LIB"
+    "$BFLAT_DIR/bflat" build-il lib/*.cs -O --stdlib:zero "${CSHARP_FLAGS[@]}" --target Shared -o "$LIB"
     for name in "$@"; do
         echo "[bflat] $name -> bin/$name"
         # shellcheck disable=SC2046
-        "$BFLAT_DIR/bflat" build $(sources "$name") --stdlib:zero "${CSHARP_FLAGS[@]}" \
+        "$BFLAT_DIR/bflat" build "samples/$name.cs" -r "$LIB" --stdlib:zero "${CSHARP_FLAGS[@]}" \
             --arch "$BFLAT_ARCH" $(bflat_flags "$name") ${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"} -o "bin/$name"
         if [ "$name" = Tiny ]; then
             if [ "$BFLAT_ARCH" = "$HOST_ARCH" ]; then
@@ -88,7 +93,7 @@ if [ $# -eq 0 ]; then
     set -- "${ALL_SAMPLES[@]}"
 fi
 for name in "$@"; do
-    sources "$name" >/dev/null
+    check_sample "$name"
 done
 
 if [ "$(uname -s)" = Darwin ]; then

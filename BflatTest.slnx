@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="lib/BflatLib.csproj" />
+  <Project Path="samples/Samples.csproj" />
+</Solution>

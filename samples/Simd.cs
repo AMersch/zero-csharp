@@ -9,6 +9,8 @@ using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 
+namespace SimdSample;
+
 public static class Program
 {
     const int N = 4096;      // multiple of 32 (the x64 loop's step)

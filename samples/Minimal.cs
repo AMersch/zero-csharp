@@ -6,6 +6,8 @@
 
 using System.Runtime.InteropServices;
 
+namespace MinimalSample;
+
 public static class Program
 {
     [DllImport("libc")]

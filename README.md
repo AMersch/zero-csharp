@@ -52,12 +52,19 @@ This produces `layouts/linux-glibc-{x64,arm64}` and `layouts/windows-{x64,arm64}
 
 ## Building
 
-Each sample is a single bflat call:
+`lib/` is compiled once into an IL assembly, and each sample references it with `-r`:
 
 ```bash
-bflat build samples/Arena.cs lib/Arena.cs lib/Out.cs --stdlib:zero \
-  --langversion preview --compiler-feature updated-memory-safety-rules -o bin/Arena
+F="--langversion preview --compiler-feature updated-memory-safety-rules"
+bflat build-il lib/*.cs -O --stdlib:zero $F --target Shared -o bin/BflatLib.dll
+bflat build samples/Arena.cs -r bin/BflatLib.dll --stdlib:zero $F -o bin/Arena
 ```
+
+This is how you ship a bflat library without header files. The assembly's metadata describes the public API, so `-r` takes the place of `#include`. The assembly holds IL, not native code, so each sample's build compiles just the parts it uses into one static binary: generics are instantiated for the caller's types, calls are inlined across the library boundary, and code is generated for the caller's `-m` flags. One `BflatLib.dll` therefore gives NEON code on arm64 and AVX2 code on x64. Sizes match building from source to within about 1 KB.
+
+- Pass `-O` to `build-il`. Unlike `bflat build`, it doesn't optimize unless you ask, and without `-O` the samples come out up to 1.4 KB bigger.
+- The library and its consumers must use the same `--stdlib`, here `--stdlib:zero`.
+- Don't call the assembly `ZeroLib`. Zero mode's core library is an assembly named `zerolib`, assembly names are case-insensitive, and the collision fails the build with "Reference to type 'Object' claims it is defined in 'ZeroLib'".
 
 `build.sh` adds:
 
@@ -65,6 +72,16 @@ bflat build samples/Arena.cs lib/Arena.cs lib/Out.cs --stdlib:zero \
 - `-Os --no-pie` plus `strip` for Tiny.
 - For Simd and Kernels: `-m x86-64-v3` on x64 (AVX2/FMA; Haswell or newer) and `-m dotprod` on arm64 (SDOT; ARMv8.2+, e.g. Apple M1).
 - On arm64, `--ldflags "-z max-page-size=4096"`. Without it, the default 64 KB segment alignment pads even Tiny to ~200 KB. 4 KB-page binaries don't load on 16 KB/64 KB-page kernels (Asahi Linux, some servers); set `ARM64_MAX_PAGE_SIZE=65536` for those.
+
+## Editor support
+
+The `.csproj` files and `BflatTest.slnx` exist only so VS Code (C# Dev Kit) and other IDEs give IntelliSense that matches zero mode. bflat ignores them, so keep building with `build.sh`.
+
+- `Directory.Build.props` compiles every project against zerolib instead of the .NET standard library, with the same C# 15 settings `build.sh` uses. Completion only offers what zero mode has, and the editor flags the same memory-safety errors bflat does.
+- zerolib is found the way `env.sh` finds bflat: `BFLAT_DIR` if it's set, otherwise a layout of the fork in `../bflat` (or `BFLAT_FORK`).
+- `lib/BflatLib.csproj` covers `lib/*.cs`, and `samples/Samples.csproj` covers every sample. Each sample is a separate program with its own `Program` and `Main`, so each one has its own namespace (`ArenaSample`, `TinySample`, ...) to keep them apart. Avoid names like `Samples.Arena`: inside that namespace, `Arena` means the namespace, not the library's `Arena` class.
+- `Samples.csproj` references the library project, so F12 opens the library's source.
+- `dotnet build BflatTest.slnx` type-checks everything without running bflat. The editor uses the Roslyn from your .NET SDK and bflat uses the fork's, so a very new preview feature could pass one and fail the other.
 
 ## Updated memory safety rules
 
@@ -89,10 +106,10 @@ unsafe { Arena.Reset(); }                // SAFETY: p is not used after this
 | `samples/Tiny.cs` | Smallest binary (`-Os --no-pie`, stripped) | ~16 KB |
 | `samples/Minimal.cs` | Hello world via `puts` | ~46 KB |
 | `samples/Arena.cs` | Growable arena: Fibonacci growth, dedicated blocks for large allocations, per-allocation alignment, `Reset` that keeps capacity | ~61 KB |
-| `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of the arena | ~80 KB |
-| `samples/VirtualTest.cs` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | ~51 KB |
-| `samples/Simd.cs` | Float dot product with NEON (arm64) or AVX + FMA (x64), checked against scalar and timed (12x faster on Apple Silicon) | ~58 KB |
-| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~72 KB |
+| `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of the arena | ~81 KB |
+| `samples/VirtualTest.cs` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | ~52 KB |
+| `samples/Simd.cs` | Float dot product with NEON (arm64) or AVX + FMA (x64), checked against scalar and timed (12x faster on Apple Silicon) | ~59 KB |
+| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~73 KB |
 
 Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is stripped); x64 is within a few KB. Run `strip` to shrink the others.
 

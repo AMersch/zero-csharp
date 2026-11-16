@@ -4,6 +4,8 @@
 
 using System.Runtime.InteropServices;
 
+namespace KernelsSample;
+
 public static class Program
 {
     [DllImport("libm.so.6")] static safe extern float expf(float x);

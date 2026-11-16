@@ -1,6 +1,8 @@
 // Example: Growable arena allocator (lib/Arena.cs) in --stdlib:zero.
 // Build: ./build.sh Arena
 
+namespace ArenaSample;
+
 public struct Point
 {
     public int X;

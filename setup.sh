@@ -68,13 +68,13 @@ elif ! ldconfig -p 2>/dev/null | grep -q 'libtinfo.so.5'; then
     ok=0
 fi
 
+if [ "$(uname -s)" != Darwin ] && ! command -v as >/dev/null 2>&1; then
+    echo "Missing: an assembler (as), for zerocore/native/*.S. Ubuntu: sudo apt install binutils"
+    ok=0
+fi
+
 if [ "$want_wasm" = 1 ]; then
-    if [ -f "$BFLAT_DIR/lib/wasi/wasm/zerolib.dll" ]; then
-        fetch_wasm_tools
-    else
-        echo "Missing: $BFLAT_DIR/lib/wasi/wasm/zerolib.dll (the layout predates WASI support; rebuild the fork)"
-        ok=0
-    fi
+    fetch_wasm_tools
 fi
 
 if [ "$ok" = 1 ]; then

@@ -11,5 +11,6 @@
   <ItemGroup>
     <Compile Include="*.cs" />
     <ProjectReference Include="../lib/BflatLib.csproj" />
+    <ProjectReference Include="../zerocore/ZeroCore.csproj" />
   </ItemGroup>
 </Project>

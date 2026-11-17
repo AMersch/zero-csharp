@@ -1,10 +1,9 @@
-// String support for --stdlib:zero.
+// String support for zero mode.
 //
-// Upstream zerolib's string has only Length, an indexer and pointer
-// constructors. The bflat fork's zerolib adds ==, !=, + (string operands),
-// Equals, IsNullOrEmpty and string switch; $"..." with non-string holes,
-// Substring and parsing are still missing. This file fills the gap without a
-// garbage collector:
+// The core library's string (zerocore/System/String.cs) has Length, an
+// indexer, ==, !=, + (string operands), Equals, IsNullOrEmpty and string
+// switch; $"..." with non-string holes, Substring and parsing are missing.
+// This file fills the gap without a garbage collector:
 //
 // - System.MemoryExtensions: read-only operations on ReadOnlySpan<char>
 //   (SequenceEqual, StartsWith, IndexOf, Trim, Split, ...), with the same
@@ -26,7 +25,7 @@ using System.Runtime.CompilerServices;
 
 namespace System.Runtime.CompilerServices
 {
-    // The compiler finds these by name; zerolib doesn't define them.
+    // The compiler finds these by name; the core library doesn't define them.
     public sealed class InterpolatedStringHandlerAttribute : Attribute
     {
     }
@@ -368,7 +367,7 @@ public static class Str
         return true;
     }
 
-    const double Infinity = 1.0 / 0.0; // zerolib's double has no PositiveInfinity or NaN
+    const double Infinity = 1.0 / 0.0; // the core library's double has no PositiveInfinity or NaN
     const double NaN = 0.0 / 0.0;
 
     static bool TryParseDigits(ReadOnlySpan<char> digits, ulong limit, out ulong value)
@@ -685,8 +684,8 @@ public static class Str
         unsafe { return MakeString(obj, (int)length); } // SAFETY: obj has room for length chars.
     }
 
-    // A zero-mode string object is [MethodTable*][int length][chars...]: zerolib
-    // allocates objects with plain malloc, no header in front, and the layout is
+    // A zero-mode string object is [MethodTable*][int length][chars...]: the core
+    // library allocates objects with plain calloc, no header in front, and the layout is
     // fixed by the compiler (RuntimeHelpers.OffsetToStringData). So a string
     // laid out in arena memory is a real string.
 
@@ -785,7 +784,7 @@ static class Fmt
     /// </summary>
     public static int Double(double value, int decimals, bool trim, Span<char> dest)
     {
-        // zerolib's double has no IsNaN or PositiveInfinity. x - x is 0 for every
+        // The core library's double has no IsNaN or PositiveInfinity. x - x is 0 for every
         // finite x and NaN for NaN and both infinities; NaN compares false to 0.
         if (value - value != 0)
             return Copy(value > 0 ? "Infinity" : value < 0 ? "-Infinity" : "NaN", dest);

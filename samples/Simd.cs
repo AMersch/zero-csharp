@@ -1,5 +1,5 @@
-// Example: SIMD in --stdlib:zero, using System.Runtime.Intrinsics from the bflat
-// fork's zerolib. A float dot product, the core of every matrix multiply:
+// Example: SIMD in zero mode, using System.Runtime.Intrinsics from the core
+// library (zerocore/Intrinsics). A float dot product, the core of every matrix multiply:
 //   arm64: NEON (AdvSimd), 4 lanes per instruction
 //   x64:   AVX + FMA, 8 lanes per instruction (needs -m x86-64-v3, which build.sh passes)
 // Build: ./build.sh Simd

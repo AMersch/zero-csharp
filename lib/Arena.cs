@@ -22,7 +22,7 @@ public static class Arena
 {
     public const nuint DefaultAlign = 16;
 
-    // zerolib's nuint has no MaxValue.
+    // The core library's nuint has no MaxValue.
     static nuint MaxSize => ~(nuint)0;
 
     // 32 bytes, so block data starts 16-byte aligned behind malloc's pointer.

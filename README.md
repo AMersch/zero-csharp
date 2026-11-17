@@ -2,9 +2,11 @@
 
 ![bflat debugging in VS Code](bflat.png)
 
-Exploring [bflat](https://flattened.net/) `--stdlib:zero` mode: C# compiled to tiny native binaries without any runtime, written in **C# 15** under the **updated memory safety rules**.
+Exploring [bflat](https://flattened.net/)'s zero mode: C# compiled to tiny native binaries without .NET's runtime, written in **C# 15** under the **updated memory safety rules**.
 
-**Zero mode is essentially "C with proper generics"**: C#'s syntax, type safety, and generics with C-like binary sizes (16-80 KB).
+**Zero mode is essentially "C with proper generics"**: C#'s syntax, type safety, and generics with C-like binary sizes (16-150 KB).
+
+The samples don't use bflat's built-in zero-mode library (`--stdlib:zero`, zerolib). They use [`zerocore/`](zerocore/README.md), an MIT-licensed core library in this repo that `build.sh` compiles from source, so nothing AGPL-licensed is linked into the binaries (see [Core library](#core-library)).
 
 ## Quick start
 
@@ -23,13 +25,13 @@ Prerequisites:
 
 - **The bflat fork** (see below). By default `../bflat/layouts/linux-glibc-<arch>`; override with `BFLAT_DIR`.
 - **macOS:** Docker. bflat can't target macOS, so it runs in a Linux container of your Mac's own architecture (native on Apple Silicon).
-- **Linux:** `libtinfo.so.5`, which bflat's bundled linker needs. On Ubuntu 22.04: `sudo apt install libtinfo5`. Ubuntu 24.04 no longer ships it.
+- **Linux:** `libtinfo.so.5`, which bflat's bundled linker needs, and an assembler (`as`, from binutils) for zerocore's assembly routines. On Ubuntu 22.04: `sudo apt install libtinfo5 binutils`. Ubuntu 24.04 no longer ships libtinfo5. Cross-compiling needs the target's assembler too (`binutils-x86-64-linux-gnu` or `binutils-aarch64-linux-gnu`).
 
-Windows: `.\setup.ps1` and `.\build.ps1` use the fork's `windows-x64` layout but are **untested**. The samples P/Invoke into `libc`, which may not resolve on Windows.
+Windows: `.\setup.ps1` and `.\build.ps1` use the fork's `windows-x64` layout but are **untested**. The samples P/Invoke into `libc`, which may not resolve on Windows. zerocore has no Windows port, so `build.ps1` still builds against zerolib and skips the Casts sample.
 
 ## Getting bflat
 
-The samples need a bflat fork, [OnurGumus/bflat](https://github.com/OnurGumus/bflat) (branch `master`), which differs from upstream bflat 10.0.0-rc.1 in these ways:
+The samples need a bflat fork, [OnurGumus/bflat](https://github.com/OnurGumus/bflat) (branch `master`). `build.sh` uses it as a compiler only: the first, fourth and fifth items below. The rest are changes to the fork's zerolib, which matter if you build with `--stdlib:zero` (as `build.ps1` still does). The fork differs from upstream bflat 10.0.0-rc.1 in these ways:
 
 - **It compiles C# 15.** Roslyn is bumped to 5.12.0, the version shipped with the .NET 11 SDK. A new `--compiler-feature` option (the same as `csc -features:`) turns on the updated memory safety rules.
 - **SIMD.** zerolib defines `Vector64/128/256<T>` (with `Create` and `As*`) and a subset of the hardware intrinsics: `AdvSimd` and `Dp` (SDOT) on arm64; `Sse`, `Avx`, `Avx2` and `Fma` on x64. That covers float arithmetic, FMA, min/max, rounding, conversions, divide and int8 dot products. The compiler treats them as real intrinsics.
@@ -48,7 +50,7 @@ The samples need a bflat fork, [OnurGumus/bflat](https://github.com/OnurGumus/bf
 
   To update only zerolib in existing layouts, without the full build below, run `bflat build-il --deterministic --stdlib:none -d LINUX -d ARM64 -o:<layout>/lib/linux/arm64/zerolib.dll` (and so on per target) in `src/zerolib`, as `src/bflat/bflat.csproj` does; then rebuild `arenalib`, which references it.
 
-The fork is AGPL-3.0, like upstream bflat's source. Binaries built with it contain its zerolib.
+The fork is AGPL-3.0, like upstream bflat's source. Binaries built with `--stdlib:zero` contain its zerolib; binaries built by `build.sh` don't (see [Core library](#core-library)).
 
 Building the fork needs a GitHub token with **only** `read:packages` (bflat's packages live on GitHub Packages), and runs in an x64 .NET 10 container:
 
@@ -64,21 +66,34 @@ docker run --rm --platform linux/amd64 -v "$PWD:/src" -w /src \
 
 This produces `layouts/linux-glibc-{x64,arm64}` and `layouts/windows-{x64,arm64}`, and takes about 15 minutes under emulation.
 
+## Core library
+
+Every C# program needs a core library: the assembly that defines `object`, `int` and `string`, and holds the runtime code the compiler calls to allocate objects, check casts and set up static fields. .NET's is `System.Private.CoreLib` plus a native runtime, megabytes of it. bflat's zero mode replaces both with zerolib, about 4,000 lines, which is AGPL-3.0 and gets compiled into every binary.
+
+[`zerocore/`](zerocore/README.md) is this repo's replacement for zerolib: about 2,100 lines of C# and three short assembly routines per architecture, under the MIT license. `build.sh` compiles it from source and passes it to bflat with `--stdlib:none`. Compared with zerolib it adds casts to interfaces, interface calls the compiler can't resolve at build time, boxing, and `Main(string[] args)`; it leaves out `Console`, `Math`, `Interlocked`, `Volatile` and `Half`, and it runs on Linux and WebAssembly only. Its README lists what works, what doesn't, and where the code comes from, including a caveat about the license that's worth reading before building a product on it.
+
+Sample binaries come out about 10 KB smaller than with zerolib (Strings 17 KB smaller), except Tiny, which is 0.6 KB larger.
+
 ## Building
 
-`lib/` is compiled once into an IL assembly, and each sample references it with `-r`:
+`zerocore/` and `lib/` are each compiled once into an IL assembly, and each sample references them with `-r`:
 
 ```bash
 F="--langversion preview --compiler-feature updated-memory-safety-rules"
-bflat build-il lib/*.cs -O --stdlib:zero $F --target Shared -o bin/BflatLib.dll
-bflat build samples/Arena.cs -r bin/BflatLib.dll --stdlib:zero $F -o bin/Arena
+bflat build-il $(find zerocore -name '*.cs') -O --stdlib:none --langversion preview \
+    -o bin/System.Private.CoreLib.dll
+as zerocore/native/arm64.S -o bin/zerocore-arm64.o
+bflat build-il lib/*.cs -O --stdlib:none -r bin/System.Private.CoreLib.dll $F \
+    --target Shared -o bin/BflatLib.dll
+bflat build samples/Arena.cs -r bin/BflatLib.dll -r bin/System.Private.CoreLib.dll \
+    --stdlib:none --no-reflection -i libc $F --ldflags bin/zerocore-arm64.o -o bin/Arena
 ```
 
 This is how you ship a bflat library without header files. The assembly's metadata describes the public API, so `-r` takes the place of `#include`. The assembly holds IL, not native code, so each sample's build compiles just the parts it uses into one static binary: generics are instantiated for the caller's types, calls are inlined across the library boundary, and code is generated for the caller's `-m` flags. One `BflatLib.dll` therefore gives NEON code on arm64 and AVX2 code on x64. Sizes match building from source to within about 1 KB.
 
 - Pass `-O` to `build-il`. Unlike `bflat build`, it doesn't optimize unless you ask, and without `-O` the samples come out up to 1.4 KB bigger.
-- The library and its consumers must use the same `--stdlib`, here `--stdlib:zero`.
-- Don't call the assembly `ZeroLib`. Zero mode's core library is an assembly named `zerolib`, assembly names are case-insensitive, and the collision fails the build with "Reference to type 'Object' claims it is defined in 'ZeroLib'".
+- The library and its consumers must be built against the same core library.
+- The core library has to be named `System.Private.CoreLib`, and builds against it need `--no-reflection` and `-i` for each `[DllImport]` library (`build.sh` passes `-i libc -i libm.so.6`). [`zerocore/README.md`](zerocore/README.md) explains why.
 
 `build.sh` adds:
 
@@ -89,31 +104,31 @@ This is how you ship a bflat library without header files. The assembly's metada
 
 ## WebAssembly
 
-`./build.sh --wasm` compiles the same samples and `lib/` to WebAssembly modules for WASI, from 15 KB (Tiny) to 72 KB (Strings), stripped. All eight run under wasmtime: Strings passes its 136 checks and prints exactly what the native build prints, and the others match too, apart from what depends on the platform (below).
+`./build.sh --wasm` compiles the same samples, `lib/` and `zerocore/` to WebAssembly modules for WASI, from 15 KB (Tiny) to 72 KB (Strings), stripped. All nine run under wasmtime: Strings passes its 136 checks and Casts its 41, both printing exactly what the native build prints, and the others match too, apart from what depends on the platform (below).
 
 bflat can't target WebAssembly, so this uses a different compiler for the last step:
 
 1. **bflat** compiles each sample to IL, exactly as for the native build, against `bin/BflatLib.dll`.
-2. **[NativeAOT-LLVM](https://github.com/dotnet/runtimelab/tree/feature/NativeAOT-LLVM)**, an experimental NativeAOT compiler from dotnet/runtimelab, compiles the IL to LLVM bitcode. It uses the fork's WASI build of zerolib (`lib/wasi/wasm/zerolib.dll` in the layout) instead of .NET's runtime.
-3. **The WASI SDK's clang** compiles the bitcode and links it with [`wasm/runtime.c`](wasm/runtime.c) and WASI's C library. `runtime.c` is the whole zero-mode runtime for WebAssembly, under 80 lines of code: entry point, allocation with `calloc`, and the transitions NativeAOT-LLVM's code calls, all trivial without a GC.
+2. **[NativeAOT-LLVM](https://github.com/dotnet/runtimelab/tree/feature/NativeAOT-LLVM)**, an experimental NativeAOT compiler from dotnet/runtimelab, compiles the IL to LLVM bitcode. It uses zerocore (built with `-d WASM`) instead of .NET's runtime.
+3. **The WASI SDK's clang** compiles the bitcode and links it with [`wasm/runtime.c`](wasm/runtime.c) and WASI's C library. `runtime.c` is zerocore's native half on WebAssembly, 40 lines of code: the entry point, the shadow stack, and the transitions NativeAOT-LLVM's code calls, all trivial without a GC. Allocation, casts and interface calls are zerocore's C#, the same code as on Linux.
 
-`./setup.sh --wasm` downloads all three tools, pinned in `env.sh` (NativeAOT-LLVM 10.0.0-rc.1.26357.1, WASI SDK 34.0, wasmtime 50.0.1), into `tools/wasm`: about 900 MB, mostly the WASI SDK. They're Linux builds and run in the build container on macOS, like bflat. The fork's layout must include `lib/wasi/wasm/zerolib.dll`; older layouts don't.
+`./setup.sh --wasm` downloads all three tools, pinned in `env.sh` (NativeAOT-LLVM 10.0.0-rc.1.26357.1, WASI SDK 34.0, wasmtime 50.0.1), into `tools/wasm`: about 900 MB, mostly the WASI SDK. They're Linux builds and run in the build container on macOS, like bflat.
 
 Differences from the native build:
 
 - **32-bit pointers.** Structs that hold pointers are smaller, so the arena byte counts printed by Arena and Collections are lower (Collections: 5 `List`/`Dict` headers × 4 bytes = 20 bytes).
 - **No SIMD.** Simd and Kernels take their scalar paths. WebAssembly has 128-bit SIMD, but `lib/Kernels.cs` has no path for it yet.
-- **Clocks.** Simd and Kernels call `clock_gettime(1, ...)`, Linux's numeric `CLOCK_MONOTONIC`. In WASI's C library a clock ID is a pointer, so this reads the clock ID from address 1, which is zero: the realtime clock. That still measures durations. zerolib's own `Environment.TickCount64` uses the right WASI call.
+- **Clocks.** Simd and Kernels call `clock_gettime(1, ...)`, Linux's numeric `CLOCK_MONOTONIC`. In WASI's C library a clock ID is a pointer, so this reads the clock ID from address 1, which is zero: the realtime clock. That still measures durations.
 - **Exit codes.** Modules are linked for WASI 0.1, which passes exit codes through. WASI 0.2 only reports success or failure.
-- **One exact compiler version.** `wasm/runtime.c` implements NativeAOT-LLVM's internal runtime functions (`RhpNewArray` and others). Their names and signatures aren't documented; they were read from the compiler's output. A newer NativeAOT-LLVM can change them. A changed signature fails the link, since `build.sh` turns `wasm-ld`'s signature warnings into errors, but a changed meaning only shows up when a program runs. So treat the versions in `env.sh` as a set, and after changing any of them, rerun the WASM samples and compare their output with the native build.
+- **One exact compiler version.** `wasm/runtime.c` and zerocore implement NativeAOT-LLVM's internal runtime functions (`RhpNewArray`, `RhpResolveInterfaceDispatch` and others). Their names and signatures aren't documented; they were read from the compiler's output. A newer NativeAOT-LLVM can change them. A changed signature fails the link, since `build.sh` turns `wasm-ld`'s signature warnings into errors, but a changed meaning only shows up when a program runs. So treat the versions in `env.sh` as a set, and after changing any of them, rerun the WASM samples and compare their output with the native build.
 - **Not supported:** callbacks from native code into C# (`[UnmanagedCallersOnly]` reverse P/Invoke inside a running program), and `build.ps1` (Windows).
 
 ## Editor support
 
 The `.csproj` files and `BflatTest.slnx` exist only so VS Code (C# Dev Kit) and other IDEs give IntelliSense that matches zero mode. bflat ignores them, so keep building with `build.sh`.
 
-- `Directory.Build.props` compiles every project against zerolib instead of the .NET standard library, with the same C# 15 settings `build.sh` uses. Completion only offers what zero mode has, and the editor flags the same memory-safety errors bflat does.
-- zerolib is found the way `env.sh` finds bflat: `BFLAT_DIR` if it's set, otherwise a layout of the fork in `../bflat` (or `BFLAT_FORK`).
+- `Directory.Build.props` compiles every project against zerocore instead of the .NET standard library, with the same C# 15 settings `build.sh` uses. Completion only offers what zero mode has, and the editor flags the same memory-safety errors bflat does.
+- `zerocore/ZeroCore.csproj` is the core library itself, so nothing outside the repo is needed for IntelliSense, not even bflat, and F12 on `string` or `Span<T>` opens their source.
 - `lib/BflatLib.csproj` covers `lib/*.cs`, and `samples/Samples.csproj` covers every sample. Each sample is a separate program with its own `Program` and `Main`, so each one has its own namespace (`ArenaSample`, `TinySample`, ...) to keep them apart. Avoid names like `Samples.Arena`: inside that namespace, `Arena` means the namespace, not the library's `Arena` class.
 - `Samples.csproj` references the library project, so F12 opens the library's source.
 - `dotnet build BflatTest.slnx` type-checks everything without running bflat. The editor uses the Roslyn from your .NET SDK and bflat uses the fork's, so a very new preview feature could pass one and fail the other.
@@ -139,13 +154,14 @@ unsafe { Arena.Reset(); }                // SAFETY: p is not used after this
 | Sample | Shows | Size (Linux arm64) |
 |---|---|---|
 | `samples/Tiny.cs` | Smallest binary (`-Os --no-pie`, stripped) | ~16 KB |
-| `samples/Minimal.cs` | Hello world via `puts` | ~49 KB |
-| `samples/Arena.cs` | Growable arena: Fibonacci growth, dedicated blocks for large allocations, per-allocation alignment, `Reset` that keeps capacity | ~66 KB |
-| `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of the arena | ~89 KB |
-| `samples/VirtualTest.cs` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | ~61 KB |
-| `samples/Simd.cs` | Float dot product with NEON (arm64) or AVX + FMA (x64), checked against scalar and timed (12x faster on Apple Silicon) | ~64 KB |
-| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~81 KB |
-| `samples/Strings.cs` | Tests the string support (136 checks): span operations, parsing integers, hex and doubles (bit-exact), `$"..."` formatting with alignment and format strings, arena strings, `StrBuilder`, and the fork's `==`, `+`, string `switch` and static string fields; prints a table and UTF-8 text through `Out` | ~171 KB |
+| `samples/Minimal.cs` | Hello world via `puts` | ~38 KB |
+| `samples/Arena.cs` | Growable arena: Fibonacci growth, dedicated blocks for large allocations, per-allocation alignment, `Reset` that keeps capacity | ~55 KB |
+| `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of the arena | ~78 KB |
+| `samples/VirtualTest.cs` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | ~50 KB |
+| `samples/Casts.cs` | Tests runtime type checks (41 checks): `is`, `as` and `(T)x` to interfaces and classes, generic interfaces, boxed structs, interface calls with many arguments and default methods, arrays of interfaces, delegates | ~93 KB |
+| `samples/Simd.cs` | Float dot product with NEON (arm64) or AVX + FMA (x64), checked against scalar and timed (12x faster on Apple Silicon) | ~52 KB |
+| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~65 KB |
+| `samples/Strings.cs` | Tests the string support (136 checks): span operations, parsing integers, hex and doubles (bit-exact), `$"..."` formatting with alignment and format strings, arena strings, `StrBuilder`, and the core library's `==`, `+`, string `switch` and static string fields; prints a table and UTF-8 text through `Out` | ~154 KB |
 
 Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is stripped); x64 is within a few KB. Run `strip` to shrink the others.
 
@@ -156,27 +172,31 @@ Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is s
 | `Arena.cs` | Growable bump allocator. Normal blocks grow 128, 128, 256, 384, 640, ...; an allocation too big for the next block gets its own block without changing that sequence. Alignment is per allocation, and a failed allocation returns null and leaves the arena untouched. |
 | `List.cs` | Growable array. It's a handle to an arena header, so copies share contents. `default(List<T>)` is safe to use: reads see an empty list and `Add` returns false. |
 | `Dict.cs` | Open-addressing hash map (FNV-1a, power-of-two capacity). Keys are compared by raw bytes: fine for integers and padding-free structs, not for floats. |
-| `Out.cs` | Buffered stdout writer, UTF-8 encoded. zerolib's `Console` makes one syscall per character. `Out.Line($"...")` formats straight into the buffer. |
+| `Out.cs` | Buffered stdout writer, UTF-8 encoded; zerocore has no `Console`. `Out.Line($"...")` formats straight into the buffer. |
 | `Str.cs` | String support (see [Strings](#strings)): span operations as `System.MemoryExtensions`, `Str.TryParse`, `Str.Compare`, and new strings in the arena with `Str.Format` and `Str.Concat`. |
 | `StrBuilder.cs` | Growable string buffer in the arena, with `Append($"...")`. A handle like `List<T>`. |
 | `Kernels.cs` | SIMD math for LLM inference: `Dot`, `MatVec`, `DotI8`, `Exp`, `Softmax`, `Silu`, `RmsNorm`. Each has NEON, AVX2+FMA and scalar paths and handles any length. |
 
 ## What zero mode supports
 
-Zero mode has no garbage collector, no exceptions (failures call `Environment.FailFast`), no async/await, no LINQ, and almost no base class library. On the other hand, these all work:
+Zero mode has no garbage collector, no exceptions (failures call `Environment.FailFast`), no async/await, no LINQ, and almost no base class library. On the other hand, these all work with zerocore:
 
-- `Span<T>`, and arrays: `new T[n]`, including arrays of strings and objects (fork)
-- Static fields of every type, including strings, objects and arrays (fork)
-- Strings: `==`, `+`, `switch` (fork), plus `lib/` for the rest (see [Strings](#strings))
-- Class casts: `(T)x`, `is`, `as` (fork). Not to interface or array types.
-- Top-level statements (fork)
+- `Span<T>`, and arrays: `new T[n]`, including arrays of strings, objects and interfaces
+- Static fields of every type, including strings, objects and arrays; static constructors
+- Strings: `==`, `+`, `switch`, plus `lib/` for the rest (see [Strings](#strings))
+- Casts: `(T)x`, `is`, `as` and type patterns, to classes and interfaces. Not through variance (`IEnumerable<string>` as `IEnumerable<object>`, `string[]` as `object[]`): those abort with a message.
+- Boxing: a struct converted to `object` or to an interface it implements
+- `Main(string[] args)` and top-level statements
 - Generics, including constrained calls and **static abstract interface members**. These are resolved at compile time, which suits per-format compute kernels.
-- Classes with virtual methods and interface dispatch. Every `new` calls malloc and is never freed.
+- Classes with virtual methods, and interfaces, including default interface methods. Every `new` calls calloc and is never freed. An interface call the compiler can't resolve at build time searches the class's method map on every call, so keep those out of hot loops.
+- Delegates and lambdas (they allocate), `try`/`finally` and `using`
 - Function pointers, `[UnmanagedCallersOnly]` callbacks, and P/Invoke. pthreads work, for example.
+
+[`zerocore/README.md`](zerocore/README.md) has the full list, including what doesn't work.
 
 ## Strings
 
-Upstream zerolib's `string` has only `Length`, an indexer and pointer constructors. The fork adds `==`, `!=`, `+`, `Equals`, `IsNullOrEmpty` and string `switch`. `lib/Str.cs`, `lib/StrBuilder.cs` and `lib/Out.cs` add the rest, without a garbage collector:
+zerocore's `string` has `Length`, an indexer, `==`, `!=`, `+`, `Equals`, `IsNullOrEmpty` and string `switch`, and nothing else. `lib/Str.cs`, `lib/StrBuilder.cs` and `lib/Out.cs` add the rest, without a garbage collector:
 
 ```csharp
 foreach (ReadOnlySpan<char> field in line.Split(','))       // no allocation
@@ -189,8 +209,8 @@ string label = Str.Format($"item {id:D4}");                 // a real string, in
 
 | .NET | Zero mode with `lib/` | Allocates |
 |---|---|---|
-| `a == b`, `a != b`, `switch (s)` | the same (fork) | no |
-| `a + b` | the same (fork): malloc, never freed. In a loop use `Str.Concat(a, b)` | malloc |
+| `a == b`, `a != b`, `switch (s)` | the same | no |
+| `a + b` | the same: calloc, never freed. In a loop use `Str.Concat(a, b)` | calloc |
 | `a == b` on a span | `span.SequenceEqual(other)` | no |
 | `s.Substring(i, n)` | `s.AsSpan(i, n)` | no |
 | `s.StartsWith`, `EndsWith`, `IndexOf`, `LastIndexOf`, `Contains`, `Trim` | same names, on strings and spans; `Trim` returns a span | no |
@@ -204,12 +224,26 @@ string label = Str.Format($"item {id:D4}");                 // a real string, in
 | `StringBuilder` | `StrBuilder` | arena |
 
 - **Every string converts to `ReadOnlySpan<char>` implicitly.** C# 14 adds that conversion when `System.MemoryExtensions.AsSpan(string)` exists, which `lib/Str.cs` defines. So any span parameter takes a string. A null string acts as an empty one.
-- **Arena strings are real strings.** A zero-mode string object is a method-table pointer, a length and the characters, allocated with plain `malloc`. `Str.Format` and `Str.Concat` lay one out in arena memory, so the result works anywhere a string does. It's freed by `Arena.Reset()`, like the rest of the arena, so don't use it afterwards. `Str.Format` and `Str.Concat` return null if the arena isn't initialized or is full.
+- **Arena strings are real strings.** A zero-mode string object is a method-table pointer, a length and the characters, allocated with plain `calloc`. `Str.Format` and `Str.Concat` lay one out in arena memory, so the result works anywhere a string does. It's freed by `Arena.Reset()`, like the rest of the arena, so don't use it afterwards. `Str.Format` and `Str.Concat` return null if the arena isn't initialized or is full.
 - **Holes in `$"..."`** take integers, `double` and `float`, `bool`, `char`, strings and spans, with an optional alignment (`{x,8}`, `{x,-8}`) and format: `D`/`Dn` and `X`/`x`/`Xn` for integers, `F`/`Fn` for doubles. Without a format, a double prints up to 6 decimals with trailing zeros removed. Values of 1.8e19 and up print as `1.00e+20`. Unlike .NET, `bool` prints as `true`/`false`, and `{-1:X}` prints 16 hex digits for any integer type, since every integer is formatted as a 64-bit `long` or `ulong`.
 - **Parsing is strict and invariant:** no surrounding whitespace (call `Trim()` first), no thousands separators. `TryParse(s, out double)` is correctly rounded: 5,000 decimal strings across the whole range, denormals included, came out bit-identical to Python's `float()`. It accepts `.5`, `5.`, exponents, `NaN` and `Infinity`; too large gives Infinity and too small gives 0, like .NET.
 - **Not supported:** culture-aware anything, `char`/number operands in `+` (`"n=" + 5`; use `Str.Format($"n={5}")`), and `string.Format`.
 
 ## Known issues
+
+With zerocore, as `build.sh` builds:
+
+| Issue | Status |
+|---|---|
+| `[DllImport]` of a library not passed with `-i` fails to compile ("Expected type 'Internal.Runtime.CompilerHelpers.InteropHelpers' not found") | Pass `-i <library>`; `build.sh` passes `-i libc -i libm.so.6` |
+| Building without `--no-reflection` fails ("Failed to load type 'Internal.Metadata.NativeFormat.TypeDefinition'") | Pass `--no-reflection`; `build.sh` does |
+| Non-baseline instruction sets (AVX2, FMA, dotprod) report `IsSupported == false` by default: there's no run-time CPU detection | Build with `-m x86-64-v3` / `-m dotprod`; `build.sh` does this for Simd and Kernels |
+| No `Console`, `Math`, `Interlocked`, `Volatile`, `Half` | `lib/Out.cs` for output, libm via P/Invoke for math; the others aren't available |
+| `"n=" + 5` doesn't compile (no `object.ToString`) | `Str.Format($"n={5}")` |
+| Casts and interface calls that need variance abort at run time | Not supported |
+| No Windows port | `build.ps1` builds against zerolib instead |
+
+With bflat's zerolib (`--stdlib:zero`), for reference; the fork fixes most of these, and none of them affect `build.sh`:
 
 | Issue | Status |
 |---|---|
@@ -238,4 +272,6 @@ string label = Str.Format($"item {id:D4}");                 // a real string, in
 
 ## License
 
-MIT
+MIT, including `zerocore/` (see [`zerocore/LICENSE`](zerocore/LICENSE)). zerocore's README explains where its code comes from and carries a caveat: it wasn't written in a clean room, so have it reviewed before shipping a commercial product on it.
+
+bflat and the fork are AGPL-3.0. `build.sh` uses them as a compiler; their zerolib is not linked into the binaries it produces. Each binary does link the C library of the system it targets (glibc on Linux, WASI's libc on WebAssembly), under its own license.

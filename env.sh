@@ -17,7 +17,7 @@ BFLAT_DIR=${BFLAT_DIR:-${BFLAT_FORK:-../bflat}/layouts/linux-glibc-$HOST_ARCH}
 
 # bflat can't target macOS, so on macOS it runs in a Linux container of the
 # Mac's own architecture (native speed on Apple Silicon).
-IMAGE="bflat-zero-build:$HOST_ARCH"
+IMAGE="bflat-zero-build:2-$HOST_ARCH"
 
 ensure_image() {
     if ! command -v docker >/dev/null 2>&1; then

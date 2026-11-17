@@ -4,8 +4,9 @@
     IDEs IntelliSense that matches bflat's zero mode. bflat ignores them; build
     with ./build.sh.
 
-    Each project compiles against zerolib (bflat's zero-mode standard library)
-    instead of .NET's, with the same C# 15 settings build.sh passes to bflat.
+    Each project compiles against zerocore/ (this repo's core library) instead
+    of .NET's, with the same C# 15 settings build.sh passes to bflat. Nothing
+    outside the repo is needed, not even bflat.
   -->
   <PropertyGroup>
     <!-- Several projects share samples/, so each gets its own obj/ folder. -->
@@ -26,28 +27,4 @@
     <!-- Projects list their files explicitly, matching what build.sh compiles. -->
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
-
-  <!--
-    Find zerolib's reference assembly the way env.sh finds bflat: BFLAT_DIR if
-    set, otherwise a layout of the fork at BFLAT_FORK (default ../bflat). The
-    reference assembly is the same in every layout, so any architecture works.
-  -->
-  <PropertyGroup>
-    <BflatDir Condition="'$(BflatDir)' == '' and '$(BFLAT_DIR)' != ''">$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', '$(BFLAT_DIR)'))</BflatDir>
-    <BflatFork Condition="'$(BflatFork)' == '' and '$(BFLAT_FORK)' != ''">$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', '$(BFLAT_FORK)'))</BflatFork>
-    <BflatFork Condition="'$(BflatFork)' == ''">$(MSBuildThisFileDirectory)../bflat</BflatFork>
-    <BflatDir Condition="'$(BflatDir)' == '' and Exists('$(BflatFork)/layouts/linux-glibc-arm64/ref/zerolib.dll')">$(BflatFork)/layouts/linux-glibc-arm64</BflatDir>
-    <BflatDir Condition="'$(BflatDir)' == '' and Exists('$(BflatFork)/layouts/linux-glibc-x64/ref/zerolib.dll')">$(BflatFork)/layouts/linux-glibc-x64</BflatDir>
-    <BflatDir Condition="'$(BflatDir)' == '' and Exists('$(BflatFork)/layouts/windows-x64/ref/zerolib.dll')">$(BflatFork)/layouts/windows-x64</BflatDir>
-    <BflatDir Condition="'$(BflatDir)' == '' and Exists('$(BflatFork)/layouts/windows-arm64/ref/zerolib.dll')">$(BflatFork)/layouts/windows-arm64</BflatDir>
-    <ZerolibRef>$(BflatDir)/ref/zerolib.dll</ZerolibRef>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <Reference Include="$(ZerolibRef)" />
-  </ItemGroup>
-
-  <Target Name="CheckZerolib" BeforeTargets="ResolveAssemblyReferences" Condition="!Exists('$(ZerolibRef)')">
-    <Error Text="zerolib not found at '$(ZerolibRef)'. Build the bflat fork's layouts (README, &quot;Getting bflat&quot;) or set BFLAT_DIR." />
-  </Target>
 </Project>

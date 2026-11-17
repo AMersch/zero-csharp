@@ -1,4 +1,4 @@
-// Example: string support in --stdlib:zero. The fork's zerolib adds ==, +,
+// Example: string support in zero mode. The core library (zerocore) has ==, +,
 // string switch and static string fields; lib/Str.cs, lib/StrBuilder.cs and
 // lib/Out.cs add span operations, parsing, $"..." formatting and arena strings.
 // Exit code = number of failed checks.
@@ -69,8 +69,8 @@ public static class Program
         }
     }
 
-    // Static fields of reference types need the fork's zerolib (startup allocates
-    // their storage); upstream zerolib segfaults on the first store.
+    // Static fields of reference types need the core library to allocate their
+    // storage at startup (zerocore/Runtime/Startup.cs).
     static string s_label = "initial";
     static string[] s_words = { "zero", "one" };
 
@@ -180,7 +180,7 @@ public static class Program
             && RejectsDouble("1e+") && RejectsDouble("--1") && RejectsDouble("1.2.3") && RejectsDouble(" 1"));
         End("parse: double");
 
-        // ---- zerolib string operators (fork) ----
+        // ---- the core library's string operators ----
         string foo = "foo", bar = "bar", none = null;
         Check("==", foo == "foo" && !(foo == bar));
         Check("!=", foo != bar && !(foo != "foo"));
@@ -196,7 +196,7 @@ public static class Program
         Check("+= in a loop", built == "ababab");
         Check("$ with string holes", $"{foo}-{bar}" == "foo-bar");
         Check("switch", Classify("alpha") == 1 && Classify("eta") == 7 && Classify("omega") == 0 && Classify(none) == 0);
-        End("zerolib: ==, +, switch (fork)");
+        End("core library: ==, +, switch");
 
         Check("preinitialized static string", s_label == "initial");
         s_label = Str.Format($"changed {1}");
@@ -204,7 +204,7 @@ public static class Program
         Check("static string array", s_words.Length == 2 && s_words[1] == "one");
         s_words[0] = "nil";
         Check("store into static array", s_words[0] == "nil");
-        End("zerolib: static string fields (fork)");
+        End("core library: static string fields");
 
         // ---- formatting: $"..." into new arena strings ----
         long min = -9223372036854775807 - 1;

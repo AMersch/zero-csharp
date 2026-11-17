@@ -2,6 +2,10 @@
 # UNTESTED on Windows: the samples P/Invoke into "libc", which may not
 # resolve there. See README.
 #
+# Unlike build.sh, this still builds against bflat's built-in zerolib
+# (--stdlib:zero): zerocore/ has no Windows port yet. So the binaries include
+# zerolib's AGPL code, and the Casts sample (which needs zerocore) isn't built.
+#
 # Usage: .\build.ps1 [Sample ...]     default: all samples
 # Env:   BFLAT_DIR (default ..\bflat\layouts\windows-x64)
 

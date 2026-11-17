@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds the --stdlib:zero samples with the bflat fork, which compiles C# 15
-# with the updated memory safety rules in one step.
+# Builds the samples with the bflat fork, which compiles C# 15 with the updated
+# memory safety rules in one step. They run without .NET's runtime: the core
+# library is zerocore/ (see zerocore/README.md), compiled from source here.
 #
 # On macOS bflat runs in a Linux container (see docker/Dockerfile); the
 # binaries in ./bin are Linux binaries, so use ./run.sh to run them.
@@ -14,19 +15,31 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
 
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Simd Kernels Strings)
+ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Simd Kernels Strings)
 
 # Language version and memory safety rules for every sample.
 CSHARP_FLAGS=(--langversion preview --compiler-feature updated-memory-safety-rules)
+
+# zerocore/ is the core library: object, string, Span<T>, and the runtime code
+# the compiler expects to find (allocation, casts, static fields). bflat only
+# accepts a custom core library under the name System.Private.CoreLib.
+# --stdlib:none means "no built-in library": every build references this one.
+CORE=bin/System.Private.CoreLib.dll
+CORE_FLAGS=(--stdlib:none --langversion preview)
 
 # lib/ is compiled once into an IL assembly that the samples reference with -r,
 # the way a C program links a library, except the assembly's metadata replaces
 # the header files. It holds IL, not native code: each sample's bflat build
 # compiles the parts it uses, for its own -m flags, into a single binary.
 # -O matters: unlike bflat build, build-il doesn't optimize unless asked.
-# Don't name it ZeroLib: zero mode's core library is an assembly called zerolib,
-# and assembly names are case-insensitive.
 LIB=bin/BflatLib.dll
+
+# What every native build needs besides the sources:
+# --no-reflection   bflat assumes a library named System.Private.CoreLib is
+#                   .NET's and would look for its reflection support
+# -i libc ...       bind [DllImport("libc")] at link time; binding at run time
+#                   needs runtime support zerocore doesn't have
+NATIVE_FLAGS=(--no-reflection -i libc -i libm.so.6)
 
 check_sample() {
     case " ${ALL_SAMPLES[*]} " in
@@ -51,9 +64,11 @@ bflat_flags() {
 # binaries then won't load on 16 KB/64 KB-page kernels (Asahi Linux, some
 # servers); set ARM64_MAX_PAGE_SIZE=65536 for those.
 ARM64_MAX_PAGE_SIZE=${ARM64_MAX_PAGE_SIZE:-4096}
-LINK_FLAGS=()
+# zerocore's few assembly routines (zerocore/native), linked into every binary.
+CORE_NATIVE=bin/zerocore-$BFLAT_ARCH.o
+LINK_FLAGS=(--ldflags "$CORE_NATIVE")
 if [ "$BFLAT_ARCH" = arm64 ]; then
-    LINK_FLAGS=(--ldflags "-z max-page-size=$ARM64_MAX_PAGE_SIZE")
+    LINK_FLAGS+=(--ldflags "-z max-page-size=$ARM64_MAX_PAGE_SIZE")
 fi
 
 check_bflat() {
@@ -64,21 +79,52 @@ check_bflat() {
     fi
 }
 
+# $1: output assembly; the rest: extra flags (-d WASM for the WebAssembly build).
+build_core() {
+    local out=$1
+    shift
+    mkdir -p "$(dirname "$out")"
+    echo "[bflat] zerocore/ -> $out"
+    # shellcheck disable=SC2046
+    "$BFLAT_DIR/bflat" build-il $(find zerocore -name '*.cs' | sort) -O "${CORE_FLAGS[@]}" "$@" -o "$out"
+}
+
+# Any assembler for the target will do: the cross one from the build image, or
+# plain `as` when building on the target's own architecture.
+build_core_native() {
+    local triple as
+    case "$BFLAT_ARCH" in
+        x64)   triple=x86_64-linux-gnu ;;
+        arm64) triple=aarch64-linux-gnu ;;
+    esac
+    if command -v "$triple-as" >/dev/null 2>&1; then
+        as=$triple-as
+    elif [ "$BFLAT_ARCH" = "$HOST_ARCH" ] && command -v as >/dev/null 2>&1; then
+        as=as
+    else
+        echo "Error: no assembler for $BFLAT_ARCH. Install binutils (binutils-$triple to cross-compile)." >&2
+        exit 1
+    fi
+    echo "[as]    zerocore/native/$BFLAT_ARCH.S -> $CORE_NATIVE"
+    "$as" "zerocore/native/$BFLAT_ARCH.S" -o "$CORE_NATIVE"
+}
+
 build_lib() {
-    mkdir -p bin
     echo "[bflat] lib/*.cs -> $LIB"
-    "$BFLAT_DIR/bflat" build-il lib/*.cs -O --stdlib:zero "${CSHARP_FLAGS[@]}" --target Shared -o "$LIB"
+    "$BFLAT_DIR/bflat" build-il lib/*.cs -O --stdlib:none -r "$CORE" "${CSHARP_FLAGS[@]}" --target Shared -o "$LIB"
 }
 
 build_native() {
     local name
     check_bflat
+    build_core "$CORE"
+    build_core_native
     build_lib
     for name in "$@"; do
         echo "[bflat] $name -> bin/$name"
         # shellcheck disable=SC2046
-        "$BFLAT_DIR/bflat" build "samples/$name.cs" -r "$LIB" --stdlib:zero "${CSHARP_FLAGS[@]}" \
-            --arch "$BFLAT_ARCH" $(bflat_flags "$name") ${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"} -o "bin/$name"
+        "$BFLAT_DIR/bflat" build "samples/$name.cs" -r "$LIB" -r "$CORE" --stdlib:none "${CSHARP_FLAGS[@]}" \
+            "${NATIVE_FLAGS[@]}" --arch "$BFLAT_ARCH" $(bflat_flags "$name") "${LINK_FLAGS[@]}" -o "bin/$name"
         if [ "$name" = Tiny ]; then
             if [ "$BFLAT_ARCH" = "$HOST_ARCH" ]; then
                 strip "bin/$name"
@@ -89,26 +135,25 @@ build_native() {
     done
 }
 
-WASI_ZEROLIB=$BFLAT_DIR/lib/wasi/wasm/zerolib.dll
+# zerocore's WebAssembly build differs in how it finds static fields (-d WASM).
+WASM_CORE=bin/wasm/System.Private.CoreLib.dll
 
 check_wasm() {
     if [ ! -x "$WASM_ILC" ] || [ ! -x "$WASI_SDK/bin/clang" ]; then
         echo "Error: no WebAssembly toolchain in $WASM_TOOLS. Run ./setup.sh --wasm" >&2
         exit 1
     fi
-    if [ ! -f "$WASI_ZEROLIB" ]; then
-        echo "Error: no $WASI_ZEROLIB (the bflat layout predates WASI support; rebuild the fork)" >&2
-        exit 1
-    fi
 }
 
 # Source -> IL (bflat, as for the native build) -> LLVM bitcode (NativeAOT-LLVM,
-# against zerolib's WASI build) -> WASM objects (clang) -> one module, linked with
-# wasm/runtime.c (the zero-mode runtime) and WASI's C library.
+# against zerocore's WebAssembly build) -> WASM objects (clang) -> one module,
+# linked with wasm/runtime.c (zerocore's native half there) and WASI's C library.
 build_wasm() {
     local name obj bc
     check_bflat
     check_wasm
+    build_core "$CORE"
+    build_core "$WASM_CORE" -d WASM
     build_lib
     for name in "$@"; do
         echo "[wasm]  $name -> bin/wasm/$name.wasm"
@@ -116,11 +161,12 @@ build_wasm() {
         rm -rf "$obj"
         mkdir -p "$obj"
 
-        "$BFLAT_DIR/bflat" build-il "samples/$name.cs" -r "$LIB" -O --stdlib:zero "${CSHARP_FLAGS[@]}" -o "$obj/$name.dll"
+        "$BFLAT_DIR/bflat" build-il "samples/$name.cs" -r "$LIB" -r "$CORE" -O --stdlib:none "${CSHARP_FLAGS[@]}" -o "$obj/$name.dll"
 
         # --directpinvoke binds [DllImport("libc")] and ("libm.so.6") at link time,
         # to WASI's C library.
-        if ! "$WASM_ILC" "$obj/$name.dll" -r "$LIB" -r "$WASI_ZEROLIB" --systemmodule:zerolib \
+        if ! "$WASM_ILC" "$obj/$name.dll" -r "$LIB" -r "$WASM_CORE" --reflectiondata:none \
+                --generateunmanagedentrypoints:System.Private.CoreLib \
                 --targetos:wasi --targetarch:wasm -O --wasm-global-base:1024 \
                 --codegenopt:Target=wasm32-unknown-wasip2 --codegenopt:LlvmExceptionHandlingModel=emulated \
                 --directpinvoke:libc --directpinvoke:libm.so.6 -o:"$obj/$name.bc" > "$obj/ilc.log" 2>&1; then

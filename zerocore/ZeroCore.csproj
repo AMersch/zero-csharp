@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Editor support only (see Directory.Build.props). build.sh builds this as
+    bin/System.Private.CoreLib.dll, the name bflat requires of a core library.
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AssemblyName>System.Private.CoreLib</AssemblyName>
+    <!-- A core library has nothing to reference, so the compiler can't infer this. -->
+    <RuntimeMetadataVersion>v4.0.30319</RuntimeMetadataVersion>
+    <!-- build.sh compiles zerocore without the updated memory safety rules. -->
+    <Features></Features>
+    <!-- Fields the compiler reads or writes behind C#'s back look unused or unassigned. -->
+    <NoWarn>$(NoWarn);CS0169;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="**/*.cs" Exclude="obj/**" />
+  </ItemGroup>
+</Project>

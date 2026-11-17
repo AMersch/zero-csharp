@@ -1,7 +1,7 @@
-// Buffered stdout writer for --stdlib:zero.
+// Buffered stdout writer for zero mode.
 //
-// zerolib's Console makes one syscall per character, and only prints string
-// and int. This writer buffers output, encodes it as UTF-8, prints numbers,
+// zerocore has no Console, and bflat's zerolib has one that makes a syscall
+// per character. This writer buffers output, encodes it as UTF-8, prints numbers,
 // bools and spans, and hands each line to libc write() in one call.
 //
 // Out.Line($"x = {x}, name = {name,-8}, ratio = {r:F2}") formats every hole

@@ -1,0 +1,237 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
+namespace System
+{
+    public readonly ref struct Span<T>
+    {
+        internal readonly ref T _reference;
+        private readonly int _length;
+
+        public Span(T[] array)
+        {
+            if (array == null)
+            {
+                this = default;
+                return;
+            }
+            _reference = ref MemoryMarshal.GetArrayDataReference(array);
+            _length = array.Length;
+        }
+
+        public Span(T[] array, int start, int length)
+        {
+            if (array == null)
+            {
+                if (start != 0 || length != 0)
+                    Environment.FailFast("Span: range out of bounds");
+                this = default;
+                return;
+            }
+            if ((uint)start > (uint)array.Length || (uint)length > (uint)(array.Length - start))
+                Environment.FailFast("Span: range out of bounds");
+            _reference = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(array), start);
+            _length = length;
+        }
+
+        public unsafe Span(void* pointer, int length)
+        {
+            if (length < 0)
+                Environment.FailFast("Span: negative length");
+            _reference = ref Unsafe.As<byte, T>(ref *(byte*)pointer);
+            _length = length;
+        }
+
+        public Span(ref T reference, int length)
+        {
+            _reference = ref reference;
+            _length = length;
+        }
+
+        public ref T this[int index]
+        {
+            [Intrinsic]
+            get
+            {
+                if ((uint)index >= (uint)_length)
+                    Environment.FailFast("Span: index out of range");
+                return ref Unsafe.Add(ref _reference, index);
+            }
+        }
+
+        public int Length => _length;
+
+        public bool IsEmpty => _length == 0;
+
+        public static Span<T> Empty => default;
+
+        public Span<T> Slice(int start)
+        {
+            if ((uint)start > (uint)_length)
+                Environment.FailFast("Span: slice out of range");
+            return new Span<T>(ref Unsafe.Add(ref _reference, start), _length - start);
+        }
+
+        public Span<T> Slice(int start, int length)
+        {
+            if ((uint)start > (uint)_length || (uint)length > (uint)(_length - start))
+                Environment.FailFast("Span: slice out of range");
+            return new Span<T>(ref Unsafe.Add(ref _reference, start), length);
+        }
+
+        public void Clear() => Fill(default);
+
+        public void Fill(T value)
+        {
+            for (int i = 0; i < _length; i++)
+                Unsafe.Add(ref _reference, i) = value;
+        }
+
+        public void CopyTo(Span<T> destination) => ((ReadOnlySpan<T>)this).CopyTo(destination);
+
+        // For `fixed (T* p = span)`.
+        public ref T GetPinnableReference() => ref _reference;
+
+        public Enumerator GetEnumerator() => new Enumerator(this);
+
+        public static implicit operator Span<T>(T[] array) => new Span<T>(array);
+
+        public static implicit operator ReadOnlySpan<T>(Span<T> span) => new ReadOnlySpan<T>(ref span._reference, span._length);
+
+        public ref struct Enumerator
+        {
+            private readonly Span<T> _span;
+            private int _index;
+
+            internal Enumerator(Span<T> span)
+            {
+                _span = span;
+                _index = -1;
+            }
+
+            public bool MoveNext() => ++_index < _span.Length;
+
+            public ref T Current => ref _span[_index];
+        }
+    }
+
+    public readonly ref struct ReadOnlySpan<T>
+    {
+        internal readonly ref T _reference;
+        private readonly int _length;
+
+        public ReadOnlySpan(T[] array)
+        {
+            if (array == null)
+            {
+                this = default;
+                return;
+            }
+            _reference = ref MemoryMarshal.GetArrayDataReference(array);
+            _length = array.Length;
+        }
+
+        public ReadOnlySpan(T[] array, int start, int length)
+        {
+            if (array == null)
+            {
+                if (start != 0 || length != 0)
+                    Environment.FailFast("ReadOnlySpan: range out of bounds");
+                this = default;
+                return;
+            }
+            if ((uint)start > (uint)array.Length || (uint)length > (uint)(array.Length - start))
+                Environment.FailFast("ReadOnlySpan: range out of bounds");
+            _reference = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(array), start);
+            _length = length;
+        }
+
+        public unsafe ReadOnlySpan(void* pointer, int length)
+        {
+            if (length < 0)
+                Environment.FailFast("ReadOnlySpan: negative length");
+            _reference = ref Unsafe.As<byte, T>(ref *(byte*)pointer);
+            _length = length;
+        }
+
+        public ReadOnlySpan(ref T reference, int length)
+        {
+            _reference = ref reference;
+            _length = length;
+        }
+
+        public ref readonly T this[int index]
+        {
+            [Intrinsic]
+            get
+            {
+                if ((uint)index >= (uint)_length)
+                    Environment.FailFast("ReadOnlySpan: index out of range");
+                return ref Unsafe.Add(ref _reference, index);
+            }
+        }
+
+        public int Length => _length;
+
+        public bool IsEmpty => _length == 0;
+
+        public static ReadOnlySpan<T> Empty => default;
+
+        public ReadOnlySpan<T> Slice(int start)
+        {
+            if ((uint)start > (uint)_length)
+                Environment.FailFast("ReadOnlySpan: slice out of range");
+            return new ReadOnlySpan<T>(ref Unsafe.Add(ref _reference, start), _length - start);
+        }
+
+        public ReadOnlySpan<T> Slice(int start, int length)
+        {
+            if ((uint)start > (uint)_length || (uint)length > (uint)(_length - start))
+                Environment.FailFast("ReadOnlySpan: slice out of range");
+            return new ReadOnlySpan<T>(ref Unsafe.Add(ref _reference, start), length);
+        }
+
+        // The ranges may overlap, so the direction of the copy depends on which
+        // one starts first.
+        public unsafe void CopyTo(Span<T> destination)
+        {
+            if ((uint)_length > (uint)destination.Length)
+                Environment.FailFast("ReadOnlySpan: destination too short");
+            ref T source = ref _reference;
+            ref T target = ref destination._reference;
+            if (Unsafe.AsPointer(ref target) <= Unsafe.AsPointer(ref source))
+            {
+                for (int i = 0; i < _length; i++)
+                    Unsafe.Add(ref target, i) = Unsafe.Add(ref source, i);
+            }
+            else
+            {
+                for (int i = _length - 1; i >= 0; i--)
+                    Unsafe.Add(ref target, i) = Unsafe.Add(ref source, i);
+            }
+        }
+
+        // For `fixed (T* p = span)`.
+        public ref readonly T GetPinnableReference() => ref _reference;
+
+        public Enumerator GetEnumerator() => new Enumerator(this);
+
+        public static implicit operator ReadOnlySpan<T>(T[] array) => new ReadOnlySpan<T>(array);
+
+        public ref struct Enumerator
+        {
+            private readonly ReadOnlySpan<T> _span;
+            private int _index;
+
+            internal Enumerator(ReadOnlySpan<T> span)
+            {
+                _span = span;
+                _index = -1;
+            }
+
+            public bool MoveNext() => ++_index < _span.Length;
+
+            public ref readonly T Current => ref _span[_index];
+        }
+    }
+}

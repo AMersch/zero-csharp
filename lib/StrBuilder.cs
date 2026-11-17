@@ -1,6 +1,6 @@
-// StrBuilder: growable string buffer backed by the Arena, with $"..." support.
+// StrBuilder: growable string buffer backed by an Arena, with $"..." support.
 //
-//   StrBuilder sb = StrBuilder.Create();
+//   StrBuilder sb = StrBuilder.Create(arena);
 //   sb.Append("total: ");
 //   sb.Append($"{count} items, {price:F2} each");
 //   Out.Line(sb.AsSpan());
@@ -8,11 +8,12 @@
 // Like List<T>, a StrBuilder is a handle to a header in the arena, so copies
 // share the same contents, and default(StrBuilder) is "not created": it reads
 // as empty and Append returns false. Append also returns false when the arena
-// is full. Growing copies into a fresh buffer; the old one stays allocated
-// until Arena.Reset().
+// is full. Growing extends the buffer in place while it is still the arena's
+// most recent allocation; otherwise it copies into a fresh buffer and the old
+// one stays allocated until the arena is reset.
 //
 // The buffer is laid out like a string object, [MethodTable*][length][chars],
-// so Str.Format($"...") turns a finished buffer into a string without copying.
+// so Str.Format(arena, $"...") turns a finished buffer into a string without copying.
 
 using System;
 using System.Runtime.CompilerServices;
@@ -23,6 +24,7 @@ public struct StrBuilder
 
     struct Header
     {
+        public Arena Arena;    // where the builder lives and grows
         public byte* Object;   // string-object-shaped buffer (see Str.MakeString)
         public int Length;
         public int Capacity;   // in chars, terminator not included
@@ -30,20 +32,21 @@ public struct StrBuilder
 
     Header* _header;
 
-    /// <summary>Returns a new builder, or a not-created one if the arena is out of memory.</summary>
-    public static StrBuilder Create(int initialCapacity = 64)
+    /// <summary>Returns a new builder in <paramref name="arena"/>, or a not-created one if it is out of memory.</summary>
+    public static StrBuilder Create(Arena arena, int initialCapacity = 64)
     {
         if (initialCapacity < MinCapacity)
             initialCapacity = MinCapacity;
 
-        Header* header = Arena.Alloc<Header>();
-        byte* obj = Str.AllocStringObject(initialCapacity);
+        Header* header = arena.Alloc<Header>();
+        byte* obj = Str.AllocStringObject(arena, initialCapacity);
         if (header == null || obj == null)
             return default;
 
         unsafe
         {
             // SAFETY: header was just allocated and zeroed.
+            header->Arena = arena;
             header->Object = obj;
             header->Capacity = initialCapacity;
         }
@@ -62,7 +65,7 @@ public struct StrBuilder
         }
     }
 
-    /// <summary>The text so far. Valid until the next Append or Arena.Reset().</summary>
+    /// <summary>The text so far. Valid until the next Append or until the arena is reset.</summary>
     public ReadOnlySpan<char> AsSpan()
     {
         if (_header == null)
@@ -109,8 +112,19 @@ public struct StrBuilder
             unsafe { _header->Length = 0; } // SAFETY: a live header.
     }
 
-    /// <summary>Copies the text into a new arena string. Returns null if the arena is out of memory.</summary>
-    public string ToArenaString() => Str.ToArenaString(AsSpan());
+    /// <summary>Copies the text into a new string in the builder's own arena. Returns null if it is out of memory.</summary>
+    public string ToArenaString()
+    {
+        if (_header == null)
+            return null;
+        unsafe { return Str.ToArenaString(_header->Arena, AsSpan()); } // SAFETY: a live header.
+    }
+
+    /// <summary>
+    /// Copies the text into a new string in <paramref name="target"/>: build in a
+    /// scratch arena, keep the result in a longer-lived one.
+    /// </summary>
+    public string ToArenaString(Arena target) => Str.ToArenaString(target, AsSpan());
 
     /// <summary>Turns the buffer itself into a string. The builder must not be used afterwards.</summary>
     internal string TakeString()
@@ -129,10 +143,14 @@ public struct StrBuilder
     {
         int length;
         int capacity;
+        Arena arena;
+        byte* oldObj;
         unsafe
         {
             length = _header->Length; // SAFETY: callers checked _header != null.
             capacity = _header->Capacity;
+            arena = _header->Arena;
+            oldObj = _header->Object;
         }
 
         long needed = (long)length + extra;
@@ -144,7 +162,14 @@ public struct StrBuilder
         if (newCapacity > int.MaxValue / 2)
             return false;
 
-        byte* obj = Str.AllocStringObject((int)newCapacity);
+        // Nothing was allocated after the buffer: just make it longer.
+        if (arena.TryExtend(oldObj, Str.StringObjectSize(capacity), Str.StringObjectSize((int)newCapacity)))
+        {
+            unsafe { _header->Capacity = (int)newCapacity; } // SAFETY: a live header.
+            return true;
+        }
+
+        byte* obj = Str.AllocStringObject(arena, (int)newCapacity);
         if (obj == null)
             return false;
 
@@ -176,10 +201,10 @@ public struct StrBuilder
             _ok = builder.IsCreated;
         }
 
-        /// <summary>Used by Str.Format: starts a new builder.</summary>
-        public InterpolatedHandler(int literalLength, int formattedCount)
+        /// <summary>Used by Str.Format: starts a new builder in that arena.</summary>
+        public InterpolatedHandler(int literalLength, int formattedCount, Arena arena)
         {
-            _builder = Create(literalLength + formattedCount * 8);
+            _builder = Create(arena, literalLength + formattedCount * 8);
             _ok = _builder.IsCreated;
         }
 

@@ -104,7 +104,7 @@ This is how you ship a bflat library without header files. The assembly's metada
 
 ## WebAssembly
 
-`./build.sh --wasm` compiles the same samples, `lib/` and `zerocore/` to WebAssembly modules for WASI, from 15 KB (Tiny) to 72 KB (Strings), stripped. All nine run under wasmtime: Strings passes its 136 checks and Casts its 41, both printing exactly what the native build prints, and the others match too, apart from what depends on the platform (below).
+`./build.sh --wasm` compiles the same samples, `lib/` and `zerocore/` to WebAssembly modules for WASI, from 15 KB (Tiny) to 77 KB (Strings), stripped. All nine run under wasmtime: Strings passes its 140 checks and Casts its 41, both printing exactly what the native build prints, and the others match too, apart from what depends on the platform (below).
 
 bflat can't target WebAssembly, so this uses a different compiler for the last step:
 
@@ -116,7 +116,7 @@ bflat can't target WebAssembly, so this uses a different compiler for the last s
 
 Differences from the native build:
 
-- **32-bit pointers.** Structs that hold pointers are smaller, so the arena byte counts printed by Arena and Collections are lower (Collections: 5 `List`/`Dict` headers × 4 bytes = 20 bytes).
+- **32-bit pointers.** Structs that hold pointers are smaller, so the arena byte counts printed by Arena and Collections are lower.
 - **No SIMD.** Simd and Kernels take their scalar paths. WebAssembly has 128-bit SIMD, but `lib/Kernels.cs` has no path for it yet.
 - **Clocks.** Simd and Kernels call `clock_gettime(1, ...)`, Linux's numeric `CLOCK_MONOTONIC`. In WASI's C library a clock ID is a pointer, so this reads the clock ID from address 1, which is zero: the realtime clock. That still measures durations.
 - **Exit codes.** Modules are linked for WASI 0.1, which passes exit codes through. WASI 0.2 only reports success or failure.
@@ -141,12 +141,13 @@ The samples compile with C# 15's [updated memory safety model](https://learn.mic
 - **`unsafe` on a member is a contract.** Callers must be in an unsafe context too, and the body still needs inner `unsafe { }` blocks.
 - **Every `extern` says `safe` or `unsafe`.** For example, `malloc` is `safe` and `free` is `unsafe`.
 
-In `lib/Arena.cs`, allocating is safe: you get a pointer, and using it needs `unsafe` anyway. `Reset()` and `Destroy()` are marked `unsafe`, because calling them is what turns other pointers into dangling ones:
+In `lib/Arena.cs`, allocating is safe: you get a pointer, and using it needs `unsafe` anyway. `Restore()`, `Reset()` and `Destroy()` are marked `unsafe`, because calling them is what turns other pointers into dangling ones:
 
 ```csharp
-Point* p = Arena.Alloc<Point>();         // safe
+Arena arena = Arena.Create();
+Point* p = arena.Alloc<Point>();         // safe
 unsafe { p->X = 10; }                    // dereference: unsafe
-unsafe { Arena.Reset(); }                // SAFETY: p is not used after this
+unsafe { arena.Reset(); }                // SAFETY: p is not used after this
 ```
 
 ## Examples
@@ -155,13 +156,13 @@ unsafe { Arena.Reset(); }                // SAFETY: p is not used after this
 |---|---|---|
 | `samples/Tiny.cs` | Smallest binary (`-Os --no-pie`, stripped) | ~16 KB |
 | `samples/Minimal.cs` | Hello world via `puts` | ~38 KB |
-| `samples/Arena.cs` | Growable arena: Fibonacci growth, dedicated blocks for large allocations, per-allocation alignment, `Reset` that keeps capacity | ~55 KB |
-| `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of the arena | ~78 KB |
+| `samples/Arena.cs` | Growable arena: Fibonacci growth, dedicated blocks for large allocations, per-allocation alignment, `Reset` that keeps capacity, `Save`/`Restore` for temporary work, growing in place, a second independent arena | ~67 KB |
+| `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of an arena | ~72 KB |
 | `samples/VirtualTest.cs` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | ~50 KB |
 | `samples/Casts.cs` | Tests runtime type checks (41 checks): `is`, `as` and `(T)x` to interfaces and classes, generic interfaces, boxed structs, interface calls with many arguments and default methods, arrays of interfaces, delegates | ~93 KB |
 | `samples/Simd.cs` | Float dot product with NEON (arm64) or AVX + FMA (x64), checked against scalar and timed (12x faster on Apple Silicon) | ~52 KB |
-| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~65 KB |
-| `samples/Strings.cs` | Tests the string support (136 checks): span operations, parsing integers, hex and doubles (bit-exact), `$"..."` formatting with alignment and format strings, arena strings, `StrBuilder`, and the core library's `==`, `+`, string `switch` and static string fields; prints a table and UTF-8 text through `Out` | ~154 KB |
+| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~64 KB |
+| `samples/Strings.cs` | Tests the string support (140 checks): span operations, parsing integers, hex and doubles (bit-exact), `$"..."` formatting with alignment and format strings, arena strings, `StrBuilder`, and the core library's `==`, `+`, string `switch` and static string fields; prints a table and UTF-8 text through `Out` | ~161 KB |
 
 Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is stripped); x64 is within a few KB. Run `strip` to shrink the others.
 
@@ -169,12 +170,12 @@ Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is s
 
 | File | What |
 |---|---|
-| `Arena.cs` | Growable bump allocator. Normal blocks grow 128, 128, 256, 384, 640, ...; an allocation too big for the next block gets its own block without changing that sequence. Alignment is per allocation, and a failed allocation returns null and leaves the arena untouched. |
-| `List.cs` | Growable array. It's a handle to an arena header, so copies share contents. `default(List<T>)` is safe to use: reads see an empty list and `Add` returns false. |
+| `Arena.cs` | Growable bump allocator; see [Arenas](#arenas). Normal blocks grow 128, 128, 256, 384, 640, ...; an allocation too big for the next block gets its own block without changing that sequence. Alignment is per allocation, and a failed allocation returns null and leaves the arena untouched. |
+| `List.cs` | Growable array, created in the arena you pass (`List<int>.Create(arena)`). It's a handle to an arena header, so copies share contents. `default(List<T>)` is safe to use: reads see an empty list and `Add` returns false. |
 | `Dict.cs` | Open-addressing hash map (FNV-1a, power-of-two capacity). Keys are compared by raw bytes: fine for integers and padding-free structs, not for floats. |
 | `Out.cs` | Buffered stdout writer, UTF-8 encoded; zerocore has no `Console`. `Out.Line($"...")` formats straight into the buffer. |
-| `Str.cs` | String support (see [Strings](#strings)): span operations as `System.MemoryExtensions`, `Str.TryParse`, `Str.Compare`, and new strings in the arena with `Str.Format` and `Str.Concat`. |
-| `StrBuilder.cs` | Growable string buffer in the arena, with `Append($"...")`. A handle like `List<T>`. |
+| `Str.cs` | String support (see [Strings](#strings)): span operations as `System.MemoryExtensions`, `Str.TryParse`, `Str.Compare`, and new strings in an arena with `Str.Format` and `Str.Concat`. |
+| `StrBuilder.cs` | Growable string buffer in an arena, with `Append($"...")`. A handle like `List<T>`. |
 | `Kernels.cs` | SIMD math for LLM inference: `Dot`, `MatVec`, `DotI8`, `Exp`, `Softmax`, `Silu`, `RmsNorm`. Each has NEON, AVX2+FMA and scalar paths and handles any length. |
 
 ## What zero mode supports
@@ -194,6 +195,28 @@ Zero mode has no garbage collector, no exceptions (failures call `Environment.Fa
 
 [`zerocore/README.md`](zerocore/README.md) has the full list, including what doesn't work.
 
+## Arenas
+
+`new` in zero mode never frees, so anything short-lived goes in an arena: memory handed out by moving a pointer forward and freed all at once. `lib/Arena.cs` is an instance type, so you create one per lifetime and pass it to whatever allocates:
+
+```csharp
+Arena app = Arena.Create();                  // lives as long as the program
+Arena frame = Arena.Create(64 * 1024);       // reset after every frame or request
+
+var names = List<int>.Create(app);           // collections live in the arena you give them
+string line = Str.Format(frame, $"{x}, {y}");
+
+unsafe { frame.Reset(); }                    // SAFETY: line is not used after this
+```
+
+- **An `Arena` is a handle** (one pointer), so passing or storing it is free and copies refer to the same arena. `default(Arena)` is "not created": every allocation from it returns null, and so does everything built on it.
+- **`Reset()` keeps the memory.** It merges the blocks into one, so a loop that resets each round stops calling `malloc` after the first.
+- **`Save()` and `Restore(mark)`** free only what was allocated since the mark, for temporary work in an arena that also holds data to keep. Restoring a mark from another arena, or from before a `Reset()`, ends the program with a message.
+- **One hazard with `Restore`:** if a `List`, `Dict` or `StrBuilder` created before the mark grows after it, its new buffer is freed by `Restore` while the collection still points at it, and nothing reports that. Between `Save()` and `Restore()`, only add to collections created after the mark. When temporary work has to add to long-lived collections, give it a separate scratch arena instead and copy the result out (`sb.ToArenaString(target)`).
+- **Growing in place.** `List` and `StrBuilder` extend their buffer without copying while it's still the arena's newest allocation (`TryExtend`). Otherwise the old buffer stays behind until the arena is reset.
+- **Not thread-safe.** Use one arena per thread.
+- **No stale-pointer detection.** After `Reset()`, an old pointer still reads valid-looking memory. That's why the freeing operations are `unsafe`.
+
 ## Strings
 
 zerocore's `string` has `Length`, an indexer, `==`, `!=`, `+`, `Equals`, `IsNullOrEmpty` and string `switch`, and nothing else. `lib/Str.cs`, `lib/StrBuilder.cs` and `lib/Out.cs` add the rest, without a garbage collector:
@@ -204,13 +227,13 @@ foreach (ReadOnlySpan<char> field in line.Split(','))       // no allocation
 
 Out.Line($"{name,-8}|{qty,5}|{price,9:F2}");                // straight to stdout
 
-string label = Str.Format($"item {id:D4}");                 // a real string, in the arena
+string label = Str.Format(arena, $"item {id:D4}");          // a real string, in the arena
 ```
 
 | .NET | Zero mode with `lib/` | Allocates |
 |---|---|---|
 | `a == b`, `a != b`, `switch (s)` | the same | no |
-| `a + b` | the same: calloc, never freed. In a loop use `Str.Concat(a, b)` | calloc |
+| `a + b` | the same: calloc, never freed. In a loop use `Str.Concat(arena, a, b)` | calloc |
 | `a == b` on a span | `span.SequenceEqual(other)` | no |
 | `s.Substring(i, n)` | `s.AsSpan(i, n)` | no |
 | `s.StartsWith`, `EndsWith`, `IndexOf`, `LastIndexOf`, `Contains`, `Trim` | same names, on strings and spans; `Trim` returns a span | no |
@@ -219,15 +242,15 @@ string label = Str.Format($"item {id:D4}");                 // a real string, in
 | `long.Parse(s, NumberStyles.HexNumber)` | `Str.TryParseHex(s, out ulong v)` (`0x` prefix optional) | no |
 | `string.CompareOrdinal(a, b)` | `Str.Compare(a, b)` | no |
 | `Console.WriteLine($"...")` | `Out.Line($"...")` | no |
-| `$"..."` as a string | `Str.Format($"...")` (with only string holes, plain `$"..."` works too, through `+`) | arena |
-| `a + b` without leaking | `Str.Concat(a, b)` | arena |
-| `StringBuilder` | `StrBuilder` | arena |
+| `$"..."` as a string | `Str.Format(arena, $"...")` (with only string holes, plain `$"..."` works too, through `+`) | arena |
+| `a + b` without leaking | `Str.Concat(arena, a, b)` | arena |
+| `StringBuilder` | `StrBuilder.Create(arena)` | arena |
 
 - **Every string converts to `ReadOnlySpan<char>` implicitly.** C# 14 adds that conversion when `System.MemoryExtensions.AsSpan(string)` exists, which `lib/Str.cs` defines. So any span parameter takes a string. A null string acts as an empty one.
-- **Arena strings are real strings.** A zero-mode string object is a method-table pointer, a length and the characters, allocated with plain `calloc`. `Str.Format` and `Str.Concat` lay one out in arena memory, so the result works anywhere a string does. It's freed by `Arena.Reset()`, like the rest of the arena, so don't use it afterwards. `Str.Format` and `Str.Concat` return null if the arena isn't initialized or is full.
+- **Arena strings are real strings.** A zero-mode string object is a method-table pointer, a length and the characters, allocated with plain `calloc`. `Str.Format` and `Str.Concat` lay one out in arena memory, so the result works anywhere a string does. It's freed with the rest of its arena (`Restore`, `Reset`, `Destroy`), so don't use it afterwards. `Str.Format` and `Str.Concat` return null if the arena isn't created or is full.
 - **Holes in `$"..."`** take integers, `double` and `float`, `bool`, `char`, strings and spans, with an optional alignment (`{x,8}`, `{x,-8}`) and format: `D`/`Dn` and `X`/`x`/`Xn` for integers, `F`/`Fn` for doubles. Without a format, a double prints up to 6 decimals with trailing zeros removed. Values of 1.8e19 and up print as `1.00e+20`. Unlike .NET, `bool` prints as `true`/`false`, and `{-1:X}` prints 16 hex digits for any integer type, since every integer is formatted as a 64-bit `long` or `ulong`.
 - **Parsing is strict and invariant:** no surrounding whitespace (call `Trim()` first), no thousands separators. `TryParse(s, out double)` is correctly rounded: 5,000 decimal strings across the whole range, denormals included, came out bit-identical to Python's `float()`. It accepts `.5`, `5.`, exponents, `NaN` and `Infinity`; too large gives Infinity and too small gives 0, like .NET.
-- **Not supported:** culture-aware anything, `char`/number operands in `+` (`"n=" + 5`; use `Str.Format($"n={5}")`), and `string.Format`.
+- **Not supported:** culture-aware anything, `char`/number operands in `+` (`"n=" + 5`; use `Str.Format(arena, $"n={5}")`), and `string.Format`.
 
 ## Known issues
 
@@ -239,7 +262,7 @@ With zerocore, as `build.sh` builds:
 | Building without `--no-reflection` fails ("Failed to load type 'Internal.Metadata.NativeFormat.TypeDefinition'") | Pass `--no-reflection`; `build.sh` does |
 | Non-baseline instruction sets (AVX2, FMA, dotprod) report `IsSupported == false` by default: there's no run-time CPU detection | Build with `-m x86-64-v3` / `-m dotprod`; `build.sh` does this for Simd and Kernels |
 | No `Console`, `Math`, `Interlocked`, `Volatile`, `Half` | `lib/Out.cs` for output, libm via P/Invoke for math; the others aren't available |
-| `"n=" + 5` doesn't compile (no `object.ToString`) | `Str.Format($"n={5}")` |
+| `"n=" + 5` doesn't compile (no `object.ToString`) | `Str.Format(arena, $"n={5}")` |
 | Casts and interface calls that need variance abort at run time | Not supported |
 | No Windows port | `build.ps1` builds against zerolib instead |
 

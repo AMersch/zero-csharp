@@ -1,11 +1,12 @@
-// List<T>: growable array backed by the Arena.
+// List<T>: growable array backed by an Arena.
 //
 // List<T> is a handle (one pointer) to a header that lives in the arena, so
 // copies of a List share the same contents, like passing List* in C.
 // A default(List<T>) is "not created": reads see an empty list and Add fails.
 //
-// Growing copies into a fresh arena buffer; the old buffer stays allocated
-// until Arena.Reset(). Out-of-range Get/Set fail fast.
+// Growing extends the buffer in place while it is still the arena's most
+// recent allocation; otherwise it copies into a fresh buffer and the old one
+// stays allocated until the arena is reset. Out-of-range Get/Set fail fast.
 
 using System;
 
@@ -15,6 +16,7 @@ public struct List<T> where T : unmanaged
 
     struct Header
     {
+        public Arena Arena; // where the list lives and grows
         public T* Data;
         public int Count;
         public int Capacity;
@@ -22,20 +24,21 @@ public struct List<T> where T : unmanaged
 
     Header* _header;
 
-    /// <summary>Returns a new list, or a not-created list if the arena is out of memory.</summary>
-    public static List<T> Create(int initialCapacity = 16)
+    /// <summary>Returns a new list in <paramref name="arena"/>, or a not-created list if it is out of memory.</summary>
+    public static List<T> Create(Arena arena, int initialCapacity = 16)
     {
         if (initialCapacity < MinCapacity)
             initialCapacity = MinCapacity;
 
-        Header* header = Arena.Alloc<Header>();
-        T* data = Arena.AllocArray<T>(initialCapacity, Arena.DefaultAlign, zero: false);
+        Header* header = arena.Alloc<Header>();
+        T* data = arena.AllocArray<T>(initialCapacity, Arena.DefaultAlign, zero: false);
         if (header == null || data == null)
             return default;
 
         unsafe
         {
             // SAFETY: header was just allocated and zeroed.
+            header->Arena = arena;
             header->Data = data;
             header->Capacity = initialCapacity;
         }
@@ -73,7 +76,7 @@ public struct List<T> where T : unmanaged
         unsafe
         {
             // SAFETY: _header points at a live header (the arena hasn't been reset;
-            // Arena.Reset is unsafe and its caller promises that).
+            // Arena.Reset() is unsafe and its caller promises that).
             if (_header->Count == _header->Capacity && !Grow())
                 return false;
             _header->Data[_header->Count++] = item;
@@ -136,7 +139,7 @@ public struct List<T> where T : unmanaged
     }
 
     /// <summary>View of the current items.</summary>
-    /// <safety>The span is invalidated by Add (growth), RemoveAt, Clear and Arena.Reset.</safety>
+    /// <safety>The span is invalidated by Add (growth), RemoveAt, Clear and resetting the arena.</safety>
     public unsafe Span<T> AsSpan()
     {
         if (_header == null)
@@ -153,11 +156,20 @@ public struct List<T> where T : unmanaged
                 return false;
 
             int newCapacity = oldCapacity * 2;
-            T* newData = Arena.AllocArray<T>(newCapacity, Arena.DefaultAlign, zero: false);
+            Arena arena = _header->Arena;
+            T* oldData = _header->Data;
+
+            // Nothing was allocated after the buffer: just make it longer.
+            if (arena.TryExtend(oldData, (nuint)oldCapacity * (nuint)sizeof(T), (nuint)newCapacity * (nuint)sizeof(T)))
+            {
+                _header->Capacity = newCapacity;
+                return true;
+            }
+
+            T* newData = arena.AllocArray<T>(newCapacity, Arena.DefaultAlign, zero: false);
             if (newData == null)
                 return false;
 
-            T* oldData = _header->Data;
             for (int i = 0; i < _header->Count; i++)
                 newData[i] = oldData[i];
 

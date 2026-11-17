@@ -1,4 +1,4 @@
-// Dict<TKey, TValue>: open-addressing hash map backed by the Arena.
+// Dict<TKey, TValue>: open-addressing hash map backed by an Arena.
 //
 // Like List<T>, Dict is a handle to an arena header, so copies share contents,
 // and default(Dict) is "not created" (lookups miss, Set fails).
@@ -26,6 +26,7 @@ public struct Dict<TKey, TValue>
 
     struct Header
     {
+        public Arena Arena; // where the map lives and grows
         public Entry* Entries;
         public int Capacity; // always a power of two
         public int Count;
@@ -33,21 +34,22 @@ public struct Dict<TKey, TValue>
 
     Header* _header;
 
-    /// <summary>Returns a new map, or a not-created map if the arena is out of memory.</summary>
-    public static Dict<TKey, TValue> Create(int capacity = 32)
+    /// <summary>Returns a new map in <paramref name="arena"/>, or a not-created map if it is out of memory.</summary>
+    public static Dict<TKey, TValue> Create(Arena arena, int capacity = 32)
     {
         int rounded = MinCapacity;
         while (rounded < capacity && rounded <= int.MaxValue / 2)
             rounded *= 2;
 
-        Header* header = Arena.Alloc<Header>();
-        Entry* entries = Arena.AllocArray<Entry>(rounded);
+        Header* header = arena.Alloc<Header>();
+        Entry* entries = arena.AllocArray<Entry>(rounded);
         if (header == null || entries == null)
             return default;
 
         unsafe
         {
             // SAFETY: header was just allocated and zeroed.
+            header->Arena = arena;
             header->Entries = entries;
             header->Capacity = rounded;
         }
@@ -148,7 +150,7 @@ public struct Dict<TKey, TValue>
                 return false;
 
             int newCapacity = oldCapacity * 2;
-            Entry* newEntries = Arena.AllocArray<Entry>(newCapacity);
+            Entry* newEntries = _header->Arena.AllocArray<Entry>(newCapacity);
             if (newEntries == null)
                 return false;
 

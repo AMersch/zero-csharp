@@ -74,18 +74,23 @@ public static class Program
     static string s_label = "initial";
     static string[] s_words = { "zero", "one" };
 
+    // The arena every string in this sample is built in. A static, so the
+    // helper methods can reach it; an Arena is a handle, cheap to pass or store.
+    static Arena s_arena;
+
     public static int Main()
     {
         // ---- before the arena exists: allocating calls fail cleanly ----
-        Check("Str.Format returns null", Str.Format($"x={1}") is null);
-        Check("StrBuilder not created", !StrBuilder.Create().IsCreated);
+        Check("Str.Format returns null", Str.Format(s_arena, $"x={1}") is null);
+        Check("StrBuilder not created", !StrBuilder.Create(s_arena).IsCreated);
         Check("default StrBuilder rejects Append", !default(StrBuilder).Append("x"));
         Check("span operations still work", "abc".SequenceEqual("abc"));
         End("no arena: allocating calls fail cleanly");
 
-        if (!Arena.Init(1 << 16))
+        s_arena = Arena.Create(1 << 16);
+        if (!s_arena.IsCreated)
         {
-            Out.Line("Arena.Init failed");
+            Out.Line("Arena.Create failed");
             return 1;
         }
 
@@ -175,7 +180,7 @@ public static class Program
         Check("underflow to 0", Str.TryParse("-1e-400", out parsedDouble) && parsedDouble == 0);
         Check("NaN", Str.TryParse("NaN", out parsedDouble) && IsNaN(parsedDouble));
         Check("Infinity", Str.TryParse("-Infinity", out parsedDouble) && parsedDouble < -1e308);
-        Check("round trip with Format", ParsesDouble(Str.Format($"{-1234.5678:F4}"), -1234.5678));
+        Check("round trip with Format", ParsesDouble(Str.Format(s_arena, $"{-1234.5678:F4}"), -1234.5678));
         Check("rejects", RejectsDouble("") && RejectsDouble(".") && RejectsDouble("e5") && RejectsDouble("1e")
             && RejectsDouble("1e+") && RejectsDouble("--1") && RejectsDouble("1.2.3") && RejectsDouble(" 1"));
         End("parse: double");
@@ -199,7 +204,7 @@ public static class Program
         End("core library: ==, +, switch");
 
         Check("preinitialized static string", s_label == "initial");
-        s_label = Str.Format($"changed {1}");
+        s_label = Str.Format(s_arena, $"changed {1}");
         Check("assign static string", s_label == "changed 1");
         Check("static string array", s_words.Length == 2 && s_words[1] == "one");
         s_words[0] = "nil";
@@ -210,53 +215,53 @@ public static class Program
         long min = -9223372036854775807 - 1;
         ulong max = 18446744073709551615UL;
         uint big = 4000000000;
-        Expect("int", Str.Format($"x={42}"), "x=42");
-        Expect("negative", Str.Format($"{-7}"), "-7");
-        Expect("long.MinValue", Str.Format($"{min}"), "-9223372036854775808");
-        Expect("ulong.MaxValue", Str.Format($"{max}"), "18446744073709551615");
-        Expect("uint", Str.Format($"{big}"), "4000000000");
-        Expect("hex", Str.Format($"{255:X}"), "FF");
-        Expect("hex lower padded", Str.Format($"{255:x4}"), "00ff");
-        Expect("min digits", Str.Format($"{7:D3}"), "007");
-        Expect("min digits negative", Str.Format($"{-7:D3}"), "-007");
+        Expect("int", Str.Format(s_arena, $"x={42}"), "x=42");
+        Expect("negative", Str.Format(s_arena, $"{-7}"), "-7");
+        Expect("long.MinValue", Str.Format(s_arena, $"{min}"), "-9223372036854775808");
+        Expect("ulong.MaxValue", Str.Format(s_arena, $"{max}"), "18446744073709551615");
+        Expect("uint", Str.Format(s_arena, $"{big}"), "4000000000");
+        Expect("hex", Str.Format(s_arena, $"{255:X}"), "FF");
+        Expect("hex lower padded", Str.Format(s_arena, $"{255:x4}"), "00ff");
+        Expect("min digits", Str.Format(s_arena, $"{7:D3}"), "007");
+        Expect("min digits negative", Str.Format(s_arena, $"{-7:D3}"), "-007");
 
         End("format: integers");
 
         double zero = 0;
-        Expect("F2", Str.Format($"{3.14159:F2}"), "3.14");
-        Expect("F0 rounds half up", Str.Format($"{2.5:F0}"), "3");
-        Expect("F2 rounding", Str.Format($"{123456.789:F2}"), "123456.79");
-        Expect("float F3", Str.Format($"{1.5f:F3}"), "1.500");
-        Expect("default trims zeros", Str.Format($"{0.1}"), "0.1");
-        Expect("default whole number", Str.Format($"{1.0}"), "1");
-        Expect("default negative", Str.Format($"{-2.25}"), "-2.25");
-        Expect("default small", Str.Format($"{0.000001}"), "0.000001");
-        Expect("default too small", Str.Format($"{0.0000001}"), "0");
-        Expect("huge switches to e", Str.Format($"{1e20:F2}"), "1.00e+20");
-        Expect("NaN", Str.Format($"{zero / zero}"), "NaN");
-        Expect("Infinity", Str.Format($"{1 / zero}"), "Infinity");
-        Expect("-Infinity", Str.Format($"{-1 / zero}"), "-Infinity");
+        Expect("F2", Str.Format(s_arena, $"{3.14159:F2}"), "3.14");
+        Expect("F0 rounds half up", Str.Format(s_arena, $"{2.5:F0}"), "3");
+        Expect("F2 rounding", Str.Format(s_arena, $"{123456.789:F2}"), "123456.79");
+        Expect("float F3", Str.Format(s_arena, $"{1.5f:F3}"), "1.500");
+        Expect("default trims zeros", Str.Format(s_arena, $"{0.1}"), "0.1");
+        Expect("default whole number", Str.Format(s_arena, $"{1.0}"), "1");
+        Expect("default negative", Str.Format(s_arena, $"{-2.25}"), "-2.25");
+        Expect("default small", Str.Format(s_arena, $"{0.000001}"), "0.000001");
+        Expect("default too small", Str.Format(s_arena, $"{0.0000001}"), "0");
+        Expect("huge switches to e", Str.Format(s_arena, $"{1e20:F2}"), "1.00e+20");
+        Expect("NaN", Str.Format(s_arena, $"{zero / zero}"), "NaN");
+        Expect("Infinity", Str.Format(s_arena, $"{1 / zero}"), "Infinity");
+        Expect("-Infinity", Str.Format(s_arena, $"{-1 / zero}"), "-Infinity");
 
         End("format: doubles");
 
         string name = "bob";
         string nothing = null;
         ReadOnlySpan<char> span = "world".AsSpan();
-        Expect("string", Str.Format($"hi {name}!"), "hi bob!");
-        Expect("null string", Str.Format($"[{nothing}]"), "[]");
-        Expect("span", Str.Format($"hello {span}"), "hello world");
-        Expect("char", Str.Format($"{'c'}"), "c");
-        Expect("bool", Str.Format($"{true}/{false}"), "true/false");
-        Expect("right-align", Str.Format($"[{42,5}]"), "[   42]");
-        Expect("left-align", Str.Format($"[{42,-5}]"), "[42   ]");
-        Expect("align string", Str.Format($"[{"ab",4}]"), "[  ab]");
-        Expect("align + format", Str.Format($"[{3.5,6:F1}]"), "[   3.5]");
-        Expect("too long for width", Str.Format($"[{"toolong",3}]"), "[toolong]");
+        Expect("string", Str.Format(s_arena, $"hi {name}!"), "hi bob!");
+        Expect("null string", Str.Format(s_arena, $"[{nothing}]"), "[]");
+        Expect("span", Str.Format(s_arena, $"hello {span}"), "hello world");
+        Expect("char", Str.Format(s_arena, $"{'c'}"), "c");
+        Expect("bool", Str.Format(s_arena, $"{true}/{false}"), "true/false");
+        Expect("right-align", Str.Format(s_arena, $"[{42,5}]"), "[   42]");
+        Expect("left-align", Str.Format(s_arena, $"[{42,-5}]"), "[42   ]");
+        Expect("align string", Str.Format(s_arena, $"[{"ab",4}]"), "[  ab]");
+        Expect("align + format", Str.Format(s_arena, $"[{3.5,6:F1}]"), "[   3.5]");
+        Expect("too long for width", Str.Format(s_arena, $"[{"toolong",3}]"), "[toolong]");
 
         End("format: other values and alignment");
 
         // ---- arena strings are real strings ----
-        string s = Str.Format($"n={5}");
+        string s = Str.Format(s_arena, $"n={5}");
         Check("Length", s.Length == 3);
         Check("indexer", s[0] == 'n' && s[2] == '5');
         unsafe
@@ -265,16 +270,36 @@ public static class Program
             fixed (char* p = s)
                 Check("null-terminated like a literal", p[3] == '\0');
         }
-        Expect("Concat 2", Str.Concat("ab", "cd"), "abcd");
-        Expect("Concat 3", Str.Concat("a", "b", "c"), "abc");
-        Expect("Concat with slice", Str.Concat("hello world".AsSpan(0, 5), "!"), "hello!");
-        Expect("ToArenaString", Str.ToArenaString("xyz"), "xyz");
-        Check("ToArenaString copies", !ReferenceEquals(Str.ToArenaString(name), name));
+        Expect("Concat 2", Str.Concat(s_arena, "ab", "cd"), "abcd");
+        Expect("Concat 3", Str.Concat(s_arena, "a", "b", "c"), "abc");
+        Expect("Concat with slice", Str.Concat(s_arena, "hello world".AsSpan(0, 5), "!"), "hello!");
+        Expect("ToArenaString", Str.ToArenaString(s_arena, "xyz"), "xyz");
+        Check("ToArenaString copies", !ReferenceEquals(Str.ToArenaString(s_arena, name), name));
+
+        // Temporary strings: free them with Restore and keep the rest.
+        nuint usedBefore = s_arena.Used;
+        Arena.Mark mark = s_arena.Save();
+        string temporary = Str.Format(s_arena, $"{name} has {name.Length} letters");
+        bool temporaryOk = temporary.EndsWith("3 letters");
+        unsafe { s_arena.Restore(mark); } // SAFETY: temporary is not used below.
+        Check("Save/Restore frees temporary strings", temporaryOk && s_arena.Used == usedBefore);
+        Check("earlier strings survive Restore", s == "n=5");
+
+        // Or build in a scratch arena and copy only the result out.
+        Arena scratch = Arena.Create(256);
+        StrBuilder draft = StrBuilder.Create(scratch);
+        for (int i = 0; i < 50; i++)
+            draft.Append($"{i} ");
+        usedBefore = s_arena.Used;
+        string kept = draft.ToArenaString(s_arena);
+        unsafe { scratch.Destroy(); } // SAFETY: draft is not used below; kept lives in s_arena.
+        Check("scratch arena: result copied out", kept.StartsWith("0 1 2 ") && kept.EndsWith("48 49 "));
+        Check("scratch arena: only the result is kept", s_arena.Used - usedBefore == (nuint)(System.Runtime.CompilerServices.RuntimeHelpers.OffsetToStringData + (kept.Length + 1) * 2));
 
         End("arena strings");
 
         // ---- StrBuilder ----
-        StrBuilder sb = StrBuilder.Create(16);
+        StrBuilder sb = StrBuilder.Create(s_arena, 16);
         for (int i = 0; i < 200; i++)
             sb.Append($"{i},");
         Check("grows past capacity: 690 chars", sb.Length == 690);
@@ -310,7 +335,7 @@ public static class Program
     // Split, joined with '|', as a new arena string.
     static string Join(string text)
     {
-        StrBuilder sb = StrBuilder.Create();
+        StrBuilder sb = StrBuilder.Create(s_arena);
         bool first = true;
         foreach (ReadOnlySpan<char> part in text.Split(','))
         {

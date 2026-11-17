@@ -10,9 +10,9 @@
 //   names as .NET. Defining AsSpan(string) also switches on C# 14's implicit
 //   string -> ReadOnlySpan<char> conversion, so strings can be passed to any
 //   span parameter. None of these allocate.
-// - Str: parsing, ordinal comparison, and new strings built in the Arena
-//   (Str.Format($"..."), Str.Concat). Arena strings are ordinary strings, freed
-//   in bulk by Arena.Reset().
+// - Str: parsing, ordinal comparison, and new strings built in an Arena
+//   (Str.Format(arena, $"..."), Str.Concat). Arena strings are ordinary
+//   strings, freed in bulk when their arena is reset.
 // - $"..." works through custom interpolated string handlers: Out.Line($"...")
 //   writes straight to stdout, StrBuilder.Append($"...") into the arena.
 //
@@ -52,7 +52,7 @@ namespace System
             {
                 // SAFETY: zero mode has no GC, so a string never moves and the
                 // pointer outlives the fixed block. An arena string is valid until
-                // Arena.Reset(), like any other arena memory.
+                // its arena is reset, like any other arena memory.
                 fixed (char* p = text)
                     return new ReadOnlySpan<char>(p, text.Length);
             }
@@ -654,25 +654,26 @@ public static class Str
     // ---- arena strings ---------------------------------------------------
 
     /// <summary>
-    /// $"..." into a new arena string. Returns null if the arena isn't initialized
-    /// or is out of memory.
+    /// $"..." into a new string in <paramref name="arena"/>. Returns null if the
+    /// arena isn't created or is out of memory.
     /// </summary>
-    /// <safety>The string is freed by Arena.Reset() and Arena.Destroy().</safety>
-    public static string Format(ref StrBuilder.InterpolatedHandler handler) => handler.TakeString();
+    /// <safety>The string is freed with the rest of the arena (Restore, Reset, Destroy).</safety>
+    public static string Format(Arena arena, [InterpolatedStringHandlerArgument("arena")] ref StrBuilder.InterpolatedHandler handler)
+        => handler.TakeString();
 
-    /// <summary>Copies <paramref name="text"/> into a new arena string, or returns null.</summary>
-    public static string ToArenaString(ReadOnlySpan<char> text) => Concat(text, default);
+    /// <summary>Copies <paramref name="text"/> into a new string in <paramref name="arena"/>, or returns null.</summary>
+    public static string ToArenaString(Arena arena, ReadOnlySpan<char> text) => Concat(arena, text, default);
 
-    public static string Concat(ReadOnlySpan<char> a, ReadOnlySpan<char> b) => Concat(a, b, default);
+    public static string Concat(Arena arena, ReadOnlySpan<char> a, ReadOnlySpan<char> b) => Concat(arena, a, b, default);
 
     /// <summary>The replacement for a + b + c. Returns null if the arena is out of memory.</summary>
-    public static string Concat(ReadOnlySpan<char> a, ReadOnlySpan<char> b, ReadOnlySpan<char> c)
+    public static string Concat(Arena arena, ReadOnlySpan<char> a, ReadOnlySpan<char> b, ReadOnlySpan<char> c)
     {
         long length = (long)a.Length + b.Length + c.Length;
         if (length > int.MaxValue / 2)
             return null;
 
-        byte* obj = AllocStringObject((int)length);
+        byte* obj = AllocStringObject(arena, (int)length);
         if (obj == null)
             return null;
 
@@ -695,8 +696,8 @@ public static class Str
         => (nuint)RuntimeHelpers.OffsetToStringData + (nuint)(length + 1) * sizeof(char);
 
     /// <summary>Room for a string object of <paramref name="length"/> chars plus a terminator, or null.</summary>
-    internal static byte* AllocStringObject(int length)
-        => (byte*)Arena.Alloc(StringObjectSize(length), (nuint)sizeof(nint), zero: false);
+    internal static byte* AllocStringObject(Arena arena, int length)
+        => (byte*)arena.Alloc(StringObjectSize(length), (nuint)sizeof(nint), zero: false);
 
     /// <summary>Writes the object header and terminator around chars already in place.</summary>
     /// <safety>obj must come from AllocStringObject with capacity for at least length chars.</safety>

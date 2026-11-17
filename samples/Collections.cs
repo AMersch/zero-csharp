@@ -16,14 +16,15 @@ public static class Program
 {
     public static int Main()
     {
-        if (!Arena.Init(64 * 1024))
+        Arena arena = Arena.Create(64 * 1024);
+        if (!arena.IsCreated)
             return 1;
 
         Out.Line("=== Collections Demo ===");
         Out.Line();
 
         Out.Line("--- List<int> ---");
-        var numbers = List<int>.Create(0); // capacity is clamped to a minimum of 4
+        var numbers = List<int>.Create(arena, 0); // capacity is clamped to a minimum of 4
         for (int i = 1; i <= 10; i++)
             numbers.Add(i * 10);
         Out.Line("Count: ", numbers.Count, " | Capacity: ", numbers.Capacity);
@@ -44,7 +45,7 @@ public static class Program
         Out.Line();
 
         Out.Line("--- List<Point> ---");
-        var points = List<Point>.Create();
+        var points = List<Point>.Create(arena);
         points.Add(new Point { X = 1, Y = 2 });
         points.Add(new Point { X = 10, Y = 20 });
         points.Add(new Point { X = 100, Y = 200 });
@@ -62,7 +63,7 @@ public static class Program
         Out.Line();
 
         Out.Line("--- Dict<int, int> ---");
-        var scores = Dict<int, int>.Create();
+        var scores = Dict<int, int>.Create(arena);
         scores.Set(1, 100);
         scores.Set(2, 250);
         scores.Set(3, 175);
@@ -77,7 +78,7 @@ public static class Program
             Out.Line("scores[99] not found");
 
         // Growth: 1000 inserts into a map created with capacity 8.
-        var squares = Dict<int, long>.Create(8);
+        var squares = Dict<int, long>.Create(arena, 8);
         for (int i = 0; i < 1000; i++)
             squares.Set(i, (long)i * i);
         int found = 0;
@@ -95,7 +96,7 @@ public static class Program
         Out.Line();
 
         Out.Line("--- Dict<Point, int> ---");
-        var pointIds = Dict<Point, int>.Create();
+        var pointIds = Dict<Point, int>.Create(arena);
         pointIds.Set(new Point { X = 0, Y = 0 }, 1);
         pointIds.Set(new Point { X = 10, Y = 10 }, 2);
         pointIds.Set(new Point { X = 5, Y = 5 }, 3);
@@ -103,9 +104,9 @@ public static class Program
             Out.Line("ID for (10, 10): ", value);
 
         Out.Line();
-        Out.Line("Arena used: ", (long)Arena.Used, " bytes");
+        Out.Line("Arena used: ", (long)arena.Used, " bytes");
 
-        unsafe { Arena.Destroy(); } // SAFETY: the collections are not used after this.
+        unsafe { arena.Destroy(); } // SAFETY: the collections are not used after this.
         Out.Line("Done!");
         return 0;
     }

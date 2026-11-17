@@ -93,12 +93,13 @@ public static class Program
             : Fma.IsSupported ? "AVX + FMA, 8 floats per instruction"
             : "scalar (no SIMD ISA enabled)");
 
-        if (!Arena.Init(64 * 1024))
+        Arena arena = Arena.Create(64 * 1024);
+        if (!arena.IsCreated)
             return 1;
 
         // 64-byte alignment: a full cache line, and aligned for any vector width.
-        float* a = Arena.AllocArray<float>(N, align: 64);
-        float* b = Arena.AllocArray<float>(N, align: 64);
+        float* a = arena.AllocArray<float>(N, align: 64);
+        float* b = arena.AllocArray<float>(N, align: 64);
         if (a == null || b == null)
             return 1;
 
@@ -141,7 +142,7 @@ public static class Program
         if (simdMs > 0)
             Out.Line("Speedup: ", scalarMs / simdMs, "x");
 
-        unsafe { Arena.Destroy(); } // SAFETY: a and b are not used after this.
+        unsafe { arena.Destroy(); } // SAFETY: a and b are not used after this.
         return scalar == simd ? 0 : 1;
     }
 }

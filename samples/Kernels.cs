@@ -67,14 +67,15 @@ public static class Program
         Out.Write("=== LLM kernels, path: ");
         Out.Write(Kernels.Path);
         Out.Line(" ===");
-        if (!Arena.Init(1 << 20))
+        Arena arena = Arena.Create(1 << 20);
+        if (!arena.IsCreated)
             return 1;
 
         const int N = 1003; // odd on purpose: exercises the scalar tails
-        float* x = Arena.AllocArray<float>(N, align: 64);
-        float* y = Arena.AllocArray<float>(N, align: 64);
-        float* w = Arena.AllocArray<float>(N, align: 64);
-        float* refv = Arena.AllocArray<float>(N, align: 64);
+        float* x = arena.AllocArray<float>(N, align: 64);
+        float* y = arena.AllocArray<float>(N, align: 64);
+        float* w = arena.AllocArray<float>(N, align: 64);
+        float* refv = arena.AllocArray<float>(N, align: 64);
 
         unsafe
         {
@@ -139,8 +140,8 @@ public static class Program
 
             // ---- MatVec ----
             const int Rows = 64;
-            float* m = Arena.AllocArray<float>(Rows * N, align: 64);
-            float* out64 = Arena.AllocArray<float>(Rows, align: 64);
+            float* m = arena.AllocArray<float>(Rows * N, align: 64);
+            float* out64 = arena.AllocArray<float>(Rows, align: 64);
             for (int i = 0; i < Rows * N; i++) m[i] = Random(-1f, 1f);
             for (int i = 0; i < N; i++) x[i] = Random(-1f, 1f);
             Kernels.MatVec(out64, m, x, Rows, N);
@@ -156,8 +157,8 @@ public static class Program
 
             // ---- DotI8 ----
             const int NI8 = 4096 + 7;
-            sbyte* a8 = (sbyte*)Arena.Alloc(NI8, 64);
-            sbyte* b8 = (sbyte*)Arena.Alloc(NI8, 64);
+            sbyte* a8 = (sbyte*)arena.Alloc(NI8, 64);
+            sbyte* b8 = (sbyte*)arena.Alloc(NI8, 64);
             for (int i = 0; i < NI8; i++) { a8[i] = (sbyte)(int)Random(-127.9f, 127.9f); b8[i] = (sbyte)(int)Random(-127.9f, 127.9f); }
             int want8 = 0;
             for (int i = 0; i < NI8; i++) want8 += a8[i] * b8[i];
@@ -166,7 +167,7 @@ public static class Program
 
             // ---- Timing: 4096-float softmax and dot ----
             const int T = 4096, Reps = 20000;
-            float* t = Arena.AllocArray<float>(T, align: 64);
+            float* t = arena.AllocArray<float>(T, align: 64);
             for (int i = 0; i < T; i++) t[i] = Random(-10f, 10f);
 
             long t0 = NowUs();
@@ -189,7 +190,7 @@ public static class Program
                 Out.Line("                      speedup ", (t2 - t1) / (t1 - t0), "x");
         }
 
-        unsafe { Arena.Destroy(); } // SAFETY: nothing uses the buffers after this.
+        unsafe { arena.Destroy(); } // SAFETY: nothing uses the buffers after this.
         Out.Line();
         Out.Line("failures: ", s_failures);
         return s_failures;

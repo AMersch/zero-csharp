@@ -1,0 +1,71 @@
+# Builds the samples on Linux x64 and runs ./test.sh.
+#
+# bflat comes from the fork (see README, "Getting bflat"). It has no release to
+# download, so the first run builds its layouts from source, which takes a
+# while; later runs reuse them from the cache until the fork's master moves.
+name: Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read # the fork's build restores packages from GitHub Packages
+
+jobs:
+  test:
+    # 22.04: bflat's bundled linker needs libtinfo5, which 24.04 doesn't ship.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: bflat_test
+
+      - name: Find the fork's current commit
+        id: fork
+        run: echo "sha=$(git ls-remote https://github.com/OnurGumus/bflat refs/heads/master | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore bflat from the cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: bflat/layouts/linux-glibc-x64
+          key: bflat-linux-x64-${{ steps.fork.outputs.sha }}
+
+      - name: Check out the fork
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: OnurGumus/bflat
+          ref: ${{ steps.fork.outputs.sha }}
+          path: bflat
+
+      - name: Set up .NET
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build bflat
+        if: steps.cache.outputs.cache-hit != 'true'
+        working-directory: bflat
+        env:
+          PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd src/bflat
+          dotnet nuget add source --username USERNAME --password "$PACKAGES_TOKEN" --store-password-in-clear-text \
+            --name github "https://nuget.pkg.github.com/bflattened/index.json"
+          cd ../..
+          dotnet build src/bflat/bflat.csproj -t:BuildLayouts -c:Release
+
+      - name: Install what bflat and the build need
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libtinfo5 binutils
+
+      - name: Test
+        working-directory: bflat_test
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
+        run: ./test.sh

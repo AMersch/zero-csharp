@@ -1,0 +1,7 @@
+PASS Math (10 checks)
+PASS MathF (5 checks)
+PASS Interlocked (9 checks)
+PASS Volatile (4 checks)
+PASS interface calls to many classes (4 checks)
+
+All checks passed.

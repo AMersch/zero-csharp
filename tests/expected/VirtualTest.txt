@@ -1,0 +1,15 @@
+=== Polymorphism in --stdlib:zero ===
+
+--- 1. Function-pointer vtable ---
+Rectangle area: 50
+Circle area: 147
+
+--- 2. Static abstract interface (compile-time dispatch) ---
+Rect area: 12
+Square area: 36
+
+--- 3. Virtual methods on classes (each `new` leaks) ---
+Woof
+Meow
+
+Done!

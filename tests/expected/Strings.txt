@@ -1,0 +1,20 @@
+PASS no arena: allocating calls fail cleanly (4 checks)
+PASS spans: compare, search, slice (21 checks)
+PASS spans: trim and split (9 checks)
+PASS parse (10 checks)
+PASS parse: int, ulong, hex (12 checks)
+PASS parse: double (18 checks)
+PASS core library: ==, +, switch (11 checks)
+PASS core library: static string fields (4 checks)
+PASS format: integers (9 checks)
+PASS format: doubles (13 checks)
+PASS format: other values and alignment (10 checks)
+PASS arena strings (12 checks)
+PASS StrBuilder (7 checks)
+
+item    |  qty|    price
+apple   |    3|     1.25
+melon   |   12|     0.50
+UTF-8: héllo wörld, 世界, 🎉 (2 UTF-16 chars)
+
+failures: 0

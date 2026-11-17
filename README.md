@@ -19,6 +19,8 @@ The samples don't use bflat's built-in zero-mode library (`--stdlib:zero`, zerol
 ./setup.sh --wasm     # WebAssembly: also downloads the toolchain (see below)
 ./build.sh --wasm     # builds every sample into ./bin/wasm/*.wasm
 ./run.sh --wasm Arena # runs it with wasmtime
+
+./test.sh             # builds and checks everything (see Testing)
 ```
 
 Prerequisites:
@@ -122,6 +124,21 @@ Differences from the native build:
 - **Exit codes.** Modules are linked for WASI 0.1, which passes exit codes through. WASI 0.2 only reports success or failure.
 - **One exact compiler version.** `wasm/runtime.c` and zerocore implement NativeAOT-LLVM's internal runtime functions (`RhpNewArray`, `RhpResolveInterfaceDispatch` and others). Their names and signatures aren't documented; they were read from the compiler's output. A newer NativeAOT-LLVM can change them. A changed signature fails the link, since `build.sh` turns `wasm-ld`'s signature warnings into errors, but a changed meaning only shows up when a program runs. So treat the versions in `env.sh` as a set, and after changing any of them, rerun the WASM samples and compare their output with the native build.
 - **Not supported:** callbacks from native code into C# (`[UnmanagedCallersOnly]` reverse P/Invoke inside a running program), and `build.ps1` (Windows).
+
+## Testing
+
+`./test.sh` builds every sample and checks it. Each must exit with 0: Casts, Core, Kernels and Strings count their own failed checks in the exit code. The samples that print the same thing on every run must also match the files in `tests/expected` exactly.
+
+```bash
+./test.sh            # native, for this machine (or BFLAT_ARCH)
+./test.sh --wasm     # WebAssembly
+./test.sh --all      # native, the other architecture under emulation (macOS), and WebAssembly
+./test.sh --update   # rewrite tests/expected after an intended change in output
+```
+
+- Simd and Kernels print timings, so only their exit code is checked.
+- On WebAssembly, Arena and Collections print different byte counts (32-bit pointers), so there too only the exit code is checked.
+- `.github/workflows/test.yml` runs `./test.sh` on Linux x64 for pushes to `master` and for pull requests. Its first run builds the bflat fork from source; later runs take it from a cache.
 
 ## Editor support
 

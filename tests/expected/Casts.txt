@@ -1,0 +1,10 @@
+PASS is (8 checks)
+PASS as (5 checks)
+PASS (T)x (5 checks)
+PASS generics (4 checks)
+PASS structs (3 checks)
+PASS arrays (6 checks)
+PASS interface calls (7 checks)
+PASS delegates (3 checks)
+
+All checks passed.

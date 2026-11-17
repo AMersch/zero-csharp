@@ -1,0 +1,42 @@
+=== Collections Demo ===
+
+--- List<int> ---
+Count: 10 | Capacity: 16
+[10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+After RemoveAt(5):
+[10, 20, 30, 40, 50, 70, 80, 90, 100]
+After AddMore(numbers, 3) in another method, Count: 12
+Add on default(List) returns false
+
+--- List<Point> ---
+[0] (1, 2)
+[1] (10, 20)
+[2] (100, 200)
+
+--- Dict<int, int> ---
+Count: 4
+scores[2] = 250
+scores[-42] = 999
+scores[99] not found
+1000 inserts after growth, found: 1000
+Lookup in default(Dict) misses instead of crashing: true
+
+--- Dict<Point, int> ---
+ID for (10, 10): 2
+
+--- Sort, Remove, foreach ---
+Ascending:  [3, 7, 7, 19, 42, 61, 88]
+By last digit, then value: [61, 42, 3, 7, 7, 88, 19]
+Remove(3): true, again: false, Count: 3
+foreach over scores: 3 pairs, values sum to 1349
+After removing the 500 even keys: Count 500, odd keys intact: 500
+
+--- Clone ---
+Original changed: numbers[0] = -1, scores[2] = 0
+Clones unchanged: snapshot[0] = 10, scoresCopy[2] = 250
+Clone capacity fits its 12 items: 12
+Clone of default(List) is not created: true
+
+Arena used: 99664 bytes
+After destroying the first arena, clones still work: 13 items, last = 1234, scoresCopy[-42] = 999
+Done!

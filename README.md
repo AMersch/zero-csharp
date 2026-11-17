@@ -157,7 +157,7 @@ unsafe { arena.Reset(); }                // SAFETY: p is not used after this
 | `samples/Tiny.cs` | Smallest binary (`-Os --no-pie`, stripped) | ~16 KB |
 | `samples/Minimal.cs` | Hello world via `puts` | ~38 KB |
 | `samples/Arena.cs` | Growable arena: Fibonacci growth, dedicated blocks for large allocations, per-allocation alignment, `Reset` that keeps capacity, `Save`/`Restore` for temporary work, growing in place, a second independent arena | ~67 KB |
-| `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of an arena | ~72 KB |
+| `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of an arena, including `Clone` into an arena that outlives the original | ~87 KB |
 | `samples/VirtualTest.cs` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | ~50 KB |
 | `samples/Casts.cs` | Tests runtime type checks (41 checks): `is`, `as` and `(T)x` to interfaces and classes, generic interfaces, boxed structs, interface calls with many arguments and default methods, arrays of interfaces, delegates | ~93 KB |
 | `samples/Simd.cs` | Float dot product with NEON (arm64) or AVX + FMA (x64), checked against scalar and timed (12x faster on Apple Silicon) | ~52 KB |
@@ -171,7 +171,7 @@ Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is s
 | File | What |
 |---|---|
 | `Arena.cs` | Growable bump allocator; see [Arenas](#arenas). Normal blocks grow 128, 128, 256, 384, 640, ...; an allocation too big for the next block gets its own block without changing that sequence. Alignment is per allocation, and a failed allocation returns null and leaves the arena untouched. |
-| `List.cs` | Growable array, created in the arena you pass (`List<int>.Create(arena)`). It's a handle to an arena header, so copies share contents. `default(List<T>)` is safe to use: reads see an empty list and `Add` returns false. |
+| `List.cs` | Growable array, created in the arena you pass (`List<int>.Create(arena)`). It's a handle to an arena header, so copies share contents. `default(List<T>)` is safe to use: reads see an empty list and `Add` returns false. `Clone(arena)` makes an independent copy in any arena. |
 | `Dict.cs` | Open-addressing hash map (FNV-1a, power-of-two capacity). Keys are compared by raw bytes: fine for integers and padding-free structs, not for floats. |
 | `Out.cs` | Buffered stdout writer, UTF-8 encoded; zerocore has no `Console`. `Out.Line($"...")` formats straight into the buffer. |
 | `Str.cs` | String support (see [Strings](#strings)): span operations as `System.MemoryExtensions`, `Str.TryParse`, `Str.Compare`, and new strings in an arena with `Str.Format` and `Str.Concat`. |
@@ -213,6 +213,7 @@ unsafe { frame.Reset(); }                    // SAFETY: line is not used after t
 - **`Reset()` keeps the memory.** It merges the blocks into one, so a loop that resets each round stops calling `malloc` after the first.
 - **`Save()` and `Restore(mark)`** free only what was allocated since the mark, for temporary work in an arena that also holds data to keep. Restoring a mark from another arena, or from before a `Reset()`, ends the program with a message.
 - **One hazard with `Restore`:** if a `List`, `Dict` or `StrBuilder` created before the mark grows after it, its new buffer is freed by `Restore` while the collection still points at it, and nothing reports that. Between `Save()` and `Restore()`, only add to collections created after the mark. When temporary work has to add to long-lived collections, give it a separate scratch arena instead and copy the result out (`sb.ToArenaString(target)`).
+- **Copies are explicit.** `var b = a` on a `List`, `Dict` or `StrBuilder` shares contents. `list.Clone(arena)` and `dict.Clone(arena)` make an independent copy, in the same arena or another, for example to keep a result past a scratch arena's lifetime. Elements are copied as they are, so a pointer inside one still points where it did.
 - **Growing in place.** `List` and `StrBuilder` extend their buffer without copying while it's still the arena's newest allocation (`TryExtend`). Otherwise the old buffer stays behind until the arena is reset.
 - **Not thread-safe.** Use one arena per thread.
 - **No stale-pointer detection.** After `Reset()`, an old pointer still reads valid-looking memory. That's why the freeing operations are `unsafe`.

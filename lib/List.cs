@@ -147,6 +147,38 @@ public struct List<T> where T : unmanaged
         unsafe { return new Span<T>(_header->Data, _header->Count); }
     }
 
+    /// <summary>
+    /// Returns an independent copy in <paramref name="target"/> (this list's own
+    /// arena or another one), with just enough capacity for the current items.
+    /// Returns a not-created list if this one isn't created or the target is out
+    /// of memory.
+    /// </summary>
+    /// <remarks>
+    /// Items are copied as they are. An item that is, or contains, a pointer still
+    /// points wherever it did: into the original's arena, if that's where it led.
+    /// </remarks>
+    public List<T> Clone(Arena target)
+    {
+        if (_header == null)
+            return default;
+
+        int count = Count;
+        List<T> copy = Create(target, count);
+        if (copy._header == null)
+            return default;
+
+        unsafe
+        {
+            // SAFETY: both are live headers; copy has capacity for at least count items.
+            T* source = _header->Data;
+            T* destination = copy._header->Data;
+            for (int i = 0; i < count; i++)
+                destination[i] = source[i];
+            copy._header->Count = count;
+        }
+        return copy;
+    }
+
     unsafe bool Grow()
     {
         unsafe

@@ -115,6 +115,43 @@ public struct Dict<TKey, TValue>
 
     public bool ContainsKey(TKey key) => TryGet(key, out _);
 
+    /// <summary>
+    /// Returns an independent copy in <paramref name="target"/> (this map's own
+    /// arena or another one). Returns a not-created map if this one isn't created
+    /// or the target is out of memory.
+    /// </summary>
+    /// <remarks>
+    /// Keys and values are copied as they are. One that is, or contains, a pointer
+    /// still points wherever it did: into the original's arena, if that's where
+    /// it led.
+    /// </remarks>
+    public Dict<TKey, TValue> Clone(Arena target)
+    {
+        if (_header == null)
+            return default;
+
+        unsafe
+        {
+            // SAFETY: _header is a live header with Capacity entries; the copy's
+            // table has the same capacity, so every entry keeps its slot.
+            int capacity = _header->Capacity;
+            Header* header = target.Alloc<Header>();
+            Entry* entries = target.AllocArray<Entry>(capacity, Arena.DefaultAlign, zero: false);
+            if (header == null || entries == null)
+                return default;
+
+            Entry* source = _header->Entries;
+            for (int i = 0; i < capacity; i++)
+                entries[i] = source[i];
+
+            header->Arena = target;
+            header->Entries = entries;
+            header->Capacity = capacity;
+            header->Count = _header->Count;
+            return new Dict<TKey, TValue> { _header = header };
+        }
+    }
+
     static unsafe void Insert(Header* header, TKey key, TValue value, uint hash)
     {
         unsafe

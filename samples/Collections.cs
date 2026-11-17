@@ -104,9 +104,30 @@ public static class Program
             Out.Line("ID for (10, 10): ", value);
 
         Out.Line();
+
+        // Collections are handles, so `var b = a` shares contents. Clone makes a
+        // real copy, in any arena: here one that outlives the original's.
+        Out.Line("--- Clone ---");
+        Arena keep = Arena.Create(4096);
+        List<int> snapshot = numbers.Clone(keep);
+        Dict<int, int> scoresCopy = scores.Clone(keep);
+        numbers.Set(0, -1);
+        scores.Set(2, 0);
+        Out.Line($"Original changed: numbers[0] = {numbers.Get(0)}, scores[2] = {(scores.TryGet(2, out value) ? value : -1)}");
+        Out.Line($"Clones unchanged: snapshot[0] = {snapshot.Get(0)}, scoresCopy[2] = {(scoresCopy.TryGet(2, out value) ? value : -1)}");
+        Out.Line($"Clone capacity fits its {snapshot.Count} items: {snapshot.Capacity}");
+        Out.Write("Clone of default(List) is not created: ");
+        Out.Write(!notCreated.Clone(keep).IsCreated);
+        Out.Line();
+
+        Out.Line();
         Out.Line("Arena used: ", (long)arena.Used, " bytes");
 
-        unsafe { arena.Destroy(); } // SAFETY: the collections are not used after this.
+        unsafe { arena.Destroy(); } // SAFETY: only the clones, which live in `keep`, are used after this.
+
+        snapshot.Add(1234); // the clone grows in its own arena
+        Out.Line($"After destroying the first arena, clones still work: {snapshot.Count} items, last = {snapshot.Get(snapshot.Count - 1)}, scoresCopy[-42] = {(scoresCopy.TryGet(-42, out value) ? value : -1)}");
+        unsafe { keep.Destroy(); } // SAFETY: the clones are not used after this.
         Out.Line("Done!");
         return 0;
     }

@@ -9,16 +9,22 @@ namespace System.Runtime
     //
     // Each such call site has a "dispatch cell": two words, the address of the
     // code to call and a description of the interface method. The compiler
-    // points every cell at RhpInitialDynamicInterfaceDispatch (native/*.S),
-    // which asks Resolve for the method and jumps to it.
+    // points every cell at RhpInitialDynamicInterfaceDispatch (native/*.S).
     //
-    // .NET then caches the answer in the cell; this doesn't, so each call costs
-    // a search of the type's dispatch map. That's short for typical types, but
-    // it isn't the two instructions of a virtual call.
+    // The first call from a site replaces the cell's second word with a pointer
+    // to a small cache: the classes seen at that site so far and the method each
+    // one resolved to. From then on the stub compares the object's class with
+    // the cache's entries and jumps: close to a virtual call for a site that
+    // sees one class, a few compares more for each further one. A class that
+    // isn't in the cache falls through to Resolve, which searches the class's
+    // dispatch map and adds it. Once the cache is full, each call with yet
+    // another class pays for that search.
     internal static unsafe class InterfaceDispatch
     {
         // The low bits of a cell's second word say how it names the interface.
+        // Zero means it has been replaced by a pointer to a Cache.
         private const nint EncodingMask = 3;
+        private const nint CachePointer = 0;
         private const nint FullPointer = 1;
         private const nint IndirectRelativePointer = 2;
         private const nint RelativePointer = 3;
@@ -27,11 +33,69 @@ namespace System.Runtime
         private const int ReabstractedSlot = 0xFFFF;
         private const int DiamondSlot = 0xFFFE;
 
+        private const int CacheEntries = 4;
+
+        // native/*.S reads the entries, so they stay first and stay four.
+        //
+        // Threads may fill a cache at the same time. An entry is claimed by
+        // atomically setting its Type from null, and only the thread that
+        // claimed it writes its Target. A reader that finds the type but no
+        // target yet takes the slow path, so nobody jumps to a method that was
+        // resolved for another class.
+        private struct Cache
+        {
+            public Entry Entry0, Entry1, Entry2, Entry3;
+            public MethodTable* Interface;
+            public nint Slot;
+        }
+
+        private struct Entry
+        {
+            public nint Type;
+            public nint Target;
+        }
+
         [RuntimeExport("RhpResolveInterfaceMethod")]
         internal static nint Resolve(object obj, nint* cell)
         {
             if (obj == null)
                 Environment.FailFast("NullReferenceException");
+
+            MethodTable* type = obj._methodTable;
+            Cache* cache = CacheOf(cell);
+
+            Entry* free = null;
+            Entry* entry = (Entry*)cache;
+            for (int i = 0; i < CacheEntries; i++, entry++)
+            {
+                if (entry->Type == (nint)type)
+                {
+                    if (entry->Target != 0)
+                        return entry->Target;
+                    break; // another thread is filling it in: search without caching
+                }
+                if (entry->Type == 0)
+                {
+                    free = entry;
+                    break;
+                }
+            }
+
+            nint target = FindImplementation(type, cache->Interface, (int)cache->Slot);
+            if (target == 0)
+                Environment.FailFast("Interface method not implemented (variance isn't supported)");
+
+            if (free != null && Threading.Interlocked.CompareExchange(ref free->Type, (nint)type, 0) == 0)
+                free->Target = target;
+            return target;
+        }
+
+        // The cell's cache, created on the site's first call.
+        private static Cache* CacheOf(nint* cell)
+        {
+            nint value = cell[1];
+            if ((value & EncodingMask) == CachePointer)
+                return (Cache*)value;
 
             // Cells for the same interface method sit together, followed by an
             // entry with no code address that carries the method's slot number.
@@ -40,13 +104,17 @@ namespace System.Runtime
                 last += 2;
             if ((last[1] >> 16) != 0)
                 Environment.FailFast("Unsupported kind of interface call");
-            int slot = (ushort)last[1];
 
-            MethodTable* type = obj._methodTable;
-            nint target = FindImplementation(type, InterfaceOf(cell), slot);
-            if (target == 0)
-                Environment.FailFast("Interface method not implemented (variance isn't supported)");
-            return target;
+            Cache* cache = (Cache*)Platform.calloc(1, (nuint)sizeof(Cache));
+            if (cache == null)
+                Environment.FailFast("Out of memory");
+            cache->Interface = InterfaceOf(cell, value);
+            cache->Slot = (ushort)last[1];
+
+            // If another thread got there first, use its cache. Ours is then
+            // never used again: a few words lost, once.
+            nint previous = Threading.Interlocked.CompareExchange(ref cell[1], (nint)cache, value);
+            return previous == value ? cache : (Cache*)previous;
         }
 
 #if WASM
@@ -57,14 +125,11 @@ namespace System.Runtime
         internal static nint ResolveForCall(object obj, nint* cell) => Resolve(obj, cell);
 #endif
 
-        private static MethodTable* InterfaceOf(nint* cell)
+        private static MethodTable* InterfaceOf(nint* cell, nint value)
         {
-            nint value = cell[1];
             nint encoding = value & EncodingMask;
             if (encoding == FullPointer)
                 return (MethodTable*)(value & ~EncodingMask);
-            if (encoding == 0)
-                Environment.FailFast("Unsupported kind of interface call");
 
             // Relative to the word itself; only its low 32 bits are meaningful.
             nint address = ((nint)(cell + 1) + (int)value) & ~EncodingMask;

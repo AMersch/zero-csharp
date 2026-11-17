@@ -37,13 +37,20 @@ namespace System.Runtime.CompilerServices
         // Where a string's characters start, counted from the object's address.
         public static int OffsetToStringData => sizeof(nint) + sizeof(int);
 
-        // new int[] { 1, 2, 3 }: copies the constant data into the array.
+        // new int[] { 1, 2, 3 }: copies the constant data into the array. The
+        // compiler expands the whole sequence the C# compiler emits for an array
+        // initializer; called any other way, there is nothing this could do.
         [Intrinsic]
-        public static void InitializeArray(Array array, RuntimeFieldHandle fldHandle) => InitializeArray(array, fldHandle);
+        public static void InitializeArray(Array array, RuntimeFieldHandle fldHandle)
+            => Environment.FailFast("RuntimeHelpers.InitializeArray outside an array initializer");
 
-        // ReadOnlySpan<int> x = [1, 2, 3]: a span over the constant data.
+        // ReadOnlySpan<int> x = [1, 2, 3]: a span over the constant data, likewise.
         [Intrinsic]
-        public static ReadOnlySpan<T> CreateSpan<T>(RuntimeFieldHandle fldHandle) => CreateSpan<T>(fldHandle);
+        public static ReadOnlySpan<T> CreateSpan<T>(RuntimeFieldHandle fldHandle)
+        {
+            Environment.FailFast("RuntimeHelpers.CreateSpan outside a span initializer");
+            return default;
+        }
 
         [Intrinsic]
         public static bool IsReferenceOrContainsReferences<T>() => IsReferenceOrContainsReferences<T>();

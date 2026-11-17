@@ -25,6 +25,10 @@
 //   steady-state workload (one scratch arena per token, per frame, ...)
 //   stops calling malloc after the first round.
 // - Not thread-safe: use one arena per thread.
+// - Arena.DebugChecks = true (set it first thing in Main) makes arenas created
+//   afterwards fill freed memory with 0xDD bytes, and makes List, Dict and
+//   StrBuilder stop the program when used after their memory was freed. See
+//   DebugChecks for what that does and doesn't catch.
 //
 // Allocating is safe: a pointer is harmless until it is dereferenced, and
 // dereferencing needs an unsafe context anyway. Restore(), Reset() and
@@ -60,6 +64,7 @@ public struct Arena
         public nuint PrevNormal;
         public int BlockCount;
         public uint Generation;    // bumped by Reset, to catch marks from before it
+        public bool Poison;        // DebugChecks was on when the arena was created
         public nuint Used;         // bytes handed out, padding excluded
         public nuint Capacity;     // sum of all block sizes
     }
@@ -77,6 +82,27 @@ public struct Arena
     }
 
     State* _state;
+
+    /// <summary>
+    /// Debugging aid, off by default. While on:
+    /// - Arenas created from then on fill memory with 0xDD bytes when it is freed
+    ///   (Restore, Reset, Destroy) and when a block is first obtained. A stale
+    ///   pointer then reads 0xDDDDDDDD instead of plausible old data, and so does
+    ///   memory allocated with zero: false and never written.
+    /// - List, Dict and StrBuilder check on every use that their buffer is still
+    ///   allocated, and end the program with a message if it isn't. That catches
+    ///   a collection used after its arena was reset, and one that grew after a
+    ///   Save() and was used after the Restore().
+    /// It can't catch everything: once freed memory has been handed out again,
+    /// a stale pointer into it looks valid. And it costs time: a fill on every
+    /// free, a check on every collection operation.
+    /// </summary>
+    public static bool DebugChecks;
+
+    const byte PoisonByte = 0xDD;
+
+    // What a pointer read from poisoned memory looks like.
+    static nuint PoisonPointer => sizeof(nuint) == 8 ? unchecked((nuint)0xDDDDDDDDDDDDDDDD) : 0xDDDDDDDD;
 
     [DllImport("libc")]
     static safe extern void* malloc(nuint size);
@@ -100,6 +126,7 @@ public struct Arena
             memset(state, 0, (nuint)sizeof(State));
             state->InitialSize = blockSize == 0 ? 4096 : blockSize;
             state->LastNormal = state->InitialSize;
+            state->Poison = DebugChecks;
 
             if (AddBlock(state, state->InitialSize) == null)
             {
@@ -263,6 +290,47 @@ public struct Arena
         return true;
     }
 
+    /// <summary>
+    /// Whether <paramref name="pointer"/> points into memory this arena has
+    /// handed out and not freed since. Approximate: padding between allocations
+    /// counts as handed out.
+    /// </summary>
+    public bool IsLive(void* pointer)
+    {
+        State* state = _state;
+        if (state == null || pointer == null)
+            return false;
+
+        unsafe
+        {
+            // Comparing addresses only; nothing is dereferenced through pointer.
+            byte* p = (byte*)pointer;
+            for (Block* block = state->First; block != null; block = block->Next)
+            {
+                byte* end = block == state->Current ? state->Ptr : block->End;
+                if (p >= block->Start && p < end)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// For collections: under DebugChecks, ends the program if
+    /// <paramref name="buffer"/>, which the collection got from
+    /// <paramref name="arena"/>, has been freed since.
+    /// </summary>
+    internal static void CheckLive(Arena arena, void* buffer)
+    {
+        if (!DebugChecks)
+            return;
+        // The collection's own header was freed and filled: its arena field is poison.
+        if ((nuint)arena._state == PoisonPointer)
+            Environment.FailFast("Arena.DebugChecks: collection used after its arena was reset or restored");
+        if (arena._state != null && !arena.IsLive(buffer))
+            Environment.FailFast("Arena.DebugChecks: collection's buffer was freed (it grew after Save() and was used after Restore(), or its arena was reset)");
+    }
+
     /// <summary>Remembers the arena's current position, for Restore().</summary>
     public Mark Save()
     {
@@ -319,10 +387,12 @@ public struct Arena
                 Block* next = block->Next;
                 state->BlockCount--;
                 state->Capacity -= block->Size;
+                Poison(state, block->Start, block->End);
                 free(block);
                 block = next;
             }
             keep->Next = null;
+            Poison(state, mark.Ptr, keep == state->Current ? state->Ptr : keep->End);
 
             state->Current = keep;
             state->Ptr = mark.Ptr;
@@ -351,6 +421,7 @@ public struct Arena
 
             if (state->BlockCount == 1 && (keepCapacity || state->Capacity == state->InitialSize))
             {
+                Poison(state, state->First->Start, state->Ptr);
                 state->Ptr = state->First->Start;
                 if (!keepCapacity)
                 {
@@ -407,6 +478,7 @@ public struct Arena
             while (block != null)
             {
                 Block* next = block->Next;
+                Poison(state, block->Start, block == state->Current ? state->Ptr : block->End);
                 free(block);
                 block = next;
             }
@@ -435,6 +507,7 @@ public struct Arena
             block->Start = memory + sizeof(Block);
             block->End = block->Start + size;
             block->Size = size;
+            Poison(state, block->Start, block->End);
 
             if (state->Current == null)
                 state->First = block;
@@ -447,6 +520,17 @@ public struct Arena
             state->Capacity += size;
         }
         return block;
+    }
+
+    // Fills [start, end) so that stale and uninitialized reads stand out.
+    static unsafe void Poison(State* state, byte* start, byte* end)
+    {
+        unsafe
+        {
+            // SAFETY: callers pass a range inside one of the arena's blocks.
+            if (state->Poison && end > start)
+                memset(start, PoisonByte, (nuint)(end - start));
+        }
     }
 
     static nuint NextNormalSize(State* state)

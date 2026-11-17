@@ -105,6 +105,38 @@ public static class Program
 
         Out.Line();
 
+        Out.Line("--- Sort, Remove, foreach ---");
+        var unsorted = List<int>.Create(arena);
+        int[] values = { 42, 7, 19, 3, 88, 7, 61 };
+        foreach (int v in values)
+            unsorted.Add(v);
+        unsorted.Sort(&Ascending); // any comparison: pass a static method's address
+        Out.Write("Ascending:  ");
+        PrintList(unsorted);
+        unsorted.Sort(&ByLastDigit);
+        Out.Write("By last digit, then value: ");
+        PrintList(unsorted);
+
+        Out.Line($"Remove(3): {scores.Remove(3)}, again: {scores.Remove(3)}, Count: {scores.Count}");
+        long total = 0;
+        int pairs = 0;
+        foreach (var pair in scores) // no particular order
+        {
+            total += pair.Value;
+            pairs++;
+        }
+        Out.Line($"foreach over scores: {pairs} pairs, values sum to {total}");
+        for (int i = 0; i < 1000; i += 2)
+            squares.Remove(i);
+        int odd = 0;
+        foreach (var pair in squares)
+        {
+            if (pair.Key % 2 == 1 && pair.Value == (long)pair.Key * pair.Key)
+                odd++;
+        }
+        Out.Line($"After removing the 500 even keys: Count {squares.Count}, odd keys intact: {odd}");
+        Out.Line();
+
         // Collections are handles, so `var b = a` shares contents. Clone makes a
         // real copy, in any arena: here one that outlives the original's.
         Out.Line("--- Clone ---");
@@ -137,6 +169,10 @@ public static class Program
         for (int i = 0; i < n; i++)
             list.Add(1000 + i);
     }
+
+    static int Ascending(int a, int b) => a < b ? -1 : a > b ? 1 : 0;
+
+    static int ByLastDigit(int a, int b) => a % 10 != b % 10 ? a % 10 - b % 10 : Ascending(a, b);
 
     static void PrintList(List<int> list)
     {

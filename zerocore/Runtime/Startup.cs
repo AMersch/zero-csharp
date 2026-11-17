@@ -181,6 +181,33 @@ namespace Internal.Runtime.CompilerHelpers
         private static byte* ReadRelative(void* address) => (byte*)address + *(int*)address;
     }
 
+    // What compiled code calls to turn a type, method or field named in the
+    // source (typeof, an array initializer's data) into a handle: the handle is
+    // the address the compiler passes.
+    internal static unsafe class LdTokenHelpers
+    {
+        private static RuntimeTypeHandle GetRuntimeTypeHandle(MethodTable* type)
+        {
+            RuntimeTypeHandle handle;
+            *(nint*)&handle = (nint)type;
+            return handle;
+        }
+
+        private static RuntimeMethodHandle GetRuntimeMethodHandle(nint signature)
+        {
+            RuntimeMethodHandle handle;
+            *(nint*)&handle = signature;
+            return handle;
+        }
+
+        private static RuntimeFieldHandle GetRuntimeFieldHandle(nint signature)
+        {
+            RuntimeFieldHandle handle;
+            *(nint*)&handle = signature;
+            return handle;
+        }
+    }
+
     // What compiled code calls where .NET would throw.
     internal static class ThrowHelpers
     {
@@ -193,6 +220,7 @@ namespace Internal.Runtime.CompilerHelpers
         private static void ThrowPlatformNotSupportedException() => Environment.FailFast("PlatformNotSupportedException");
         private static void ThrowArgumentException() => Environment.FailFast("ArgumentException");
         private static void ThrowArgumentOutOfRangeException() => Environment.FailFast("ArgumentOutOfRangeException");
+        private static void ThrowDataMisalignedException() => Environment.FailFast("DataMisalignedException");
     }
 }
 

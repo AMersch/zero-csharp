@@ -70,9 +70,9 @@ This produces `layouts/linux-glibc-{x64,arm64}` and `layouts/windows-{x64,arm64}
 
 Every C# program needs a core library: the assembly that defines `object`, `int` and `string`, and holds the runtime code the compiler calls to allocate objects, check casts and set up static fields. .NET's is `System.Private.CoreLib` plus a native runtime, megabytes of it. bflat's zero mode replaces both with zerolib, about 4,000 lines, which is AGPL-3.0 and gets compiled into every binary.
 
-[`zerocore/`](zerocore/README.md) is this repo's replacement for zerolib: about 2,100 lines of C# and three short assembly routines per architecture, under the MIT license. `build.sh` compiles it from source and passes it to bflat with `--stdlib:none`. Compared with zerolib it adds casts to interfaces, interface calls the compiler can't resolve at build time, boxing, and `Main(string[] args)`; it leaves out `Console`, `Math`, `Interlocked`, `Volatile` and `Half`, and it runs on Linux and WebAssembly only. Its README lists what works, what doesn't, and where the code comes from, including a caveat about the license that's worth reading before building a product on it.
+[`zerocore/`](zerocore/README.md) is this repo's replacement for zerolib: about 2,400 lines of C# and three short assembly routines per architecture, under the MIT license. `build.sh` compiles it from source and passes it to bflat with `--stdlib:none`. Compared with zerolib it adds casts to interfaces, interface calls the compiler can't resolve at build time, boxing, and `Main(string[] args)`; it leaves out `Console` and `Half`, and it runs on Linux and WebAssembly only. Its README lists what works, what doesn't, and where the code comes from, including a caveat about the license that's worth reading before building a product on it.
 
-Sample binaries come out about 10 KB smaller than with zerolib (Strings 17 KB smaller), except Tiny, which is 0.6 KB larger.
+The same program comes out about 10 KB smaller than with zerolib, except Tiny, which is 0.6 KB larger.
 
 ## Building
 
@@ -104,7 +104,7 @@ This is how you ship a bflat library without header files. The assembly's metada
 
 ## WebAssembly
 
-`./build.sh --wasm` compiles the same samples, `lib/` and `zerocore/` to WebAssembly modules for WASI, from 15 KB (Tiny) to 77 KB (Strings), stripped. All nine run under wasmtime: Strings passes its 140 checks and Casts its 41, both printing exactly what the native build prints, and the others match too, apart from what depends on the platform (below).
+`./build.sh --wasm` compiles the same samples, `lib/` and `zerocore/` to WebAssembly modules for WASI, from 15 KB (Tiny) to 75 KB (Strings), stripped. All ten run under wasmtime: Strings passes its 140 checks and Casts its 41, both printing exactly what the native build prints, and the others match too, apart from what depends on the platform (below).
 
 bflat can't target WebAssembly, so this uses a different compiler for the last step:
 
@@ -155,14 +155,15 @@ unsafe { arena.Reset(); }                // SAFETY: p is not used after this
 | Sample | Shows | Size (Linux arm64) |
 |---|---|---|
 | `samples/Tiny.cs` | Smallest binary (`-Os --no-pie`, stripped) | ~16 KB |
-| `samples/Minimal.cs` | Hello world via `puts` | ~38 KB |
-| `samples/Arena.cs` | Growable arena: Fibonacci growth, dedicated blocks for large allocations, per-allocation alignment, `Reset` that keeps capacity, `Save`/`Restore` for temporary work, growing in place, a second independent arena | ~67 KB |
-| `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of an arena, including `Clone` into an arena that outlives the original | ~87 KB |
+| `samples/Minimal.cs` | Hello world via `puts` | ~39 KB |
+| `samples/Arena.cs` | Growable arena: Fibonacci growth, dedicated blocks for large allocations, per-allocation alignment, `Reset` that keeps capacity, `Save`/`Restore` for temporary work, growing in place, a second independent arena, debug checks | ~74 KB |
+| `samples/Collections.cs` | `List<T>` and `Dict<K,V>` on top of an arena: sorting, removing, `foreach`, and `Clone` into an arena that outlives the original | ~98 KB |
 | `samples/VirtualTest.cs` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | ~50 KB |
-| `samples/Casts.cs` | Tests runtime type checks (41 checks): `is`, `as` and `(T)x` to interfaces and classes, generic interfaces, boxed structs, interface calls with many arguments and default methods, arrays of interfaces, delegates | ~93 KB |
+| `samples/Casts.cs` | Tests runtime type checks (41 checks): `is`, `as` and `(T)x` to interfaces and classes, generic interfaces, boxed structs, interface calls with many arguments and default methods, arrays of interfaces, delegates | ~97 KB |
+| `samples/Core.cs` | Tests the smaller parts of the core library (32 checks): `Math`, `MathF`, `Interlocked`, `Volatile`, and one call site calling an interface method on six classes | ~75 KB |
 | `samples/Simd.cs` | Float dot product with NEON (arm64) or AVX + FMA (x64), checked against scalar and timed (12x faster on Apple Silicon) | ~52 KB |
-| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~64 KB |
-| `samples/Strings.cs` | Tests the string support (140 checks): span operations, parsing integers, hex and doubles (bit-exact), `$"..."` formatting with alignment and format strings, arena strings, `StrBuilder`, and the core library's `==`, `+`, string `switch` and static string fields; prints a table and UTF-8 text through `Out` | ~161 KB |
+| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~65 KB |
+| `samples/Strings.cs` | Tests the string support (140 checks): span operations, parsing integers, hex and doubles (bit-exact), `$"..."` formatting with alignment and format strings, arena strings, `StrBuilder`, and the core library's `==`, `+`, string `switch` and static string fields; prints a table and UTF-8 text through `Out` | ~159 KB |
 
 Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is stripped); x64 is within a few KB. Run `strip` to shrink the others.
 
@@ -171,8 +172,8 @@ Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is s
 | File | What |
 |---|---|
 | `Arena.cs` | Growable bump allocator; see [Arenas](#arenas). Normal blocks grow 128, 128, 256, 384, 640, ...; an allocation too big for the next block gets its own block without changing that sequence. Alignment is per allocation, and a failed allocation returns null and leaves the arena untouched. |
-| `List.cs` | Growable array, created in the arena you pass (`List<int>.Create(arena)`). It's a handle to an arena header, so copies share contents. `default(List<T>)` is safe to use: reads see an empty list and `Add` returns false. `Clone(arena)` makes an independent copy in any arena. |
-| `Dict.cs` | Open-addressing hash map (FNV-1a, power-of-two capacity). Keys are compared by raw bytes: fine for integers and padding-free structs, not for floats. |
+| `List.cs` | Growable array, created in the arena you pass (`List<int>.Create(arena)`). It's a handle to an arena header, so copies share contents. `default(List<T>)` is safe to use: reads see an empty list and `Add` returns false. `Clone(arena)` makes an independent copy in any arena, and `Sort(&Compare)` sorts in place with any comparison (heapsort, not stable). |
+| `Dict.cs` | Open-addressing hash map (FNV-1a, power-of-two capacity) with `Set`, `TryGet`, `Remove`, `Clone(arena)` and `foreach` over its pairs, in no particular order. Keys are compared by raw bytes: fine for integers and padding-free structs, not for floats. |
 | `Out.cs` | Buffered stdout writer, UTF-8 encoded; zerocore has no `Console`. `Out.Line($"...")` formats straight into the buffer. |
 | `Str.cs` | String support (see [Strings](#strings)): span operations as `System.MemoryExtensions`, `Str.TryParse`, `Str.Compare`, and new strings in an arena with `Str.Format` and `Str.Concat`. |
 | `StrBuilder.cs` | Growable string buffer in an arena, with `Append($"...")`. A handle like `List<T>`. |
@@ -189,9 +190,10 @@ Zero mode has no garbage collector, no exceptions (failures call `Environment.Fa
 - Boxing: a struct converted to `object` or to an interface it implements
 - `Main(string[] args)` and top-level statements
 - Generics, including constrained calls and **static abstract interface members**. These are resolved at compile time, which suits per-format compute kernels.
-- Classes with virtual methods, and interfaces, including default interface methods. Every `new` calls calloc and is never freed. An interface call the compiler can't resolve at build time searches the class's method map on every call, so keep those out of hot loops.
+- Classes with virtual methods, and interfaces, including default interface methods. Every `new` calls calloc and is never freed. An interface call the compiler can't resolve at build time goes through a small per-call-site cache: a little slower than a virtual call, and slower again at a site that sees more than four classes.
 - Delegates and lambdas (they allocate), `try`/`finally` and `using`
-- Function pointers, `[UnmanagedCallersOnly]` callbacks, and P/Invoke. pthreads work, for example.
+- Function pointers, `[UnmanagedCallersOnly]` callbacks, and P/Invoke. pthreads work, for example, with `Interlocked` and `Volatile` for shared state.
+- `Math` and `MathF`, and array initializers (`new[] { 1, 2, 3 }`)
 
 [`zerocore/README.md`](zerocore/README.md) has the full list, including what doesn't work.
 
@@ -216,7 +218,8 @@ unsafe { frame.Reset(); }                    // SAFETY: line is not used after t
 - **Copies are explicit.** `var b = a` on a `List`, `Dict` or `StrBuilder` shares contents. `list.Clone(arena)` and `dict.Clone(arena)` make an independent copy, in the same arena or another, for example to keep a result past a scratch arena's lifetime. Elements are copied as they are, so a pointer inside one still points where it did.
 - **Growing in place.** `List` and `StrBuilder` extend their buffer without copying while it's still the arena's newest allocation (`TryExtend`). Otherwise the old buffer stays behind until the arena is reset.
 - **Not thread-safe.** Use one arena per thread.
-- **No stale-pointer detection.** After `Reset()`, an old pointer still reads valid-looking memory. That's why the freeing operations are `unsafe`.
+- **Stale pointers aren't detected by default.** After `Reset()`, an old pointer still reads valid-looking memory. That's why the freeing operations are `unsafe`.
+- **`Arena.DebugChecks = true`** (set it first thing in `Main`) is the debugging aid for that. Arenas created afterwards fill freed memory with `0xDD` bytes, so a stale pointer reads `0xDDDDDDDD` instead of plausible old data. `List`, `Dict` and `StrBuilder` then also check on every use that their memory is still allocated, and stop the program with a message if it isn't. That catches a collection used after its arena was reset, and the `Restore` hazard above. It can't catch a stale pointer into memory that has since been handed out again, and it costs a fill on every free and a check on every collection operation, so leave it off in release builds.
 
 ## Strings
 
@@ -262,7 +265,7 @@ With zerocore, as `build.sh` builds:
 | `[DllImport]` of a library not passed with `-i` fails to compile ("Expected type 'Internal.Runtime.CompilerHelpers.InteropHelpers' not found") | Pass `-i <library>`; `build.sh` passes `-i libc -i libm.so.6` |
 | Building without `--no-reflection` fails ("Failed to load type 'Internal.Metadata.NativeFormat.TypeDefinition'") | Pass `--no-reflection`; `build.sh` does |
 | Non-baseline instruction sets (AVX2, FMA, dotprod) report `IsSupported == false` by default: there's no run-time CPU detection | Build with `-m x86-64-v3` / `-m dotprod`; `build.sh` does this for Simd and Kernels |
-| No `Console`, `Math`, `Interlocked`, `Volatile`, `Half` | `lib/Out.cs` for output, libm via P/Invoke for math; the others aren't available |
+| No `Console`, `Half`, `Thread` | `lib/Out.cs` for output; pthreads via P/Invoke for threads |
 | `"n=" + 5` doesn't compile (no `object.ToString`) | `Str.Format(arena, $"n={5}")` |
 | Casts and interface calls that need variance abort at run time | Not supported |
 | No Windows port | `build.ps1` builds against zerolib instead |

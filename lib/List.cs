@@ -72,6 +72,7 @@ public struct List<T> where T : unmanaged
     {
         if (_header == null)
             return false;
+        DebugCheck();
 
         unsafe
         {
@@ -116,6 +117,7 @@ public struct List<T> where T : unmanaged
     {
         if (_header == null)
             return false;
+        DebugCheck();
 
         unsafe
         {
@@ -144,7 +146,68 @@ public struct List<T> where T : unmanaged
     {
         if (_header == null)
             return default;
+        DebugCheck();
         unsafe { return new Span<T>(_header->Data, _header->Count); }
+    }
+
+    /// <summary>
+    /// Sorts the items in place. <paramref name="compare"/> returns a negative
+    /// number if its first argument goes before its second, a positive one if
+    /// after, and zero if either order will do:
+    /// <code>
+    /// static int ByAge(Person a, Person b) => a.Age - b.Age;
+    /// people.Sort(&amp;ByAge);
+    /// </code>
+    /// Heapsort: no extra memory, and n log n comparisons however the items start
+    /// out. Not stable: items that compare equal may end up in either order.
+    /// </summary>
+    public void Sort(delegate*<T, T, int> compare)
+    {
+        if (_header == null || compare == null)
+            return;
+        DebugCheck();
+
+        unsafe
+        {
+            // SAFETY: a live header; every index stays below Count. compare is the
+            // caller's function, called with two items of the list.
+            T* data = _header->Data;
+            int count = _header->Count;
+
+            // Arrange the items as a heap with the largest first, then move the
+            // largest to the end and repair the heap, one item at a time.
+            for (int start = count / 2 - 1; start >= 0; start--)
+                SiftDown(data, start, count, compare);
+            for (int end = count - 1; end > 0; end--)
+            {
+                T largest = data[0];
+                data[0] = data[end];
+                data[end] = largest;
+                SiftDown(data, 0, end, compare);
+            }
+        }
+    }
+
+    // Moves data[root] down until neither child is larger, within [0, count).
+    static unsafe void SiftDown(T* data, int root, int count, delegate*<T, T, int> compare)
+    {
+        unsafe
+        {
+            while (true)
+            {
+                int child = 2 * root + 1;
+                if (child >= count)
+                    return;
+                if (child + 1 < count && compare(data[child], data[child + 1]) < 0)
+                    child++;
+                if (compare(data[root], data[child]) >= 0)
+                    return;
+                T item = data[root];
+                data[root] = data[child];
+                data[child] = item;
+                root = child;
+            }
+        }
     }
 
     /// <summary>
@@ -161,6 +224,7 @@ public struct List<T> where T : unmanaged
     {
         if (_header == null)
             return default;
+        DebugCheck();
 
         int count = Count;
         List<T> copy = Create(target, count);
@@ -211,10 +275,19 @@ public struct List<T> where T : unmanaged
         return true;
     }
 
+    // Under Arena.DebugChecks, stops the program if the list's memory was freed.
+    void DebugCheck()
+    {
+        if (Arena.DebugChecks)
+            unsafe { Arena.CheckLive(_header->Arena, _header->Data); } // SAFETY: callers checked _header != null.
+    }
+
     unsafe void CheckIndex(int index)
     {
         unsafe
         {
+            if (_header != null)
+                DebugCheck();
             if (_header == null || (uint)index >= (uint)_header->Count)
                 Environment.FailFast(null);
         }

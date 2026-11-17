@@ -70,6 +70,7 @@ public struct StrBuilder
     {
         if (_header == null)
             return default;
+        DebugCheck();
         unsafe { return new ReadOnlySpan<char>(Chars(), _header->Length); } // SAFETY: Length chars are initialized.
     }
 
@@ -77,6 +78,7 @@ public struct StrBuilder
     {
         if (_header == null)
             return false;
+        DebugCheck();
 
         unsafe
         {
@@ -132,6 +134,13 @@ public struct StrBuilder
         if (_header == null)
             return null;
         unsafe { return Str.MakeString(_header->Object, _header->Length); } // SAFETY: Object has room for Capacity >= Length chars.
+    }
+
+    // Under Arena.DebugChecks, stops the program if the builder's memory was freed.
+    void DebugCheck()
+    {
+        if (Arena.DebugChecks)
+            unsafe { Arena.CheckLive(_header->Arena, _header->Object); } // SAFETY: callers checked _header != null.
     }
 
     char* Chars()

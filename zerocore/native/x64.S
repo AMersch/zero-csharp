@@ -4,6 +4,9 @@
 // routes them through these functions, which must leave every register alone
 // except the ones noted. That contract is why they're in assembly. Without a
 // garbage collector they only have to do the store.
+//
+// (Comments after an instruction start with # here: this assembler only takes
+// // at the start of a line.)
 
     .intel_syntax noprefix
     .text
@@ -37,12 +40,40 @@ RhpByRefAssignRef:
 // method's own arguments in place, plus:
 // rdi: the object
 // r11: the call site's dispatch cell
-// Find the method, put every argument register back, and jump to it.
-// 200 bytes: 8 integer registers, 8 vector registers, and 8 to keep the stack
-// 16-byte aligned for the call.
+//
+// Fast path: after its first call, the cell's second word points at a cache
+// of four entries, each a class and the method it resolved to. If the object's
+// class is among them, jump. rax and r10 are free to use here.
     .global RhpInitialDynamicInterfaceDispatch
     .type RhpInitialDynamicInterfaceDispatch, @function
 RhpInitialDynamicInterfaceDispatch:
+    test    rdi, rdi
+    jz      1f                      # null: let the slow path report it
+    mov     r10, [r11 + 8]
+    test    r10b, 3
+    jnz     1f                      # not a cache pointer yet
+    mov     rax, [rdi]              # the object's class
+    cmp     rax, [r10]
+    je      2f
+    add     r10, 16                 # next entry
+    cmp     rax, [r10]
+    je      2f
+    add     r10, 16
+    cmp     rax, [r10]
+    je      2f
+    add     r10, 16
+    cmp     rax, [r10]
+    jne     1f
+2:
+    mov     r10, [r10 + 8]
+    test    r10, r10
+    jz      1f                      # entry claimed but not filled in yet
+    jmp     r10
+
+// Slow path: find the method, put every argument register back, and jump to
+// it. 200 bytes: 8 integer registers, 8 vector registers, and 8 to keep the
+// stack 16-byte aligned for the call.
+1:
     sub     rsp, 200
     mov     [rsp], rdi
     mov     [rsp + 8], rsi

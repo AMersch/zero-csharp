@@ -34,10 +34,37 @@ RhpByRefAssignRefArm64:
 // method's own arguments in place, plus:
 // x0:  the object
 // x11: the call site's dispatch cell
-// Find the method, put every argument register back, and jump to it.
+//
+// Fast path: after its first call, the cell's second word points at a cache
+// of four entries, each a class and the method it resolved to. If the object's
+// class is among them, jump. x9, x10 and x12 are free to use here.
     .global RhpInitialDynamicInterfaceDispatch
     .type RhpInitialDynamicInterfaceDispatch, %function
 RhpInitialDynamicInterfaceDispatch:
+    cbz     x0, 1f                  // null: let the slow path report it
+    ldr     x9, [x11, #8]
+    tst     x9, #3
+    b.ne    1f                      // not a cache pointer yet
+    ldr     x10, [x0]               // the object's class
+    ldr     x12, [x9]
+    cmp     x10, x12
+    b.eq    2f
+    ldr     x12, [x9, #16]!         // next entry
+    cmp     x10, x12
+    b.eq    2f
+    ldr     x12, [x9, #16]!
+    cmp     x10, x12
+    b.eq    2f
+    ldr     x12, [x9, #16]!
+    cmp     x10, x12
+    b.ne    1f
+2:
+    ldr     x9, [x9, #8]
+    cbz     x9, 1f                  // entry claimed but not filled in yet
+    br      x9
+
+// Slow path: find the method, put every argument register back, and jump to it.
+1:
     stp     x29, x30, [sp, #-224]!
     mov     x29, sp
     stp     x0, x1, [sp, #16]

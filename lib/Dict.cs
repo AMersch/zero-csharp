@@ -73,6 +73,7 @@ public struct Dict<TKey, TValue>
     {
         if (_header == null)
             return false;
+        DebugCheck();
 
         unsafe
         {
@@ -90,6 +91,7 @@ public struct Dict<TKey, TValue>
     {
         if (_header != null)
         {
+            DebugCheck();
             uint hash = Hash(key);
             unsafe
             {
@@ -115,6 +117,123 @@ public struct Dict<TKey, TValue>
 
     public bool ContainsKey(TKey key) => TryGet(key, out _);
 
+    /// <summary>Removes a key. Returns false if it wasn't there.</summary>
+    public bool Remove(TKey key)
+    {
+        if (_header == null)
+            return false;
+        DebugCheck();
+
+        uint hash = Hash(key);
+        unsafe
+        {
+            // SAFETY: a live header; every index is masked into [0, Capacity).
+            Entry* entries = _header->Entries;
+            int mask = _header->Capacity - 1;
+            int hole = (int)hash & mask;
+            while (true)
+            {
+                if (!entries[hole].Used)
+                    return false;
+                if (entries[hole].Hash == hash && BytesEqual(entries[hole].Key, key))
+                    break;
+                hole = (hole + 1) & mask;
+            }
+
+            // A lookup walks from an entry's home slot until it finds the entry
+            // or an empty slot, so just emptying this slot would hide the entries
+            // that were pushed past it. Close the gap instead: move back each
+            // following entry whose home slot is at or before the hole.
+            int next = hole;
+            while (true)
+            {
+                next = (next + 1) & mask;
+                if (!entries[next].Used)
+                    break;
+                int home = (int)entries[next].Hash & mask;
+                // Leave it if its home lies after the hole, up to where it is now
+                // (the range wraps around the end of the table).
+                bool homeAfterHole = hole <= next ? (hole < home && home <= next) : (hole < home || home <= next);
+                if (homeAfterHole)
+                    continue;
+                entries[hole] = entries[next];
+                hole = next;
+            }
+
+            entries[hole] = default;
+            _header->Count--;
+        }
+        return true;
+    }
+
+    /// <summary>A key with its value, as foreach yields them.</summary>
+    public struct Pair
+    {
+        public TKey Key;
+        public TValue Value;
+    }
+
+    /// <summary>
+    /// For foreach: every key and value, in no particular order.
+    /// <code>foreach (var pair in scores) total += pair.Value;</code>
+    /// </summary>
+    /// <remarks>Don't Set or Remove during the loop: entries move, so some may be skipped or seen twice.</remarks>
+    public Enumerator GetEnumerator()
+    {
+        if (_header != null)
+            DebugCheck();
+        return new Enumerator(this);
+    }
+
+    public struct Enumerator
+    {
+        readonly Dict<TKey, TValue> _dict;
+        int _index;
+
+        internal Enumerator(Dict<TKey, TValue> dict)
+        {
+            _dict = dict;
+            _index = -1;
+        }
+
+        public bool MoveNext()
+        {
+            Header* header = _dict._header;
+            if (header == null)
+                return false;
+            unsafe
+            {
+                // SAFETY: a live header; _index stays below Capacity.
+                while (++_index < header->Capacity)
+                {
+                    if (header->Entries[_index].Used)
+                        return true;
+                }
+            }
+            return false;
+        }
+
+        public Pair Current
+        {
+            get
+            {
+                unsafe
+                {
+                    // SAFETY: MoveNext returned true, so _index names a used entry.
+                    Entry* entry = &_dict._header->Entries[_index];
+                    return new Pair { Key = entry->Key, Value = entry->Value };
+                }
+            }
+        }
+    }
+
+    // Under Arena.DebugChecks, stops the program if the map's memory was freed.
+    void DebugCheck()
+    {
+        if (Arena.DebugChecks)
+            unsafe { Arena.CheckLive(_header->Arena, _header->Entries); } // SAFETY: callers checked _header != null.
+    }
+
     /// <summary>
     /// Returns an independent copy in <paramref name="target"/> (this map's own
     /// arena or another one). Returns a not-created map if this one isn't created
@@ -129,6 +248,7 @@ public struct Dict<TKey, TValue>
     {
         if (_header == null)
             return default;
+        DebugCheck();
 
         unsafe
         {

@@ -171,6 +171,26 @@ public static class Program
 
         unsafe { arena.Destroy(); } // SAFETY: nothing points into the arena after this.
         Out.Line("Arena destroyed.");
+
+        // Debugging aid: arenas created while DebugChecks is on fill freed memory
+        // with 0xDD, so a stale pointer reads an obvious pattern instead of the
+        // old value, and collections stop the program when used after a reset.
+        Arena.DebugChecks = true;
+        Arena debug = Arena.Create(256);
+        int* stale = debug.AllocArray<int>(4);
+        unsafe { stale[0] = 12345; }
+        Out.Line();
+        Out.Write("DebugChecks: pointer is live before Reset: ");
+        Out.Write(debug.IsLive(stale));
+        Out.Line();
+        // SAFETY: stale is read below on purpose. Its memory still belongs to the
+        // arena's block, so the read is harmless; it shows what a bug would see.
+        unsafe { debug.Reset(); }
+        uint seen;
+        unsafe { seen = (uint)stale[0]; }
+        Out.Line($"After Reset the stale pointer reads 0x{seen:X}, IsLive: {debug.IsLive(stale)}");
+        unsafe { debug.Destroy(); } // SAFETY: stale is not used after this.
+        Arena.DebugChecks = false;
         return 0;
     }
 }

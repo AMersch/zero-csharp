@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Runs a built sample: natively on Linux, in the build container on macOS.
 # With --wasm, runs bin/wasm/<Sample>.wasm with wasmtime (./setup.sh --wasm).
-# Usage: ./run.sh [--wasm] Arena
+# With --dos, runs bin/dos/<Sample>.exe under FreeDOS in an emulator
+# (./setup.sh --dos); --dos --window shows the DOS screen. See dos/run.sh.
+# Usage: ./run.sh [--wasm | --dos [--window]] Arena
 # Env:   BFLAT_ARCH (see env.sh): on macOS, runs a cross-compiled binary under emulation
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
+
+if [ "${1:-}" = --dos ]; then
+    shift
+    exec dos/run.sh "$@"
+fi
 
 wasm=0
 if [ "${1:-}" = --wasm ]; then
@@ -13,7 +20,7 @@ if [ "${1:-}" = --wasm ]; then
     shift
 fi
 if [ $# -lt 1 ]; then
-    echo "Usage: ./run.sh [--wasm] <Sample> [args...]" >&2
+    echo "Usage: ./run.sh [--wasm | --dos [--window]] <Sample> [args...]" >&2
     exit 1
 fi
 name=$1

@@ -1,0 +1,11 @@
+frames played: 300
+score: 42
+frames with a rock on the ship: 11
+picture checksum: 1665879556
+pixels the screen shows differently: 0
+20 frames took about 286 ms: yes
+Sleep(200) took about 200 ms: yes
+key presses waiting: 0
+speaker switches on and off: yes
+file written, appended, read back, deleted: yes
+mouse driver asked: yes

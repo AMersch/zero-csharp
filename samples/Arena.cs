@@ -23,7 +23,8 @@ public static class Program
     {
         Out.Line("=== Growable Arena Demo ===");
 
-        Arena arena = Arena.Create(128);
+        // The name is optional: Dump() and failure messages show it.
+        Arena arena = Arena.Create(128, "demo");
         if (!arena.IsCreated)
         {
             Out.Line("Arena.Create failed");
@@ -141,6 +142,23 @@ public static class Program
             Out.Write(p4->X == 999);
         }
         Out.Line();
+
+        // OpenScope is Save and Restore as a using block: leaving the block, by
+        // any path, frees what was allocated inside it.
+        Arena.Scope temp;
+        unsafe { temp = arena.OpenScope(); } // SAFETY: nothing from inside the block is used after it.
+        using (temp)
+        {
+            arena.AllocArray<int>(100);
+            Out.Line($"Inside the scope: used {(long)arena.Used} bytes");
+        }
+        Out.Write("After the scope: used as before: ");
+        Out.Write(arena.Used == usedBefore);
+        Out.Line();
+
+        // Dump shows where the memory is. The peak is the most the arena ever
+        // held at once: a first block of that size would have been enough.
+        arena.Dump();
 
         // The newest allocation can grow in place, so a buffer built up step by
         // step doesn't leave its smaller copies behind.

@@ -1,0 +1,10 @@
+Usage: Guards <case>, where the case is one of:
+  restore-order        an older mark restored before a newer one
+  restore-other-arena  a mark restored in another arena
+  restore-after-reset  a mark from before a Reset()
+  list-after-reset     a list used after its arena was reset (DebugChecks)
+  list-grew-in-scope   an older list that grew inside a scope, used after it (DebugChecks)
+  list-grew-in-place   an older list that grew in place inside a scope, used after it (DebugChecks)
+  builder-grew-in-place  the same for a StrBuilder (DebugChecks)
+  list-index           a list index out of range
+  out-of-memory        an allocation the system can't satisfy (stopOnOutOfMemory)

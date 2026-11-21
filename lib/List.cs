@@ -279,7 +279,7 @@ public struct List<T> where T : unmanaged
     void DebugCheck()
     {
         if (Arena.DebugChecks)
-            unsafe { Arena.CheckLive(_header->Arena, _header->Data); } // SAFETY: callers checked _header != null.
+            unsafe { Arena.CheckLive(_header->Arena, _header->Data, (nuint)_header->Capacity * (nuint)sizeof(T)); } // SAFETY: callers checked _header != null.
     }
 
     unsafe void CheckIndex(int index)
@@ -289,7 +289,7 @@ public struct List<T> where T : unmanaged
             if (_header != null)
                 DebugCheck();
             if (_header == null || (uint)index >= (uint)_header->Count)
-                Environment.FailFast(null);
+                Environment.FailFast("List: index out of range");
         }
     }
 }

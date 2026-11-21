@@ -140,7 +140,7 @@ public struct StrBuilder
     void DebugCheck()
     {
         if (Arena.DebugChecks)
-            unsafe { Arena.CheckLive(_header->Arena, _header->Object); } // SAFETY: callers checked _header != null.
+            unsafe { Arena.CheckLive(_header->Arena, _header->Object, Str.StringObjectSize(_header->Capacity)); } // SAFETY: callers checked _header != null.
     }
 
     char* Chars()

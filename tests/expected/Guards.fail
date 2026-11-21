@@ -1,0 +1,9 @@
+restore-order|Arena "order":|Arena.Restore: the mark was already freed by restoring an older one
+restore-other-arena|Arena "second":|Arena.Restore: the mark doesn't belong to this arena's current contents
+restore-after-reset|Arena "reset":|Arena.Restore: the mark doesn't belong to this arena's current contents
+list-after-reset|Arena.DebugChecks: collection used after its arena was reset or restored
+list-grew-in-scope|Arena "lists":|Arena.DebugChecks: collection's buffer was freed
+list-grew-in-place|Arena "in place":|Arena.DebugChecks: collection's buffer was freed
+builder-grew-in-place|Arena "builder":|Arena.DebugChecks: collection's buffer was freed
+list-index|List: index out of range
+out-of-memory|Arena "small":|Arena: out of memory

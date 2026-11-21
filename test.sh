@@ -6,6 +6,11 @@
 # A sample with a tests/input/<Sample>.txt reads it as standard input; the
 # others get an empty one.
 #
+# Guards is also run once per line of tests/expected/Guards.fail, with the
+# line's first field as its argument. Each of those runs makes a mistake that
+# lib/ must end the program for: the exit code must not be 0, and the output
+# must hold every other field of the line (fields are separated by "|").
+#
 # Usage:  ./test.sh            native, for this machine (or BFLAT_ARCH)
 #         ./test.sh --wasm     WebAssembly (needs ./setup.sh --wasm)
 #         ./test.sh --dos      DOS, on an emulated 386 with 4 MB (needs ./setup.sh --dos)
@@ -17,7 +22,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
 
-SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Simd Kernels Strings Quiz)
+SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Simd Kernels Strings Quiz Guards)
 
 # Simd and Kernels print timings, so only their exit code is checked.
 TIMED=" Simd Kernels "
@@ -27,14 +32,15 @@ POINTER_SIZED=" Arena Collections "
 # Simd and Kernels aren't built for DOS: they benchmark SIMD instructions,
 # which a 386 doesn't have.
 # Vga is a game for DOS only; "Vga test" plays by itself and reports.
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Strings Quiz Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Strings Quiz Guards Vga)
 
 EXPECTED=tests/expected
 failures=0
 
 # $1: a label for the report; $2: "native", "wasm" or "dos"; $3: "check" or "update"
 run_all() {
-    local label=$1 target=$2 mode=$3 name out status expected argument input
+    local label=$1 target=$2 mode=$3 name out status expected argument input line missing i
+    local fields=()
     local run=(./run.sh)
     local samples=("${SAMPLES[@]}")
     [ "$target" = wasm ] && run+=(--wasm)
@@ -76,6 +82,28 @@ run_all() {
             echo "ok   $name"
         fi
     done
+
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        IFS='|' read -r -a fields <<< "$line"
+        name=${fields[0]}
+        status=0
+        out=$("${run[@]}" Guards "$name" < /dev/null 2>&1) || status=$?
+        missing=
+        for ((i = 1; i < ${#fields[@]}; i++)); do
+            [[ "$out" == *"${fields[$i]}"* ]] || missing=${fields[$i]}
+        done
+        if [ "$status" = 0 ]; then
+            echo "FAIL Guards $name: the program wasn't stopped"
+            failures=$((failures + 1))
+        elif [ -n "$missing" ]; then
+            echo "FAIL Guards $name: stopped (exit code $status) without the message \"$missing\""
+            echo "$out" | tail -3 | sed 's/^/       /'
+            failures=$((failures + 1))
+        else
+            echo "ok   Guards $name (stopped, as it must be)"
+        fi
+    done < "$EXPECTED/Guards.fail"
 }
 
 test_native() {

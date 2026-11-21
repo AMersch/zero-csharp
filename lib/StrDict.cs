@@ -378,6 +378,6 @@ public struct StrDict<TValue>
     void DebugCheck()
     {
         if (Arena.DebugChecks)
-            unsafe { Arena.CheckLive(_header->Arena, _header->Entries); } // SAFETY: callers checked _header != null.
+            unsafe { Arena.CheckLive(_header->Arena, _header->Entries, 1); } // SAFETY: callers checked _header != null.
     }
 }

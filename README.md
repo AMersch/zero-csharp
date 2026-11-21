@@ -111,7 +111,7 @@ This is how you ship a bflat library without header files. The assembly's metada
 
 ## WebAssembly
 
-`./build.sh --wasm` compiles the same samples, `lib/` and `zerocore/` to WebAssembly modules for WASI, from 15 KB (Tiny) to 75 KB (Strings), stripped. All eleven run under wasmtime: Strings passes its 140 checks and Casts its 41, both printing exactly what the native build prints, and the others match too, apart from what depends on the platform (below).
+`./build.sh --wasm` compiles the same samples, `lib/` and `zerocore/` to WebAssembly modules for WASI, from 15 KB (Tiny) to 75 KB (Strings), stripped. All twelve run under wasmtime: Strings passes its 140 checks and Casts its 41, both printing exactly what the native build prints, and the others match too, apart from what depends on the platform (below).
 
 bflat can't target WebAssembly, so this uses a different compiler for the last step:
 
@@ -132,7 +132,7 @@ Differences from the native build:
 
 ## DOS
 
-`./build.sh --dos` compiles nine of the samples, `lib/` and `zerocore/` to 32-bit DOS programs that run on a 386: `bin/dos/*.exe`, from 14 KB (Tiny) to 89 KB (Strings). On an emulated 386 with 4 MB of memory all nine exit with 0, and they print exactly what the WebAssembly build prints (which is what the native build prints, apart from the pointer-sized byte counts in Arena and Collections). Simd and Kernels are left out: they benchmark SIMD instructions, which a 386 doesn't have.
+`./build.sh --dos` compiles ten of the samples, `lib/` and `zerocore/` to 32-bit DOS programs that run on a 386: `bin/dos/*.exe`, from 14 KB (Tiny) to 89 KB (Strings). On an emulated 386 with 4 MB of memory all ten exit with 0, and they print exactly what the WebAssembly build prints (which is what the native build prints, apart from the pointer-sized byte counts in Arena and Collections). Simd and Kernels are left out: they benchmark SIMD instructions, which a 386 doesn't have.
 
 A tenth sample exists only for DOS: [`samples/Vga.cs`](samples/Vga.cs), a small game in the VGA's 320x200, 256-color mode (31 KB). It uses [`lib/Dos.cs`](lib/Dos.cs): `Dos.Graphics()`, `Dos.Screen` (the screen as a `Span<byte>`, one byte per pixel), `Dos.Show` and `Dos.Fill` (copy a finished picture to the screen and clear one, with the processor's block instructions), `Dos.SetColor`, `Dos.WaitFrame` (the 70 Hz screen refresh), `Dos.KeyDown` and `Dos.ReadKey`, `Dos.Mouse`, `Dos.Sound` (the PC speaker), `Dos.FileOpen`/`FileRead`/`FileWrite` and friends, `Dos.Ticks` (milliseconds) and `Dos.Sleep`, and `Dos.In`/`Dos.Out` for hardware ports. The game is steered with the arrow keys or the mouse, sounds a falling tone on a crash and keeps its best score in `VGA.DAT`. The game moves by the clock, 70 steps a second, so a machine too slow to draw 70 frames a second drops frames instead of slowing the game down. `./run.sh --dos --window Vga` plays it; `Vga test` plays 300 frames by itself and checks that the screen holds the picture it drew, that the clock runs, that the speaker switches on and off, and that a file can be written, appended to, read back and deleted; that is what `test.sh` uses.
 
@@ -150,7 +150,7 @@ To run a program on a real machine or another emulator, copy it together with `H
 What it needs, and what's different:
 
 - **A 386 with a 387 math coprocessor, or a 486DX or later.** The compiled code uses 387 instructions for all floating point, and there is no software fallback, so a 386 or 486SX without a coprocessor isn't supported.
-- **2 MB of memory or more.** Each program reserves 256 KB for its stack and 256 KB for the "shadow stack" NativeAOT-LLVM's code keeps (see `dos/runtime.c`). With 2 MB, eight of the nine samples run; Strings needs more for its arenas and runs with 4 MB.
+- **2 MB of memory or more.** Each program reserves 256 KB for its stack and 256 KB for the "shadow stack" NativeAOT-LLVM's code keeps (see `dos/runtime.c`). With 2 MB, nine of the ten samples run; Strings needs more for its arenas and runs with 4 MB.
 - **Nothing newer than a 386 gets in unnoticed.** After linking, `build.sh` disassembles each program and fails if it finds an instruction a 386 or 387 lacks. That check exists because it's easy to break: clang's `-march=i386` still emits the 486's `cmpxchg` for an atomic operation. zerocore's `Interlocked` avoids that by being ordinary code in this build, and it is the first thing the check caught.
 - **Use Bochs to test.** Its `i386` processor model refuses instructions a 386 doesn't have; that's what `run.sh` and `test.sh` use when Bochs is installed. QEMU's `486` model refuses the Pentium Pro's and SSE instructions but runs the 486's own (`bswap`, `cmpxchg`, `xadd`), so it can't tell a 386 program from a 486 one.
 - **Floating point is the 387's.** It's set to 53-bit precision, so `+ - * /` and `Sqrt` on doubles give the same results as elsewhere. Two things can differ in the last digits: values the 387 keeps in a register with more precision than their type has (a `long` above 2^53 converted to `double`, or `float` arithmetic), and `Exp`, `Log`, `Pow`, `Sin` and the like, which are the 387's own. A one-off comparison of some sixty such results (not kept in the repository) matched Linux to nine decimals except one `long` conversion.
@@ -165,6 +165,8 @@ FreeDOS and HX aren't part of this repository; `setup.sh` downloads them. HX is 
 ## Testing
 
 `./test.sh` builds every sample and checks it. Each must exit with 0: Casts, Core, Kernels and Strings count their own failed checks in the exit code. The samples that print the same thing on every run must also match the files in `tests/expected` exactly.
+
+The guards are tested the other way round. Zero mode has no exceptions, so `lib/` can only end the program when it catches a mistake, and `samples/Guards.cs` makes one such mistake per run (`./run.sh Guards restore-order`). `test.sh` runs every case listed in `tests/expected/Guards.fail` and requires a non-zero exit code and the message on that line. To cover a new guard, add a case to the sample and a line to that file.
 
 ```bash
 ./test.sh            # native, for this machine (or BFLAT_ARCH)
@@ -212,7 +214,7 @@ unsafe { arena.Reset(); }                // SAFETY: p is not used after this
 |---|---|---|
 | `samples/Tiny.cs` | Smallest binary (`-Os --no-pie`, stripped) | ~16 KB |
 | `samples/Minimal.cs` | Hello world via `puts` | ~39 KB |
-| `samples/Arena.cs` | Growable arena: Fibonacci growth, dedicated blocks for large allocations, per-allocation alignment, `Reset` that keeps capacity, `Save`/`Restore` for temporary work, growing in place, a second independent arena, debug checks | ~74 KB |
+| `samples/Arena.cs` | Growable arena: Fibonacci growth, dedicated blocks for large allocations, per-allocation alignment, `Reset` that keeps capacity, `Save`/`Restore` and `OpenScope` for temporary work, `Dump`, growing in place, a second independent arena, debug checks | ~82 KB |
 | `samples/Collections.cs` | `List<T>`, `Dict<K,V>`, and their versions for references (`RefList`, `StrDict`, `RefDict`) on top of an arena: word counts keyed by text, sorting, removing, `foreach`, and `Clone` into an arena that outlives the original | ~98 KB |
 | `samples/VirtualTest.cs` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | ~50 KB |
 | `samples/Casts.cs` | Tests runtime type checks (41 checks): `is`, `as` and `(T)x` to interfaces and classes, generic interfaces, boxed structs, interface calls with many arguments and default methods, arrays of interfaces, delegates | ~97 KB |
@@ -221,6 +223,7 @@ unsafe { arena.Reset(); }                // SAFETY: p is not used after this
 | `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~65 KB |
 | `samples/Strings.cs` | Tests the string support (140 checks): span operations, parsing integers, hex and doubles (bit-exact), `$"..."` formatting with alignment and format strings, arena strings, `StrBuilder`, and the core library's `==`, `+`, string `switch` and static string fields; prints a table and UTF-8 text through `Out` | ~159 KB |
 | `samples/Quiz.cs` | Asks questions in a loop and reads the answers with `In.ReadLine`: prompts formatted straight to stdout, answers read into a stack buffer, mistakes kept as strings in a `RefList` in a long-lived arena. `test.sh` feeds it `tests/input/Quiz.txt` (bad UTF-8, an over-long line, CRLF, end of input) | ~67 KB |
+| `samples/Guards.cs` | The mistakes `lib/` ends the program for, one per run: marks restored out of order or in the wrong arena, collections used after their memory was freed (`DebugChecks`), a list index out of range, running out of memory in an arena created with `stopOnOutOfMemory`. `test.sh` checks the message of each | ~77 KB |
 | `samples/Vga.cs` | DOS only (see [DOS](#dos)): a small game in 320x200 with 256 colors, steered with the arrow keys; `Vga test` checks the screen, keyboard and clock by itself | 31 KB (DOS) |
 
 Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is stripped); x64 is within a few KB. Run `strip` to shrink the others.
@@ -276,13 +279,16 @@ unsafe { frame.Reset(); }                    // SAFETY: line is not used after t
 
 - **An `Arena` is a handle** (one pointer), so passing or storing it is free and copies refer to the same arena. `default(Arena)` is "not created": every allocation from it returns null, and so does everything built on it.
 - **`Reset()` keeps the memory.** It merges the blocks into one, so a loop that resets each round stops calling `malloc` after the first.
-- **`Save()` and `Restore(mark)`** free only what was allocated since the mark, for temporary work in an arena that also holds data to keep. Restoring a mark from another arena, or from before a `Reset()`, ends the program with a message.
+- **`Save()` and `Restore(mark)`** free only what was allocated since the mark, for temporary work in an arena that also holds data to keep. Restoring a mark from another arena, or from before a `Reset()`, ends the program with a message. Marks must be restored newest first: restoring one ends every mark saved after it, and restoring such an ended mark stops the program too, unless enough has been allocated again to cover its position.
+- **`OpenScope()`** is `Save()` and `Restore()` as a `using` block, which rules that mistake out and also covers early returns: `Arena.Scope temp; unsafe { temp = arena.OpenScope(); } using (temp) { ... }`.
 - **One hazard with `Restore`:** if a `List`, `Dict` or `StrBuilder` created before the mark grows after it, its new buffer is freed by `Restore` while the collection still points at it, and nothing reports that. Between `Save()` and `Restore()`, only add to collections created after the mark. When temporary work has to add to long-lived collections, give it a separate scratch arena instead and copy the result out (`sb.ToArenaString(target)`).
 - **Copies are explicit.** `var b = a` on a `List`, `Dict` or `StrBuilder` shares contents. `list.Clone(arena)` and `dict.Clone(arena)` make an independent copy, in the same arena or another, for example to keep a result past a scratch arena's lifetime. Elements are copied as they are, so a pointer inside one still points where it did.
 - **Growing in place.** `List` and `StrBuilder` extend their buffer without copying while it's still the arena's newest allocation (`TryExtend`). Otherwise the old buffer stays behind until the arena is reset.
+- **Out of memory is your choice.** By default a failed allocation returns null, and `Add` on a collection returns false. `Arena.Create(size, name, stopOnOutOfMemory: true)` ends the program with a message instead, so nothing built on that arena has to check. Use it wherever the program couldn't carry on anyway; it matters most on DOS and WebAssembly, where memory really does run out.
 - **Not thread-safe.** Use one arena per thread.
+- **Seeing what an arena does.** `Arena.Create(size, "frame")` names it, and failure messages then say which arena they are about. `arena.Dump()` prints how full it is and its blocks. `arena.PeakUsed` is the most it ever held at once: run the workload, read it, and pass that as the first block's size so the arena never has to grow.
 - **Stale pointers aren't detected by default.** After `Reset()`, an old pointer still reads valid-looking memory. That's why the freeing operations are `unsafe`.
-- **`Arena.DebugChecks = true`** (set it first thing in `Main`) is the debugging aid for that. Arenas created afterwards fill freed memory with `0xDD` bytes, so a stale pointer reads `0xDDDDDDDD` instead of plausible old data. `List`, `Dict` and `StrBuilder` then also check on every use that their memory is still allocated, and stop the program with a message if it isn't. That catches a collection used after its arena was reset, and the `Restore` hazard above. It can't catch a stale pointer into memory that has since been handed out again, and it costs a fill on every free and a check on every collection operation, so leave it off in release builds.
+- **`Arena.DebugChecks = true`** (set it first thing in `Main`) is the debugging aid for that. Arenas created afterwards fill freed memory with `0xDD` bytes, so a stale pointer reads `0xDDDDDDDD` instead of plausible old data. `List`, `Dict` and `StrBuilder` then also check on every use that their memory is still allocated, and stop the program with a message if it isn't. That catches a collection used after its arena was reset, and the `Restore` hazard above, whether the collection moved to a new buffer or grew in place. It can't catch a stale pointer into memory that has since been handed out again, and it costs a fill on every free and a check on every collection operation, so leave it off in release builds.
 
 ## Strings
 

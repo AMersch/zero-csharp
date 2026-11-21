@@ -231,7 +231,7 @@ public struct Dict<TKey, TValue>
     void DebugCheck()
     {
         if (Arena.DebugChecks)
-            unsafe { Arena.CheckLive(_header->Arena, _header->Entries); } // SAFETY: callers checked _header != null.
+            unsafe { Arena.CheckLive(_header->Arena, _header->Entries, (nuint)_header->Capacity * (nuint)sizeof(Entry)); } // SAFETY: callers checked _header != null.
     }
 
     /// <summary>

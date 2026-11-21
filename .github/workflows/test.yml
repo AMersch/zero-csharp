@@ -88,7 +88,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: bflat_test
+          path: zero-csharp
       - uses: actions/cache/restore@v4
         with:
           path: |
@@ -99,7 +99,7 @@ jobs:
       - name: Install what bflat and the build need
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libtinfo5 binutils
       - name: Test
-        working-directory: bflat_test
+        working-directory: zero-csharp
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-${{ matrix.arch }}
         run: ./test.sh
@@ -110,7 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: bflat_test
+          path: zero-csharp
       - uses: actions/cache/restore@v4
         with:
           path: |
@@ -122,7 +122,7 @@ jobs:
         # clang compiles win/runtime.c and the assembly for Windows.
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libtinfo5 binutils clang
       - name: Test under Wine
-        working-directory: bflat_test
+        working-directory: zero-csharp
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: ./test.sh --win
@@ -135,7 +135,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: bflat_test
+          path: zero-csharp
       - uses: actions/cache/restore@v4
         with:
           path: |
@@ -146,7 +146,7 @@ jobs:
       - name: Install what bflat needs
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libtinfo5
       - name: Compile for macOS
-        working-directory: bflat_test
+        working-directory: zero-csharp
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: |
@@ -156,7 +156,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: mac-objects
-          path: bflat_test/bin/mac/obj
+          path: zero-csharp/bin/mac/obj
 
   macos:
     needs: mac-objects
@@ -178,7 +178,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: bflat_test
+          path: zero-csharp
       - uses: actions/cache/restore@v4
         with:
           path: |
@@ -190,18 +190,18 @@ jobs:
         id: wasm-tools
         uses: actions/cache@v4
         with:
-          path: bflat_test/tools/wasm
-          key: wasm-tools-${{ hashFiles('bflat_test/env.sh') }}
+          path: zero-csharp/tools/wasm
+          key: wasm-tools-${{ hashFiles('zero-csharp/env.sh') }}
       - name: Install what bflat and the build need
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libtinfo5 binutils
       - name: Download the WebAssembly tools
         if: steps.wasm-tools.outputs.cache-hit != 'true'
-        working-directory: bflat_test
+        working-directory: zero-csharp
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: ./setup.sh --wasm
       - name: Test
-        working-directory: bflat_test
+        working-directory: zero-csharp
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: ./test.sh --wasm

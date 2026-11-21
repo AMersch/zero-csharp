@@ -27,7 +27,7 @@ SECTIONS = {
     'reference': 'Reference',
 }
 # Where the site is published, for the absolute links that link previews need.
-SITE_URL = 'https://onurgumus.github.io/bflat_test/'
+SITE_URL = 'https://onurgumus.github.io/zero-csharp/'
 # The link-preview image, drawn from docs/social/card.html.
 SOCIAL_IMAGE = 'img/social.png'
 SOCIAL_IMAGE_ALT = ('C# code from the quiz tutorial next to a blue DOS screen running it: '

@@ -241,7 +241,7 @@ def page(number, filename, types, slug):
     lines, found = collect(LIB / filename, set(types))
     title = types[0]
     out = [f'---\ntitle: {title}\nindex: {number + 1}\n---\n', f'# {title}\n',
-           f'Source: [`lib/{filename}`](https://github.com/OnurGumus/bflat_test/blob/master/lib/{filename})\n',
+           f'Source: [`lib/{filename}`](https://github.com/OnurGumus/zero-csharp/blob/master/lib/{filename})\n',
            'This page is generated from the source by `scripts/gen-reference.py`.\n']
     intro = header_comment(lines)
     if intro:

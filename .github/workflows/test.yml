@@ -160,7 +160,7 @@ jobs:
 
   macos:
     needs: mac-objects
-    runs-on: macos-14 # Apple Silicon
+    runs-on: macos-latest # Apple Silicon
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

@@ -149,8 +149,46 @@ namespace Internal.Runtime.CompilerHelpers
             for (int i = 0; i < header->NumberOfSections; i++)
             {
                 if (sections[i].Id == GCStaticRegionSection)
+                {
                     InitializeStatics(sections[i].Start, sections[i].End);
+                    if (s_regionStart == null)
+                    {
+                        s_regionStart = sections[i].Start;
+                        s_regionEnd = sections[i].End;
+                    }
+                }
             }
+        }
+
+        // The GC static region, kept for StaticsReferInto. A bflat program is
+        // one module, so it has one.
+        private static byte* s_regionStart;
+        private static byte* s_regionEnd;
+
+        // Whether any static field holds a reference to an object in
+        // [start, end). Lib's arena uses it, with debug checks on, to catch a
+        // static field left pointing into memory about to be freed. It reads
+        // every word of every static base, so a non-reference field whose
+        // value happens to be such an address counts too; static bases hold
+        // little else.
+        internal static bool StaticsReferInto(byte* start, byte* end)
+        {
+            bool relative = MethodTable.SupportsRelativePointers;
+            for (byte* entry = s_regionStart; entry < s_regionEnd; entry += relative ? sizeof(int) : sizeof(nint))
+            {
+                nint* slot = relative ? (nint*)ReadRelative(entry) : *(nint**)entry;
+                byte* statics = (byte*)*slot;
+                if (((nint)statics & FlagsMask) != 0)
+                    continue; // never initialized
+                nuint size = (*(MethodTable**)statics)->BaseSize;
+                for (nuint offset = (nuint)sizeof(nint); offset + (nuint)sizeof(nint) <= size; offset += (nuint)sizeof(nint))
+                {
+                    byte* value = *(byte**)(statics + offset);
+                    if (value >= start && value < end)
+                        return true;
+                }
+            }
+            return false;
         }
 
         // Static fields that hold object references live in one object per type

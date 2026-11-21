@@ -37,9 +37,10 @@ by mistake becomes a compile error instead of a leak.
 
 ## Use a value from outside the lambda
 
-A lambda that reads a local variable captures it, and a capturing lambda allocates a closure and a
-delegate on every call. Pass the value as state instead. `Where` and `Select` take it as a first
-argument and hand it to the lambda:
+A lambda that reads a local variable or a parameter captures it. The compiler then allocates a
+closure to hold the variable each time the code that declares it runs, and a delegate with it: in a
+method called in a loop, that's every call, and none of it is freed. Pass the value as state instead.
+`Where` and `Select` take it as a first argument and hand it to the lambda:
 
 <!-- sample: samples/Queries.cs state -->
 ```csharp
@@ -47,15 +48,23 @@ argument and hand it to the lambda:
 int above = numbers.Where(threshold, static (t, x) => x > t).Count();
 ```
 
-For comparison, this is what the state argument avoids. The sample measures it:
+For comparison, this is what the state argument avoids:
+
+<!-- sample: samples/Queries.cs capture-method -->
+```csharp
+// The trap: the lambda captures `limit`, so every call of CountAbove
+// allocates a closure to hold `limit`, and a delegate, never freed.
+static int CountAbove(int[] numbers, int limit)
+    => numbers.Where(x => x > limit).Count();
+```
+
+The sample measures it:
 
 <!-- sample: samples/Queries.cs capture -->
 ```csharp
-// The trap: this lambda captures `threshold`, so every call allocates
-// a closure and a delegate, and they're never freed.
 before = GC.GetTotalAllocatedBytes();
 for (int i = 0; i < 1000; i++)
-    checksum += numbers.Where(x => x > threshold).Count();
+    checksum += CountAbove(numbers, threshold);
 long captured = GC.GetTotalAllocatedBytes() - before;
 ```
 

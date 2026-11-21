@@ -25,6 +25,7 @@ public static class Program
             Out.Line("  builder-grew-in-place  the same for a StrBuilder (DebugChecks)");
             Out.Line("  list-index           a list index out of range");
             Out.Line("  out-of-memory        an allocation the system can't satisfy (stopOnOutOfMemory)");
+            Out.Line("  lambda-in-scope      a lambda first run inside AllocateObjectsHere, cached in the arena (DebugChecks)");
             Out.Line("  throw                a throw, inside a try with a matching catch");
             Out.Line("  throw-null           throw null");
             Out.Line("  union-no-case        a switch on a union that holds none of its cases");
@@ -42,6 +43,7 @@ public static class Program
             case "builder-grew-in-place": BuilderGrewInPlace(); break;
             case "list-index": ListIndex(); break;
             case "out-of-memory": OutOfMemory(); break;
+            case "lambda-in-scope": LambdaInScope(); break;
             case "throw": Throw(); break;
             case "throw-null": ThrowNull(); break;
             case "union-no-case": UnionNoCase(); break;
@@ -172,6 +174,21 @@ public static class Program
         // Half the address space: no system has that much to give.
         arena.Alloc(~(nuint)0 / 2);
         // docs:end
+    }
+
+    static void LambdaInScope()
+    {
+        Arena.DebugChecks = true;
+        Arena frame = Arena.Create(1024, "frame");
+        Arena.ObjectScope objects;
+        unsafe { objects = frame.AllocateObjectsHere(); }
+        using (objects)
+        {
+            // The first run of a lambda that captures nothing creates it and
+            // caches it in a static field: here, inside the arena.
+            System.Func<int, int> twice = static x => x * 2;
+            twice(21);
+        }
     }
 
     static void Throw()

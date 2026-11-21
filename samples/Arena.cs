@@ -194,6 +194,38 @@ public static class Program
         unsafe { arena.Destroy(); } // SAFETY: nothing points into the arena after this.
         Out.Line("Arena destroyed.");
 
+        // docs:object-scope
+        // Ordinary C# allocates with calloc and never frees. Inside
+        // AllocateObjectsHere the same code allocates in the arena, so
+        // resetting it frees everything the round created.
+        Arena rounds = Arena.Create(4096);
+        long heapBefore = System.GC.GetTotalAllocatedBytes();
+        int total = 0;
+        for (int round = 0; round < 1000; round++)
+        {
+            Arena.ObjectScope objects;
+            // SAFETY: nothing created in the round is kept past the Reset.
+            unsafe { objects = rounds.AllocateObjectsHere(); }
+            using (objects)
+            {
+                int[] cells = new int[16];            // an array
+                int offset = round;
+                System.Func<int, int> shift = x => x + offset; // closure, delegate
+                string text = Echo("ab") + Echo("cd"); // a new string
+                total += shift(cells.Length) + text.Length;
+            }
+            unsafe { rounds.Reset(); } // SAFETY: see above.
+        }
+        long heapGrowth = System.GC.GetTotalAllocatedBytes() - heapBefore;
+        // docs:end
+        Out.Line();
+        Out.Line("Objects in an arena, 1000 rounds: heap growth ", heapGrowth,
+            " bytes, arena blocks ", rounds.BlockCount);
+        Out.Write("Every round ran: ");
+        Out.Write(total == 1000 * (16 + 4) + 999 * 1000 / 2);
+        Out.Line();
+        unsafe { rounds.Destroy(); } // SAFETY: nothing points into it.
+
         // docs:debug-checks
         // Debugging aid: arenas created while DebugChecks is on fill freed memory
         // with 0xDD, so a stale pointer reads an obvious pattern instead of the
@@ -217,4 +249,9 @@ public static class Program
         Arena.DebugChecks = false;
         return 0;
     }
+
+    // Returns its argument, out of the compiler's sight, so that `+` in Main
+    // builds a new string at run time instead of joining two literals.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static string Echo(string text) => text;
 }

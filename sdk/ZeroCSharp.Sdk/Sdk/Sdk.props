@@ -18,6 +18,11 @@
     <!-- NuGet reads a framework name it doesn't know as name + version 0.0,
          so the version is part of the name. -->
     <TargetFramework>$(ZeroSdkTfm)</TargetFramework>
+    <!-- A Directory.Build.props of the repository around the project may set
+         these for its .NET projects; a zero project has one framework and
+         none of .NET's global usings. -->
+    <TargetFrameworks></TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
     <TargetFrameworkIdentifier>$(ZeroSdkTfm)</TargetFrameworkIdentifier>
     <TargetFrameworkVersion>v0.0</TargetFrameworkVersion>
     <TargetFrameworkMoniker>$(ZeroSdkTfm),Version=v0.0</TargetFrameworkMoniker>
@@ -52,8 +57,8 @@
     <!-- Speed (bflat's default) or Size (-Os). The native program is optimized
          in Debug and Release alike, as build.sh does. -->
     <ZeroOptimizeFor Condition="'$(ZeroOptimizeFor)' == ''">Speed</ZeroOptimizeFor>
-    <!-- Libraries whose [DllImport]s are bound when the program is linked. -->
-    <ZeroDllImports Condition="'$(ZeroDllImports)' == ''">libc;libm.so.6</ZeroDllImports>
+    <!-- ZeroDllImports: more libraries whose [DllImport]s are bound when the
+         program is linked, besides libc and libm.so.6, which always are. -->
     <!-- ZeroInstructionSet: passed to bflat as -m (x86-64-v3, dotprod, ...). -->
 
     <!-- dotnet pack: the dll goes to lib/<framework>/ by a target in Sdk.targets,

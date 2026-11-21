@@ -586,7 +586,8 @@ case "$TARGET" in
         cp "$WIN_OBJ/runtime.obj" "$WIN_OBJ/zerocore.obj" "$PAYLOAD_DIR/native/win-x64/"
         {
             echo "zero-csharp $(git rev-parse HEAD)"
-            echo "bflat $(git -C "${BFLAT_FORK:-../bflat}" rev-parse HEAD 2>/dev/null || echo unknown)"
+            # BFLAT_COMMIT when the layouts came without their checkout (CI's cache).
+            echo "bflat ${BFLAT_COMMIT:-$(git -C "${BFLAT_FORK:-../bflat}" rev-parse HEAD 2>/dev/null || echo unknown)}"
         } > "$PAYLOAD_DIR/VERSIONS.txt"
         exit 0
         ;;

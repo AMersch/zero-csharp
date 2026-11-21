@@ -28,10 +28,14 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       key: ${{ steps.fork.outputs.key }}
+      commit: ${{ steps.fork.outputs.commit }}
     steps:
       - name: Find the fork's current commit
         id: fork
-        run: echo "key=bflat-layouts-$(git ls-remote https://github.com/OnurGumus/bflat refs/heads/master | cut -f1)" >> "$GITHUB_OUTPUT"
+        run: |
+          commit=$(git ls-remote https://github.com/OnurGumus/bflat refs/heads/master | cut -f1)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "key=bflat-layouts-$commit" >> "$GITHUB_OUTPUT"
       - name: Restore bflat from the cache
         id: cache
         uses: actions/cache@v4
@@ -93,7 +97,7 @@ jobs:
         working-directory: zero-csharp
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
-          BFLAT_FORK: ${{ github.workspace }}/bflat
+          BFLAT_COMMIT: ${{ needs.bflat.outputs.commit }}
         run: ./build.sh --sdk-payload sdk/ZeroCSharp.Sdk/payload
       - uses: actions/upload-artifact@v4
         with:

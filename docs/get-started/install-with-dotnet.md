@@ -14,8 +14,8 @@ the code.
 ## What you need
 
 - **The .NET 10 SDK.** Nothing else: the packages bring the compiler and the linker.
-- **Linux, x64 or arm64, to build programs.** Tested on Ubuntu 22.04 and 24.04, Debian 12 and
-  Fedora 41.
+- **Linux, x64 or arm64, to build programs.** The packages are tested on Ubuntu 22.04 and 24.04,
+  Debian 12 and Fedora 41, each with nothing but the .NET SDK installed.
 - **On macOS,** everything except the last step works: the editor, compiling, libraries and
   `dotnet pack`. Building a program stops with an error that says so. Build programs on a Linux
   machine or in a container, or [install from the repository](install.html), which also covers macOS,
@@ -55,10 +55,11 @@ Out.Write(name);
 Out.Line("!");
 ```
 
-`dotnet build` puts the native program in `bin/Debug/zero01/`:
+`dotnet build` puts the native program in `bin/Debug/zero01/`; `dotnet run` builds and runs it:
 
 ```bash
 echo Ann | bin/Debug/zero01/Hello
+echo Ann | dotnet run
 ```
 
 ```text
@@ -82,10 +83,11 @@ dotnet build -p:ZeroTarget=linux-arm64
 | `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64` | the build machine's |
 | `ZeroOptimizeFor` | `Speed`, or `Size` (bflat's `-Os`) | `Speed` |
 | `ZeroInstructionSet` | passed to bflat as `-m`, e.g. `x86-64-v3` or `dotprod` (see [Use SIMD](../how-to/use-simd.html)) | none |
-| `ZeroDllImports` | libraries whose `[DllImport]`s are bound when linking | `libc;libm.so.6` |
+| `ZeroDllImports` | more libraries whose `[DllImport]`s are bound when linking, besides `libc` and `libm.so.6`, which always are | none |
 
 Set them on the command line with `-p:`, or in the project file. The native program is optimized in
-Debug and Release alike.
+Debug and Release alike. `dotnet publish` copies it, and only it, to the publish folder: it needs
+nothing next to it.
 
 ## What dotnet build does
 
@@ -101,9 +103,11 @@ compiler is.
 
 ## Editors
 
-Editors check code with the compiler they bundle, not the pinned one, so an old editor can mark C# 15
-features as errors that `dotnet build` accepts. The C# extension for VS Code, version 11.9.41, bundles
-Roslyn 5.14, which is new enough. Rider and Visual Studio weren't checked.
+Editors check code with the compiler they bundle, not the pinned one, so an editor whose compiler is
+older than Roslyn 5.12 can mark C# 15 features as errors that `dotnet build` accepts, and a newer one
+may treat preview features a little differently. For example, the C# extension for VS Code, version
+11.9.41, bundles Roslyn 5.14. How editors handle these projects hasn't been checked yet: if yours
+disagrees with `dotnet build`, `dotnet build` is right.
 
 ## Next
 

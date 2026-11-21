@@ -158,6 +158,10 @@ test_host_packages() {
         listing=$(unzip -l "$pkg")
         if ! grep -q ' tools/bflat/bflat$' <<< "$listing"; then fail "host packages" "$rid: no tools/bflat/bflat"; return; fi
         if ! grep -q ' tools/bflat/bin/lld$' <<< "$listing"; then fail "host packages" "$rid: no tools/bflat/bin/lld"; return; fi
+        # The AGPL package must point to its exact source.
+        if ! unzip -p "$pkg" "ZeroCSharp.Bflat.$rid.nuspec" | grep -qE 'commit="[0-9a-f]{40}"'; then
+            fail "host packages" "$rid: the nuspec doesn't name the fork's commit"; return
+        fi
     done
     pass "host packages ($ZERO_HOSTS)"
 }
@@ -350,10 +354,75 @@ test_templates() {
     pass "$name"
 }
 
+# ---- From the final review -----------------------------------------------------
+
+test_custom_packages_folder() {
+    local name="custom packages folder" dir out
+    linux_only "$name" || return
+    dir=$(fixture native pkgfolder)
+    rm -rf "$WORK/pkgfolder-packages"
+    # No trailing slash, as CI setups often write it.
+    if ! (export NUGET_PACKAGES=$WORK/pkgfolder-packages; run_in "$dir" pkgfolder build); then fail "$name" "dotnet build failed"; return; fi
+    out=$("$dir/bin/Debug/$TFM/native"); if [ "$out" != hi ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
+test_dotnet_run() {
+    local name="dotnet run" dir
+    linux_only "$name" || return
+    dir=$(fixture native run)
+    if ! run_in "$dir" run run; then fail "$name" "dotnet run failed"; return; fi
+    if [ "$(tail -1 "$LOG")" != hi ]; then fail "$name" "didn't print hi"; return; fi
+    pass "$name"
+}
+
+test_publish() {
+    local name="publish" dir out
+    linux_only "$name" || return
+    dir=$(fixture native publish)
+    if ! run_in "$dir" publish publish -c Release -o "$dir/out"; then fail "$name" "dotnet publish failed"; return; fi
+    if [ ! -x "$dir/out/native" ]; then fail "$name" "no native program in the publish folder"; return; fi
+    if [ -e "$dir/out/native.dll" ]; then fail "$name" "the IL native.dll was published"; return; fi
+    out=$("$dir/out/native"); if [ "$out" != hi ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
+test_extra_dll_imports() {
+    local name="extra dll imports" dir
+    linux_only "$name" || return
+    dir=$(fixture native dllimports)
+    if ! run_in "$dir" dllimports build -v:n "-p:ZeroDllImports=libdl.so.2;"; then fail "$name" "dotnet build failed"; return; fi
+    if ! grep -q 'tools/bflat/bflat" build.* -i libc .*-i libdl.so.2' "$LOG" && ! grep -q 'tools/bflat/bflat" build.* -i libdl.so.2 .*-i libc ' "$LOG"; then
+        fail "$name" "libc and libdl.so.2 weren't both passed"; return
+    fi
+    pass "$name"
+}
+
+test_inherited_settings() {
+    local name="inherited settings" dir out
+    linux_only "$name" || return
+    dir=$(fixture inherited)
+    if ! run_in "$dir" inherited build; then fail "$name" "dotnet build failed"; return; fi
+    out=$("$dir/bin/Debug/$TFM/inherited"); if [ "$out" != hi ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
+test_clean_and_rebuild() {
+    local name="clean and rebuild" dir
+    linux_only "$name" || return
+    dir=$(fixture native clean)
+    if ! run_in "$dir" clean-1 build; then fail "$name" "dotnet build failed"; return; fi
+    if ! run_in "$dir" clean-2 clean; then fail "$name" "dotnet clean failed"; return; fi
+    if [ -e "$dir/bin/Debug/$TFM/native" ]; then fail "$name" "dotnet clean left the native program"; return; fi
+    if ! run_in "$dir" clean-3 build -v:n || ! ran_bflat; then fail "$name" "building after clean didn't run bflat"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
-    project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates)
+    project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
+    custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild)
 
 # ---- Run ---------------------------------------------------------------------
 

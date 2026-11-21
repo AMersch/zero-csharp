@@ -8,6 +8,8 @@
 # Env:    ZERO_HOSTS     the hosts to pack bflat for (default "linux-x64 linux-arm64")
 #         ZERO_LAYOUTS   where the full layouts are (default ../bflat/layouts):
 #                        linux-glibc-x64, linux-glibc-arm64
+#         BFLAT_FORK, BFLAT_COMMIT   where the fork is checked out, or its commit
+#                        (the bflat packages name it; see build.sh --sdk-payload)
 #         ZERO_PAYLOAD_PREBUILT=1   use sdk/ZeroCSharp.Sdk/payload as it is (CI builds it
 #                        in another job, like sdk/trimmed/)
 # Trimmed layouts are kept in sdk/trimmed/<rid> and redone only when the
@@ -22,6 +24,11 @@ mkdir -p sdk/feed
 rm -f sdk/feed/ZeroCSharp.*.nupkg
 [ -n "${ZERO_PAYLOAD_PREBUILT:-}" ] || ./build.sh --sdk-payload "$payload"
 bflat_commit=$(sed -n 's/^bflat //p' "$payload/VERSIONS.txt")
+# The bflat packages are AGPL: they must name the exact source they were built from.
+if ! [[ "$bflat_commit" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Error: the bflat fork's commit is '$bflat_commit'. Set BFLAT_FORK to its checkout, or BFLAT_COMMIT." >&2
+    exit 1
+fi
 
 for rid in $hosts; do
     layout=$layouts/linux-glibc-${rid#linux-}

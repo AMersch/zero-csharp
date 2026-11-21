@@ -34,6 +34,11 @@ namespace System.Runtime.CompilerServices
 
     public static unsafe class RuntimeHelpers
     {
+        // Records' generated ToString calls this before printing nested
+        // records, to stop a cycle from overflowing the stack. There's no
+        // stack size to check against here, so it lets everything through.
+        public static void EnsureSufficientExecutionStack() { }
+
         // Where a string's characters start, counted from the object's address.
         public static int OffsetToStringData => sizeof(nint) + sizeof(int);
 

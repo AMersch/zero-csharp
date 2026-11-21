@@ -21,7 +21,11 @@ With zerocore, as `build.sh` builds it:
 - **Arrays**: `new T[n]`, including arrays of strings, objects and interfaces, array initializers, and
   `Span<T>`.
 - **Static fields of every type**, including strings, objects and arrays, and static constructors.
-- **Strings**: `==`, `+`, `switch`, plus `lib/` for the rest (see [Strings without a GC](strings.html)).
+- **Strings**: `==`, `+` (with numbers too: `"n=" + 5`), `switch`, `ToString()` and `string.Format`,
+  plus `lib/` for the rest (see [Strings without a GC](strings.html)).
+- **Records and anonymous types**: value equality, `with`, deconstruction and the generated `ToString`;
+  `typeof` and `GetType()` for comparing types. With no reflection, a `Type` has no name, and a class
+  without its own `ToString` prints `object`.
 - **Delegates and lambdas** (they allocate), `try`/`finally` and `using`.
 - **Function pointers, P/Invoke and `[UnmanagedCallersOnly]` callbacks.**
 - **Threads**: [`Parallel.For`](../how-to/run-in-parallel.html) runs a loop on every processor, with
@@ -29,6 +33,26 @@ With zerocore, as `build.sh` builds it:
 - **`Math` and `MathF`**, and `Main(string[] args)` and top-level statements.
 - **Extension methods**, and C# 14 **extension members**: properties, static members and
   `ref` receivers in `extension(...)` blocks.
+
+Records work as in .NET, including the generated `ToString`:
+
+<!-- sample: samples/Records.cs records -->
+```csharp
+public record struct Point(int X, int Y);
+
+public record Person(string Name, int Age);
+
+public record Employee(string Name, int Age, string Team) : Person(Name, Age);
+```
+
+<!-- sample: samples/Records.cs record-use -->
+```csharp
+var a = new Point(1, 2);
+var b = new Point(Opaque(1), 2);
+Point moved = a with { Y = 5 };
+Out.Line(a.ToString());     // Point { X = 1, Y = 2 }
+Out.Line(moved.ToString()); // Point { X = 1, Y = 5 }
+```
 
 Extension members compile to ordinary static methods, so they cost nothing at run time:
 
@@ -190,10 +214,11 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
   Return errors as values instead, for example with a union (see above).
 - **Variance.** Casting or dispatching through it (`IEnumerable<string>` as `IEnumerable<object>`,
   `string[]` as `object[]`) aborts with a message saying so, instead of answering wrongly.
-- **Most of the base class library.** No `Console` (use `Out` and `In`), no `object.ToString`, `Equals`
-  or `GetHashCode`, no .NET collections (use [`lib/`'s](../how-to/choose-a-collection.html)), no LINQ
-  (use [`lib/Seq.cs`](../how-to/query-data.html)), no anonymous types (use tuples),
-  async, `Thread`, `typeof`, `Half`, or boxing of `Nullable<T>`.
+- **Most of the base class library.** No `Console` (use `Out` and `In`), no .NET collections (use
+  [`lib/`'s](../how-to/choose-a-collection.html)), no LINQ (use [`lib/Seq.cs`](../how-to/query-data.html)),
+  no reflection (a `Type` only compares), async, `Thread`, `Half`, or boxing of `Nullable<T>`.
+- **A struct's default `Equals` compares bytes.** A reference field compares by reference, where .NET
+  would call its `Equals`. Records and `IEquatable<T>` compare field by field.
 - **Reflection.** Builds need `--no-reflection`.
 - **Run-time CPU detection.** Instruction sets beyond the baseline are available only when the build
   names them with `-m`.
@@ -212,7 +237,7 @@ These are the issues you may hit with zerocore, as `build.sh` builds:
 | Building without `--no-reflection` fails ("Failed to load type 'Internal.Metadata.NativeFormat.TypeDefinition'") | Pass `--no-reflection`; `build.sh` does |
 | Non-baseline instruction sets (AVX2, FMA, dotprod) report `IsSupported == false` | Build with `-m x86-64-v3` or `-m dotprod`; `build.sh` does this for Simd and Kernels |
 | No `Console`, `Half`, `Thread` | `lib/Out.cs` for output, `lib/In.cs` for input; `Parallel.For` (`lib/Threads.cs`) for threads |
-| `"n=" + 5` doesn't compile (no `object.ToString`) | `Str.Format(arena, $"n={5}")` |
+| `"n=" + 5`, `ToString()` and `string.Format` allocate a string that's never freed | Fine once; in a loop, `Str.Format(arena, $"n={5}")` |
 | Casts and interface calls that need variance abort at run time | Not supported |
 | Windows: x64 only, built from Linux or macOS | `./build.sh --win`; building on Windows (`build.ps1`) is untested |
 | macOS: Apple Silicon only, built on a Mac | `./build.sh --mac` |

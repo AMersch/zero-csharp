@@ -25,7 +25,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
 
-SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads)
+SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records)
 
 # Simd and Kernels print timings, so only their exit code is checked.
 TIMED=" Simd Kernels "
@@ -35,7 +35,7 @@ POINTER_SIZED=" Arena Collections "
 # Simd and Kernels aren't built for DOS: they benchmark SIMD instructions,
 # which a 386 doesn't have.
 # Vga is a game for DOS only; "Vga test" plays by itself and reports.
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Vga)
 
 EXPECTED=tests/expected
 failures=0

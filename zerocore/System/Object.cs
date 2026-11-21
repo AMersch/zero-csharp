@@ -10,11 +10,70 @@ namespace System
         internal MethodTable* _methodTable;
 
         public Object() { }
+
+        // What records, anonymous types and EqualityComparer<T> build on.
+        // An object is equal only to itself, its hash is its address (objects
+        // never move), and with no type names there is nothing better to
+        // print than "object".
+        public virtual bool Equals(object obj) => (object)this == obj;
+
+        public virtual int GetHashCode()
+        {
+            object self = this;
+            nint address = Unsafe.As<object, nint>(ref self);
+            return unchecked((int)(address >> 4) ^ (int)((long)address >> 36));
+        }
+
+        public virtual string ToString() => "object";
+
+        public Type GetType() => Type.Of(_methodTable);
+
+        public static bool ReferenceEquals(object a, object b) => a == b;
+
+        public static bool Equals(object a, object b) => a == b || (a != null && b != null && a.Equals(b));
     }
 
-    public abstract class ValueType { }
+    // A struct is equal to another of the same type with the same bytes. That
+    // is exact for numbers, bools and nested structs of them; a reference
+    // field compares by reference, where .NET would call its Equals (two
+    // equal strings at different addresses differ here). Records and
+    // IEquatable<T> implementations compare field by field instead.
+    public abstract unsafe class ValueType
+    {
+        public override bool Equals(object obj)
+        {
+            if (obj == null || obj._methodTable != _methodTable)
+                return false;
+            uint size = _methodTable->ValueTypeSize;
+            ref byte mine = ref Unsafe.As<RawData>(this).Data;
+            ref byte theirs = ref Unsafe.As<RawData>(obj).Data;
+            for (uint i = 0; i < size; i++)
+            {
+                if (Unsafe.Add(ref mine, (nint)i) != Unsafe.Add(ref theirs, (nint)i))
+                    return false;
+            }
+            return true;
+        }
 
-    public abstract class Enum : ValueType { }
+        public override int GetHashCode()
+            => Number.HashBytes((byte*)Unsafe.AsPointer(ref Unsafe.As<RawData>(this).Data), (int)_methodTable->ValueTypeSize);
+    }
+
+    // With no names to look up, an enum prints its number.
+    public abstract unsafe class Enum : ValueType
+    {
+        public override string ToString()
+        {
+            ref byte data = ref Unsafe.As<RawData>(this).Data;
+            switch (_methodTable->ValueTypeSize)
+            {
+                case 1: return Number.FormatInt64(Unsafe.As<byte, sbyte>(ref data));
+                case 2: return Number.FormatInt64(Unsafe.As<byte, short>(ref data));
+                case 8: return Number.FormatInt64(Unsafe.As<byte, long>(ref data));
+                default: return Number.FormatInt64(Unsafe.As<byte, int>(ref data));
+            }
+        }
+    }
 
     public struct Nullable<T> where T : struct
     {
@@ -48,14 +107,9 @@ namespace System
         public static explicit operator T(T? value) => value.Value;
     }
 
-    public abstract class Type { }
-
-    // The compiler asks for this type by name.
-    internal sealed class RuntimeType : Type { }
-
     public struct RuntimeTypeHandle
     {
-        private nint _value;
+        internal nint _value; // the type's MethodTable*
     }
 
     public struct RuntimeMethodHandle

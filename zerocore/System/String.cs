@@ -8,7 +8,7 @@ namespace System
     // here (by + and Concat) are allocated like any other object and never freed.
     // Object has no Equals or GetHashCode to override here.
 #pragma warning disable CS0660, CS0661
-    public sealed unsafe class String
+    public sealed unsafe class String : IEquatable<string>
 #pragma warning restore CS0660, CS0661
     {
         // The compiler finds these two fields by name, to lay out string literals.
@@ -51,6 +51,62 @@ namespace System
         }
 
         public bool Equals(string other) => Equals(this, other);
+
+        public override bool Equals(object obj) => obj is string other && Equals(this, other);
+
+        // FNV-1a over the characters: equal strings hash alike.
+        public override int GetHashCode()
+        {
+            uint hash = 2166136261;
+            ref char c = ref _firstChar;
+            for (int i = 0; i < _stringLength; i++)
+                hash = (hash ^ Unsafe.Add(ref c, i)) * 16777619;
+            return (int)hash;
+        }
+
+        public override string ToString() => this;
+
+        // string.Format with positional holes only: "{0}", "{1}", ..., and
+        // "{{" and "}}" for braces. Alignment and format strings ("{0,5}",
+        // "{0:F2}") aren't supported and end the program; lib's Out and Fmt
+        // have them. Each argument's ToString fills its hole; null is empty.
+        public static string Format(string format, params object[] args) => Format(null, format, args);
+
+        public static string Format(IFormatProvider provider, string format, params object[] args)
+        {
+            var builder = new System.Text.StringBuilder();
+            for (int i = 0; i < format._stringLength; i++)
+            {
+                char c = format[i];
+                if (c == '{' && i + 1 < format._stringLength && format[i + 1] == '{')
+                {
+                    builder.Append('{');
+                    i++;
+                }
+                else if (c == '}' && i + 1 < format._stringLength && format[i + 1] == '}')
+                {
+                    builder.Append('}');
+                    i++;
+                }
+                else if (c == '{')
+                {
+                    int index = 0;
+                    i++;
+                    while (i < format._stringLength && format[i] >= '0' && format[i] <= '9')
+                        index = index * 10 + (format[i++] - '0');
+                    if (i >= format._stringLength || format[i] != '}' || args == null || index >= args.Length)
+                        Environment.FailFast("string.Format: only {0}, {1}, ... holes are supported");
+                    object arg = args[index];
+                    if (arg != null)
+                        builder.Append(arg.ToString());
+                }
+                else
+                {
+                    builder.Append(c);
+                }
+            }
+            return builder.ToString();
+        }
 
         public static bool operator ==(string a, string b) => Equals(a, b);
 

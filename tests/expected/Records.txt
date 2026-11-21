@@ -1,0 +1,13 @@
+Point { X = 1, Y = 2 }
+Point { X = 1, Y = 5 }
+PASS record struct (4 checks)
+Person { Name = Ann, Age = 41 }
+Employee { Name = Ann, Age = 41, Team = Compilers }
+PASS record class (4 checks)
+{ Name = pen, Price = 3 }
+PASS anonymous types (1 checks)
+count=5, ratio=2.5, ok=True
+PASS text (3 checks)
+PASS cost (1 checks)
+
+All checks passed.

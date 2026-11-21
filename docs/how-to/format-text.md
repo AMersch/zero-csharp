@@ -5,8 +5,9 @@ index: 4
 
 # Format text
 
-zerocore's `string` can't take `$"..."` with holes that aren't strings, and there is no
-`object.ToString`. `lib/` takes `$"..."` through its own interpolated string handlers instead. Each
+zerocore's `string` can't take `$"..."` with holes that aren't strings, and `ToString` and `+`
+allocate a new string each time, never freed. `lib/` takes `$"..."` through its own interpolated
+string handlers instead. Each
 hole is formatted as the compiler visits it, straight into wherever the text is going: stdout, a new
 string in an arena, or a `StrBuilder`. This guide shows the three destinations and the formats a
 hole accepts.
@@ -97,12 +98,13 @@ the questions line up, and `samples/Strings.cs` prints its table with
 
 - **`{-1:X}` isn't the type's width.** Every integer is formatted as a 64-bit `long` or `ulong`, so
   `{-1:X}` prints 16 hex digits whatever the type of the value.
-- **No holes of other types.** There is no `object.ToString`, so a struct or class in a hole doesn't
-  compile. Format its fields instead.
+- **No holes of other types.** A struct or class in a hole doesn't compile. Format its fields
+  instead, or call its `ToString()`, which allocates.
 - **No culture, and few formats.** Formatting is invariant: `.` as the decimal point, no thousands
   separators. Integers know `D` and `X`, doubles know `F`; any other format, such as `N`, `E` or `P`,
   is ignored and the value prints in the default form.
-- **No `string.Format`,** and no numbers in `+`: `"n=" + 5` doesn't compile. Use
+- **`string.Format` and numbers in `+`** (`"n=" + 5`) work, but allocate a string each time with
+  calloc, never freed, and `string.Format` knows only `{0}`-style holes. In a loop, use
   `Str.Format(arena, $"n={5}")`.
 - **Plain `$"..."` as a string** works only when every hole is a string, through `+`, and then it
   allocates with calloc and is never freed. Prefer `Str.Format`.

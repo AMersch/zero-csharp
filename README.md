@@ -252,6 +252,7 @@ unsafe { arena.Reset(); }                // SAFETY: p is not used after this
 | `samples/Guards.cs` | The mistakes `lib/` ends the program for, one per run: marks restored out of order or in the wrong arena, collections used after their memory was freed (`DebugChecks`), a list index out of range, running out of memory in an arena created with `stopOnOutOfMemory`. `test.sh` checks the message of each | ~77 KB |
 | `samples/Queries.cs` | LINQ-style queries with `lib/Seq.cs`: `Where`, `Select`, `Count`, `Sum`, `Any`, `All`, `Take`, `Skip`, `Aggregate`, `TryFirst`, `ToList(arena)`, query syntax, state arguments instead of captures, and tuples instead of anonymous types. Checks with `GC.GetTotalAllocatedBytes()` that a thousand runs allocate nothing, and that a capturing lambda does |
 | `samples/Threads.cs` | `Parallel.For` from `lib/Threads.cs`: iterations spread over every processor, a counter shared through `Interlocked`, and one arena per part, each thread sending its own allocations there with `AllocateObjectsHere`. On WebAssembly and DOS the loops run on one thread and give the same answers |
+| `samples/Records.cs` | `record struct` and `record class` (value equality, `with`, deconstruction, the generated `ToString`), a derived record never equal to its base, `typeof` and `GetType()`, anonymous types, `"n=" + 5`, `ToString()` of numbers and `string.Format`. Checks that comparing record structs allocates nothing |
 | `samples/Vga.cs` | DOS only (see [DOS](#dos)): a small game in 320x200 with 256 colors, steered with the arrow keys; `Vga test` checks the screen, keyboard and clock by itself | 36 KB (DOS) |
 
 Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is stripped); x64 is within a few KB. Run `strip` to shrink the others.
@@ -275,7 +276,7 @@ Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is s
 
 ## What zero mode supports
 
-Zero mode has no garbage collector, no exceptions you can catch (`throw` and other failures print a message and abort), no async/await, no .NET LINQ (`lib/Seq.cs` has allocation-free `Where`, `Select`, `Sum` and friends), no anonymous types (tuples work), and almost no base class library. On the other hand, these all work with zerocore:
+Zero mode has no garbage collector, no exceptions you can catch (`throw` and other failures print a message and abort), no async/await, no .NET LINQ (`lib/Seq.cs` has allocation-free `Where`, `Select`, `Sum` and friends), no reflection, and almost no base class library. Records, anonymous types, `ToString()` and `typeof` work. On the other hand, these all work with zerocore:
 
 - `Span<T>`, and arrays: `new T[n]`, including arrays of strings, objects and interfaces
 - Static fields of every type, including strings, objects and arrays; static constructors
@@ -355,7 +356,7 @@ string label = Str.Format(arena, $"item {id:D4}");          // a real string, in
 - **Arena strings are real strings.** A zero-mode string object is a method-table pointer, a length and the characters, allocated with plain `calloc`. `Str.Format` and `Str.Concat` lay one out in arena memory, so the result works anywhere a string does. It's freed with the rest of its arena (`Restore`, `Reset`, `Destroy`), so don't use it afterwards. `Str.Format` and `Str.Concat` return null if the arena isn't created or is full.
 - **Holes in `$"..."`** take integers, `double` and `float`, `bool`, `char`, strings and spans, with an optional alignment (`{x,8}`, `{x,-8}`) and format: `D`/`Dn` and `X`/`x`/`Xn` for integers, `F`/`Fn` for doubles. Without a format, a double prints up to 6 decimals with trailing zeros removed. Values of 1.8e19 and up print as `1.00e+20`. Unlike .NET, `bool` prints as `true`/`false`, and `{-1:X}` prints 16 hex digits for any integer type, since every integer is formatted as a 64-bit `long` or `ulong`.
 - **Parsing is strict and invariant:** no surrounding whitespace (call `Trim()` first), no thousands separators. `TryParse(s, out double)` is correctly rounded: 5,000 decimal strings across the whole range, denormals included, came out bit-identical to Python's `float()`. It accepts `.5`, `5.`, exponents, `NaN` and `Infinity`; too large gives Infinity and too small gives 0, like .NET.
-- **Not supported:** culture-aware anything, `char`/number operands in `+` (`"n=" + 5`; use `Str.Format(arena, $"n={5}")`), and `string.Format`.
+- **Not supported:** culture-aware anything. `"n=" + 5`, `ToString()` and `string.Format` (`{0}` holes only) work but allocate a string that's never freed; in a loop, use `Str.Format(arena, $"n={5}")`.
 
 ## Known issues
 
@@ -367,7 +368,7 @@ With zerocore, as `build.sh` builds:
 | Building without `--no-reflection` fails ("Failed to load type 'Internal.Metadata.NativeFormat.TypeDefinition'") | Pass `--no-reflection`; `build.sh` does |
 | Non-baseline instruction sets (AVX2, FMA, dotprod) report `IsSupported == false` by default: there's no run-time CPU detection | Build with `-m x86-64-v3` / `-m dotprod`; `build.sh` does this for Simd and Kernels |
 | No `Console`, `Half`, `Thread` | `lib/Out.cs` for output, `lib/In.cs` for input; `Parallel.For` (`lib/Threads.cs`) for threads |
-| `"n=" + 5` doesn't compile (no `object.ToString`) | `Str.Format(arena, $"n={5}")` |
+| `"n=" + 5`, `ToString()` and `string.Format` allocate a string that's never freed | Fine once; in a loop, `Str.Format(arena, $"n={5}")` |
 | Casts and interface calls that need variance abort at run time | Not supported |
 | Windows: x64 only, and built from Linux or macOS | `./build.sh --win`; `build.ps1` (building on Windows) is untested and uses zerolib |
 | macOS: Apple Silicon only, and built on a Mac | `./build.sh --mac` |

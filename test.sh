@@ -14,8 +14,11 @@
 # Usage:  ./test.sh            native, for this machine (or BFLAT_ARCH)
 #         ./test.sh --wasm     WebAssembly (needs ./setup.sh --wasm)
 #         ./test.sh --dos      DOS, on an emulated 386 with 4 MB (needs ./setup.sh --dos)
+#         ./test.sh --win      Windows x64, under Wine in a container
+#         ./test.sh --mac      macOS, natively (on a Mac with Apple Silicon)
 #         ./test.sh --all      native, the other architecture (macOS only, run
-#                              under emulation), and WebAssembly and DOS if set up
+#                              under emulation), Windows, macOS (on Apple
+#                              Silicon), and WebAssembly and DOS if set up
 #         ./test.sh --update   native, and rewrite tests/expected from the output
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS (see env.sh)
 set -euo pipefail
@@ -44,6 +47,8 @@ run_all() {
     local run=(./run.sh)
     local samples=("${SAMPLES[@]}")
     [ "$target" = wasm ] && run+=(--wasm)
+    [ "$target" = win ] && run+=(--win)
+    [ "$target" = mac ] && run+=(--mac)
     if [ "$target" = dos ]; then
         run+=(--dos)
         samples=("${DOS_SAMPLES[@]}")
@@ -59,13 +64,15 @@ run_all() {
         [ -f "$input" ] || input=/dev/null
         # shellcheck disable=SC2086
         out=$("${run[@]}" "$name" $argument < "$input" 2>&1) || status=$?
+        # The C library's puts ends lines with "\r\n" on Windows, as it should.
+        [ "$target" = win ] && out=${out//$'\r'/}
         expected=$EXPECTED/$name.txt
 
         if [ "$status" != 0 ]; then
             echo "FAIL $name: exit code $status"
             echo "$out" | tail -5 | sed 's/^/       /'
             failures=$((failures + 1))
-        elif [[ "$TIMED" == *" $name "* ]] || { [ "$target" != native ] && [[ "$POINTER_SIZED" == *" $name "* ]]; }; then
+        elif [[ "$TIMED" == *" $name "* ]] || { { [ "$target" = wasm ] || [ "$target" = dos ]; } && [[ "$POINTER_SIZED" == *" $name "* ]]; }; then
             echo "ok   $name (exit code only)"
         elif [ "$mode" = update ]; then
             mkdir -p "$EXPECTED"
@@ -116,6 +123,16 @@ test_wasm() {
     run_all "WebAssembly" wasm check
 }
 
+test_mac() {
+    ./build.sh --mac > /dev/null
+    run_all "macOS arm64" mac check
+}
+
+test_win() {
+    ./build.sh --win > /dev/null
+    run_all "Windows x64 (Wine)" win check
+}
+
 # build.sh --dos also checks every program for instructions newer than a 386.
 test_dos() {
     ./build.sh --dos > /dev/null
@@ -130,6 +147,8 @@ case "${1:-}" in
     --update) test_native update ;;
     --wasm)   test_wasm ;;
     --dos)    test_dos ;;
+    --win)    test_win ;;
+    --mac)    test_mac ;;
     --all)
         test_native
         if [ "$(uname -s)" = Darwin ]; then
@@ -144,6 +163,15 @@ case "${1:-}" in
             echo
             echo "(skipping the other architecture: running it needs emulation, which this script only sets up on macOS)"
         fi
+        if [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then
+            test_mac
+        fi
+        if command -v docker >/dev/null 2>&1 && find_dos_clang > /dev/null; then
+            test_win
+        else
+            echo
+            echo "(skipping Windows: needs Docker and a clang with the x86 target)"
+        fi
         if [ -x "$WASM_ILC" ] && [ -x "$WASI_SDK/bin/clang" ]; then
             test_wasm
         else
@@ -157,7 +185,7 @@ case "${1:-}" in
             echo "(skipping DOS: run ./setup.sh --dos first)"
         fi
         ;;
-    *) echo "Usage: ./test.sh [--wasm | --dos | --all | --update]" >&2; exit 2 ;;
+    *) echo "Usage: ./test.sh [--wasm | --dos | --win | --mac | --all | --update]" >&2; exit 2 ;;
 esac
 
 echo

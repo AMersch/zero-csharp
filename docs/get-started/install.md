@@ -44,12 +44,14 @@ elsewhere, set `BFLAT_DIR`.
 
 ## Prerequisites
 
-- **macOS:** Docker. bflat can't produce macOS programs, so it runs in a Linux container of your Mac's
+- **macOS:** Docker. bflat is a Linux program, so it runs in a Linux container of your Mac's
   own architecture (native on Apple Silicon), and so do the programs it builds.
 - **Linux:** `libtinfo.so.5`, which bflat's bundled linker needs, and an assembler (`as`, from
   binutils) for zerocore's assembly routines. On Ubuntu 22.04:
   `sudo apt install libtinfo5 binutils`. Ubuntu 24.04 no longer ships libtinfo5.
-- **Windows:** not supported. `setup.ps1` and `build.ps1` exist but are untested.
+- **Windows** as the machine you build on: not supported. `setup.ps1` and `build.ps1` exist but are
+  untested. Windows as a target works from Linux or macOS: `./build.sh --win` (see
+  [Targets](../concepts/targets.html)), which also needs clang (Xcode's on macOS).
 
 Then let `setup.sh` check them. On macOS it also builds the container image:
 

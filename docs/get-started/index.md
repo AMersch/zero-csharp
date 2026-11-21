@@ -10,9 +10,11 @@ native programs that carry no .NET runtime and no garbage collector. A program h
 type checking and generics, compiled to something the size of a C program: the hello-world sample is
 about 39 KB, the smallest one 16 KB.
 
-The same source builds for three targets:
+The same source builds for five targets:
 
 - **Native Linux**, x64 or arm64. On macOS the compiler runs in a Linux container.
+- **macOS on Apple Silicon**, programs that run on the Mac directly.
+- **Windows x64**, built from Linux or macOS and tested under Wine.
 - **WebAssembly** (WASI), run with wasmtime.
 - **DOS on a 386**, run under FreeDOS in an emulator, or on old hardware.
 

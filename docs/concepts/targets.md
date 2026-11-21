@@ -5,9 +5,10 @@ index: 5
 
 # Targets
 
-The same C# source builds for three targets: a native Linux program, a WebAssembly module, and a DOS
-program for a 386. Each target needs a different compiler for its last step, but all three share the
-same first step and the same core library. This page explains how each path works and what changes
+The same C# source builds for five targets: a native Linux program, a macOS program for Apple
+Silicon, a 64-bit Windows program, a WebAssembly module, and a DOS program for a 386. WebAssembly and
+DOS need a different compiler for their last step, but all five share the same first step and the
+same core library. This page explains how each path works and what changes
 along it.
 
 ## The shared first step
@@ -18,7 +19,7 @@ place of a header file. Because it holds IL rather than native code, the last st
 compiles only what that program uses: generics are instantiated for its types, calls are inlined across
 the library boundary, and code is generated for its target and its `-m` flags.
 
-`lib/` is the same assembly for all three targets. zerocore is built a second time with `-d WASM` for
+`lib/` is the same assembly for all five targets. zerocore is built a second time with `-d WASM` for
 WebAssembly and DOS, because that build finds static fields differently.
 
 ## Native Linux
@@ -31,7 +32,7 @@ The native target is bflat's own: `bflat build` compiles a sample, with `zerocor
 ./run.sh Arena        # runs it (in the container on macOS)
 ```
 
-bflat can't target macOS, so on a Mac it runs in a Linux container of the Mac's own architecture, which
+bflat is a Linux program, so on a Mac it runs in a Linux container of the Mac's own architecture, which
 is native on Apple Silicon. `BFLAT_ARCH=x64` or `arm64` cross-compiles.
 
 A few things `build.sh` adds matter for what you get:
@@ -45,6 +46,44 @@ A few things `build.sh` adds matter for what you get:
 - **Tiny** is built with `-Os --no-pie` and stripped.
 
 [Your first program](../get-started/first-program.html) walks through a native build.
+
+## macOS on Apple Silicon
+
+`./build.sh --mac` builds programs that run on the Mac itself, without the container. bflat still runs
+in the container, but with `--os macos -c` it only compiles: it writes a Mach-O object file, and the
+Mac's own clang links it with two small files:
+
+- `mac/runtime.c` holds `main` and a `clock_gettime` that answers the samples' Linux clock number.
+  The rest of the C library calls have the same names on macOS.
+- `zerocore/native/mac-arm64.S` is `arm64.S` as a Mach-O object.
+
+```bash
+./build.sh --mac Core     # bin/mac/Core
+./run.sh --mac Core       # or just bin/mac/Core
+```
+
+zerocore is unchanged. The link maps Apple's names for the module section's bounds onto the
+`__start___modules` and `__stop___modules` symbols that GNU ld provides on Linux. Programs start at
+63 KB, because macOS arm64 aligns each of a program's four segments to 16 KB pages.
+
+## Windows x64
+
+`./build.sh --win` uses the same bflat, with `--os windows --arch x64`, and the same zerocore and
+`lib/`. Two small files supply what is Windows-specific:
+
+- `win/runtime.c` is the entry point. Windows starts a program with no `argc` or `argv`, so it builds
+  them from the command line, in UTF-8 as on Linux, and calls `Main`. It also provides `write`, `read`
+  and `clock_gettime` on top of kernel32. The rest of the C library comes from Windows' Universal CRT.
+- `zerocore/native/win-x64.S` is zerocore's assembly for the Windows calling convention, plus the stack
+  probe that Windows needs for frames larger than a page.
+
+```bash
+./build.sh --win Core     # bin/win/Core.exe
+./run.sh --win Core       # runs it under Wine, in an x64 container
+```
+
+The programs print what the native build prints. `puts` ends lines with `\r\n`, as Windows programs
+do, and a program zerocore stops exits with code 3. Only x64 is supported.
 
 ## WebAssembly
 

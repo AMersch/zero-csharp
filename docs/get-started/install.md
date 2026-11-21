@@ -11,8 +11,8 @@ the libraries your programs use are compiled from source in this repository.
 ## The repository
 
 ```bash
-git clone https://github.com/OnurGumus/bflat_test.git
-cd bflat_test
+git clone https://github.com/OnurGumus/zero-csharp.git
+cd zero-csharp
 ```
 
 ## The bflat fork

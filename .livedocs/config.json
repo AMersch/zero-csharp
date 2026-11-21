@@ -1,6 +1,6 @@
 {
   "siteName": "Zero C#",
-  "repoUrl": "https://github.com/OnurGumus/bflat_test",
+  "repoUrl": "https://github.com/OnurGumus/zero-csharp",
   "logoPath": "img/mark.svg",
   "stylesheet": "content/site.css",
   "themes": [
@@ -26,7 +26,7 @@
     },
     {
       "label": "GitHub",
-      "href": "https://github.com/OnurGumus/bflat_test"
+      "href": "https://github.com/OnurGumus/zero-csharp"
     }
   ],
   "projects": [

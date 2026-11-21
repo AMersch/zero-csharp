@@ -5,9 +5,11 @@ index: 5
 
 # Run it in your browser
 
-The samples' WebAssembly builds run right here, in this page: the same `.wasm` files that
-`./build.sh --wasm` makes and `./test.sh --wasm` checks, built from this site's version of the code.
-Each one is a few dozen kilobytes. Pick one and run it.
+The samples run right here, in this page. They are the WebAssembly modules that `./build.sh --wasm`
+makes and that the tests check, built from this site's version of the code: a few dozen kilobytes
+each, and 1.1 MB for the language model, whose weights are inside it.
+
+## Pick a sample and run it
 
 <div data-wasm-runner="../wasm/" class="not-prose wasm-runner">
   <label>Sample
@@ -32,6 +34,8 @@ Each one is a few dozen kilobytes. Pick one and run it.
   <button type="button">Run</button>
   <output></output>
 </div>
+
+## What the page does
 
 The page gives each program what a terminal would: its arguments, standard input from the box, and
 standard output and error printed below, with the exit code. That is all of WASI these programs use,

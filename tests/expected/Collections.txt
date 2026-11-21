@@ -31,12 +31,30 @@ Remove(3): true, again: false, Count: 3
 foreach over scores: 3 pairs, values sum to 1349
 After removing the 500 even keys: Count 500, odd keys intact: 500
 
+--- RefList<string> ---
+Sorted (null first): [null, alpha:5, bravo:5, charlie:7, delta:5] (5 items)
+RemoveAt(0), Set(0): [ALPHA, bravo:5, charlie:7, delta:5] (4 items)
+default(RefList): Count 0, Add returns false
+
+--- StrDict ---
+Word counts: 5 distinct, the = 3, and = 2, bat = 1, dog = 0
+500 keys, 250 even ones removed: Count 250, odd keys intact: 250, foreach: 250 pairs summing to 20833250
+key0 gone: true, key499 = 249001
+StrDict<string>: ok = fine x2, Count 1
+default(StrDict): Count 0, Set returns false, found: false
+
+--- RefDict<int, string> ---
+3 = three is 3, 9 found: true and null: true, 4 found: false and null: true
+Remove(7): true, again: false, Count: 2
+foreach: keys sum to 12
+
 --- Clone ---
 Original changed: numbers[0] = -1, scores[2] = 0
 Clones unchanged: snapshot[0] = 10, scoresCopy[2] = 250
 Clone capacity fits its 12 items: 12
 Clone of default(List) is not created: true
 
-Arena used: 99664 bytes
+Arena used: 163896 bytes
+StrDict clone, keys copied: the = 3, dog = 1, Count 6
 After destroying the first arena, clones still work: 13 items, last = 1234, scoresCopy[-42] = 999
 Done!

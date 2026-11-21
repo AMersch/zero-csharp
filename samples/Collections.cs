@@ -1,8 +1,12 @@
-// Example: Generic List<T> and Dict<K,V> (lib/List.cs, lib/Dict.cs) in --stdlib:zero.
+// Example: Generic List<T> and Dict<K,V> (lib/List.cs, lib/Dict.cs) in --stdlib:zero,
+// and their versions for references: RefList<T>, StrDict<TValue> (string keys
+// compared by text) and RefDict<TKey, TValue> (lib/RefList.cs, StrDict.cs, RefDict.cs).
 // Build: ./build.sh Collections
 //
-// Both collections take their memory from the Arena and work with any
+// All of them take their memory from the Arena. List and Dict work with any
 // unmanaged element type.
+
+using System;
 
 namespace CollectionsSample;
 
@@ -139,8 +143,98 @@ public static class Program
 
         // Collections are handles, so `var b = a` shares contents. Clone makes a
         // real copy, in any arena: here one that outlives the original's.
+        // List<T> takes only unmanaged types; RefList<T> holds references.
+        Out.Line("--- RefList<string> ---");
+        var names = RefList<string>.Create(arena, 0);
+        string[] words = { "delta", "alpha", "charlie", "bravo" };
+        foreach (string word in words)
+            names.Add(Str.Format(arena, $"{word}:{word.Length}")); // strings built in the arena
+        names.Add(null);
+        names.Sort(&ByName);
+        Out.Write("Sorted (null first): ");
+        PrintNames(names);
+        names.RemoveAt(0);
+        names.Set(0, "ALPHA");
+        Out.Write("RemoveAt(0), Set(0): ");
+        PrintNames(names);
+        RefList<string> noNames = default;
+        Out.Line($"default(RefList): Count {noNames.Count}, Add returns {noNames.Add("x")}");
+        Out.Line();
+
+        // Keys compared by their text; each new key is copied into the map.
+        Out.Line("--- StrDict ---");
+        var counts = StrDict<int>.Create(arena, 0);
+        Span<char> wordBuffer = stackalloc char[8]; // every word is read into this buffer
+        foreach (ReadOnlySpan<char> w in "the cat and the hat and the bat".Split(' '))
+        {
+            for (int i = 0; i < w.Length; i++)
+                wordBuffer[i] = w[i];
+            ReadOnlySpan<char> key = wordBuffer.Slice(0, w.Length);
+            counts.TryGet(key, out int n);
+            counts.Set(key, n + 1);
+        }
+        Out.Line($"Word counts: {counts.Count} distinct, the = {Count(counts, "the")}, and = {Count(counts, "and")}, bat = {Count(counts, "bat")}, dog = {Count(counts, "dog")}");
+
+        // Keys made in a scratch arena that is reset every time: the map has its own copies.
+        var squareMap = StrDict<long>.Create(arena, 0);
+        Arena scratch = Arena.Create(256);
+        for (int i = 0; i < 500; i++)
+        {
+            unsafe { scratch.Reset(); } // SAFETY: nothing from scratch is used after this.
+            squareMap.Set(Str.Format(scratch, $"key{i}"), (long)i * i);
+        }
+        int removed = 0;
+        for (int i = 0; i < 500; i += 2)
+        {
+            unsafe { scratch.Reset(); } // SAFETY: as above.
+            if (squareMap.Remove(Str.Format(scratch, $"key{i}")))
+                removed++;
+        }
+        int oddFound = 0;
+        for (int i = 1; i < 500; i += 2)
+        {
+            unsafe { scratch.Reset(); } // SAFETY: as above.
+            if (squareMap.TryGet(Str.Format(scratch, $"key{i}"), out long square) && square == (long)i * i)
+                oddFound++;
+        }
+        long squareSum = 0;
+        int squarePairs = 0;
+        foreach (var pair in squareMap)
+        {
+            squareSum += pair.Value;
+            squarePairs++;
+        }
+        unsafe { scratch.Destroy(); } // SAFETY: nothing from scratch is used after this.
+        Out.Line($"500 keys, {removed} even ones removed: Count {squareMap.Count}, odd keys intact: {oddFound}, foreach: {squarePairs} pairs summing to {squareSum}");
+        Out.Line($"key0 gone: {!squareMap.ContainsKey("key0")}, key499 = {(squareMap.TryGet("key499", out long last) ? last : -1)}");
+
+        var labels = StrDict<string>.Create(arena); // values can be references too
+        labels.Set("ok", "fine");
+        labels.Set("ok", Str.Format(arena, $"fine x{2}"));
+        Out.Line($"StrDict<string>: ok = {(labels.TryGet("ok", out string label) ? label : "missing")}, Count {labels.Count}");
+        StrDict<int> noCounts = default;
+        Out.Line($"default(StrDict): Count {noCounts.Count}, Set returns {noCounts.Set("x", 1)}, found: {noCounts.ContainsKey("x")}");
+        Out.Line();
+
+        // Unmanaged keys, reference values.
+        Out.Line("--- RefDict<int, string> ---");
+        var byId = RefDict<int, string>.Create(arena);
+        byId.Set(7, "seven");
+        byId.Set(3, Str.Format(arena, $"three is {3}"));
+        byId.Set(9, null);
+        bool nineFound = byId.TryGet(9, out string nine);
+        bool fourFound = byId.TryGet(4, out string four);
+        Out.Line($"3 = {(byId.TryGet(3, out string three) ? three : "missing")}, 9 found: {nineFound} and null: {nine is null}, 4 found: {fourFound} and null: {four is null}");
+        Out.Line($"Remove(7): {byId.Remove(7)}, again: {byId.Remove(7)}, Count: {byId.Count}");
+        int ids = 0;
+        foreach (var pair in byId)
+            ids += pair.Key;
+        Out.Line($"foreach: keys sum to {ids}");
+        Out.Line();
+
         Out.Line("--- Clone ---");
         Arena keep = Arena.Create(4096);
+        StrDict<int> countsCopy = counts.Clone(keep); // keys are copied into keep too
         List<int> snapshot = numbers.Clone(keep);
         Dict<int, int> scoresCopy = scores.Clone(keep);
         numbers.Set(0, -1);
@@ -158,6 +252,8 @@ public static class Program
         unsafe { arena.Destroy(); } // SAFETY: only the clones, which live in `keep`, are used after this.
 
         snapshot.Add(1234); // the clone grows in its own arena
+        countsCopy.Set("dog", 1);
+        Out.Line($"StrDict clone, keys copied: the = {Count(countsCopy, "the")}, dog = {Count(countsCopy, "dog")}, Count {countsCopy.Count}");
         Out.Line($"After destroying the first arena, clones still work: {snapshot.Count} items, last = {snapshot.Get(snapshot.Count - 1)}, scoresCopy[-42] = {(scoresCopy.TryGet(-42, out value) ? value : -1)}");
         unsafe { keep.Destroy(); } // SAFETY: the clones are not used after this.
         Out.Line("Done!");
@@ -173,6 +269,24 @@ public static class Program
     static int Ascending(int a, int b) => a < b ? -1 : a > b ? 1 : 0;
 
     static int ByLastDigit(int a, int b) => a % 10 != b % 10 ? a % 10 - b % 10 : Ascending(a, b);
+
+    static int ByName(string a, string b) => Str.Compare(a, b);
+
+    static int Count(StrDict<int> counts, string word) => counts.TryGet(word, out int n) ? n : 0;
+
+    static void PrintNames(RefList<string> names)
+    {
+        Out.Write("[");
+        bool first = true;
+        foreach (string name in names)
+        {
+            if (!first)
+                Out.Write(", ");
+            Out.Write(name is null ? "null" : name);
+            first = false;
+        }
+        Out.Line($"] ({names.Count} items)");
+    }
 
     static void PrintList(List<int> list)
     {

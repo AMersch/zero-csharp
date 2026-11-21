@@ -3,6 +3,9 @@
 # (the test samples exit with their number of failed checks), and those whose
 # output is the same on every run must print exactly what tests/expected holds.
 #
+# A sample with a tests/input/<Sample>.txt reads it as standard input; the
+# others get an empty one.
+#
 # Usage:  ./test.sh            native, for this machine (or BFLAT_ARCH)
 #         ./test.sh --wasm     WebAssembly (needs ./setup.sh --wasm)
 #         ./test.sh --dos      DOS, on an emulated 386 with 4 MB (needs ./setup.sh --dos)
@@ -14,7 +17,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
 
-SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Simd Kernels Strings)
+SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Simd Kernels Strings Quiz)
 
 # Simd and Kernels print timings, so only their exit code is checked.
 TIMED=" Simd Kernels "
@@ -24,14 +27,14 @@ POINTER_SIZED=" Arena Collections "
 # Simd and Kernels aren't built for DOS: they benchmark SIMD instructions,
 # which a 386 doesn't have.
 # Vga is a game for DOS only; "Vga test" plays by itself and reports.
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Strings Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Strings Quiz Vga)
 
 EXPECTED=tests/expected
 failures=0
 
 # $1: a label for the report; $2: "native", "wasm" or "dos"; $3: "check" or "update"
 run_all() {
-    local label=$1 target=$2 mode=$3 name out status expected argument
+    local label=$1 target=$2 mode=$3 name out status expected argument input
     local run=(./run.sh)
     local samples=("${SAMPLES[@]}")
     [ "$target" = wasm ] && run+=(--wasm)
@@ -46,8 +49,10 @@ run_all() {
         status=0
         argument=
         [ "$name" = Vga ] && argument=test
+        input=tests/input/$name.txt
+        [ -f "$input" ] || input=/dev/null
         # shellcheck disable=SC2086
-        out=$("${run[@]}" "$name" $argument 2>&1) || status=$?
+        out=$("${run[@]}" "$name" $argument < "$input" 2>&1) || status=$?
         expected=$EXPECTED/$name.txt
 
         if [ "$status" != 0 ]; then

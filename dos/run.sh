@@ -9,7 +9,9 @@
 # program's exit code. With --window the emulator's window shows the DOS
 # screen and stays at the prompt (type `PROGRAM` to run it again).
 #
-# Usage: dos/run.sh [--window] <Sample> [args...]
+# Usage: dos/run.sh [--window] <Sample> [args...] [< input]
+# When standard input is a file or a pipe, its contents go onto D: and the
+# program reads them as its standard input; otherwise it reads the keyboard.
 # Env:   DOS_EMULATOR, DOS_CPU, DOS_TOOLS (see ../env.sh)
 #        DOS_TIMEOUT   seconds before a run without a window is stopped (default 120)
 #        DOS_MEMORY    the machine's memory in MB (default 4)
@@ -52,6 +54,14 @@ memory=${DOS_MEMORY:-4}
 mkdir -p "$work"
 disk=$work/disk.img
 
+# Standard input from a file or a pipe becomes IN.TXT, which the batch file
+# hands to the program with "<". (With a window, the program reads the keyboard.)
+input=
+if [ "$window" = 0 ] && { [ -f /dev/stdin ] || [ -p /dev/stdin ]; }; then
+    cat > "$work/IN.TXT"
+    input=" < IN.TXT"
+fi
+
 # HXLDR32 stays resident and makes DOS start Windows console programs through
 # HX's loader, so the program is run by its name like any DOS program.
 # CTMOUSE is FreeDOS's mouse driver; without a mouse it just doesn't load.
@@ -66,12 +76,15 @@ files=("$exe=PROGRAM.EXE" "$work/RUN.BAT"
     if [ "$window" = 1 ]; then
         printf 'PROGRAM.EXE %s\r\n' "$*"
     else
-        printf 'PROGRAM.EXE %s > OUT.TXT\r\n' "$*"
+        printf 'PROGRAM.EXE %s%s > OUT.TXT\r\n' "$*" "$input"
         printf 'echo %%ERRORLEVEL%% > CODE.TXT\r\n'
         printf 'FDAPM POWEROFF\r\n'
     fi
 } > "$work/RUN.BAT"
 
+if [ -n "$input" ]; then
+    files+=("$work/IN.TXT")
+fi
 python3 dos/fat16.py make "$disk" "${files[@]}"
 
 case "$emulator" in

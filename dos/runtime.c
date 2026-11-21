@@ -115,6 +115,17 @@ int write(int fd, const void *buffer, size_t count)
     return (int)written;
 }
 
+// Standard input, whatever fd is: the keyboard through HX's console, or a
+// file given with "<" (what test.sh uses). Returns 0 at the end of input.
+int read(int fd, void *buffer, size_t count)
+{
+    u32 got = 0;
+    (void)fd;
+    if (!ReadFile(GetStdHandle(STD_INPUT_HANDLE), buffer, count, &got, 0))
+        return -1;
+    return (int)got;
+}
+
 int puts(const char *text)
 {
     size_t length = 0;

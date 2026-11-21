@@ -39,5 +39,8 @@ Second arena: list of 100 ints, 920 bytes used
 First arena untouched: true
 Arena destroyed.
 
+Objects in an arena, 1000 rounds: heap growth 0 bytes, arena blocks 1
+Every round ran: true
+
 DebugChecks: pointer is live before Reset: true
 After Reset the stale pointer reads 0xDDDDDDDD, IsLive: false

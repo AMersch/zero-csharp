@@ -27,6 +27,9 @@
 // - Reset() keeps the capacity by merging all blocks into one, so a
 //   steady-state workload (one scratch arena per token, per frame, ...)
 //   stops calling malloc after the first round.
+// - AllocateObjectsHere() sends every ordinary allocation (new, closures,
+//   strings, boxing) to the arena until the scope closes, so code that would
+//   leak frees its objects with the arena. See it for the rules.
 // - Not thread-safe: use one arena per thread.
 // - Arena.DebugChecks = true (set it first thing in Main) makes arenas created
 //   afterwards fill freed memory with 0xDD bytes, and makes List, Dict and
@@ -525,6 +528,95 @@ public struct Arena
     /// including the buffer of an older collection that grew inside it.
     /// </safety>
     public unsafe Scope OpenScope() => new Scope { Arena = this, Mark = Save() };
+
+    /// <summary>
+    /// Until the returned scope is disposed, every object the program creates
+    /// (new, boxing, closures, delegates, arrays, string concatenation) is
+    /// allocated in this arena instead of with calloc, so resetting the arena
+    /// frees it: ordinary C# stops leaking.
+    /// <code>
+    /// Arena frame = Arena.Create(64 * 1024);
+    /// ObjectScope objects;
+    /// unsafe { objects = frame.AllocateObjectsHere(); } // SAFETY: see below
+    /// using (objects)
+    /// {
+    ///     ... code that allocates ...
+    /// }
+    /// unsafe { frame.Reset(); } // SAFETY: nothing from the frame is kept
+    /// </code>
+    /// Scopes nest: disposing one puts back whatever was in effect before it.
+    /// The arena must outlive the scope, and while it is open only one thread
+    /// may allocate.
+    /// </summary>
+    /// <safety>
+    /// The objects die with the arena (Reset, Restore, Destroy), so no
+    /// reference to one may be kept past that: not in a static field, not in an
+    /// object from outside the scope. That includes what the compiler keeps
+    /// for you: a lambda that captures nothing is created the first time it
+    /// runs and then cached in a static field, and a static constructor runs
+    /// the first time its type is used. If either happens first inside the
+    /// scope, the cache or the static field points into the arena. Run such
+    /// code once before opening the scope. With Arena.DebugChecks on when the
+    /// arena was created, closing the scope checks every static field and
+    /// stops the program if one points into the arena.
+    /// The compiler also caches delegates outside static fields: a lambda that
+    /// captures a variable declared outside the scope is cached in the closure
+    /// that holds that variable, an object from outside, and the check can't
+    /// see that. Declare what a lambda inside the scope captures inside the
+    /// scope too, or in a method called from it.
+    /// </safety>
+    public unsafe ObjectScope AllocateObjectsHere()
+    {
+        ObjectScope scope = default;
+        scope.State = _state;
+        unsafe
+        {
+            // SAFETY: ObjectAllocator only stores the pointers; AllocateObject
+            // is given this arena's live state, which the caller keeps alive.
+            System.Runtime.ObjectAllocator.Get(out scope.PreviousAllocate, out scope.PreviousContext);
+            System.Runtime.ObjectAllocator.Set(&AllocateObject, _state);
+        }
+        return scope;
+    }
+
+    // ObjectAllocator's function: objects are pointer-aligned and zeroed.
+    static unsafe void* AllocateObject(void* context, nuint size)
+        => new Arena { _state = (State*)context }.Alloc(size, (nuint)sizeof(nint), zero: true);
+
+    /// <summary>From AllocateObjectsHere, for a using block: disposing it puts back the allocator that was in effect before.</summary>
+    public ref struct ObjectScope
+    {
+        internal delegate*<void*, nuint, void*> PreviousAllocate;
+        internal void* PreviousContext;
+        internal void* State; // the arena's State*
+
+        public void Dispose()
+        {
+            // SAFETY: puts back what AllocateObjectsHere found.
+            unsafe { System.Runtime.ObjectAllocator.Set(PreviousAllocate, PreviousContext); }
+            unsafe { CheckStatics((State*)State); } // SAFETY: State is the scope's live arena.
+        }
+    }
+
+    // With debug checks on: stops the program if a static field points into
+    // the arena, which only an object created inside AllocateObjectsHere can
+    // make happen.
+    static unsafe void CheckStatics(State* state)
+    {
+        unsafe
+        {
+            // SAFETY: the scope's caller keeps the arena alive until the scope
+            // is disposed, and the block list belongs to it.
+            if (state == null || !state->Poison)
+                return;
+            for (Block* block = state->First; block != null; block = block->Next)
+            {
+                if (System.Runtime.ObjectAllocator.StaticsReferInto(block->Start, block->End))
+                    Fail(state, "Arena.AllocateObjectsHere: a static field points at an object created inside the scope. "
+                        + "A lambda or static constructor probably ran for the first time inside it; run it once before.");
+            }
+        }
+    }
 
     /// <summary>
     /// Prints the arena's name, how full it is and its blocks to standard output:

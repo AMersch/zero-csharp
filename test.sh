@@ -130,6 +130,9 @@ test_mac() {
 
 test_win() {
     ./build.sh --win > /dev/null
+    # Build the Wine image now, if needed, so its build log doesn't end up in
+    # the first program's output.
+    ensure_win_image > /dev/null
     run_all "Windows x64 (Wine)" win check
 }
 

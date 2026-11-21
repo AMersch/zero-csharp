@@ -1,8 +1,11 @@
-# Builds the samples on Linux x64 and runs ./test.sh.
+# Builds the samples and runs ./test.sh on every target CI can run:
+# Linux x64 and arm64, macOS on Apple Silicon, Windows x64 (under Wine) and
+# WebAssembly. DOS isn't here: it runs under an emulated 386 for 15 minutes
+# and more, so run ./test.sh --dos locally.
 #
 # bflat comes from the fork (see README, "Getting bflat"). It has no release to
-# download, so the first run builds its layouts from source, which takes a
-# while; later runs reuse them from the cache until the fork's master moves.
+# download, so the first job builds its layouts from source when the fork's
+# master has moved, and caches them; every other job restores that cache.
 name: Test
 
 on:
@@ -16,31 +19,31 @@ permissions:
   packages: read # the fork's build restores packages from GitHub Packages
 
 jobs:
-  test:
-    # 22.04: bflat's bundled linker needs libtinfo5, which 24.04 doesn't ship.
+  bflat:
     runs-on: ubuntu-22.04
+    outputs:
+      key: ${{ steps.fork.outputs.key }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          path: bflat_test
-
       - name: Find the fork's current commit
         id: fork
-        run: echo "sha=$(git ls-remote https://github.com/OnurGumus/bflat refs/heads/master | cut -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "key=bflat-layouts-$(git ls-remote https://github.com/OnurGumus/bflat refs/heads/master | cut -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Restore bflat from the cache
         id: cache
         uses: actions/cache@v4
         with:
-          path: bflat/layouts/linux-glibc-x64
-          key: bflat-linux-x64-${{ steps.fork.outputs.sha }}
+          path: |
+            bflat/layouts/linux-glibc-x64
+            bflat/layouts/linux-glibc-arm64
+          key: ${{ steps.fork.outputs.key }}
+          lookup-only: true
 
       - name: Check out the fork
         if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: OnurGumus/bflat
-          ref: ${{ steps.fork.outputs.sha }}
+          ref: master
           path: bflat
 
       - name: Set up .NET
@@ -61,11 +64,144 @@ jobs:
           cd ../..
           dotnet build src/bflat/bflat.csproj -t:BuildLayouts -c:Release
 
+      - name: Save bflat to the cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            bflat/layouts/linux-glibc-x64
+            bflat/layouts/linux-glibc-arm64
+          key: ${{ steps.fork.outputs.key }}
+
+  linux:
+    needs: bflat
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    # 22.04: bflat's bundled linker needs libtinfo5, which 24.04 doesn't ship.
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: bflat_test
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            bflat/layouts/linux-glibc-x64
+            bflat/layouts/linux-glibc-arm64
+          key: ${{ needs.bflat.outputs.key }}
+          fail-on-cache-miss: true
       - name: Install what bflat and the build need
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libtinfo5 binutils
+      - name: Test
+        working-directory: bflat_test
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-${{ matrix.arch }}
+        run: ./test.sh
 
+  windows:
+    needs: bflat
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: bflat_test
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            bflat/layouts/linux-glibc-x64
+            bflat/layouts/linux-glibc-arm64
+          key: ${{ needs.bflat.outputs.key }}
+          fail-on-cache-miss: true
+      - name: Install what bflat and the build need
+        # clang compiles win/runtime.c and the assembly for Windows.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libtinfo5 binutils clang
+      - name: Test under Wine
+        working-directory: bflat_test
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
+        run: ./test.sh --win
+
+  # macOS runners have no Docker to run bflat in, so bflat compiles the
+  # samples to Mach-O object files here, and the macos job links and runs them.
+  mac-objects:
+    needs: bflat
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: bflat_test
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            bflat/layouts/linux-glibc-x64
+            bflat/layouts/linux-glibc-arm64
+          key: ${{ needs.bflat.outputs.key }}
+          fail-on-cache-miss: true
+      - name: Install what bflat needs
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libtinfo5
+      - name: Compile for macOS
+        working-directory: bflat_test
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
+        run: |
+          source ./env.sh
+          eval "$(grep '^ALL_SAMPLES=' build.sh)"
+          ./build.sh --native-mac-objects "${ALL_SAMPLES[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-objects
+          path: bflat_test/bin/mac/obj
+
+  macos:
+    needs: mac-objects
+    runs-on: macos-latest # Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-objects
+          path: bin/mac/obj
+      - name: Link and test
+        env:
+          MAC_OBJECTS_PREBUILT: '1'
+        run: ./test.sh --mac
+
+  wasm:
+    needs: bflat
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: bflat_test
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            bflat/layouts/linux-glibc-x64
+            bflat/layouts/linux-glibc-arm64
+          key: ${{ needs.bflat.outputs.key }}
+          fail-on-cache-miss: true
+      - name: Restore the WebAssembly tools
+        id: wasm-tools
+        uses: actions/cache@v4
+        with:
+          path: bflat_test/tools/wasm
+          key: wasm-tools-${{ hashFiles('bflat_test/env.sh') }}
+      - name: Install what bflat and the build need
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libtinfo5 binutils
+      - name: Download the WebAssembly tools
+        if: steps.wasm-tools.outputs.cache-hit != 'true'
+        working-directory: bflat_test
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
+        run: ./setup.sh --wasm
       - name: Test
         working-directory: bflat_test
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
-        run: ./test.sh
+        run: ./test.sh --wasm

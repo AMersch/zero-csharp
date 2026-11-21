@@ -5,8 +5,9 @@
 // Without a garbage collector, memory a query allocates is never given back.
 // So the checks at the end run every query a thousand times and compare
 // GC.GetTotalAllocatedBytes() before and after: the operators and `static`
-// lambdas must not allocate at all. A lambda that captures a local does
-// allocate, on every call, which the last check shows.
+// lambdas must not allocate at all. A lambda that captures a parameter of a
+// method allocates on every call of that method, which the last checks show,
+// unless the call runs in an arena's object scope.
 
 using System;
 
@@ -71,6 +72,13 @@ public static class Program
         }
         return (count, total);
     }
+    // docs:end
+
+    // docs:capture-method
+    // The trap: the lambda captures `limit`, so every call of CountAbove
+    // allocates a closure to hold `limit`, and a delegate, never freed.
+    static int CountAbove(int[] numbers, int limit)
+        => numbers.Where(x => x > limit).Count();
     // docs:end
 
     // Every query the sample runs, so the allocation check can repeat them.
@@ -188,14 +196,36 @@ public static class Program
         Check("a thousand runs allocate nothing", allocated == 0);
 
         // docs:capture
-        // The trap: this lambda captures `threshold`, so every call allocates
-        // a closure and a delegate, and they're never freed.
         before = GC.GetTotalAllocatedBytes();
         for (int i = 0; i < 1000; i++)
-            checksum += numbers.Where(x => x > threshold).Count();
+            checksum += CountAbove(numbers, threshold);
         long captured = GC.GetTotalAllocatedBytes() - before;
         // docs:end
-        Check("a capturing lambda allocates on every call", captured > 0);
+        // At least 16 bytes a call: a closure and a delegate, on any target.
+        Check("a capturing lambda allocates on every call", captured >= 16 * 1000);
+
+        // docs:capture-in-scope
+        // In an arena's object scope the closure and delegate go into the
+        // arena, and each Reset frees them. With DebugChecks on, closing the
+        // scope also checks that no static field points into the arena: the
+        // lambdas the compiler caches in static fields all ran before, so
+        // none does.
+        Arena.DebugChecks = true;
+        Arena frame = Arena.Create(4096, "frame");
+        Arena.DebugChecks = false;
+        before = GC.GetTotalAllocatedBytes();
+        for (int i = 0; i < 1000; i++)
+        {
+            Arena.ObjectScope objects;
+            // SAFETY: nothing created inside is kept past the Reset.
+            unsafe { objects = frame.AllocateObjectsHere(); }
+            using (objects)
+                checksum += CountAbove(numbers, threshold);
+            unsafe { frame.Reset(); } // SAFETY: see above.
+        }
+        long scoped = GC.GetTotalAllocatedBytes() - before;
+        // docs:end
+        Check("the same lambda in an object scope leaves nothing behind", scoped == 0);
         Section("allocation");
 
         Out.Line();

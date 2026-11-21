@@ -117,6 +117,79 @@ copy the result out before freeing the scratch arena. With strings that copy is
 or `StrBuilder` shares the contents, it doesn't copy them. [Keep a string](../how-to/keep-a-string.html)
 shows the pattern.
 
+## Ordinary objects in an arena
+
+Code you didn't write for arenas still allocates the ordinary way: `new`, a lambda that captures a
+variable, a boxed struct, `a + b` on strings. Inside `AllocateObjectsHere`, all of that goes into the
+arena instead of to `calloc`, so resetting the arena frees it. A loop that would leak on every round
+then leaks nothing:
+
+<!-- sample: samples/Arena.cs object-scope -->
+```csharp
+// Ordinary C# allocates with calloc and never frees. Inside
+// AllocateObjectsHere the same code allocates in the arena, so
+// resetting it frees everything the round created.
+Arena rounds = Arena.Create(4096);
+long heapBefore = System.GC.GetTotalAllocatedBytes();
+int total = 0;
+for (int round = 0; round < 1000; round++)
+{
+    Arena.ObjectScope objects;
+    // SAFETY: nothing created in the round is kept past the Reset.
+    unsafe { objects = rounds.AllocateObjectsHere(); }
+    using (objects)
+    {
+        int[] cells = new int[16];            // an array
+        int offset = round;
+        System.Func<int, int> shift = x => x + offset; // closure, delegate
+        string text = Echo("ab") + Echo("cd"); // a new string
+        total += shift(cells.Length) + text.Length;
+    }
+    unsafe { rounds.Reset(); } // SAFETY: see above.
+}
+long heapGrowth = System.GC.GetTotalAllocatedBytes() - heapBefore;
+```
+
+`GC.GetTotalAllocatedBytes()` counts only the memory that is never freed, so it is the way to check.
+In this sample, a thousand rounds add nothing to it, and the arena keeps a single block.
+
+The scope is `unsafe` for the same reason `Reset` is: objects made inside it die with the arena, so
+nothing may keep a reference to one. The compiler can break that rule for you in two ways:
+
+- **Cached lambdas and static constructors.** A lambda that captures nothing is created the first time
+  it runs and kept in a hidden static field, and a static constructor runs the first time its type is
+  used. If that first time is inside the scope, a static field ends up pointing into the arena. Run
+  such code once before opening a scope. With `Arena.DebugChecks` on when the arena was created,
+  closing the scope checks every static field and stops the program if one points into the arena.
+- **Captured variables from outside.** A lambda that captures a variable declared outside the scope is
+  cached in the object that holds that variable, which the check can't see. Declare what a lambda
+  captures inside the scope, or in a method called from it, as here:
+
+<!-- sample: samples/Queries.cs capture-in-scope -->
+```csharp
+// In an arena's object scope the closure and delegate go into the
+// arena, and each Reset frees them. With DebugChecks on, closing the
+// scope also checks that no static field points into the arena: the
+// lambdas the compiler caches in static fields all ran before, so
+// none does.
+Arena.DebugChecks = true;
+Arena frame = Arena.Create(4096, "frame");
+Arena.DebugChecks = false;
+before = GC.GetTotalAllocatedBytes();
+for (int i = 0; i < 1000; i++)
+{
+    Arena.ObjectScope objects;
+    // SAFETY: nothing created inside is kept past the Reset.
+    unsafe { objects = frame.AllocateObjectsHere(); }
+    using (objects)
+        checksum += CountAbove(numbers, threshold);
+    unsafe { frame.Reset(); } // SAFETY: see above.
+}
+long scoped = GC.GetTotalAllocatedBytes() - before;
+```
+
+Only one thread may allocate while a scope is open: the setting applies to the whole program.
+
 ## Running out of memory
 
 By default, out of memory is a value you check: null from an allocation, false from `Add`. Where the

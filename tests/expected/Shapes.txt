@@ -1,0 +1,7 @@
+Floor area: 37.00
+Table: area 0.79, perimeter 3.14
+Point { X = 0, Y = 0 }
+Point { X = 4, Y = 0 }
+Point { X = 4, Y = 3 }
+Point { X = 0, Y = 3 }
+PASS Geometry

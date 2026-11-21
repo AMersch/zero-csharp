@@ -47,3 +47,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   with `Interlocked`, and one arena per thread.
 - [Run a language model](run-a-language-model.html): a small Llama-style model, compiled into the
   program, telling stories on every target, DOS included.
+
+## Organizing code
+
+- [Create a reusable library](create-a-library.html): a folder in `libs/` that every program can use,
+  how it's built, and how to design its API for zero mode.

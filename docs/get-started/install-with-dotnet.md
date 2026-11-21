@@ -78,6 +78,13 @@ dotnet build -p:ZeroTarget=win-x64        # bin/Debug/zero01/Hello.exe
 dotnet build -p:ZeroTarget=linux-arm64
 ```
 
+Each build keeps the program for its own target only: building for `win-x64` removes the Linux
+program built before it from the same folder. To keep both, give each its own folder with `-o`:
+
+```bash
+dotnet build -p:ZeroTarget=win-x64 -o bin/win-x64
+```
+
 | Property | Values | Default |
 |---|---|---|
 | `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64` | the build machine's |

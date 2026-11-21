@@ -36,7 +36,7 @@ Prerequisites:
 
 - **The bflat fork** (see below). By default `../bflat/layouts/linux-glibc-<arch>`; override with `BFLAT_DIR`.
 - **macOS:** Docker. bflat is a Linux program, so it runs in a Linux container of your Mac's own architecture (native on Apple Silicon). By default the samples are Linux programs that run in that container too; `./build.sh --mac` builds macOS programs instead (see [macOS](#macos)), which also needs Xcode or its command line tools.
-- **Linux:** `libtinfo.so.5`, which bflat's bundled linker needs, and an assembler (`as`, from binutils) for zerocore's assembly routines. On Ubuntu 22.04: `sudo apt install libtinfo5 binutils`. Ubuntu 24.04 no longer ships libtinfo5. Cross-compiling needs the target's assembler too (`binutils-x86-64-linux-gnu` or `binutils-aarch64-linux-gnu`).
+- **Linux:** an assembler (`as`, from binutils) for zerocore's assembly routines: `sudo apt install binutils`. bflat's linker needs nothing else (layouts built before the fork switched to LLVM 20's lld, on 2026-11-21, need `libtinfo.so.5`: rebuild them). Cross-compiling needs the target's assembler too (`binutils-x86-64-linux-gnu` or `binutils-aarch64-linux-gnu`).
 
 Windows programs: `./build.sh --win` builds every sample as a 64-bit Windows program (see [Windows](#windows)). Building *on* Windows is another matter: `.\setup.ps1` and `.\build.ps1` use the fork's `windows-x64` layout but are **untested**, and still build against zerolib rather than zerocore.
 

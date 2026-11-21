@@ -186,8 +186,10 @@ work. *(Settled in review.)*
   (linux-x64, linux-arm64, win-x64), and runs what the runner can run, checking the output. Clean runners are
   `ubuntu-24.04` and `ubuntu-24.04-arm`, with no extra packages installed, plus a 22.04 container
   and a macOS runner that checks the library-and-pack path and the unsupported-host error.
-- Publishing to nuget.org runs on a version tag, with an API key stored as a repository secret (the
-  user creates it).
+- Publishing to nuget.org runs on a version tag, by trusted publishing: a policy on the owner's
+  nuget.org account trusts `sdk.yml`, and `NuGet/login` trades GitHub's OIDC token for a short-lived
+  key, so no API key is stored. (Changed from a stored key at the user's request, as nuget.org
+  recommends.)
 
 ### Documentation
 

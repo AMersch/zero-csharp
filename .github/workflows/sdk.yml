@@ -9,7 +9,7 @@
 #   test     sdk/test/run.sh against the feed: Ubuntu 24.04 x64 and arm64,
 #            Ubuntu 22.04, Debian 12 and Fedora in containers, the newest
 #            .NET SDK, and macOS (what works there without a native step)
-#   publish  on a tag sdk-v*: dotnet nuget push (secret NUGET_API_KEY)
+#   publish  on a tag sdk-v*: dotnet nuget push, by trusted publishing (below)
 name: SDK
 
 on:
@@ -228,10 +228,18 @@ jobs:
           ZERO_NO_PACK: '1'
         run: sdk/test/run.sh
 
+  # Trusted publishing: nuget.org trusts this workflow (a policy on the
+  # package owner's account: owner OnurGumus, repository zero-csharp,
+  # workflow sdk.yml), and NuGet/login trades GitHub's OIDC token for a key
+  # that lives an hour. No API key is stored. vars.NUGET_USER is the
+  # nuget.org user name (a repository variable, not a secret).
   publish:
     if: startsWith(github.ref, 'refs/tags/sdk-v')
     needs: [test, macos]
     runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -240,7 +248,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Log in to nuget.org
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
       - name: Push to nuget.org
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: dotnet nuget push "feed/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: dotnet nuget push "feed/*.nupkg" --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate

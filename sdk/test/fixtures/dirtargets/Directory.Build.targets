@@ -1,0 +1,6 @@
+<Project>
+  <!-- A target chosen for a whole folder of projects. -->
+  <PropertyGroup>
+    <ZeroTarget>win-x64</ZeroTarget>
+  </PropertyGroup>
+</Project>

@@ -509,13 +509,38 @@ test_payload_folder_guard() {
     pass "$name"
 }
 
+# ZeroTarget from Directory.Build.targets, imported after the project: still a
+# chosen target, with a folder of its own.
+test_target_from_directory_targets() {
+    local name="target from Directory.Build.targets" dir
+    linux_only "$name" || return
+    dir=$(fixture dirtargets)
+    if ! run_in "$dir" dirtargets build; then fail "$name" "dotnet build failed"; return; fi
+    if [ "$(head -c 2 "$dir/bin/Debug/$TFM/win-x64/dirtargets.exe" 2>/dev/null)" != MZ ]; then fail "$name" "no win-x64/dirtargets.exe"; return; fi
+    pass "$name"
+}
+
+# A project built with 0.1.0 (on nuget.org), then with this version: the
+# program the new build makes must still be there afterwards.
+test_upgrade_from_0_1_0() {
+    local name="upgrade from 0.1.0" dir out
+    linux_only "$name" || return
+    dir=$(fixture native upgrade)
+    sed -i.bak "s|ZeroCSharp.Sdk/$VERSION|ZeroCSharp.Sdk/0.1.0|" "$dir/native.csproj" && rm -f "$dir/native.csproj.bak"
+    if ! run_in "$dir" upgrade-1 build; then fail "$name" "the 0.1.0 build failed"; return; fi
+    sed -i.bak "s|ZeroCSharp.Sdk/0.1.0|ZeroCSharp.Sdk/$VERSION|" "$dir/native.csproj" && rm -f "$dir/native.csproj.bak"
+    if ! run_in "$dir" upgrade-2 build; then fail "$name" "the $VERSION build failed"; return; fi
+    out=$("$dir/bin/Debug/$TFM/native" 2>/dev/null); if [ "$out" != hi ]; then fail "$name" "the program is gone after the $VERSION build"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
-    release_tag_check payload_folder_guard)
+    release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0)
 
 # ---- Run ---------------------------------------------------------------------
 

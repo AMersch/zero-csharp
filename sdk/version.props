@@ -3,6 +3,6 @@
      major.minor has another framework name, and NuGet refuses it. -->
 <Project>
   <PropertyGroup>
-    <ZeroSdkVersion>0.1.1</ZeroSdkVersion>
+    <ZeroSdkVersion>0.2.0</ZeroSdkVersion>
   </PropertyGroup>
 </Project>

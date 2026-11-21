@@ -1,8 +1,8 @@
 <!--
-  ZeroCSharp.Sdk: zero-mode C# projects. <Project Sdk="ZeroCSharp.Sdk/0.1.0">.
+  ZeroCSharp.Sdk: zero-mode C# projects. <Project Sdk="ZeroCSharp.Sdk/0.2.0">.
 
-  A project gets a target framework of its own, zero<major><minor> (zero01 for
-  0.1), and compiles against zerocore (the core library, System.Private.CoreLib)
+  A project gets a target framework of its own, zero<major><minor> (zero02 for
+  0.2), and compiles against zerocore (the core library, System.Private.CoreLib)
   and lib/ (BflatLib) instead of .NET's libraries. NuGet then refuses ordinary
   .NET packages, and packages of zero libraries built with another SDK version
   (another framework name), with NU1202.

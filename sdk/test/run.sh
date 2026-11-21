@@ -37,6 +37,10 @@ fail() {
 }
 
 skip() { echo "skip $1: $2"; skipped=$((skipped + 1)); }
+# can_build <test name>: true on a host that builds native programs; on others,
+# records a skip. exe <path>: the default program's path on this host.
+can_build() { linux_only "$@"; }
+exe() { echo "$1"; }
 # linux_only <test name>: true on Linux; on other hosts, records a skip.
 linux_only() {
     [ "$HOST_OS" = Linux ] && return 0
@@ -241,7 +245,7 @@ test_bflat_failure_fails_the_build() {
     if ! ran_bflat; then fail "$name" "it failed before bflat ran"; return; fi
     # The build fails because bflat did (its command exited with an error), over
     # the import it can't bind.
-    if ! grep -q 'tools/bflat/bflat" build.*exited with code' "$LOG"; then fail "$name" "the failing command wasn't bflat"; return; fi
+    if ! grep -qE 'tools/bflat/bflat(\.exe)?" build @.*exited with code' "$LOG"; then fail "$name" "the failing command wasn't bflat"; return; fi
     if ! grep -q 'nosuchfunction' "$LOG"; then fail "$name" "the error doesn't name nosuchfunction"; return; fi
     pass "$name"
 }
@@ -251,7 +255,7 @@ test_size() {
     linux_only "$name" || return
     dir=$(fixture native size)
     if ! run_in "$dir" size build -v:n -p:ZeroOptimizeFor=Size; then fail "$name" "dotnet build failed"; return; fi
-    if ! grep -q 'tools/bflat/bflat" build.* -Os' "$LOG"; then fail "$name" "bflat wasn't given -Os"; return; fi
+    if ! grep -q 'bflat arguments:.* -Os' "$LOG"; then fail "$name" "bflat wasn't given -Os"; return; fi
     pass "$name"
 }
 
@@ -319,21 +323,21 @@ test_pack_and_package_reference() {
     pass "$name"
 }
 
-# A package made for another SDK version (lib/zero02/) must be refused.
+# A package made for another SDK version (lib/zero01/, 0.1's framework) must be refused.
 test_version_mismatch() {
     local name="version mismatch" app pkg=$WORK/oldfeed
     rm -rf "$pkg" "${NUGET_PACKAGES:-$HOME/.nuget/packages}/zerotest.geometry"
-    mkdir -p "$pkg/src/lib/zero02"
-    cp "$ROOT/sdk/ZeroCSharp.Sdk/payload/ref/BflatLib.dll" "$pkg/src/lib/zero02/Geometry.dll"
+    mkdir -p "$pkg/src/lib/zero01"
+    cp "$ROOT/sdk/ZeroCSharp.Sdk/payload/ref/BflatLib.dll" "$pkg/src/lib/zero01/Geometry.dll"
     printf '%s\n' '<?xml version="1.0"?>' \
-        '<package><metadata><id>ZeroTest.Geometry</id><version>1.0.0</version><authors>test</authors><description>A zero library built for SDK 0.2.</description></metadata></package>' \
+        '<package><metadata><id>ZeroTest.Geometry</id><version>1.0.0</version><authors>test</authors><description>A zero library built for SDK 0.1.</description></metadata></package>' \
         > "$pkg/src/ZeroTest.Geometry.nuspec"
     (cd "$pkg/src" && zip -qr ../ZeroTest.Geometry.1.0.0.nupkg .)
     app=$(fixture app-with-pkg oldpkg)/App
     add_source "$app/../nuget.config" old "$pkg"
     if run_in "$app" oldpkg restore; then fail "$name" "restore succeeded"; return; fi
-    if ! grep -q "NU1202" "$LOG" || ! grep -q "zero02" "$LOG" || ! grep -q "$TFM" "$LOG"; then
-        fail "$name" "no NU1202 naming zero02 and $TFM"; return
+    if ! grep -q "NU1202" "$LOG" || ! grep -q "zero01" "$LOG" || ! grep -q "$TFM" "$LOG"; then
+        fail "$name" "no NU1202 naming zero01 and $TFM"; return
     fi
     pass "$name"
 }
@@ -395,7 +399,7 @@ test_extra_dll_imports() {
     linux_only "$name" || return
     dir=$(fixture native dllimports)
     if ! run_in "$dir" dllimports build -v:n "-p:ZeroDllImports=libdl.so.2;"; then fail "$name" "dotnet build failed"; return; fi
-    if ! grep -q 'tools/bflat/bflat" build.* -i libc .*-i libdl.so.2' "$LOG" && ! grep -q 'tools/bflat/bflat" build.* -i libdl.so.2 .*-i libc ' "$LOG"; then
+    if ! grep -q 'bflat arguments:.* -i libc .*-i libdl.so.2' "$LOG" && ! grep -q 'bflat arguments:.* -i libdl.so.2 .*-i libc ' "$LOG"; then
         fail "$name" "libc and libdl.so.2 weren't both passed"; return
     fi
     pass "$name"
@@ -452,9 +456,9 @@ test_language_settings_forwarded() {
     linux_only "$name" || return
     dir=$(fixture native langver)
     if ! run_in "$dir" langver build -v:n -p:LangVersion=14 "-p:Features=strict"; then fail "$name" "dotnet build failed"; return; fi
-    if ! grep -q 'tools/bflat/bflat" build.* --langversion 14 ' "$LOG"; then fail "$name" "bflat wasn't given --langversion 14"; return; fi
-    if ! grep -q 'tools/bflat/bflat" build.* --compiler-feature strict ' "$LOG"; then fail "$name" "bflat wasn't given --compiler-feature strict"; return; fi
-    if grep -q 'tools/bflat/bflat" build.* --langversion preview' "$LOG"; then fail "$name" "bflat was still given --langversion preview"; return; fi
+    if ! grep -q 'bflat arguments:.* --langversion 14 ' "$LOG"; then fail "$name" "bflat wasn't given --langversion 14"; return; fi
+    if ! grep -q 'bflat arguments:.* --compiler-feature strict ' "$LOG"; then fail "$name" "bflat wasn't given --compiler-feature strict"; return; fi
+    if grep -q 'bflat arguments:.* --langversion preview' "$LOG"; then fail "$name" "bflat was still given --langversion preview"; return; fi
     pass "$name"
 }
 
@@ -534,13 +538,38 @@ test_upgrade_from_0_1_0() {
     pass "$name"
 }
 
+# ---- 0.2 ------------------------------------------------------------------------
+
+# 40 sources in a folder with a long name: their full paths alone pass cmd.exe's
+# 8191-character limit, so bflat must get its arguments from a response file.
+test_long_command_line() {
+    local name="long command line" dir sub i main
+    can_build "$name" || return
+    dir=$(fixture native manyfiles)
+    rm -f "$dir/Program.cs"
+    sub="$dir/$(printf 'a%.0s' $(seq 1 120))"
+    mkdir -p "$sub"
+    main='public static class Program { public static int Main() { long n = 0;'
+    for i in $(seq 1 40); do
+        echo "public static class Part$i { public static long One() => 1; }" > "$sub/Part$i.cs"
+        main="$main n += Part$i.One();"
+    done
+    echo "$main Out.Write(n); Out.Line(); return 0; } }" > "$dir/Program.cs"
+    if ! run_in "$dir" manyfiles build -v:n; then fail "$name" "dotnet build failed"; return; fi
+    if ! grep -qE 'tools/bflat/bflat(\.exe)?" build @' "$LOG"; then fail "$name" "bflat didn't get a response file"; return; fi
+    local out; out=$("$(exe "$dir/bin/Debug/$TFM/native")" | tr -d '\r')
+    if [ "$out" != 40 ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
-    release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0)
+    release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0
+    long_command_line)
 
 # ---- Run ---------------------------------------------------------------------
 

@@ -46,7 +46,10 @@
     <Exec Command="test -x &quot;$(ZeroBflatDir)bflat&quot; &amp;&amp; test -x &quot;$(ZeroBflatDir)bin/lld&quot; || chmod +x &quot;$(ZeroBflatDir)bflat&quot; &quot;$(ZeroBflatDir)bin/lld&quot;" />
     <!-- bflat doesn't make the folder (a target's own, for a chosen target). -->
     <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(ZeroNativeOutput)'))" />
-    <Exec Command="&quot;$(ZeroBflatDir)bflat&quot; build $(ZeroNativeArgs)" />
+    <!-- The arguments as a response file: cmd.exe (Exec on Windows) stops at
+         8191 characters, which a project's full source paths can pass. -->
+    <Message Text="bflat arguments: $(ZeroNativeArgs)" />
+    <Exec Command="&quot;$(ZeroBflatDir)bflat&quot; build @&quot;$(ZeroNativeArgsFile)&quot;" />
     <Message Importance="high" Text="$(MSBuildProjectName) -> $(ZeroNativeOutput)" />
   </Target>
 

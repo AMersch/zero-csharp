@@ -55,10 +55,10 @@ Out.Write(name);
 Out.Line("!");
 ```
 
-`dotnet build` puts the native program in `bin/Debug/zero01/`; `dotnet run` builds and runs it:
+`dotnet build` puts the native program in `bin/Debug/zero02/`; `dotnet run` builds and runs it:
 
 ```bash
-echo Ann | bin/Debug/zero01/Hello
+echo Ann | bin/Debug/zero02/Hello
 echo Ann | dotnet run
 ```
 
@@ -66,8 +66,9 @@ echo Ann | dotnet run
 What's your name? Hello, Ann!
 ```
 
-`zero01` is the project's target framework: zero mode, version 0.1 of the SDK. It keeps ordinary .NET
-packages out, because they need .NET's libraries, which a zero program doesn't have.
+`zero02` is the project's target framework: zero mode, version 0.2 of the SDK. It keeps ordinary .NET
+packages out, because they need .NET's libraries, which a zero program doesn't have. Libraries packed
+with version 0.1 (`zero01`) need re-packing for 0.2.
 
 ## Build for another target
 
@@ -76,8 +77,8 @@ program for a chosen target goes in a folder named after it, as `dotnet build -r
 programs for several targets sit side by side:
 
 ```bash
-dotnet build -p:ZeroTarget=win-x64        # bin/Debug/zero01/win-x64/Hello.exe
-dotnet build -p:ZeroTarget=linux-arm64    # bin/Debug/zero01/linux-arm64/Hello
+dotnet build -p:ZeroTarget=win-x64        # bin/Debug/zero02/win-x64/Hello.exe
+dotnet build -p:ZeroTarget=linux-arm64    # bin/Debug/zero02/linux-arm64/Hello
 ```
 
 `dotnet clean` removes all of them.

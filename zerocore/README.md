@@ -25,7 +25,7 @@ bflat build Program.cs --stdlib:none -r System.Private.CoreLib.dll \
 - `--no-reflection` is required. bflat assumes a library named `System.Private.CoreLib` is .NET's and would otherwise look for its reflection support ("Failed to load type 'Internal.Metadata.NativeFormat.TypeDefinition'").
 - `-i <library>` is needed for every library you `[DllImport]`, here `libc`. It binds the functions at link time. Without it bflat binds them when first called, which needs runtime support zerocore doesn't have ("Expected type 'Internal.Runtime.CompilerHelpers.InteropHelpers' not found").
 
-For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-d WASM`, and `../wasm/runtime.c` replaces the assembly file.
+For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-d WASM`, and `../wasm/runtime.c` replaces the assembly file. DOS (`build_dos_*` there) uses the same build of the library, with `../dos/runtime.c`.
 
 ## What's in it
 
@@ -70,7 +70,7 @@ A failure that would throw in .NET (a failed cast, an index out of range, an ari
 - **Interface calls cost a little more than virtual calls.** When the compiler can't tell which class is behind an interface, the call goes through a cache of the last four classes seen at that call site: about 1.6 ns on an Apple M-series core against 0.9 ns for a virtual call, and 3 to 4 ns when the site alternates between two to four classes. A site that sees more than four pays for a full search (about 5 ns) on each of the extras. In a hot loop, generics with a `struct` constraint or static abstract members are still faster: they're resolved at build time.
 - **Most of the base class library.** No `Console` (use `../lib/Out.cs`), `object.ToString`, `Equals` or `GetHashCode`, collections, LINQ, async, `Thread`, `typeof`, or `Nullable<T>` boxing.
 - **SIMD operations beyond the ones declared.** To add one, declare it in `Intrinsics/` with the name and signature it has in .NET; the compiler does the rest.
-- **Windows and UEFI.** Linux (x64, arm64) and WebAssembly (WASI) only.
+- **Windows and UEFI.** Linux (x64, arm64), WebAssembly (WASI) and 32-bit DOS on a 386 (see the main README; it uses the WebAssembly build of this library) only.
 - **A threading library.** There's no `Thread` or `lock`; create threads with pthreads through P/Invoke. Allocation, interface calls and `Interlocked` are safe to use from several threads (tested with eight on arm64). Static constructors are not: make sure a type's static fields are first touched before other threads start.
 
 ## Where the code comes from, and the license

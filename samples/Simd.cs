@@ -89,19 +89,23 @@ public static class Program
     {
         Out.Line("=== SIMD dot product in --stdlib:zero ===");
         Out.Write("Path: ");
+        // docs:path
         Out.Line(AdvSimd.Arm64.IsSupported ? "NEON (AdvSimd), 4 floats per instruction"
             : Fma.IsSupported ? "AVX + FMA, 8 floats per instruction"
             : "scalar (no SIMD ISA enabled)");
+        // docs:end
 
         Arena arena = Arena.Create(64 * 1024);
         if (!arena.IsCreated)
             return 1;
 
+        // docs:aligned
         // 64-byte alignment: a full cache line, and aligned for any vector width.
         float* a = arena.AllocArray<float>(N, align: 64);
         float* b = arena.AllocArray<float>(N, align: 64);
         if (a == null || b == null)
             return 1;
+        // docs:end
 
         float scalar, simd;
         long scalarMs, simdMs;

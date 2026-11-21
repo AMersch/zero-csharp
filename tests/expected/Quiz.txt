@@ -1,0 +1,15 @@
+6 questions. An empty answer skips one.
+Q1: 38 + 8 = "abc" isn't a number
+Q1: 38 + 8 = right
+Q2: 5 + 0 = "é😀" isn't a number
+Q2: 5 + 0 = "��(" isn't a number
+Q2: 5 + 0 = no, it's 5
+Q3: 12 + 5 = that's 40 characters; answers are at most 32
+Q3: 12 + 5 = right
+Q4: 2 + 43 = skipped
+Q5: 27 + 8 = right
+Q6: 38 + 36 = 
+(end of input)
+3 of 5 right
+Mistakes:
+  5 + 0 = 5, not 7

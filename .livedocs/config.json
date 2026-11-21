@@ -1,0 +1,46 @@
+{
+  "siteName": "Zero C#",
+  "repoUrl": "https://github.com/OnurGumus/bflat_test",
+  "logoPath": "img/mark.svg",
+  "stylesheet": "content/site.css",
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "navigation": [
+    {
+      "label": "Get started",
+      "href": "get-started/index.html"
+    },
+    {
+      "label": "Tutorial",
+      "href": "tutorial/index.html"
+    },
+    {
+      "label": "Task guides",
+      "href": "how-to/index.html"
+    },
+    {
+      "label": "Reference",
+      "href": "reference/index.html"
+    },
+    {
+      "label": "GitHub",
+      "href": "https://github.com/OnurGumus/bflat_test"
+    }
+  ],
+  "projects": [
+    ".livedocs/examples/Examples.fsproj"
+  ],
+  "docsSets": [
+    {
+      "id": "zero",
+      "title": "Zero C#",
+      "source": ".livedocs/content",
+      "default": true,
+      "projects": [
+        ".livedocs/examples/Examples.fsproj"
+      ]
+    }
+  ]
+}

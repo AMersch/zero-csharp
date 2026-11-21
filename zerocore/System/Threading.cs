@@ -6,13 +6,17 @@ namespace System.Threading
     //
     // On Linux the compiler replaces each call with the processor's atomic
     // instruction (lock cmpxchg / lock xadd on x64, an exclusive load/store loop
-    // on arm64), so the bodies, which call themselves, never run. WebAssembly
-    // modules built here are single-threaded, and the compiler there may not
-    // replace the calls, so on that target they are ordinary code.
+    // on arm64), so the bodies, which call themselves, never run. The
+    // WebAssembly build is single-threaded and also serves DOS on a 386, which
+    // has no such instruction (cmpxchg and xadd arrived with the 486). So there
+    // the methods are ordinary code, and aren't marked [Intrinsic], which would
+    // make the compiler replace them anyway.
     public static unsafe class Interlocked
     {
         /// <summary>Stores <paramref name="value"/> if the variable equals <paramref name="comparand"/>. Returns what the variable held.</summary>
+#if !WASM
         [Intrinsic]
+#endif
         public static int CompareExchange(ref int location, int value, int comparand)
         {
 #if WASM
@@ -25,7 +29,9 @@ namespace System.Threading
 #endif
         }
 
+#if !WASM
         [Intrinsic]
+#endif
         public static long CompareExchange(ref long location, long value, long comparand)
         {
 #if WASM
@@ -39,7 +45,9 @@ namespace System.Threading
         }
 
         /// <summary>Stores <paramref name="value"/> and returns what the variable held.</summary>
+#if !WASM
         [Intrinsic]
+#endif
         public static int Exchange(ref int location, int value)
         {
 #if WASM
@@ -51,7 +59,9 @@ namespace System.Threading
 #endif
         }
 
+#if !WASM
         [Intrinsic]
+#endif
         public static long Exchange(ref long location, long value)
         {
 #if WASM
@@ -65,7 +75,9 @@ namespace System.Threading
 
         // Adds and returns the value from before the addition; Add, Increment
         // and Decrement are built on it.
+#if !WASM
         [Intrinsic]
+#endif
         private static int ExchangeAdd(ref int location, int value)
         {
 #if WASM
@@ -77,7 +89,9 @@ namespace System.Threading
 #endif
         }
 
+#if !WASM
         [Intrinsic]
+#endif
         private static long ExchangeAdd(ref long location, long value)
         {
 #if WASM
@@ -110,7 +124,9 @@ namespace System.Threading
                 : Exchange(ref Unsafe.As<nint, int>(ref location), (int)value);
 
         /// <summary>Makes this thread's earlier writes visible to others before its later reads.</summary>
+#if !WASM
         [Intrinsic]
+#endif
         public static void MemoryBarrier()
         {
 #if !WASM

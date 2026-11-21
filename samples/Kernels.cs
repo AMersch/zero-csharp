@@ -71,11 +71,13 @@ public static class Program
         if (!arena.IsCreated)
             return 1;
 
+        // docs:buffers
         const int N = 1003; // odd on purpose: exercises the scalar tails
         float* x = arena.AllocArray<float>(N, align: 64);
         float* y = arena.AllocArray<float>(N, align: 64);
         float* w = arena.AllocArray<float>(N, align: 64);
         float* refv = arena.AllocArray<float>(N, align: 64);
+        // docs:end
 
         unsafe
         {
@@ -94,9 +96,11 @@ public static class Program
             }
             Check("Exp vs libm, 2M values in [-87, 88]", maxRel < 4e-7, "max rel err ", maxRel);
 
+            // docs:softmax
             // ---- Softmax ----
             for (int i = 0; i < N; i++) { x[i] = Random(-20f, 20f); refv[i] = x[i]; }
             Kernels.Softmax(x, N);
+            // docs:end
             float max = refv[0];
             for (int i = 1; i < N; i++) max = refv[i] > max ? refv[i] : max;
             double sum = 0, total = 0, maxAbs = 0;

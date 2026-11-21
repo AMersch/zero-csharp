@@ -31,6 +31,7 @@ public static class Shapes
 
 // ---- 2. Static abstract interface members ------------------------------------
 
+// docs:static-abstract
 public interface IArea<TSelf> where TSelf : struct, IArea<TSelf>
 {
     static abstract string Name { get; }
@@ -43,6 +44,7 @@ public struct Rect : IArea<Rect>
     public static string Name => "Rect";
     public static int Area(in Rect r) => r.W * r.H;
 }
+// docs:end
 
 public struct Square : IArea<Square>
 {
@@ -91,20 +93,24 @@ public static class Program
         PrintArea(new Square { Side = 6 });
         Out.Line();
 
+        // docs:new-leaks
         Out.Line("--- 3. Virtual methods on classes (each `new` leaks) ---");
         Animal dog = new Dog();
         Animal cat = new Cat();
         Out.Line(dog.Sound());
         Out.Line(cat.Sound());
+        // docs:end
         Out.Line();
 
         Out.Line("Done!");
         return 0;
     }
 
+    // docs:generic-call
     static void PrintArea<T>(in T shape) where T : struct, IArea<T>
     {
         Out.Write(T.Name);
         Out.Line(" area: ", T.Area(in shape));
     }
+    // docs:end
 }

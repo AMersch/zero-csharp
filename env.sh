@@ -54,3 +54,50 @@ esac
 WASM_ILC=$WASM_TOOLS/ilc-$NAOT_LLVM_VERSION/tools/ilc
 WASI_SDK=$WASM_TOOLS/wasi-sdk-$WASI_SDK_VERSION-$WASI_SDK_ARCH-linux
 WASMTIME=$WASM_TOOLS/wasmtime-$WASMTIME_VERSION-$WASMTIME_ARCH-linux/wasmtime
+
+# DOS (./setup.sh --dos, ./build.sh --dos, ./run.sh --dos): 32-bit programs for
+# a 386 and later, run under DOS by the HX DOS extender. C# is compiled to LLVM
+# bitcode by NativeAOT-LLVM, as for WebAssembly (only that part of WASM_TOOLS
+# is needed), and the bitcode is compiled for a 386 by a clang that has the
+# x86 target, which the WASI SDK's doesn't.
+#
+# DOS_TOOLS     where FreeDOS and the HX runtime are stored. Default: tools/dos
+# DOS_CLANG     the clang to use. Default: Xcode's on macOS, `clang` elsewhere
+# DOS_EMULATOR  bochs or qemu, for run.sh. Default: bochs if installed, since
+#               it refuses instructions a 386 doesn't have; QEMU runs most of them
+# DOS_CPU       the processor to emulate. Default: i386 (bochs) or 486 (qemu)
+HX_VERSION=2.23
+FREEDOS_VERSION=1.4
+DOS_TOOLS=${DOS_TOOLS:-tools/dos}
+DOS_HX=$DOS_TOOLS/hx-$HX_VERSION
+DOS_BOOT=$DOS_TOOLS/freedos-$FREEDOS_VERSION.img
+DOS_MOUSE=$DOS_TOOLS/CTMOUSE.EXE   # FreeDOS's mouse driver, taken from its image
+
+# Prints the first clang that can compile for 32-bit x86. (/usr/bin/clang on
+# macOS is skipped when the Xcode license hasn't been accepted: it only prints
+# a notice. The toolchain's own binary works regardless.)
+find_dos_clang() {
+    local candidate
+    for candidate in "${DOS_CLANG:-}" \
+        "$(xcode-select -p 2>/dev/null)/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang" \
+        /Library/Developer/CommandLineTools/usr/bin/clang clang; do
+        [ -n "$candidate" ] || continue
+        if echo 'int x;' | "$candidate" -target i386-pc-windows-gnu -x c -c - -o /dev/null 2>/dev/null; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_dos_emulator() {
+    if [ -n "${DOS_EMULATOR:-}" ]; then
+        echo "$DOS_EMULATOR"
+    elif command -v bochs >/dev/null 2>&1; then
+        echo bochs
+    elif command -v qemu-system-i386 >/dev/null 2>&1; then
+        echo qemu
+    else
+        return 1
+    fi
+}

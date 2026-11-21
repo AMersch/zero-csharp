@@ -1,4 +1,4 @@
-// Example: Minimal zero-mode "Hello World" (~45 KB, no .NET runtime).
+// Example: Minimal zero-mode "Hello World" (~39 KB, no .NET runtime).
 // Build: ./build.sh Minimal
 //
 // Under the updated memory safety rules, creating a pointer (stackalloc) is

@@ -28,6 +28,10 @@ New point X: 999
 
 Scratch work: used 16016 bytes in 2 blocks
 After Restore: used as before: true, blocks 1, p4 intact: true
+Inside the scope: used 416 bytes
+After the scope: used as before: true
+Arena "demo": 16 of 8335 bytes used (peak 16016 of 24350), 1 block
+  block 1: 8335 bytes, 8319 free (current)
 Extend newest allocation in place: true
 Extend after another allocation: false
 

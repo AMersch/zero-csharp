@@ -1,0 +1,7 @@
+Q1: 38 + 8 = right
+Q2: 5 + 0 = right
+Q3: 12 + 5 = no, it's 17
+Q4: 2 + 43 = right
+Q5: 27 + 8 = 
+(end of input)
+3 of 4 right

@@ -1,0 +1,63 @@
+# Builds the documentation site (docs/) and checks it: every C# excerpt must match
+# the sample it quotes, and every local link must resolve. Pushes to master also
+# publish it to GitHub Pages (enable Pages with "GitHub Actions" as the source).
+#
+# It doesn't build bflat or run the samples: test.yml does that.
+name: Docs
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deployment at a time; a newer push waits rather than cancelling one in progress.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Node.js for the search index
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Build and check the site
+        run: python3 scripts/build-docs.py
+
+      - name: Upload the site
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./output
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -28,3 +28,17 @@ Thumbs.db
 
 # WebAssembly toolchain (./setup.sh --wasm)
 tools/
+
+# Documentation build (python3 scripts/build-docs.py)
+output/
+.livedocs/content/
+.livedocs/cache/
+.livedocs/releases/
+.livedocs/history/
+docs/reference/
+
+# Browser automation screenshots
+.playwright-mcp/
+
+# Python
+__pycache__/

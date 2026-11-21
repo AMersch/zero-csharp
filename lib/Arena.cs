@@ -18,9 +18,12 @@
 //   block of its own and leaves that sequence alone.
 // - Every allocation picks its alignment (any power of two, default 16).
 // - Allocations fail by returning null; arena state is untouched on failure.
+//   An arena created with stopOnOutOfMemory: true ends the program instead
+//   when memory runs out, so nothing has to check for that.
 // - Save() and Restore() free only what was allocated in between, for
 //   temporary work in an arena that also holds longer-lived data. Don't let
-//   an older collection grow in between (see Restore).
+//   an older collection grow in between (see Restore). OpenScope() pairs the
+//   two with a using block, so they can't get out of order.
 // - Reset() keeps the capacity by merging all blocks into one, so a
 //   steady-state workload (one scratch arena per token, per frame, ...)
 //   stops calling malloc after the first round.
@@ -29,6 +32,9 @@
 //   afterwards fill freed memory with 0xDD bytes, and makes List, Dict and
 //   StrBuilder stop the program when used after their memory was freed. See
 //   DebugChecks for what that does and doesn't catch.
+// - For finding out what an arena does: give it a name in Create (failure
+//   messages then say which arena), print its blocks with Dump(), and read
+//   PeakUsed after a run to choose the first block's size.
 //
 // Allocating is safe: a pointer is harmless until it is dereferenced, and
 // dereferencing needs an unsafe context anyway. Restore(), Reset() and
@@ -36,6 +42,7 @@
 // caller promises that nothing still points at the memory they free.
 
 using System;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 public struct Arena
@@ -67,6 +74,10 @@ public struct Arena
         public bool Poison;        // DebugChecks was on when the arena was created
         public nuint Used;         // bytes handed out, padding excluded
         public nuint Capacity;     // sum of all block sizes
+        public nuint PeakUsed;     // the highest Used and Capacity so far;
+        public nuint PeakCapacity; // Reset and Restore don't lower them
+        public nint Name;          // address of the name string, or 0
+        public bool StopOnOutOfMemory;
     }
 
     /// <summary>A point in an arena's history, from Save(). Restore() frees everything allocated after it.</summary>
@@ -81,6 +92,23 @@ public struct Arena
         internal uint Generation;
     }
 
+    /// <summary>
+    /// A Save() that restores itself: from OpenScope(), for a using block.
+    /// Leaving the block, by any path, frees what was allocated inside it.
+    /// </summary>
+    public ref struct Scope
+    {
+        internal Arena Arena;
+        internal Mark Mark;
+
+        public void Dispose()
+        {
+            // SAFETY: OpenScope's caller promised that nothing allocated inside
+            // the scope is used after it.
+            unsafe { Arena.Restore(Mark); }
+        }
+    }
+
     State* _state;
 
     /// <summary>
@@ -90,9 +118,10 @@ public struct Arena
     ///   pointer then reads 0xDDDDDDDD instead of plausible old data, and so does
     ///   memory allocated with zero: false and never written.
     /// - List, Dict and StrBuilder check on every use that their buffer is still
-    ///   allocated, and end the program with a message if it isn't. That catches
-    ///   a collection used after its arena was reset, and one that grew after a
-    ///   Save() and was used after the Restore().
+    ///   allocated, all of it, and end the program with a message if it isn't.
+    ///   That catches a collection used after its arena was reset, and one that
+    ///   grew after a Save() (into a new buffer or in place) and was used after
+    ///   the Restore().
     /// It can't catch everything: once freed memory has been handed out again,
     /// a stale pointer into it looks valid. And it costs time: a fill on every
     /// free, a check on every collection operation.
@@ -113,12 +142,25 @@ public struct Arena
     [DllImport("libc")]
     static unsafe extern void* memset(void* destination, int value, nuint count);
 
-    /// <summary>Returns a new arena with one block, or a not-created arena if malloc fails.</summary>
-    public static Arena Create(nuint blockSize = 4096)
+    /// <summary>
+    /// Returns a new arena with one block, or a not-created arena if malloc fails.
+    /// <paramref name="name"/> is for Dump() and failure messages; the arena keeps
+    /// the reference, so pass a string that outlives it, such as a literal.
+    /// With <paramref name="stopOnOutOfMemory"/>, running out of memory ends the
+    /// program with a message, here and in every later allocation, instead of
+    /// returning null (and instead of List.Add and the like returning false).
+    /// Use it wherever the program couldn't carry on anyway. Requests that are
+    /// wrong in themselves (a bad alignment, a negative count) still return null.
+    /// </summary>
+    public static Arena Create(nuint blockSize = 4096, string name = null, bool stopOnOutOfMemory = false)
     {
         State* state = (State*)malloc((nuint)sizeof(State));
         if (state == null)
+        {
+            if (stopOnOutOfMemory)
+                Environment.FailFast("Arena.Create: out of memory");
             return default;
+        }
 
         unsafe
         {
@@ -127,9 +169,12 @@ public struct Arena
             state->InitialSize = blockSize == 0 ? 4096 : blockSize;
             state->LastNormal = state->InitialSize;
             state->Poison = DebugChecks;
+            state->Name = Unsafe.As<string, nint>(ref name);
+            state->StopOnOutOfMemory = stopOnOutOfMemory;
 
             if (AddBlock(state, state->InitialSize) == null)
             {
+                OutOfMemory(state);
                 free(state);
                 return default;
             }
@@ -175,6 +220,39 @@ public struct Arena
         }
     }
 
+    /// <summary>The highest Used has been since the arena was created. A good first block size.</summary>
+    public nuint PeakUsed
+    {
+        get
+        {
+            if (_state == null)
+                return 0;
+            unsafe { return _state->PeakUsed; }
+        }
+    }
+
+    /// <summary>The highest Capacity has been since the arena was created.</summary>
+    public nuint PeakCapacity
+    {
+        get
+        {
+            if (_state == null)
+                return 0;
+            unsafe { return _state->PeakCapacity; }
+        }
+    }
+
+    /// <summary>The name given to Create, or null.</summary>
+    public string Name
+    {
+        get
+        {
+            if (_state == null)
+                return null;
+            unsafe { return NameOf(_state); }
+        }
+    }
+
     public nuint NextBlockSize => _state == null ? 0 : NextNormalSize(_state);
 
     public nuint CurrentBlockSize
@@ -210,14 +288,14 @@ public struct Arena
             if (!Fits(state, p, size))
             {
                 if (size > MaxSize - align)
-                    return null;
+                    return OutOfMemory(state);
 
                 nuint needed = size + align - 1; // worst-case padding in a fresh block
                 nuint normal = NextNormalSize(state);
                 bool dedicated = needed > normal;
 
                 if (AddBlock(state, dedicated ? needed : normal) == null)
-                    return null;
+                    return OutOfMemory(state);
 
                 if (!dedicated)
                 {
@@ -229,6 +307,8 @@ public struct Arena
 
             state->Ptr = p + size;
             state->Used += size;
+            if (state->Used > state->PeakUsed)
+                state->PeakUsed = state->Used;
 
             if (zero && size != 0)
                 memset(p, 0, size); // SAFETY: [p, p + size) lies inside the current block.
@@ -286,6 +366,8 @@ public struct Arena
 
             state->Ptr = end + extra;
             state->Used += extra;
+            if (state->Used > state->PeakUsed)
+                state->PeakUsed = state->Used;
         }
         return true;
     }
@@ -295,11 +377,21 @@ public struct Arena
     /// handed out and not freed since. Approximate: padding between allocations
     /// counts as handed out.
     /// </summary>
-    public bool IsLive(void* pointer)
+    public bool IsLive(void* pointer) => IsLive(pointer, 1);
+
+    /// <summary>
+    /// Like IsLive(pointer), for all <paramref name="size"/> bytes from
+    /// <paramref name="pointer"/>: false too if only the end of that range was
+    /// freed, as happens to a buffer that grew in place after a Save() once the
+    /// mark is restored.
+    /// </summary>
+    public bool IsLive(void* pointer, nuint size)
     {
         State* state = _state;
         if (state == null || pointer == null)
             return false;
+        if (size == 0)
+            size = 1;
 
         unsafe
         {
@@ -309,26 +401,29 @@ public struct Arena
             {
                 byte* end = block == state->Current ? state->Ptr : block->End;
                 if (p >= block->Start && p < end)
-                    return true;
+                    return size <= (nuint)(end - p);
             }
         }
         return false;
     }
 
     /// <summary>
-    /// For collections: under DebugChecks, ends the program if
-    /// <paramref name="buffer"/>, which the collection got from
-    /// <paramref name="arena"/>, has been freed since.
+    /// For collections: under DebugChecks, ends the program if any of the
+    /// <paramref name="size"/> bytes of <paramref name="buffer"/>, which the
+    /// collection got from <paramref name="arena"/>, have been freed since.
     /// </summary>
-    internal static void CheckLive(Arena arena, void* buffer)
+    internal static void CheckLive(Arena arena, void* buffer, nuint size)
     {
         if (!DebugChecks)
             return;
         // The collection's own header was freed and filled: its arena field is poison.
         if ((nuint)arena._state == PoisonPointer)
             Environment.FailFast("Arena.DebugChecks: collection used after its arena was reset or restored");
-        if (arena._state != null && !arena.IsLive(buffer))
-            Environment.FailFast("Arena.DebugChecks: collection's buffer was freed (it grew after Save() and was used after Restore(), or its arena was reset)");
+        if (arena._state != null && !arena.IsLive(buffer, size))
+        {
+            // SAFETY: the state is live; see the note above BlockCount.
+            unsafe { Fail(arena._state, "Arena.DebugChecks: collection's buffer was freed (it grew after Save() and was used after Restore(), or its arena was reset)"); }
+        }
     }
 
     /// <summary>Remembers the arena's current position, for Restore().</summary>
@@ -355,8 +450,12 @@ public struct Arena
 
     /// <summary>
     /// Frees everything allocated since <paramref name="mark"/> was saved, and
-    /// nothing from before it. Marks must be restored newest first. A mark from
-    /// another arena, or from before a Reset(), ends the program.
+    /// nothing from before it. Marks must be restored newest first: restoring a
+    /// mark also ends every mark saved after it. A mark from another arena, from
+    /// before a Reset(), or one that points past what the arena now holds (it was
+    /// ended by restoring an older mark) ends the program. That last check can
+    /// miss an ended mark once enough has been allocated again to cover its
+    /// position; OpenScope() rules the mistake out instead.
     /// </summary>
     /// <safety>
     /// Every pointer, span and collection allocated since the mark becomes
@@ -376,11 +475,18 @@ public struct Arena
         unsafe
         {
             if (mark.Owner != state || mark.Generation != state->Generation)
-                Environment.FailFast("Arena.Restore: the mark doesn't belong to this arena's current contents");
+                Fail(state, "Arena.Restore: the mark doesn't belong to this arena's current contents");
 
-            // SAFETY: a mark of this generation names a block that is still in
-            // the chain; the blocks after it were added since and are freed once.
-            Block* keep = (Block*)mark.Block;
+            // Comparing addresses only: the mark's block is not read until it
+            // has been found in the chain.
+            Block* keep = state->First;
+            while (keep != null && keep != (Block*)mark.Block)
+                keep = keep->Next;
+            if (keep == null || mark.Used > state->Used || (keep == state->Current && mark.Ptr > state->Ptr))
+                Fail(state, "Arena.Restore: the mark was already freed by restoring an older one (restore marks newest first)");
+
+            // SAFETY: keep is in the chain; the blocks after it were added
+            // since the mark and are freed once.
             Block* block = keep->Next;
             while (block != null)
             {
@@ -399,6 +505,86 @@ public struct Arena
             state->Used = mark.Used;
             state->LastNormal = mark.LastNormal;
             state->PrevNormal = mark.PrevNormal;
+        }
+    }
+
+    /// <summary>
+    /// Save() for a using block: leaving the block restores the mark, so the
+    /// two can't be left unpaired or get out of order.
+    /// <code>
+    /// Arena.Scope temp;
+    /// unsafe { temp = arena.OpenScope(); } // SAFETY: nothing from inside is used after the block
+    /// using (temp)
+    /// {
+    ///     ... temporary allocations ...
+    /// }
+    /// </code>
+    /// </summary>
+    /// <safety>
+    /// As for Restore: everything allocated inside the block dangles after it,
+    /// including the buffer of an older collection that grew inside it.
+    /// </safety>
+    public unsafe Scope OpenScope() => new Scope { Arena = this, Mark = Save() };
+
+    /// <summary>
+    /// Prints the arena's name, how full it is and its blocks to standard output:
+    /// <code>
+    /// Arena "frame": 920 of 1152 bytes used (peak 920 of 1152), 3 blocks
+    ///   block 1: 128 bytes
+    ///   block 2: 256 bytes
+    ///   block 3: 768 bytes, 88 free (current)
+    /// </code>
+    /// Many small blocks mean the first block is too small for the workload;
+    /// PeakUsed is the size that would have held everything.
+    /// </summary>
+    public void Dump()
+    {
+        State* state = _state;
+        if (state == null)
+        {
+            Out.Line("Arena: not created");
+            return;
+        }
+
+        unsafe
+        {
+            // SAFETY: the state is live (see above) and its blocks are read, not written.
+            string name = NameOf(state);
+            Out.Write("Arena");
+            if (name != null)
+            {
+                Out.Write(" \"");
+                Out.Write(name);
+                Out.Write("\"");
+            }
+            Out.Write(": ");
+            Out.Write((long)state->Used);
+            Out.Write(" of ");
+            Out.Write((long)state->Capacity);
+            Out.Write(" bytes used (peak ");
+            Out.Write((long)state->PeakUsed);
+            Out.Write(" of ");
+            Out.Write((long)state->PeakCapacity);
+            Out.Write("), ");
+            Out.Write(state->BlockCount);
+            Out.Line(state->BlockCount == 1 ? " block" : " blocks");
+
+            int index = 1;
+            for (Block* block = state->First; block != null; block = block->Next)
+            {
+                Out.Write("  block ");
+                Out.Write(index++);
+                Out.Write(": ");
+                Out.Write((long)block->Size);
+                Out.Write(" bytes");
+                if (block == state->Current)
+                {
+                    Out.Write(", ");
+                    Out.Write((long)(block->End - state->Ptr));
+                    Out.Write(" free (current)");
+                }
+                Out.Line();
+            }
         }
     }
 
@@ -445,7 +631,7 @@ public struct Arena
             state->LastNormal = state->InitialSize;
             state->PrevNormal = 0;
             if (AddBlock(state, state->InitialSize) == null)
-                Environment.FailFast("Arena.Reset: out of memory");
+                Fail(state, "Arena.Reset: out of memory");
         }
     }
 
@@ -518,8 +704,44 @@ public struct Arena
             state->Current = block;
             state->BlockCount++;
             state->Capacity += size;
+            if (state->Capacity > state->PeakCapacity)
+                state->PeakCapacity = state->Capacity;
         }
         return block;
+    }
+
+    static unsafe string NameOf(State* state)
+    {
+        // SAFETY: Name holds null or the address of the string given to Create,
+        // which the caller keeps alive. In zero mode a reference is its address.
+        unsafe { return Unsafe.As<nint, string>(ref state->Name); }
+    }
+
+    // What a failed allocation returns: null, unless the arena was created to
+    // end the program instead.
+    static unsafe void* OutOfMemory(State* state)
+    {
+        unsafe
+        {
+            // SAFETY: callers pass a live state.
+            if (state->StopOnOutOfMemory)
+                Fail(state, "Arena: out of memory");
+        }
+        return null;
+    }
+
+    // Ends the program, saying first which arena it was if that one has a name.
+    static unsafe void Fail(State* state, string message)
+    {
+        string name;
+        unsafe { name = NameOf(state); } // SAFETY: callers pass a live state.
+        if (name != null)
+        {
+            Out.Write("Arena \"");
+            Out.Write(name);
+            Out.Line("\":");
+        }
+        Environment.FailFast(message);
     }
 
     // Fills [start, end) so that stale and uninitialized reads stand out.

@@ -23,7 +23,8 @@ public static class Program
     {
         Out.Line("=== Growable Arena Demo ===");
 
-        Arena arena = Arena.Create(128);
+        // The name is optional: Dump() and failure messages show it.
+        Arena arena = Arena.Create(128, "demo");
         if (!arena.IsCreated)
         {
             Out.Line("Arena.Create failed");
@@ -57,6 +58,7 @@ public static class Program
             }
         }
 
+        // docs:alloc-and-use
         Entity* e = arena.Alloc<Entity>();
         int* squares = arena.AllocArray<int>(10);
         unsafe
@@ -67,6 +69,7 @@ public static class Program
                 squares[i] = i * i;
             Out.Line("squares[5] = ", squares[5]);
         }
+        // docs:end
         Out.Line("Used: ", (long)arena.Used, " bytes | Blocks: ", arena.BlockCount);
 
         // Start over with a single 128-byte block to show the growth sequence.
@@ -142,6 +145,23 @@ public static class Program
         }
         Out.Line();
 
+        // OpenScope is Save and Restore as a using block: leaving the block, by
+        // any path, frees what was allocated inside it.
+        Arena.Scope temp;
+        unsafe { temp = arena.OpenScope(); } // SAFETY: nothing from inside the block is used after it.
+        using (temp)
+        {
+            arena.AllocArray<int>(100);
+            Out.Line($"Inside the scope: used {(long)arena.Used} bytes");
+        }
+        Out.Write("After the scope: used as before: ");
+        Out.Write(arena.Used == usedBefore);
+        Out.Line();
+
+        // Dump shows where the memory is. The peak is the most the arena ever
+        // held at once: a first block of that size would have been enough.
+        arena.Dump();
+
         // The newest allocation can grow in place, so a buffer built up step by
         // step doesn't leave its smaller copies behind.
         int* growing = arena.AllocArray<int>(4);
@@ -155,12 +175,14 @@ public static class Program
         Out.Write(arena.TryExtend(growing, 8 * sizeof(int), 16 * sizeof(int)));
         Out.Line();
 
+        // docs:second-arena
         // Arenas are independent: one per lifetime. Here a second arena holds a
         // list for a while and is dropped without touching the first.
         Arena frame = Arena.Create(256);
         List<int> numbers = List<int>.Create(frame);
         for (int i = 0; i < 100; i++)
             numbers.Add(i);
+        // docs:end
         Out.Line();
         Out.Line($"Second arena: list of {numbers.Count} ints, {(long)frame.Used} bytes used");
         usedBefore = arena.Used;
@@ -172,6 +194,7 @@ public static class Program
         unsafe { arena.Destroy(); } // SAFETY: nothing points into the arena after this.
         Out.Line("Arena destroyed.");
 
+        // docs:debug-checks
         // Debugging aid: arenas created while DebugChecks is on fill freed memory
         // with 0xDD, so a stale pointer reads an obvious pattern instead of the
         // old value, and collections stop the program when used after a reset.
@@ -179,6 +202,7 @@ public static class Program
         Arena debug = Arena.Create(256);
         int* stale = debug.AllocArray<int>(4);
         unsafe { stale[0] = 12345; }
+        // docs:end
         Out.Line();
         Out.Write("DebugChecks: pointer is live before Reset: ");
         Out.Write(debug.IsLive(stale));

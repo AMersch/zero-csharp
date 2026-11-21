@@ -168,6 +168,7 @@ public static class Program
 
     public static int Main()
     {
+        // docs:interface-checks
         object circle = Opaque(new Circle { Radius = 2 });
         object rect = Opaque(new Rect { W = 3, H = 4 });
         object square = Opaque(new Square { W = 5, H = 5 });
@@ -182,6 +183,7 @@ public static class Program
         Check("null is never an instance", !(nothing is IShape));
         Check("through the base class", square is IShape && square is IScalable);
         Check("through another interface", circle is INamed && square is INamed);
+        // docs:end
         Section("is");
 
         IShape asShape = rect as IShape;

@@ -1,0 +1,134 @@
+---
+title: Limits
+index: 6
+---
+
+# Limits
+
+Zero mode has no garbage collector, no exceptions, no async/await, no LINQ, and almost no base class
+library. A good deal of ordinary C# still works, because zerocore provides the parts the compiler
+needs. This page lists both sides and the known issues, so you can tell early whether a design fits.
+
+## What works
+
+With zerocore, as `build.sh` builds it:
+
+- **Classes, structs and generics**, virtual methods, and interfaces, including default interface
+  methods. Every `new` calls `calloc` and is never freed (see [Memory without a GC](memory.html)).
+- **Static abstract interface members** and constrained generic calls.
+- **Casts**: `(T)x`, `is`, `as` and type patterns, to classes and interfaces. **Boxing**: a struct
+  converted to `object` or to an interface it implements.
+- **Arrays**: `new T[n]`, including arrays of strings, objects and interfaces, array initializers, and
+  `Span<T>`.
+- **Static fields of every type**, including strings, objects and arrays, and static constructors.
+- **Strings**: `==`, `+`, `switch`, plus `lib/` for the rest (see [Strings without a GC](strings.html)).
+- **Delegates and lambdas** (they allocate), `try`/`finally` and `using`.
+- **Function pointers, P/Invoke and `[UnmanagedCallersOnly]` callbacks.** Threads come from pthreads
+  through P/Invoke, with `Interlocked` and `Volatile` for shared state.
+- **`Math` and `MathF`**, and `Main(string[] args)` and top-level statements.
+
+Casts to interfaces work as in .NET, except that a failed `(T)x` ends the program instead of throwing:
+
+<!-- sample: samples/Casts.cs interface-checks -->
+```csharp
+object circle = Opaque(new Circle { Radius = 2 });
+object rect = Opaque(new Rect { W = 3, H = 4 });
+object square = Opaque(new Square { W = 5, H = 5 });
+object plain = Opaque(new Plain());
+object nothing = Opaque(null);
+
+Check("class implementing it directly", circle is IShape);
+Check("second interface of a class", rect is IScalable);
+Check("not implemented", !(circle is IScalable));
+Check("unrelated class", !(plain is IShape));
+Check("unrelated interface", !(rect is IUnrelated));
+Check("null is never an instance", !(nothing is IShape));
+Check("through the base class", square is IShape && square is IScalable);
+Check("through another interface", circle is INamed && square is INamed);
+```
+
+## Choosing how to dispatch
+
+Interfaces and virtual methods both work, but they don't cost the same. An interface call the compiler
+can't resolve at build time goes through a small cache per call site: a little slower than a virtual
+call, and slower again at a site that sees more than four classes.
+
+Generics with static abstract members avoid the question. They are resolved at compile time, one
+specialized copy per struct type, with no allocation and no indirect call. That suits hot loops such as
+per-format compute kernels:
+
+<!-- sample: samples/VirtualTest.cs static-abstract -->
+```csharp
+public interface IArea<TSelf> where TSelf : struct, IArea<TSelf>
+{
+    static abstract string Name { get; }
+    static abstract int Area(in TSelf shape);
+}
+
+public struct Rect : IArea<Rect>
+{
+    public int W, H;
+    public static string Name => "Rect";
+    public static int Area(in Rect r) => r.W * r.H;
+}
+```
+
+<!-- sample: samples/VirtualTest.cs generic-call -->
+```csharp
+static void PrintArea<T>(in T shape) where T : struct, IArea<T>
+{
+    Out.Write(T.Name);
+    Out.Line(" area: ", T.Area(in shape));
+}
+```
+
+## What doesn't work
+
+- **Freeing memory.** Nothing allocated with `new`, boxing or `+` is ever freed. Use
+  [arenas](memory.html) for anything short-lived.
+- **Exceptions.** There is no `Exception` type, so `throw` and `catch` don't compile. A failure that
+  would throw in .NET, such as a failed cast, an index out of range or an overflow in `checked` code,
+  prints a message and ends the program. A null dereference is a plain segmentation fault. `lib/`
+  follows the same rule: when it catches a mistake, it can only end the program with a message.
+- **Variance.** Casting or dispatching through it (`IEnumerable<string>` as `IEnumerable<object>`,
+  `string[]` as `object[]`) aborts with a message saying so, instead of answering wrongly.
+- **Most of the base class library.** No `Console` (use `Out` and `In`), no `object.ToString`, `Equals`
+  or `GetHashCode`, no .NET collections (use [`lib/`'s](../how-to/choose-a-collection.html)), no LINQ,
+  async, `Thread`, `typeof`, `Half`, or boxing of `Nullable<T>`.
+- **Reflection.** Builds need `--no-reflection`.
+- **Run-time CPU detection.** Instruction sets beyond the baseline are available only when the build
+  names them with `-m`.
+- **Windows.** zerocore runs on Linux (x64, arm64), WebAssembly and DOS. `build.ps1` exists but is
+  untested, and builds against bflat's zerolib instead.
+
+`zerocore/README.md` has the full list.
+
+## Known issues and workarounds
+
+These are the issues you may hit with zerocore, as `build.sh` builds:
+
+| Issue | Workaround |
+|---|---|
+| `[DllImport]` of a library not passed with `-i` fails to compile ("Expected type 'Internal.Runtime.CompilerHelpers.InteropHelpers' not found") | Pass `-i <library>`; `build.sh` passes `-i libc -i libm.so.6` |
+| Building without `--no-reflection` fails ("Failed to load type 'Internal.Metadata.NativeFormat.TypeDefinition'") | Pass `--no-reflection`; `build.sh` does |
+| Non-baseline instruction sets (AVX2, FMA, dotprod) report `IsSupported == false` | Build with `-m x86-64-v3` or `-m dotprod`; `build.sh` does this for Simd and Kernels |
+| No `Console`, `Half`, `Thread` | `lib/Out.cs` for output, `lib/In.cs` for input; pthreads through P/Invoke for threads |
+| `"n=" + 5` doesn't compile (no `object.ToString`) | `Str.Format(arena, $"n={5}")` |
+| Casts and interface calls that need variance abort at run time | Not supported |
+| No Windows port | `build.ps1` builds against zerolib instead |
+
+Two of these come from the core library having to be named `System.Private.CoreLib`. bflat assumes a
+library with that name is .NET's and looks for its reflection support, hence `--no-reflection`. And
+without `-i`, bflat binds a `[DllImport]` function when it is first called, which needs runtime support
+zerocore doesn't have; with `-i`, it is bound at link time.
+
+The other targets add limits of their own: no SIMD and no callbacks from native code on WebAssembly,
+one thread and a 387 for floating point on DOS. [Targets](targets.html) covers them.
+
+## Errors from the compiler
+
+Most of zerocore is a contract with the compiler, which looks types, methods and fields up by name
+(`System.Runtime.TypeCast.CheckCastClass`, `String._stringLength`, ...). When one it needs is missing,
+the build fails with "Expected type ... not found" or "Failed to load type ...", not with a C# error.
+Those names can't be changed. If you see such a message, check the first two rows of the table above
+before anything else.

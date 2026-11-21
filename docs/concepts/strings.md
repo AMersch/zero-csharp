@@ -1,0 +1,163 @@
+---
+title: Strings without a GC
+index: 3
+---
+
+# Strings without a GC
+
+In .NET, most string operations allocate a new string and leave the old one to the garbage collector.
+`Substring`, `Split`, `ToString`, `string.Format` and `+` all work that way. Zero mode has no collector,
+so every one of those allocations would be a leak. The string support here is built around one idea:
+**read through spans, which allocate nothing, and create a string only when you need one, in an arena
+you chose**.
+
+## What the core library's string has
+
+zerocore's `string` has `Length`, an indexer, `==`, `!=`, `+`, `Equals`, `IsNullOrEmpty` and `switch` on
+strings, and nothing else. String literals, static string fields and static string arrays work. `a + b`
+works too, but it allocates with `calloc` and is never freed, like every allocation the core library
+makes. Use it for strings built once; in a loop, use the arena versions below.
+
+`lib/Str.cs`, `lib/StrBuilder.cs` and `lib/Out.cs` add the rest. The
+[Str reference](../reference/str.html) has the full table of .NET calls and their zero-mode
+counterparts.
+
+## Spans: reading without allocating
+
+`lib/Str.cs` defines the span operations .NET has in `System.MemoryExtensions`, with the same names:
+`SequenceEqual`, `StartsWith`, `EndsWith`, `IndexOf`, `LastIndexOf`, `Contains`, `Trim` and `Split`. None
+of them allocate. Where .NET would return a new string, these return a span over the original
+characters: `s.AsSpan(i, n)` takes the place of `s.Substring(i, n)`, `Trim` returns a span, and `Split`
+yields one span per part:
+
+<!-- sample: samples/Strings.cs split -->
+```csharp
+int parts = 0;
+foreach (ReadOnlySpan<char> part in "x,y,z".Split(','))
+    parts++;
+Check("Split count", parts == 3);
+```
+
+Defining `AsSpan(string)` also switches on C# 14's implicit conversion from `string` to
+`ReadOnlySpan<char>`. So every string converts to a span, and any span parameter takes a string. A
+null string acts as an empty one.
+
+Parsing works on spans too. `Str.TryParse` reads `int`, `long`, `ulong` and `double`, and
+`Str.TryParseHex` reads hex. Parsing is strict and invariant: no surrounding whitespace, so call `Trim()`
+first, and no thousands separators. `TryParse` for `double` is correctly rounded. That combination is
+how the tutorial's quiz reads an answer without allocating anything: the line goes into a stack buffer,
+and the number is parsed from a slice of it.
+
+<!-- sample: samples/QuizStep2.cs check -->
+```csharp
+ReadOnlySpan<char> answer = buffer.Slice(0, Math.Min(length, buffer.Length));
+if (Str.TryParse(answer.Trim(), out long value) && value == a + b)
+{
+    right++;
+    Out.Line("right");
+}
+else
+{
+    Out.Line($"no, it's {a + b}");
+}
+```
+
+## Out: formatting straight to stdout
+
+zerocore has no `Console`. `lib/Out.cs` is a buffered writer that encodes text as UTF-8 and hands each
+line to `write()` in one call. `Out.Line($"...")` uses a custom interpolated string handler, so every
+hole is formatted straight into the output buffer and no string is built:
+
+<!-- sample: samples/Strings.cs table -->
+```csharp
+Out.Line($"{"item",-8}|{"qty",5}|{"price",9}");
+Out.Line($"{"apple",-8}|{3,5}|{1.25,9:F2}");
+Out.Line($"{"melon",-8}|{12,5}|{0.5,9:F2}");
+```
+
+Holes take integers, `double` and `float`, `bool`, `char`, strings and spans, with an optional alignment
+(`{x,8}`, `{x,-8}`) and format: `D`/`Dn` and `X`/`x`/`Xn` for integers, `F`/`Fn` for doubles. Some
+results differ from .NET's: `bool` prints as `true`/`false`, and `{-1:X}` prints 16 hex digits for any
+integer type, since every integer is formatted as a 64-bit value. [Format text](../how-to/format-text.html)
+covers the details.
+
+## Strings in an arena
+
+When you do need a string object, to store it or to pass it to something that takes `string`, build it
+in an arena. `Str.Format(arena, $"...")` formats into the arena with the same holes as `Out`, and
+`Str.Concat(arena, a, b)` joins spans. Both return null if the arena isn't created or is full.
+
+These are real strings. A zero-mode string object is a method-table pointer, a length and the
+characters, and `Str.Format` lays one out in arena memory, followed by a terminator like a literal's.
+The result works anywhere a string does:
+
+<!-- sample: samples/Strings.cs real-string -->
+```csharp
+string s = Str.Format(s_arena, $"n={5}");
+Check("Length", s.Length == 3);
+Check("indexer", s[0] == 'n' && s[2] == '5');
+unsafe
+{
+    // SAFETY: s has Length chars plus a terminator.
+    fixed (char* p = s)
+        Check("null-terminated like a literal", p[3] == '\0');
+}
+```
+
+For text built up in pieces, `StrBuilder.Create(arena)` is the counterpart of `StringBuilder`, with
+`Append($"...")`. Like a `List`, it is a handle to a header in the arena, so copies share the same
+contents, and it grows its buffer in place while that buffer is still the arena's newest allocation.
+Its buffer is laid out like a string object, which is how `Str.Format` turns its finished buffer into
+a string without copying. `sb.ToArenaString()` copies the text into a new string.
+
+An arena string is freed with the rest of its arena, by `Restore`, `Reset` or `Destroy`. After that it
+must not be used. This is the one rule that replaces the garbage collector for strings: **a string
+lives exactly as long as its arena**.
+
+## Keeping a string past its arena
+
+That rule decides where a string should be built. If it is temporary, build it in a scratch arena, or
+after a `Save()`, and free it with the rest. If it has to be kept, build it in the arena that lives
+long enough, or copy it there.
+
+Copying is explicit. `Str.ToArenaString(keep, s)` copies any string or span into the arena `keep`, and
+`sb.ToArenaString(keep)` copies a builder's text. A common shape is to do the messy work in a scratch
+arena and copy out only the result:
+
+<!-- sample: samples/Strings.cs scratch -->
+```csharp
+// Or build in a scratch arena and copy only the result out.
+Arena scratch = Arena.Create(256);
+StrBuilder draft = StrBuilder.Create(scratch);
+for (int i = 0; i < 50; i++)
+    draft.Append($"{i} ");
+usedBefore = s_arena.Used;
+string kept = draft.ToArenaString(s_arena);
+```
+
+After this, the scratch arena can be destroyed and `kept` still holds the text, in `s_arena`.
+
+Collections of strings follow the same rule. `RefList<string>` and `RefDict` hold references, not
+copies, so the strings they hold must live in an arena that outlives the collection's use of them. The
+quiz keeps its mistakes this way, building each string directly in the long-lived arena:
+
+<!-- sample: samples/Quiz.cs record -->
+```csharp
+else
+{
+    Out.Line($"no, it's {a + b}");
+    // Kept until the end, so the string is built in `keep`, not in
+    // the buffer the next answer overwrites.
+    mistakes.Add(Str.Format(keep, $"  {a} + {b} = {a + b}, not {value}"));
+}
+```
+
+`StrDict` is the exception: it copies each new key into its own arena, so it doesn't depend on where its
+keys came from, and looking up a span that was just read allocates nothing.
+[Keep a string](../how-to/keep-a-string.html) walks through the choices.
+
+## What isn't there
+
+There is nothing culture-aware, no `string.Format`, and no `char` or number operands in `+`: `"n=" + 5`
+doesn't compile, because there is no `object.ToString`. Write `Str.Format(arena, $"n={5}")` instead.
+With only string holes, a plain `$"..."` works, through `+`.

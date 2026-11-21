@@ -58,6 +58,7 @@ public static class Program
             }
         }
 
+        // docs:alloc-and-use
         Entity* e = arena.Alloc<Entity>();
         int* squares = arena.AllocArray<int>(10);
         unsafe
@@ -68,6 +69,7 @@ public static class Program
                 squares[i] = i * i;
             Out.Line("squares[5] = ", squares[5]);
         }
+        // docs:end
         Out.Line("Used: ", (long)arena.Used, " bytes | Blocks: ", arena.BlockCount);
 
         // Start over with a single 128-byte block to show the growth sequence.
@@ -173,12 +175,14 @@ public static class Program
         Out.Write(arena.TryExtend(growing, 8 * sizeof(int), 16 * sizeof(int)));
         Out.Line();
 
+        // docs:second-arena
         // Arenas are independent: one per lifetime. Here a second arena holds a
         // list for a while and is dropped without touching the first.
         Arena frame = Arena.Create(256);
         List<int> numbers = List<int>.Create(frame);
         for (int i = 0; i < 100; i++)
             numbers.Add(i);
+        // docs:end
         Out.Line();
         Out.Line($"Second arena: list of {numbers.Count} ints, {(long)frame.Used} bytes used");
         usedBefore = arena.Used;
@@ -190,6 +194,7 @@ public static class Program
         unsafe { arena.Destroy(); } // SAFETY: nothing points into the arena after this.
         Out.Line("Arena destroyed.");
 
+        // docs:debug-checks
         // Debugging aid: arenas created while DebugChecks is on fill freed memory
         // with 0xDD, so a stale pointer reads an obvious pattern instead of the
         // old value, and collections stop the program when used after a reset.
@@ -197,6 +202,7 @@ public static class Program
         Arena debug = Arena.Create(256);
         int* stale = debug.AllocArray<int>(4);
         unsafe { stale[0] = 12345; }
+        // docs:end
         Out.Line();
         Out.Write("DebugChecks: pointer is live before Reset: ");
         Out.Write(debug.IsLive(stale));

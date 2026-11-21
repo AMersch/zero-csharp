@@ -85,11 +85,13 @@ public static class Program
 
     static void SetPalette()
     {
+        // docs:palette
         Dos.SetColor(Black, 0, 0, 4);
         Dos.SetColor(DimStar, 20, 20, 28);
         Dos.SetColor(BrightStar, 50, 50, 63);
         Dos.SetColor(Hull, 10, 50, 60);
         Dos.SetColor(Cockpit, 63, 55, 10);
+        // docs:end
         for (int i = 0; i < 8; i++)                     // rocks: eight browns, light to dark
             Dos.SetColor(Rock0 + i, 48 - i * 4, 36 - i * 3, 24 - i * 2);
         Dos.SetColor(Red, 63, 8, 8);
@@ -108,12 +110,14 @@ public static class Program
 
     static void FillRect(Span<byte> picture, int x, int y, int width, int height, byte color)
     {
+        // docs:fill-rect
         int left = Math.Max(x, 0), right = Math.Min(x + width, W);
         int top = Math.Max(y, 0), bottom = Math.Min(y + height, H);
         if (left >= right)
             return;
         for (int row = top; row < bottom; row++)
             Dos.Fill(picture.Slice(row * W + left, right - left), color);
+        // docs:end
     }
 
     // A rock: a square with its corners cut off, lit from the top.
@@ -229,6 +233,7 @@ public static class Program
         int steps = 0;
         while (true)
         {
+            // docs:input
             // Esc is taken from the key presses, not from what is held down
             // right now: pressed and released during the pause after a crash,
             // it would otherwise go unnoticed.
@@ -237,6 +242,7 @@ public static class Program
                 if (key >> 8 == Dos.Esc)
                     return;
             int steer = (Dos.KeyDown(Dos.Right) ? 1 : 0) - (Dos.KeyDown(Dos.Left) ? 1 : 0);
+            // docs:end
 
             // The mouse takes over while it moves: the ship goes where it points.
             if (s_mouse)
@@ -266,9 +272,11 @@ public static class Program
 
             if (hit && s_score > s_best)
                 s_best = s_score;
+            // docs:frame
             Draw(picture, hit);
             Dos.WaitFrame();
             Dos.Show(picture);
+            // docs:end
 
             if (hit)
             {
@@ -383,10 +391,12 @@ public static class Program
             s_stars[i].Y = Random(H);
             s_stars[i].Speed = 1 + Random(2);
         }
+        // docs:setup
         Span<byte> picture = new byte[W * H];
 
         Dos.Graphics();
         SetPalette();
+        // docs:end
         if (args.Length > 0 && args[0] == "test")
             return SelfTest(picture);
 
@@ -396,12 +406,14 @@ public static class Program
         if (s_mouse)
             Dos.Mouse(out s_mouseX, out _);
 
+        // docs:back-to-text
         Play(picture);
         Dos.Sound(0);
         Dos.Text();
         if (s_best > bestBefore)
             SaveBest(s_best);
         Out.Line("Best score: ", s_best);
+        // docs:end
         return 0;
     }
 }

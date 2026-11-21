@@ -4,7 +4,9 @@
 
 Exploring [bflat](https://flattened.net/)'s zero mode: C# compiled to tiny native binaries without .NET's runtime, written in **C# 15** under the **updated memory safety rules**.
 
-**Zero mode is essentially "C with proper generics"**: C#'s syntax, type safety, and generics with C-like binary sizes (16-150 KB).
+**Zero mode is essentially "C with proper generics"**: C#'s syntax, type safety, and generics with C-like binary sizes (16-160 KB).
+
+**Documentation:** <https://onurgumus.github.io/bflat_test/>, a guide to installing the fork, a tutorial, concepts, task guides and a reference for `lib/`. Its source is in `docs/`; build it with `dotnet tool restore && python3 scripts/build-docs.py` (needs .NET 10, Python 3 and Node), then `python3 -m http.server -d output`.
 
 The samples don't use bflat's built-in zero-mode library (`--stdlib:zero`, zerolib). They use [`zerocore/`](zerocore/README.md), an MIT-licensed core library in this repo that `build.sh` compiles from source, so nothing AGPL-licensed is linked into the binaries (see [Core library](#core-library)).
 
@@ -77,7 +79,7 @@ This produces `layouts/linux-glibc-{x64,arm64}` and `layouts/windows-{x64,arm64}
 
 Every C# program needs a core library: the assembly that defines `object`, `int` and `string`, and holds the runtime code the compiler calls to allocate objects, check casts and set up static fields. .NET's is `System.Private.CoreLib` plus a native runtime, megabytes of it. bflat's zero mode replaces both with zerolib, about 4,000 lines, which is AGPL-3.0 and gets compiled into every binary.
 
-[`zerocore/`](zerocore/README.md) is this repo's replacement for zerolib: about 2,400 lines of C# and three short assembly routines per architecture, under the MIT license. `build.sh` compiles it from source and passes it to bflat with `--stdlib:none`. Compared with zerolib it adds casts to interfaces, interface calls the compiler can't resolve at build time, boxing, and `Main(string[] args)`; it leaves out `Console` and `Half`, and it runs on Linux and WebAssembly only. Its README lists what works, what doesn't, and where the code comes from, including a caveat about the license that's worth reading before building a product on it.
+[`zerocore/`](zerocore/README.md) is this repo's replacement for zerolib: about 2,400 lines of C# and three short assembly routines per architecture, under the MIT license. `build.sh` compiles it from source and passes it to bflat with `--stdlib:none`. Compared with zerolib it adds casts to interfaces, interface calls the compiler can't resolve at build time, boxing, and `Main(string[] args)`; it leaves out `Console` and `Half`, and it runs on Linux, WebAssembly and DOS (through the WebAssembly build's bitcode). Its README lists what works, what doesn't, and where the code comes from, including a caveat about the license that's worth reading before building a product on it.
 
 The same program comes out about 10 KB smaller than with zerolib, except Tiny, which is 0.6 KB larger.
 
@@ -96,7 +98,7 @@ bflat build samples/Arena.cs -r bin/BflatLib.dll -r bin/System.Private.CoreLib.d
     --stdlib:none --no-reflection -i libc $F --ldflags bin/zerocore-arm64.o -o bin/Arena
 ```
 
-This is how you ship a bflat library without header files. The assembly's metadata describes the public API, so `-r` takes the place of `#include`. The assembly holds IL, not native code, so each sample's build compiles just the parts it uses into one static binary: generics are instantiated for the caller's types, calls are inlined across the library boundary, and code is generated for the caller's `-m` flags. One `BflatLib.dll` therefore gives NEON code on arm64 and AVX2 code on x64. Sizes match building from source to within about 1 KB.
+This is how you ship a bflat library without header files. The assembly's metadata describes the public API, so `-r` takes the place of `#include`. The assembly holds IL, not native code, so each sample's build compiles just the parts it uses into one executable: generics are instantiated for the caller's types, calls are inlined across the library boundary, and code is generated for the caller's `-m` flags. One `BflatLib.dll` therefore gives NEON code on arm64 and AVX2 code on x64. Sizes match building from source to within about 1 KB.
 
 - Pass `-O` to `build-il`. Unlike `bflat build`, it doesn't optimize unless you ask, and without `-O` the samples come out up to 1.4 KB bigger.
 - The library and its consumers must be built against the same core library.
@@ -111,7 +113,7 @@ This is how you ship a bflat library without header files. The assembly's metada
 
 ## WebAssembly
 
-`./build.sh --wasm` compiles the same samples, `lib/` and `zerocore/` to WebAssembly modules for WASI, from 15 KB (Tiny) to 75 KB (Strings), stripped. All twelve run under wasmtime: Strings passes its 140 checks and Casts its 41, both printing exactly what the native build prints, and the others match too, apart from what depends on the platform (below).
+`./build.sh --wasm` compiles the same samples, `lib/` and `zerocore/` to WebAssembly modules for WASI, from 16 KB (Tiny) to 80 KB (Collections and Strings), stripped. All fifteen run under wasmtime: Strings passes its 140 checks and Casts its 41, both printing exactly what the native build prints, and the others match too, apart from what depends on the platform (below).
 
 bflat can't target WebAssembly, so this uses a different compiler for the last step:
 
@@ -132,9 +134,9 @@ Differences from the native build:
 
 ## DOS
 
-`./build.sh --dos` compiles ten of the samples, `lib/` and `zerocore/` to 32-bit DOS programs that run on a 386: `bin/dos/*.exe`, from 14 KB (Tiny) to 89 KB (Strings). On an emulated 386 with 4 MB of memory all ten exit with 0, and they print exactly what the WebAssembly build prints (which is what the native build prints, apart from the pointer-sized byte counts in Arena and Collections). Simd and Kernels are left out: they benchmark SIMD instructions, which a 386 doesn't have.
+`./build.sh --dos` compiles thirteen of the samples, `lib/` and `zerocore/` to 32-bit DOS programs that run on a 386: `bin/dos/*.exe`, from 16 KB (Tiny) to 93 KB (Strings). On an emulated 386 with 4 MB of memory all thirteen exit with 0, and they print exactly what the WebAssembly build prints (which is what the native build prints, apart from the pointer-sized byte counts in Arena and Collections). Simd and Kernels are left out: they benchmark SIMD instructions, which a 386 doesn't have.
 
-A tenth sample exists only for DOS: [`samples/Vga.cs`](samples/Vga.cs), a small game in the VGA's 320x200, 256-color mode (31 KB). It uses [`lib/Dos.cs`](lib/Dos.cs): `Dos.Graphics()`, `Dos.Screen` (the screen as a `Span<byte>`, one byte per pixel), `Dos.Show` and `Dos.Fill` (copy a finished picture to the screen and clear one, with the processor's block instructions), `Dos.SetColor`, `Dos.WaitFrame` (the 70 Hz screen refresh), `Dos.KeyDown` and `Dos.ReadKey`, `Dos.Mouse`, `Dos.Sound` (the PC speaker), `Dos.FileOpen`/`FileRead`/`FileWrite` and friends, `Dos.Ticks` (milliseconds) and `Dos.Sleep`, and `Dos.In`/`Dos.Out` for hardware ports. The game is steered with the arrow keys or the mouse, sounds a falling tone on a crash and keeps its best score in `VGA.DAT`. The game moves by the clock, 70 steps a second, so a machine too slow to draw 70 frames a second drops frames instead of slowing the game down. `./run.sh --dos --window Vga` plays it; `Vga test` plays 300 frames by itself and checks that the screen holds the picture it drew, that the clock runs, that the speaker switches on and off, and that a file can be written, appended to, read back and deleted; that is what `test.sh` uses.
+One more sample exists only for DOS: [`samples/Vga.cs`](samples/Vga.cs), a small game in the VGA's 320x200, 256-color mode (36 KB). It uses [`lib/Dos.cs`](lib/Dos.cs): `Dos.Graphics()`, `Dos.Screen` (the screen as a `Span<byte>`, one byte per pixel), `Dos.Show` and `Dos.Fill` (copy a finished picture to the screen and clear one, with the processor's block instructions), `Dos.SetColor`, `Dos.WaitFrame` (the 70 Hz screen refresh), `Dos.KeyDown` and `Dos.ReadKey`, `Dos.Mouse`, `Dos.Sound` (the PC speaker), `Dos.FileOpen`/`FileRead`/`FileWrite` and friends, `Dos.Ticks` (milliseconds) and `Dos.Sleep`, and `Dos.In`/`Dos.Out` for hardware ports. The game is steered with the arrow keys or the mouse, sounds a falling tone on a crash and keeps its best score in `VGA.DAT`. The game moves by the clock, 70 steps a second, so a machine too slow to draw 70 frames a second drops frames instead of slowing the game down. `./run.sh --dos --window Vga` plays it; `Vga test` plays 300 frames by itself and checks that the screen holds the picture it drew, that the clock runs, that the speaker switches on and off, and that a file can be written, appended to, read back and deleted; that is what `test.sh` uses.
 
 bflat's own compiler can make 32-bit x86 programs, but only for a Pentium 4 or later: its code generator always uses SSE2 for floating point. So this goes through the WebAssembly route's compiler, whose output isn't tied to a processor until the last step:
 
@@ -150,7 +152,7 @@ To run a program on a real machine or another emulator, copy it together with `H
 What it needs, and what's different:
 
 - **A 386 with a 387 math coprocessor, or a 486DX or later.** The compiled code uses 387 instructions for all floating point, and there is no software fallback, so a 386 or 486SX without a coprocessor isn't supported.
-- **2 MB of memory or more.** Each program reserves 256 KB for its stack and 256 KB for the "shadow stack" NativeAOT-LLVM's code keeps (see `dos/runtime.c`). With 2 MB, nine of the ten samples run; Strings needs more for its arenas and runs with 4 MB.
+- **2 MB of memory or more.** Each program reserves 256 KB for its stack and 256 KB for the "shadow stack" NativeAOT-LLVM's code keeps (see `dos/runtime.c`). With 2 MB, all but Strings run; Strings needs more for its arenas and runs with 4 MB.
 - **Nothing newer than a 386 gets in unnoticed.** After linking, `build.sh` disassembles each program and fails if it finds an instruction a 386 or 387 lacks. That check exists because it's easy to break: clang's `-march=i386` still emits the 486's `cmpxchg` for an atomic operation. zerocore's `Interlocked` avoids that by being ordinary code in this build, and it is the first thing the check caught.
 - **Use Bochs to test.** Its `i386` processor model refuses instructions a 386 doesn't have; that's what `run.sh` and `test.sh` use when Bochs is installed. QEMU's `486` model refuses the Pentium Pro's and SSE instructions but runs the 486's own (`bswap`, `cmpxchg`, `xadd`), so it can't tell a 386 program from a 486 one.
 - **Floating point is the 387's.** It's set to 53-bit precision, so `+ - * /` and `Sqrt` on doubles give the same results as elsewhere. Two things can differ in the last digits: values the 387 keeps in a register with more precision than their type has (a `long` above 2^53 converted to `double`, or `float` arithmetic), and `Exp`, `Log`, `Pow`, `Sin` and the like, which are the 387's own. A one-off comparison of some sixty such results (not kept in the repository) matched Linux to nine decimals except one `long` conversion.
@@ -220,11 +222,12 @@ unsafe { arena.Reset(); }                // SAFETY: p is not used after this
 | `samples/Casts.cs` | Tests runtime type checks (41 checks): `is`, `as` and `(T)x` to interfaces and classes, generic interfaces, boxed structs, interface calls with many arguments and default methods, arrays of interfaces, delegates | ~97 KB |
 | `samples/Core.cs` | Tests the smaller parts of the core library (32 checks): `Math`, `MathF`, `Interlocked`, `Volatile`, and one call site calling an interface method on six classes | ~75 KB |
 | `samples/Simd.cs` | Float dot product with NEON (arm64) or AVX + FMA (x64), checked against scalar and timed (12x faster on Apple Silicon) | ~52 KB |
-| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within 1 ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~65 KB |
+| `samples/Kernels.cs` | Tests and times `lib/Kernels.cs`: exp within a few ulp of libm, softmax, SiLU, RMSNorm, matrix-vector product, exact int8 dot product (softmax 7x faster than scalar libm on Apple Silicon) | ~65 KB |
 | `samples/Strings.cs` | Tests the string support (140 checks): span operations, parsing integers, hex and doubles (bit-exact), `$"..."` formatting with alignment and format strings, arena strings, `StrBuilder`, and the core library's `==`, `+`, string `switch` and static string fields; prints a table and UTF-8 text through `Out` | ~159 KB |
 | `samples/Quiz.cs` | Asks questions in a loop and reads the answers with `In.ReadLine`: prompts formatted straight to stdout, answers read into a stack buffer, mistakes kept as strings in a `RefList` in a long-lived arena. `test.sh` feeds it `tests/input/Quiz.txt` (bad UTF-8, an over-long line, CRLF, end of input) | ~67 KB |
+| `samples/QuizStep1.cs` … `QuizStep3.cs` | The [tutorial](https://onurgumus.github.io/bflat_test/tutorial/index.html)'s first three steps towards Quiz: print the questions, read the answers, handle bad input. The site quotes them | ~52-56 KB |
 | `samples/Guards.cs` | The mistakes `lib/` ends the program for, one per run: marks restored out of order or in the wrong arena, collections used after their memory was freed (`DebugChecks`), a list index out of range, running out of memory in an arena created with `stopOnOutOfMemory`. `test.sh` checks the message of each | ~77 KB |
-| `samples/Vga.cs` | DOS only (see [DOS](#dos)): a small game in 320x200 with 256 colors, steered with the arrow keys; `Vga test` checks the screen, keyboard and clock by itself | 31 KB (DOS) |
+| `samples/Vga.cs` | DOS only (see [DOS](#dos)): a small game in 320x200 with 256 colors, steered with the arrow keys; `Vga test` checks the screen, keyboard and clock by itself | 36 KB (DOS) |
 
 Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is stripped); x64 is within a few KB. Run `strip` to shrink the others.
 

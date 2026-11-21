@@ -67,11 +67,13 @@ public static class Program
         Out.Line();
 
         Out.Line("--- Dict<int, int> ---");
+        // docs:dict
         var scores = Dict<int, int>.Create(arena);
         scores.Set(1, 100);
         scores.Set(2, 250);
         scores.Set(3, 175);
         scores.Set(-42, 999);
+        // docs:end
         Out.Line("Count: ", scores.Count);
 
         if (scores.TryGet(2, out int value))
@@ -165,6 +167,7 @@ public static class Program
         Out.Line("--- StrDict ---");
         var counts = StrDict<int>.Create(arena, 0);
         Span<char> wordBuffer = stackalloc char[8]; // every word is read into this buffer
+        // docs:word-counts
         foreach (ReadOnlySpan<char> w in "the cat and the hat and the bat".Split(' '))
         {
             for (int i = 0; i < w.Length; i++)
@@ -173,6 +176,7 @@ public static class Program
             counts.TryGet(key, out int n);
             counts.Set(key, n + 1);
         }
+        // docs:end
         Out.Line($"Word counts: {counts.Count} distinct, the = {Count(counts, "the")}, and = {Count(counts, "and")}, bat = {Count(counts, "bat")}, dog = {Count(counts, "dog")}");
 
         // Keys made in a scratch arena that is reset every time: the map has its own copies.
@@ -208,9 +212,11 @@ public static class Program
         Out.Line($"500 keys, {removed} even ones removed: Count {squareMap.Count}, odd keys intact: {oddFound}, foreach: {squarePairs} pairs summing to {squareSum}");
         Out.Line($"key0 gone: {!squareMap.ContainsKey("key0")}, key499 = {(squareMap.TryGet("key499", out long last) ? last : -1)}");
 
+        // docs:labels
         var labels = StrDict<string>.Create(arena); // values can be references too
         labels.Set("ok", "fine");
         labels.Set("ok", Str.Format(arena, $"fine x{2}"));
+        // docs:end
         Out.Line($"StrDict<string>: ok = {(labels.TryGet("ok", out string label) ? label : "missing")}, Count {labels.Count}");
         StrDict<int> noCounts = default;
         Out.Line($"default(StrDict): Count {noCounts.Count}, Set returns {noCounts.Set("x", 1)}, found: {noCounts.ContainsKey("x")}");
@@ -218,10 +224,12 @@ public static class Program
 
         // Unmanaged keys, reference values.
         Out.Line("--- RefDict<int, string> ---");
+        // docs:refdict
         var byId = RefDict<int, string>.Create(arena);
         byId.Set(7, "seven");
         byId.Set(3, Str.Format(arena, $"three is {3}"));
         byId.Set(9, null);
+        // docs:end
         bool nineFound = byId.TryGet(9, out string nine);
         bool fourFound = byId.TryGet(4, out string four);
         Out.Line($"3 = {(byId.TryGet(3, out string three) ? three : "missing")}, 9 found: {nineFound} and null: {nine is null}, 4 found: {fourFound} and null: {four is null}");
@@ -233,10 +241,12 @@ public static class Program
         Out.Line();
 
         Out.Line("--- Clone ---");
+        // docs:clone
         Arena keep = Arena.Create(4096);
         StrDict<int> countsCopy = counts.Clone(keep); // keys are copied into keep too
         List<int> snapshot = numbers.Clone(keep);
         Dict<int, int> scoresCopy = scores.Clone(keep);
+        // docs:end
         numbers.Set(0, -1);
         scores.Set(2, 0);
         Out.Line($"Original changed: numbers[0] = {numbers.Get(0)}, scores[2] = {(scores.TryGet(2, out value) ? value : -1)}");

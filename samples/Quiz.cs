@@ -1,5 +1,7 @@
 // Example: reading input with In (lib/In.cs). Asks arithmetic questions in a
 // loop and reads the answers; asks again when an answer isn't a number.
+// Also the tutorial's last step (QuizStep1-3.cs are the earlier ones): it keeps
+// the mistakes in an arena to list them at the end.
 // Build: ./build.sh Quiz
 // Run:   ./run.sh Quiz                (type the answers; Ctrl-D ends early)
 //        ./run.sh Quiz < answers.txt
@@ -23,6 +25,7 @@ public static class Program
 
     public static int Main()
     {
+        // docs:keep
         // Lives until the end: the mistakes are kept here, the list and its strings.
         Arena keep = Arena.Create(4096);
         RefList<string> mistakes = RefList<string>.Create(keep);
@@ -31,6 +34,7 @@ public static class Program
             Out.Line("Arena.Create failed");
             return 1;
         }
+        // docs:end
 
         // Each answer is read into this; nothing is allocated per question.
         Span<char> buffer = stackalloc char[32];
@@ -77,6 +81,7 @@ public static class Program
                     right++;
                     Out.Line("right");
                 }
+                // docs:record
                 else
                 {
                     Out.Line($"no, it's {a + b}");
@@ -84,11 +89,13 @@ public static class Program
                     // the buffer the next answer overwrites.
                     mistakes.Add(Str.Format(keep, $"  {a} + {b} = {a + b}, not {value}"));
                 }
+                // docs:end
                 break;
             }
         }
 
     Done:
+        // docs:report
         Out.Line($"{right} of {asked} right");
         if (mistakes.Count > 0)
         {
@@ -96,6 +103,7 @@ public static class Program
             foreach (string mistake in mistakes)
                 Out.Line(mistake);
         }
+        // docs:end
         Out.Flush();
         return 0;
     }

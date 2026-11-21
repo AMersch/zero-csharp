@@ -52,6 +52,7 @@ public static class Program
 
     static void RestoreOrder()
     {
+        // docs:restore-order
         Arena arena = Arena.Create(256, "order");
         Arena.Mark outer = arena.Save();
         arena.AllocArray<byte>(64);
@@ -62,6 +63,7 @@ public static class Program
             arena.Restore(outer); // also ends `inner`
             arena.Restore(inner);
         }
+        // docs:end
     }
 
     static void RestoreOtherArena()
@@ -85,12 +87,14 @@ public static class Program
 
     static void ListAfterReset()
     {
+        // docs:list-after-reset
         Arena.DebugChecks = true;
         Arena arena = Arena.Create(256);
         List<int> list = List<int>.Create(arena);
         list.Add(1);
         unsafe { arena.Reset(); }
         list.Add(2);
+        // docs:end
     }
 
     static void ListGrewInScope()
@@ -112,6 +116,7 @@ public static class Program
 
     static void ListGrewInPlace()
     {
+        // docs:grew-in-place
         Arena.DebugChecks = true;
         Arena arena = Arena.Create(256, "in place");
         List<int> list = List<int>.Create(arena, 4);
@@ -127,6 +132,7 @@ public static class Program
                 list.Add(i);
         }
         list.Get(0);
+        // docs:end
     }
 
     static void BuilderGrewInPlace()
@@ -154,8 +160,10 @@ public static class Program
 
     static void OutOfMemory()
     {
+        // docs:out-of-memory
         Arena arena = Arena.Create(256, "small", stopOnOutOfMemory: true);
         // Half the address space: no system has that much to give.
         arena.Alloc(~(nuint)0 / 2);
+        // docs:end
     }
 }

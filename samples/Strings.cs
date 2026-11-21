@@ -127,10 +127,12 @@ public static class Program
         Expect("Split without separator", Join("abc"), "abc");
         Expect("Split empty string", Join(""), "");
         Expect("Split trailing separator", Join("a,"), "a|");
+        // docs:split
         int parts = 0;
         foreach (ReadOnlySpan<char> part in "x,y,z".Split(','))
             parts++;
         Check("Split count", parts == 3);
+        // docs:end
 
         End("spans: trim and split");
 
@@ -261,6 +263,7 @@ public static class Program
         End("format: other values and alignment");
 
         // ---- arena strings are real strings ----
+        // docs:real-string
         string s = Str.Format(s_arena, $"n={5}");
         Check("Length", s.Length == 3);
         Check("indexer", s[0] == 'n' && s[2] == '5');
@@ -270,21 +273,25 @@ public static class Program
             fixed (char* p = s)
                 Check("null-terminated like a literal", p[3] == '\0');
         }
+        // docs:end
         Expect("Concat 2", Str.Concat(s_arena, "ab", "cd"), "abcd");
         Expect("Concat 3", Str.Concat(s_arena, "a", "b", "c"), "abc");
         Expect("Concat with slice", Str.Concat(s_arena, "hello world".AsSpan(0, 5), "!"), "hello!");
         Expect("ToArenaString", Str.ToArenaString(s_arena, "xyz"), "xyz");
         Check("ToArenaString copies", !ReferenceEquals(Str.ToArenaString(s_arena, name), name));
 
+        // docs:restore
         // Temporary strings: free them with Restore and keep the rest.
         nuint usedBefore = s_arena.Used;
         Arena.Mark mark = s_arena.Save();
         string temporary = Str.Format(s_arena, $"{name} has {name.Length} letters");
         bool temporaryOk = temporary.EndsWith("3 letters");
         unsafe { s_arena.Restore(mark); } // SAFETY: temporary is not used below.
+        // docs:end
         Check("Save/Restore frees temporary strings", temporaryOk && s_arena.Used == usedBefore);
         Check("earlier strings survive Restore", s == "n=5");
 
+        // docs:scratch
         // Or build in a scratch arena and copy only the result out.
         Arena scratch = Arena.Create(256);
         StrBuilder draft = StrBuilder.Create(scratch);
@@ -292,6 +299,7 @@ public static class Program
             draft.Append($"{i} ");
         usedBefore = s_arena.Used;
         string kept = draft.ToArenaString(s_arena);
+        // docs:end
         unsafe { scratch.Destroy(); } // SAFETY: draft is not used below; kept lives in s_arena.
         Check("scratch arena: result copied out", kept.StartsWith("0 1 2 ") && kept.EndsWith("48 49 "));
         Check("scratch arena: only the result is kept", s_arena.Used - usedBefore == (nuint)(System.Runtime.CompilerServices.RuntimeHelpers.OffsetToStringData + (kept.Length + 1) * 2));
@@ -321,9 +329,11 @@ public static class Program
 
         // ---- Out: $"..." straight to stdout ----
         Out.Line();
+        // docs:table
         Out.Line($"{"item",-8}|{"qty",5}|{"price",9}");
         Out.Line($"{"apple",-8}|{3,5}|{1.25,9:F2}");
         Out.Line($"{"melon",-8}|{12,5}|{0.5,9:F2}");
+        // docs:end
         Out.Line($"UTF-8: héllo wörld, 世界, 🎉 ({"🎉".Length} UTF-16 chars)");
         Out.Line();
         Out.Line($"failures: {s_failures}");

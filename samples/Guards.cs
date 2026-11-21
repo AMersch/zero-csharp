@@ -1,4 +1,5 @@
-// Example: the mistakes lib/ ends the program for, one per run.
+// Example: the mistakes lib/ ends the program for, and `throw`, which is a
+// panic in zero mode: one per run.
 // Build: ./build.sh Guards        Run: ./run.sh Guards <case>
 //
 // Zero mode has no exceptions, so a guard can only stop the program: a message
@@ -24,6 +25,9 @@ public static class Program
             Out.Line("  builder-grew-in-place  the same for a StrBuilder (DebugChecks)");
             Out.Line("  list-index           a list index out of range");
             Out.Line("  out-of-memory        an allocation the system can't satisfy (stopOnOutOfMemory)");
+            Out.Line("  throw                a throw, inside a try with a matching catch");
+            Out.Line("  throw-null           throw null");
+            Out.Line("  union-no-case        a switch on a union that holds none of its cases");
             return 0;
         }
 
@@ -38,6 +42,9 @@ public static class Program
             case "builder-grew-in-place": BuilderGrewInPlace(); break;
             case "list-index": ListIndex(); break;
             case "out-of-memory": OutOfMemory(); break;
+            case "throw": Throw(); break;
+            case "throw-null": ThrowNull(); break;
+            case "union-no-case": UnionNoCase(); break;
             default:
                 Out.Line("Unknown case");
                 return 0;
@@ -166,4 +173,40 @@ public static class Program
         arena.Alloc(~(nuint)0 / 2);
         // docs:end
     }
+
+    static void Throw()
+    {
+        // docs:throw-panic
+        try
+        {
+            throw new System.InvalidOperationException("the queue is empty");
+        }
+        catch (System.InvalidOperationException)
+        {
+            // Never runs: the throw has already ended the program.
+            Out.Line("caught");
+        }
+        // docs:end
+    }
+
+    static void ThrowNull()
+    {
+        throw null;
+    }
+
+    static int UnionNoCase()
+    {
+        // docs:union-no-case
+        Choice choice = default;  // holds neither a Left nor a Right
+        return choice switch
+        {
+            Left l => l.Value,
+            Right r => r.Value,
+        };
+        // docs:end
+    }
 }
+
+public struct Left { public int Value; }
+public struct Right { public int Value; }
+public union Choice(Left, Right);

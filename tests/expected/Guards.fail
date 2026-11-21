@@ -7,3 +7,6 @@ list-grew-in-place|Arena "in place":|Arena.DebugChecks: collection's buffer was 
 builder-grew-in-place|Arena "builder":|Arena.DebugChecks: collection's buffer was freed
 list-index|List: index out of range
 out-of-memory|Arena "small":|Arena: out of memory
+throw|Unhandled exception: the queue is empty
+throw-null|Unhandled exception: NullReferenceException
+union-no-case|Unhandled exception: InvalidOperationException

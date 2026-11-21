@@ -250,7 +250,7 @@ Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is s
 
 ## What zero mode supports
 
-Zero mode has no garbage collector, no exceptions (failures call `Environment.FailFast`), no async/await, no LINQ, and almost no base class library. On the other hand, these all work with zerocore:
+Zero mode has no garbage collector, no exceptions you can catch (`throw` and other failures print a message and abort), no async/await, no LINQ, and almost no base class library. On the other hand, these all work with zerocore:
 
 - `Span<T>`, and arrays: `new T[n]`, including arrays of strings, objects and interfaces
 - Static fields of every type, including strings, objects and arrays; static constructors

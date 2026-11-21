@@ -5,7 +5,7 @@ index: 6
 
 # Limits
 
-Zero mode has no garbage collector, no exceptions, no async/await, no LINQ, and almost no base class
+Zero mode has no garbage collector, no exceptions you can catch, no async/await, no LINQ, and almost no base class
 library. A good deal of ordinary C# still works, because zerocore provides the parts the compiler
 needs. This page lists both sides and the known issues, so you can tell early whether a design fits.
 
@@ -26,6 +26,100 @@ With zerocore, as `build.sh` builds it:
 - **Function pointers, P/Invoke and `[UnmanagedCallersOnly]` callbacks.** Threads come from pthreads
   through P/Invoke, with `Interlocked` and `Volatile` for shared state.
 - **`Math` and `MathF`**, and `Main(string[] args)` and top-level statements.
+- **Extension methods**, and C# 14 **extension members**: properties, static members and
+  `ref` receivers in `extension(...)` blocks.
+
+Extension members compile to ordinary static methods, so they cost nothing at run time:
+
+<!-- sample: samples/Core.cs extension-members -->
+```csharp
+public struct Vec
+{
+    public int X, Y;
+}
+
+public static class VecExtensions
+{
+    // Classic extension method: `this` on the first parameter.
+    public static int Dot(this Vec a, Vec b) => a.X * b.X + a.Y * b.Y;
+
+    // C# 14 extension block: properties and methods on a Vec value.
+    extension(Vec v)
+    {
+        public int LengthSquared => v.Dot(v);
+        public bool IsZero => v.X == 0 && v.Y == 0;
+        public Vec Scale(int k) => new Vec { X = v.X * k, Y = v.Y * k };
+    }
+
+    // Static members, called as Vec.Zero and Vec.Of(1, 2).
+    extension(Vec)
+    {
+        public static Vec Zero => default;
+        public static Vec Of(int x, int y) => new Vec { X = x, Y = y };
+    }
+
+    // By reference: changes the caller's variable.
+    extension(ref Vec v)
+    {
+        public void Translate(int dx, int dy)
+        {
+            v.X += dx;
+            v.Y += dy;
+        }
+    }
+}
+```
+
+<!-- sample: samples/Core.cs extension-calls -->
+```csharp
+Vec v = Vec.Of(Opaque(3), Opaque(4));
+Check("extension method", v.Dot(Vec.Of(1, 1)) == 7);
+Check("extension property", v.LengthSquared == 25);
+Check("extension method in a block", v.Scale(2).LengthSquared == 100);
+Check("static extension members", Vec.Zero.IsZero && !v.IsZero);
+v.Translate(-3, -4);
+Check("by-reference extension", v.IsZero);
+```
+
+C# 15 **unions** work too. A union holds a value of one of the types it lists, and a `switch` on it
+must handle each of them, which makes it the natural way to return an error:
+
+<!-- sample: samples/Core.cs union-declaration -->
+```csharp
+public struct Parsed { public int Value; }
+public struct BadChar { public int Position; }
+
+// A ParseResult holds either a Parsed or a BadChar, and a switch on it must
+// handle both.
+public union ParseResult(Parsed, BadChar);
+```
+
+<!-- sample: samples/Core.cs union-function -->
+```csharp
+static ParseResult ParseNumber(string text)
+{
+    int value = 0;
+    for (int i = 0; i < text.Length; i++)
+    {
+        char c = text[i];
+        if (c < '0' || c > '9')
+            return new BadChar { Position = i };
+        value = value * 10 + (c - '0');
+    }
+    return new Parsed { Value = value };
+}
+
+static int ValueOrMinusOne(string text) => ParseNumber(text) switch
+{
+    Parsed p => p.Value,
+    BadChar => -1,
+};
+```
+
+A union keeps its value in a field of type `object`, so a struct value is boxed: each `Parsed` or
+`BadChar` returned above is a heap allocation that is never freed. That is fine for an error that
+happens once, but not for a function called in a hot loop. There, return a struct with a tag field,
+or allocate in an [arena](memory.html).
 
 Casts to interfaces work as in .NET, except that a failed `(T)x` ends the program instead of throwing:
 
@@ -86,10 +180,13 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
 
 - **Freeing memory.** Nothing allocated with `new`, boxing or `+` is ever freed. Use
   [arenas](memory.html) for anything short-lived.
-- **Exceptions.** There is no `Exception` type, so `throw` and `catch` don't compile. A failure that
-  would throw in .NET, such as a failed cast, an index out of range or an overflow in `checked` code,
-  prints a message and ends the program. A null dereference is a plain segmentation fault. `lib/`
+- **Catching exceptions.** `throw` is a panic, like Rust's `panic!` built with `panic = "abort"`:
+  it prints the exception's message and ends the program. Nothing unwinds, so no `catch` block runs,
+  and neither do the `finally` blocks and `using` disposals between the `throw` and `Main`. A failure
+  that would throw in .NET, such as a failed cast, an index out of range or an overflow in `checked`
+  code, ends the program the same way. A null dereference is a plain segmentation fault. `lib/`
   follows the same rule: when it catches a mistake, it can only end the program with a message.
+  Return errors as values instead, for example with a union (see above).
 - **Variance.** Casting or dispatching through it (`IEnumerable<string>` as `IEnumerable<object>`,
   `string[]` as `object[]`) aborts with a message saying so, instead of answering wrongly.
 - **Most of the base class library.** No `Console` (use `Out` and `In`), no `object.ToString`, `Equals`

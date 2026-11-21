@@ -91,6 +91,19 @@ namespace System.Runtime
         [RuntimeExport("RhpGcPoll")]
         internal static void RhpGcPoll() { }
 
+        // `throw`: a panic. Print the message and end the program; nothing
+        // unwinds (see System/Exceptions.cs). `throw null` throws a
+        // NullReferenceException in .NET, so it reports that.
+        [RuntimeExport("RhpThrowEx")]
+        internal static void RhpThrowEx(object exception)
+        {
+            Exception e = exception as Exception;
+            if (e == null)
+                Environment.FailFast("Unhandled exception: NullReferenceException");
+            string message = e.Message;
+            Environment.FailFast(message == null ? "Unhandled exception" : "Unhandled exception: " + message);
+        }
+
         // Where compiled code ends up when it would throw and has nowhere to go.
         [RuntimeExport("RhpFallbackFailFast")]
         internal static void RhpFallbackFailFast() => Environment.FailFast("Unhandled exception");

@@ -14,7 +14,69 @@
     <PackageReference Include="Microsoft.Net.Compilers.Toolset" Version="5.12.0" PrivateAssets="all" IsImplicitlyDefined="true" />
   </ItemGroup>
 
+  <!-- bflat for this host, restored with the project. -->
+  <ItemGroup Condition="'$(ZeroHostRid)' != '' and '$(OutputType)' != 'Library'">
+    <PackageDownload Include="ZeroCSharp.Bflat.$(ZeroHostRid)" Version="[$(ZeroSdkVersion)]" />
+  </ItemGroup>
+
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+  <!--
+    The native step: after the normal compile (which checks the code the way the
+    editor sees it), bflat compiles the same sources, with zerocore, lib/ and the
+    project's zero libraries, into a native program. The flags are build.sh's.
+  -->
+  <Target Name="ZeroNativeBuild" AfterTargets="Build" Condition="'$(OutputType)' != 'Library'"
+          DependsOnTargets="ZeroCheckNativeHost;ZeroNativeCommand"
+          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);$(ZeroNativeArgsFile)"
+          Outputs="$(ZeroNativeOutput)">
+    <Exec Command="chmod +x &quot;$(ZeroBflatDir)bflat&quot; &quot;$(ZeroBflatDir)bin/lld&quot;" />
+    <Exec Command="&quot;$(ZeroBflatDir)bflat&quot; build $(ZeroNativeArgs)" />
+    <Message Importance="high" Text="$(MSBuildProjectName) -> $(ZeroNativeOutput)" />
+  </Target>
+
+  <Target Name="ZeroCheckNativeHost">
+    <Error Condition="'$(ZeroHostRid)' == '' and $([MSBuild]::IsOSPlatform('OSX'))"
+           Text="Zero C# can't make native programs on macOS yet; build on Linux or Windows, or use the repository's build.sh." />
+    <Error Condition="'$(ZeroHostRid)' == '' and !$([MSBuild]::IsOSPlatform('OSX'))"
+           Text="Zero C# can't make native programs on this machine yet; build on Linux (x64 or arm64)." />
+    <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64'"
+           Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64." />
+  </Target>
+
+  <Target Name="ZeroNativeCommand">
+    <PropertyGroup>
+      <ZeroBflatDir>$(NuGetPackageRoot)zerocsharp.bflat.$(ZeroHostRid)/$(ZeroSdkVersion)/tools/bflat/</ZeroBflatDir>
+      <ZeroNativeDir>$(ZeroSdkRoot)payload/native/$(ZeroTarget)/</ZeroNativeDir>
+      <ZeroNativeOutput>$(OutDir)$(AssemblyName)</ZeroNativeOutput>
+      <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'win-x64'">$(OutDir)$(AssemblyName).exe</ZeroNativeOutput>
+      <ZeroNativeArgsFile>$(IntermediateOutputPath)zero-native.args</ZeroNativeArgsFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <ZeroNativeInput Include="$(ZeroRefDir)*.dll;$(ZeroNativeDir)*" />
+      <_ZeroArg Include="@(Compile->'&quot;%(FullPath)&quot;')" />
+      <_ZeroArg Include="-r &quot;%(Reference.Identity)&quot;" Condition="'%(Reference.ZeroFramework)' == 'true'" />
+      <_ZeroArg Include="@(ZeroLibraryReference->'-r &quot;%(FullPath)&quot;')" />
+      <_ZeroArg Include="--stdlib:none --no-reflection --langversion preview --compiler-feature updated-memory-safety-rules" />
+      <_ZeroArg Include="$(DefineConstants.Split(';'))" Condition="'$(DefineConstants)' != ''" >
+        <Prefix>-d </Prefix>
+      </_ZeroArg>
+      <_ZeroArg Include="-i $(ZeroDllImports.Replace(';', ' -i '))" />
+      <_ZeroArg Include="--arch x64" Condition="'$(ZeroTarget)' != 'linux-arm64'" />
+      <_ZeroArg Include="--arch arm64" Condition="'$(ZeroTarget)' == 'linux-arm64'" />
+      <_ZeroArg Include="--ldflags &quot;$(ZeroNativeDir)zerocore.o&quot; --ldflags &quot;-z nostart-stop-gc&quot;" Condition="'$(ZeroTarget)' != 'win-x64'" />
+      <_ZeroArg Include="--ldflags &quot;-z max-page-size=4096&quot;" Condition="'$(ZeroTarget)' == 'linux-arm64'" />
+      <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64'" />
+      <_ZeroArg Include="-Os" Condition="'$(ZeroOptimizeFor)' == 'Size'" />
+      <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != ''" />
+      <_ZeroArg Include="-o &quot;$(ZeroNativeOutput)&quot;" />
+    </ItemGroup>
+    <PropertyGroup>
+      <ZeroNativeArgs>@(_ZeroArg->'%(Prefix)%(Identity)', ' ')</ZeroNativeArgs>
+    </PropertyGroup>
+    <!-- The command line is an input too: changing ZeroTarget or a flag rebuilds. -->
+    <WriteLinesToFile File="$(ZeroNativeArgsFile)" Lines="$(ZeroNativeArgs)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
 
   <Target Name="ZeroPackDll" BeforeTargets="_GetPackageFiles" Condition="'$(OutputType)' == 'Library'">
     <ItemGroup>

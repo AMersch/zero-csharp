@@ -38,6 +38,24 @@
     <!-- A library's IL is what programs compile from: optimize it, as build.sh's -O does. -->
     <Optimize>true</Optimize>
 
+    <!-- The compiler's output is IL, always a .dll: the native program built
+         from the same sources takes the plain name (or .exe for Windows). -->
+    <TargetExt>.dll</TargetExt>
+    <UseAppHost>false</UseAppHost>
+
+    <!-- The native step (Sdk.targets). The host is the machine running the
+         build: bflat runs on Linux only in this version. -->
+    <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">linux-x64</ZeroHostRid>
+    <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">linux-arm64</ZeroHostRid>
+    <!-- linux-x64, linux-arm64 or win-x64; the host's own by default. -->
+    <ZeroTarget Condition="'$(ZeroTarget)' == ''">$(ZeroHostRid)</ZeroTarget>
+    <!-- Speed (bflat's default) or Size (-Os). The native program is optimized
+         in Debug and Release alike, as build.sh does. -->
+    <ZeroOptimizeFor Condition="'$(ZeroOptimizeFor)' == ''">Speed</ZeroOptimizeFor>
+    <!-- Libraries whose [DllImport]s are bound when the program is linked. -->
+    <ZeroDllImports Condition="'$(ZeroDllImports)' == ''">libc;libm.so.6</ZeroDllImports>
+    <!-- ZeroInstructionSet: passed to bflat as -m (x86-64-v3, dotprod, ...). -->
+
     <!-- dotnet pack: the dll goes to lib/<framework>/ by a target in Sdk.targets,
          because NuGet's pack rejects build output for a framework it doesn't know. -->
     <IncludeBuildOutput>false</IncludeBuildOutput>

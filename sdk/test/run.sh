@@ -21,18 +21,27 @@ TFM=zero$(echo "$VERSION" | cut -d. -f1,2 | tr -d .)
 HOST_OS=$(uname -s)
 export ZERO_HOSTS=${ZERO_HOSTS:-linux-x64 linux-arm64}
 case "$(uname -m)" in
-    x86_64 | amd64)  HOST_ARCH_NAME=x64;   DOCKER_ARCH=amd64 ;;
-    *)               HOST_ARCH_NAME=arm64; DOCKER_ARCH=arm64 ;;
+    x86_64 | amd64)  HOST_ARCH_NAME=x64;   DOCKER_ARCH=amd64; HOST_ELF_ARCH=x86-64 ;;
+    *)               HOST_ARCH_NAME=arm64; DOCKER_ARCH=arm64; HOST_ELF_ARCH=aarch64 ;;
 esac
 
 passed=0
 failed=0
+skipped=0
 LOG=
 pass() { echo "ok   $1"; passed=$((passed + 1)); }
 fail() {
     echo "FAIL $1: $2"
     [ -n "$LOG" ] && [ -f "$LOG" ] && tail -20 "$LOG" | sed 's/^/     | /'
     failed=$((failed + 1))
+}
+
+skip() { echo "skip $1: $2"; skipped=$((skipped + 1)); }
+# linux_only <test name>: true on Linux; on other hosts, records a skip.
+linux_only() {
+    [ "$HOST_OS" = Linux ] && return 0
+    skip "$1" "builds native programs, which needs a Linux host"
+    return 1
 }
 
 # fixture <fixture> [<dir under work>]: a fresh copy of a fixture, with the
@@ -153,7 +162,108 @@ test_host_packages() {
     pass "host packages ($ZERO_HOSTS)"
 }
 
-ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused)
+# ---- The native step (Linux hosts) -----------------------------------------
+
+test_native_hello_runs() {
+    local name="native hello runs" dir exe out
+    linux_only "$name" || return
+    dir=$(fixture native)
+    if ! run_in "$dir" native build; then fail "$name" "dotnet build failed"; return; fi
+    exe=$dir/bin/Debug/$TFM/native
+    if [ ! -x "$exe" ]; then fail "$name" "no $exe"; return; fi
+    out=$("$exe"); if [ "$out" != hi ]; then fail "$name" "printed '$out'"; return; fi
+    if ! file "$exe" | grep -q "ELF.*$HOST_ELF_ARCH"; then fail "$name" "not an ELF for $HOST_ELF_ARCH: $(file -b "$exe")"; return; fi
+    pass "$name"
+}
+
+test_cross_targets() {
+    local name="cross targets" dir other other_arch
+    linux_only "$name" || return
+    dir=$(fixture native cross)
+    if ! run_in "$dir" cross-win build -p:ZeroTarget=win-x64; then fail "$name" "win-x64 build failed"; return; fi
+    if [ "$(head -c 2 "$dir/bin/Debug/$TFM/native.exe" 2>/dev/null)" != MZ ]; then fail "$name" "native.exe isn't a Windows program"; return; fi
+    if [ "$HOST_ARCH_NAME" = x64 ]; then other=linux-arm64; other_arch=aarch64; else other=linux-x64; other_arch=x86-64; fi
+    if ! run_in "$dir" cross-linux build -p:ZeroTarget=$other; then fail "$name" "$other build failed"; return; fi
+    if ! file "$dir/bin/Debug/$TFM/native" | grep -q "ELF.*$other_arch"; then fail "$name" "not an ELF for $other_arch"; return; fi
+    pass "$name"
+}
+
+test_bad_target() {
+    local name="bad target" dir
+    linux_only "$name" || return
+    dir=$(fixture native badtarget)
+    if run_in "$dir" badtarget build -p:ZeroTarget=mac-arm64; then fail "$name" "the build succeeded"; return; fi
+    if ! grep -q 'linux-x64, linux-arm64, win-x64' "$LOG"; then fail "$name" "the error doesn't list the targets"; return; fi
+    pass "$name"
+}
+
+test_path_with_spaces() {
+    local name="path with spaces" dir out
+    linux_only "$name" || return
+    dir=$(fixture native "spaces dir/native")
+    if ! run_in "$dir" spaces build; then fail "$name" "dotnet build failed"; return; fi
+    out=$("$dir/bin/Debug/$TFM/native"); if [ "$out" != hi ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
+test_compile_items() {
+    local name="compile items" dir out
+    linux_only "$name" || return
+    dir=$(fixture subfolders)
+    if ! run_in "$dir" subfolders build; then fail "$name" "dotnet build failed"; return; fi
+    out=$("$dir/bin/Debug/$TFM/subfolders"); if [ "$out" != "from b" ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
+# Whether the last log shows bflat being run.
+ran_bflat() { grep -q 'tools/bflat/bflat" build' "$LOG"; }
+
+test_incremental() {
+    local name="incremental" dir
+    linux_only "$name" || return
+    dir=$(fixture native incremental)
+    if ! run_in "$dir" incremental-1 build -v:n || ! ran_bflat; then fail "$name" "the first build didn't run bflat"; return; fi
+    if ! run_in "$dir" incremental-2 build -v:n || ran_bflat; then fail "$name" "an unchanged project ran bflat again"; return; fi
+    sleep 1; touch "$dir/Program.cs"
+    if ! run_in "$dir" incremental-3 build -v:n || ! ran_bflat; then fail "$name" "a changed source didn't run bflat"; return; fi
+    pass "$name"
+}
+
+test_bflat_failure_fails_the_build() {
+    local name="bflat failure fails the build" dir
+    linux_only "$name" || return
+    dir=$(fixture badimport)
+    if run_in "$dir" badimport build; then fail "$name" "the build succeeded"; return; fi
+    if ! ran_bflat; then fail "$name" "it failed before bflat ran"; return; fi
+    if ! grep -qE 'error' "$LOG"; then fail "$name" "no error in the output"; return; fi
+    pass "$name"
+}
+
+test_size() {
+    local name="size" dir
+    linux_only "$name" || return
+    dir=$(fixture native size)
+    if ! run_in "$dir" size build -v:n -p:ZeroOptimizeFor=Size; then fail "$name" "dotnet build failed"; return; fi
+    if ! grep -q 'tools/bflat/bflat" build.* -Os' "$LOG"; then fail "$name" "bflat wasn't given -Os"; return; fi
+    pass "$name"
+}
+
+test_macos_error() {
+    local name="macos error" dir
+    if [ "$HOST_OS" != Darwin ]; then skip "$name" "macOS only"; return; fi
+    dir=$(fixture native macos)
+    if run_in "$dir" macos build; then fail "$name" "the build succeeded"; return; fi
+    if ! grep -qF "Zero C# can't make native programs on macOS yet; build on Linux or Windows, or use the repository's build.sh." "$LOG"; then
+        fail "$name" "not the macOS message"; return
+    fi
+    dir=$(fixture hello macos-library)
+    if ! run_in "$dir" macos-library build; then fail "$name" "a library didn't build on macOS"; return; fi
+    pass "$name"
+}
+
+ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
+    native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
+    bflat_failure_fails_the_build size macos_error)
 
 # ---- Run ---------------------------------------------------------------------
 
@@ -167,6 +277,10 @@ fi
 # The feed's packages keep their version between runs, so drop the cached
 # copies: restore must take the ones just packed.
 rm -rf "${NUGET_PACKAGES:-$HOME/.nuget/packages}"/zerocsharp.*
+# MSBuild processes that stay alive between builds keep the SDK's files in
+# memory; with the same version repacked, they'd build with the old ones.
+export MSBUILDDISABLENODEREUSE=1
+dotnet build-server shutdown > /dev/null 2>&1 || true
 mkdir -p "$WORK"
 
 tests=("$@")
@@ -176,5 +290,5 @@ for name in "${tests[@]}"; do
     "test_${name//-/_}"
 done
 echo
-echo "$passed passed, $failed failed"
+echo "$passed passed, $failed failed, $skipped skipped"
 exit "$failed"

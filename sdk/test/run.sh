@@ -185,10 +185,10 @@ test_cross_targets() {
     linux_only "$name" || return
     dir=$(fixture native cross)
     if ! run_in "$dir" cross-win build -p:ZeroTarget=win-x64; then fail "$name" "win-x64 build failed"; return; fi
-    if [ "$(head -c 2 "$dir/bin/Debug/$TFM/native.exe" 2>/dev/null)" != MZ ]; then fail "$name" "native.exe isn't a Windows program"; return; fi
+    if [ "$(head -c 2 "$dir/bin/Debug/$TFM/win-x64/native.exe" 2>/dev/null)" != MZ ]; then fail "$name" "native.exe isn't a Windows program"; return; fi
     if [ "$HOST_ARCH_NAME" = x64 ]; then other=linux-arm64; other_arch=aarch64; else other=linux-x64; other_arch=x86-64; fi
     if ! run_in "$dir" cross-linux build -p:ZeroTarget=$other; then fail "$name" "$other build failed"; return; fi
-    if ! file "$dir/bin/Debug/$TFM/native" | grep -q "ELF.*$other_arch"; then fail "$name" "not an ELF for $other_arch"; return; fi
+    if ! file "$dir/bin/Debug/$TFM/$other/native" | grep -q "ELF.*$other_arch"; then fail "$name" "not an ELF for $other_arch"; return; fi
     pass "$name"
 }
 
@@ -239,7 +239,10 @@ test_bflat_failure_fails_the_build() {
     dir=$(fixture badimport)
     if run_in "$dir" badimport build; then fail "$name" "the build succeeded"; return; fi
     if ! ran_bflat; then fail "$name" "it failed before bflat ran"; return; fi
-    if ! grep -qE 'error' "$LOG"; then fail "$name" "no error in the output"; return; fi
+    # The build fails because bflat did (its command exited with an error), over
+    # the import it can't bind.
+    if ! grep -q 'tools/bflat/bflat" build.*exited with code' "$LOG"; then fail "$name" "the failing command wasn't bflat"; return; fi
+    if ! grep -q 'nosuchfunction' "$LOG"; then fail "$name" "the error doesn't name nosuchfunction"; return; fi
     pass "$name"
 }
 
@@ -418,11 +421,101 @@ test_clean_and_rebuild() {
     pass "$name"
 }
 
+# ---- 0.1.1 ----------------------------------------------------------------------
+
+# Like dotnet build -r: the default build's program is in bin/Debug/<framework>/,
+# a ZeroTarget's in a folder named after it. Building for one keeps the others,
+# and dotnet clean removes them all.
+test_targets_side_by_side() {
+    local name="targets side by side" dir out host=linux-$HOST_ARCH_NAME
+    linux_only "$name" || return
+    dir=$(fixture native sidebyside)
+    if ! run_in "$dir" sidebyside-1 build; then fail "$name" "the default build failed"; return; fi
+    if ! run_in "$dir" sidebyside-2 build -p:ZeroTarget=win-x64; then fail "$name" "the win-x64 build failed"; return; fi
+    if ! run_in "$dir" sidebyside-3 build -p:ZeroTarget=$host; then fail "$name" "the $host build failed"; return; fi
+    out=$("$dir/bin/Debug/$TFM/native" 2>/dev/null)
+    if [ "$out" != hi ]; then fail "$name" "the default program is gone after building for other targets"; return; fi
+    out=$("$dir/bin/Debug/$TFM/$host/native" 2>/dev/null)
+    if [ "$out" != hi ]; then fail "$name" "no $host/native"; return; fi
+    if [ "$(head -c 2 "$dir/bin/Debug/$TFM/win-x64/native.exe" 2>/dev/null)" != MZ ]; then fail "$name" "no win-x64/native.exe"; return; fi
+    if ! run_in "$dir" sidebyside-4 clean; then fail "$name" "dotnet clean failed"; return; fi
+    if [ -e "$dir/bin/Debug/$TFM/native" ] || [ -e "$dir/bin/Debug/$TFM/$host/native" ] || [ -e "$dir/bin/Debug/$TFM/win-x64/native.exe" ]; then
+        fail "$name" "dotnet clean left a native program"; return
+    fi
+    pass "$name"
+}
+
+# bflat compiles with the project's language version and compiler features,
+# not fixed ones.
+test_language_settings_forwarded() {
+    local name="language settings forwarded" dir
+    linux_only "$name" || return
+    dir=$(fixture native langver)
+    if ! run_in "$dir" langver build -v:n -p:LangVersion=14 "-p:Features=strict"; then fail "$name" "dotnet build failed"; return; fi
+    if ! grep -q 'tools/bflat/bflat" build.* --langversion 14 ' "$LOG"; then fail "$name" "bflat wasn't given --langversion 14"; return; fi
+    if ! grep -q 'tools/bflat/bflat" build.* --compiler-feature strict ' "$LOG"; then fail "$name" "bflat wasn't given --compiler-feature strict"; return; fi
+    if grep -q 'tools/bflat/bflat" build.* --langversion preview' "$LOG"; then fail "$name" "bflat was still given --langversion preview"; return; fi
+    pass "$name"
+}
+
+test_target_framework_is_an_error() {
+    local name="target framework is an error" dir
+    dir=$(fixture tfm)
+    if run_in "$dir" tfm build; then fail "$name" "the build succeeded"; return; fi
+    if ! grep -q "ZERO001" "$LOG" || ! grep -q "TargetFramework" "$LOG"; then fail "$name" "no ZERO001 error naming TargetFramework"; return; fi
+    pass "$name"
+}
+
+# bflat already executable in a read-only packages folder (a shared or mounted
+# cache): the build mustn't try to change it. As root, permissions don't stop
+# chmod, so this can only fail when run as another user (as CI's runners are).
+test_read_only_packages_folder() {
+    local name="read-only packages folder" dir pkgs=$WORK/ro-packages out
+    linux_only "$name" || return
+    dir=$(fixture native readonly)
+    chmod -R u+w "$pkgs" 2>/dev/null; rm -rf "$pkgs"
+    if ! (export NUGET_PACKAGES=$pkgs; run_in "$dir" readonly-1 build); then fail "$name" "the first build failed"; return; fi
+    chmod -R a-w "$pkgs"/zerocsharp.bflat.*
+    sleep 1; touch "$dir/Program.cs"
+    (export NUGET_PACKAGES=$pkgs; run_in "$dir" readonly-2 build -v:n)
+    local rc=$?
+    LOG=$WORK/readonly-2.log # run_in set it in the subshell
+    chmod -R u+w "$pkgs"
+    if [ $rc -ne 0 ]; then fail "$name" "building with a read-only packages folder failed"; return; fi
+    if ! ran_bflat; then fail "$name" "the second build didn't run bflat"; return; fi
+    out=$("$dir/bin/Debug/$TFM/native"); if [ "$out" != hi ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
+# The release workflow publishes only when the tag names the version packed.
+test_release_tag_check() {
+    local name="release tag check"
+    LOG=$WORK/tagcheck.log
+    if ! sdk/check-tag.sh "sdk-v$VERSION" > "$LOG" 2>&1; then fail "$name" "sdk-v$VERSION was refused"; return; fi
+    if sdk/check-tag.sh "sdk-v0.0.9" > "$LOG" 2>&1; then fail "$name" "sdk-v0.0.9 was accepted for $VERSION"; return; fi
+    if ! grep -q "$VERSION" "$LOG"; then fail "$name" "the error doesn't name $VERSION"; return; fi
+    pass "$name"
+}
+
+# ./build.sh --sdk-payload replaces its directory: only an empty one or an
+# earlier payload, never a folder of something else.
+test_payload_folder_guard() {
+    local name="payload folder guard" dir=$WORK/notapayload
+    rm -rf "$dir" && mkdir -p "$dir" && echo keep > "$dir/keep.txt"
+    LOG=$WORK/payloadguard.log
+    if ./build.sh --sdk-payload "${dir#$ROOT/}" > "$LOG" 2>&1; then fail "$name" "build.sh accepted the folder"; return; fi
+    if [ ! -f "$dir/keep.txt" ]; then fail "$name" "the folder's files were removed"; return; fi
+    if ! grep -q "isn't an SDK payload" "$LOG"; then fail "$name" "not the guard's message"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
-    custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild)
+    custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild
+    targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
+    release_tag_check payload_folder_guard)
 
 # ---- Run ---------------------------------------------------------------------
 

@@ -13,7 +13,8 @@
 #         ZERO_PAYLOAD_PREBUILT=1   use sdk/ZeroCSharp.Sdk/payload as it is (CI builds it
 #                        in another job, like sdk/trimmed/)
 # Trimmed layouts are kept in sdk/trimmed/<rid> and redone only when the
-# layout or the trimming script is newer.
+# layout's bflat or lld, or the trimming script, differ from the ones they were
+# made from (by checksum: copies and checkouts don't keep times in order).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 hosts=${ZERO_HOSTS:-linux-x64 linux-arm64}
@@ -33,10 +34,17 @@ fi
 for rid in $hosts; do
     layout=$layouts/linux-glibc-${rid#linux-}
     trimmed=sdk/trimmed/$rid
-    if [ ! -f "$trimmed/bflat" ] || [ "$layout/bflat" -nt "$trimmed/bflat" ] || [ "$layout/bin/lld" -nt "$trimmed/bflat" ] \
-            || [ sdk/trim-layout.sh -nt "$trimmed/bflat" ]; then
-        echo "[trim]  $layout -> $trimmed"
-        sdk/trim-layout.sh "$layout" "$trimmed"
+    # Without the full layout (CI downloads the trimmed one), use what's there.
+    if [ -f "$layout/bflat" ]; then
+        source_sum=$(cat "$layout/bflat" "$layout/bin/lld" sdk/trim-layout.sh | cksum)
+        if [ ! -f "$trimmed/bflat" ] || [ "$(cat "sdk/trimmed/$rid.source" 2>/dev/null)" != "$source_sum" ]; then
+            echo "[trim]  $layout -> $trimmed"
+            sdk/trim-layout.sh "$layout" "$trimmed"
+            echo "$source_sum" > "sdk/trimmed/$rid.source"
+        fi
+    elif [ ! -f "$trimmed/bflat" ]; then
+        echo "Error: no layout in $layout and no trimmed one in $trimmed." >&2
+        exit 1
     fi
     dotnet pack sdk/ZeroCSharp.Bflat/ZeroCSharp.Bflat.csproj -o sdk/feed -v:q -nologo \
         -p:HostRid="$rid" -p:LayoutDir="$PWD/$trimmed" -p:BflatCommit="$bflat_commit"

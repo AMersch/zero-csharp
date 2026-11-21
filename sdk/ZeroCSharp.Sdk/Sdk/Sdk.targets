@@ -1,5 +1,10 @@
 <Project>
   <PropertyGroup>
+    <!-- Like dotnet build -r <rid>: a chosen target's program goes in a folder
+         named after it, so programs for several targets sit side by side; the
+         default build's goes in the output folder itself. -->
+    <ZeroTargetFolder Condition="'$(ZeroTarget)' != ''">$(ZeroTarget)/</ZeroTargetFolder>
+    <ZeroTarget Condition="'$(ZeroTarget)' == ''">$(ZeroHostRid)</ZeroTarget>
     <ZeroRefDir>$(ZeroSdkRoot)payload/ref/</ZeroRefDir>
     <!-- Setting these skips MSBuild's search for an installed targeting pack,
          which doesn't exist for this framework. -->
@@ -33,9 +38,21 @@
           DependsOnTargets="ZeroCheckNativeHost;ZeroNativeCommand"
           Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);$(ZeroNativeArgsFile)"
           Outputs="$(ZeroNativeOutput)">
-    <Exec Command="chmod +x &quot;$(ZeroBflatDir)bflat&quot; &quot;$(ZeroBflatDir)bin/lld&quot;" />
+    <!-- NuGet doesn't keep the executable bit; a packages folder that's
+         read-only (shared or mounted) must already have it. -->
+    <Exec Command="test -x &quot;$(ZeroBflatDir)bflat&quot; &amp;&amp; test -x &quot;$(ZeroBflatDir)bin/lld&quot; || chmod +x &quot;$(ZeroBflatDir)bflat&quot; &quot;$(ZeroBflatDir)bin/lld&quot;" />
+    <!-- bflat doesn't make the folder (a target's own, for a chosen target). -->
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(ZeroNativeOutput)'))" />
     <Exec Command="&quot;$(ZeroBflatDir)bflat&quot; build $(ZeroNativeArgs)" />
     <Message Importance="high" Text="$(MSBuildProjectName) -> $(ZeroNativeOutput)" />
+  </Target>
+
+  <!-- The framework is the SDK's: a TargetFramework set in the project would
+       otherwise be ignored without a word. -->
+  <Target Name="ZeroCheckTargetFramework" BeforeTargets="Restore;_CheckForInvalidConfigurationAndPlatform;DispatchToInnerBuilds"
+          Condition="'$(TargetFramework)' != '$(ZeroSdkTfm)' or '$(TargetFrameworks)' != ''">
+    <Error Code="ZERO001"
+           Text="A zero project's target framework is the SDK's ($(ZeroSdkTfm)); remove TargetFramework and TargetFrameworks from the project (TargetFramework is '$(TargetFramework)', TargetFrameworks '$(TargetFrameworks)')." />
   </Target>
 
   <Target Name="ZeroCheckNativeHost">
@@ -53,9 +70,10 @@
            slash; package folders are lower-case. -->
       <ZeroBflatDir>$([MSBuild]::EnsureTrailingSlash('$(NuGetPackageRoot)'))zerocsharp.bflat.$(ZeroHostRid)/$(ZeroSdkVersion.ToLowerInvariant())/tools/bflat/</ZeroBflatDir>
       <ZeroNativeDir>$(ZeroSdkRoot)payload/native/$(ZeroTarget)/</ZeroNativeDir>
-      <ZeroNativeOutput>$(OutDir)$(AssemblyName)</ZeroNativeOutput>
-      <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'win-x64'">$(OutDir)$(AssemblyName).exe</ZeroNativeOutput>
+      <ZeroNativeOutput>$(OutDir)$(ZeroTargetFolder)$(AssemblyName)</ZeroNativeOutput>
+      <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'win-x64'">$(ZeroNativeOutput).exe</ZeroNativeOutput>
       <ZeroNativeArgsFile>$(IntermediateOutputPath)zero-native.args</ZeroNativeArgsFile>
+      <ZeroNativeArgsFile Condition="'$(ZeroTargetFolder)' != ''">$(IntermediateOutputPath)zero-native.$(ZeroTarget).args</ZeroNativeArgsFile>
     </PropertyGroup>
     <ItemGroup>
       <!-- Zero libraries: every resolved reference that isn't zerocore or lib/
@@ -66,7 +84,12 @@
       <_ZeroArg Include="@(Compile->'&quot;%(FullPath)&quot;')" />
       <_ZeroArg Include="-r &quot;%(Reference.Identity)&quot;" Condition="'%(Reference.ZeroFramework)' == 'true'" />
       <_ZeroArg Include="@(ZeroLibraryReference->'-r &quot;%(FullPath)&quot;')" />
-      <_ZeroArg Include="--stdlib:none --no-reflection --langversion preview --compiler-feature updated-memory-safety-rules" />
+      <_ZeroArg Include="--stdlib:none --no-reflection" />
+      <!-- The language as the project sets it for the C# compiler. -->
+      <_ZeroArg Include="--langversion $(LangVersion)" Condition="'$(LangVersion)' != ''" />
+      <_ZeroArg Include="$(Features.Split(';'))" Condition="'$(Features)' != ''">
+        <Prefix>--compiler-feature </Prefix>
+      </_ZeroArg>
       <_ZeroArg Include="$(DefineConstants.Split(';'))" Condition="'$(DefineConstants)' != ''" >
         <Prefix>-d </Prefix>
       </_ZeroArg>
@@ -84,16 +107,27 @@
     <PropertyGroup>
       <ZeroNativeArgs>@(_ZeroArg->'%(Prefix)%(Identity)', ' ')</ZeroNativeArgs>
     </PropertyGroup>
-    <!-- The command line is an input too: changing ZeroTarget or a flag rebuilds. -->
+    <!-- The command line is an input too: changing a flag rebuilds. -->
     <WriteLinesToFile File="$(ZeroNativeArgsFile)" Lines="$(ZeroNativeArgs)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <!-- Not in FileWrites: IncrementalClean would then remove the programs of
+         the targets not being built. ZeroClean removes them instead. -->
+  </Target>
+
+  <!-- dotnet clean (and Rebuild): every target's program and command line. -->
+  <Target Name="ZeroClean" AfterTargets="CoreClean" Condition="'$(OutputType)' != 'Library'">
     <ItemGroup>
-      <FileWrites Include="$(ZeroNativeOutput);$(ZeroNativeArgsFile)" />
+      <_ZeroCleanTarget Include="linux-x64;linux-arm64;win-x64" />
+      <_ZeroCleanFile Include="$(OutDir)$(AssemblyName);$(OutDir)$(AssemblyName).exe" />
+      <_ZeroCleanFile Include="@(_ZeroCleanTarget->'$(OutDir)%(Identity)/$(AssemblyName)')" />
+      <_ZeroCleanFile Include="@(_ZeroCleanTarget->'$(OutDir)%(Identity)/$(AssemblyName).exe')" />
+      <_ZeroCleanFile Include="$(IntermediateOutputPath)zero-native*.args" />
     </ItemGroup>
+    <Delete Files="@(_ZeroCleanFile)" />
   </Target>
 
   <!-- dotnet run runs the native program, when it's for this machine. -->
   <PropertyGroup Condition="'$(OutputType)' != 'Library' and '$(ZeroTarget)' == '$(ZeroHostRid)' and '$(ZeroHostRid)' != ''">
-    <RunCommand>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(OutDir)', '$(AssemblyName)'))</RunCommand>
+    <RunCommand>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(OutDir)$(ZeroTargetFolder)', '$(AssemblyName)'))</RunCommand>
     <RunArguments>$(StartArguments)</RunArguments>
     <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
   </PropertyGroup>

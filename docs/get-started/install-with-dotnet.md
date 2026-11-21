@@ -71,19 +71,16 @@ packages out, because they need .NET's libraries, which a zero program doesn't h
 
 ## Build for another target
 
-The `ZeroTarget` property picks what to build for; by default it's the machine you build on:
+The `ZeroTarget` property picks what to build for; by default it's the machine you build on. A
+program for a chosen target goes in a folder named after it, as `dotnet build -r` does for .NET, so
+programs for several targets sit side by side:
 
 ```bash
-dotnet build -p:ZeroTarget=win-x64        # bin/Debug/zero01/Hello.exe
-dotnet build -p:ZeroTarget=linux-arm64
+dotnet build -p:ZeroTarget=win-x64        # bin/Debug/zero01/win-x64/Hello.exe
+dotnet build -p:ZeroTarget=linux-arm64    # bin/Debug/zero01/linux-arm64/Hello
 ```
 
-Each build keeps the program for its own target only: building for `win-x64` removes the Linux
-program built before it from the same folder. To keep both, give each its own folder with `-o`:
-
-```bash
-dotnet build -p:ZeroTarget=win-x64 -o bin/win-x64
-```
+`dotnet clean` removes all of them.
 
 | Property | Values | Default |
 |---|---|---|
@@ -102,7 +99,10 @@ It compiles your code twice. First the C# compiler compiles it against zerocore 
 your editor sees it, into an IL `.dll`: this is where C# errors come from, and `Console` or any other
 .NET API that zero mode doesn't have is an error here. Then bflat compiles the same sources into the
 native program, with zerocore, `lib/` and any [zero libraries](../how-to/create-a-library.html) the
-project references. bflat runs again only when a source, a referenced library or a property changed.
+project references. Both compile with the project's `LangVersion`, `Features` and `DefineConstants`.
+bflat runs again only when a source, a referenced library or a property changed.
+
+The target framework is always the SDK's: a project that sets `TargetFramework` gets error ZERO001.
 
 The compiler is pinned to the one bflat uses (Roslyn 5.12), so C# 15's unions and the
 [memory safety rules](../concepts/safety-rules.html) work in `dotnet build` whatever your SDK's own

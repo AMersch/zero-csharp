@@ -52,8 +52,8 @@
          build: bflat runs on Linux only in this version. -->
     <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">linux-x64</ZeroHostRid>
     <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">linux-arm64</ZeroHostRid>
-    <!-- linux-x64, linux-arm64 or win-x64; the host's own by default. -->
-    <ZeroTarget Condition="'$(ZeroTarget)' == ''">$(ZeroHostRid)</ZeroTarget>
+    <!-- ZeroTarget: linux-x64, linux-arm64 or win-x64; the host's own by default
+         (set in Sdk.targets, which tells the default from a chosen one). -->
     <!-- Speed (bflat's default) or Size (-Os). The native program is optimized
          in Debug and Release alike, as build.sh does. -->
     <ZeroOptimizeFor Condition="'$(ZeroOptimizeFor)' == ''">Speed</ZeroOptimizeFor>

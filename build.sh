@@ -17,6 +17,9 @@
 #
 # With --mac (on a Mac with Apple Silicon), builds macOS programs (bin/mac/*)
 # that run directly, without the container: bflat compiles, Xcode's clang links.
+# With MAC_OBJECTS_PREBUILT=1 it only links, using the object files already in
+# bin/mac/obj (from `./build.sh --native-mac-objects <samples>` on Linux), and
+# needs neither bflat nor Docker: that is how CI's macOS job works.
 #
 # Usage:  ./build.sh [--wasm | --dos | --win | --mac] [Sample ...]     default: all samples
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh)
@@ -485,7 +488,9 @@ in_container() {
         "$IMAGE" ./build.sh "$@"
 }
 
-if [ "$(uname -s)" = Darwin ]; then
+if [ "$TARGET" = mac ] && [ -n "${MAC_OBJECTS_PREBUILT:-}" ]; then
+    run() { :; } # the objects are in bin/mac/obj already
+elif [ "$(uname -s)" = Darwin ]; then
     check_bflat
     ensure_image
     run() { in_container "--native-$1" "${@:2}"; }

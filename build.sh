@@ -520,6 +520,11 @@ case "${1:-}" in
     --sdk-payload)
         TARGET=sdk-payload
         PAYLOAD_DIR=${2:?--sdk-payload needs a directory, inside this one}
+        # The directory is replaced: only an empty one or an earlier payload.
+        if [ -d "$PAYLOAD_DIR" ] && [ -n "$(ls -A "$PAYLOAD_DIR")" ] && [ ! -f "$PAYLOAD_DIR/VERSIONS.txt" ]; then
+            echo "Error: $PAYLOAD_DIR isn't an SDK payload (no VERSIONS.txt) and isn't empty; it would be replaced. Pick an empty or new directory." >&2
+            exit 1
+        fi
         shift 2 ;;
 esac
 

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Copies the part of a bflat layout that zero-mode builds use: about 80 of its
-# files, 550 MB down to about 110 MB. The ZeroCSharp.Bflat packages carry the
-# result.
+# files, about 130 MB of it. The ZeroCSharp.Bflat packages carry the result.
 #
 # Which files: the ones bflat opens while it builds, found by tracing real
 # builds (strace) in a container, for every target the SDK supports. Then
@@ -32,8 +31,7 @@ rm -rf "$out"
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 
-# The build image has libtinfo5 and binutils, which older layouts' tools need;
-# strace is added for the trace.
+# The build image (env.sh); strace is added for the trace.
 source ./env.sh
 ensure_image
 docker run --rm --platform "$platform" -v "$PWD:/w" -v "$layout:/bflat:ro" -v "$out:/out" -w /w "$IMAGE" bash -c '

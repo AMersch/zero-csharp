@@ -1,0 +1,7 @@
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <!-- A zero project's framework is the SDK's: setting one is a mistake. -->
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>

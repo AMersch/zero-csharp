@@ -261,9 +261,80 @@ test_macos_error() {
     pass "$name"
 }
 
+# ---- Libraries ----------------------------------------------------------------
+
+# app_with_lib <work dir>: the program and the Geometry library (from libs/).
+app_with_lib() {
+    local dir
+    dir=$(fixture app-with-lib "$1")
+    cp "$ROOT"/libs/Geometry/*.cs "$dir/Geometry/"
+    echo "$dir"
+}
+
+test_project_reference() {
+    local name="project reference" dir out
+    linux_only "$name" || return
+    dir=$(app_with_lib projref)
+    if ! run_in "$dir/App" projref build; then fail "$name" "dotnet build failed"; return; fi
+    out=$("$dir/App/bin/Debug/$TFM/App"); if [ "$out" != "Floor area: 37.00" ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
+test_library_change_rebuilds() {
+    local name="library change rebuilds" dir out
+    linux_only "$name" || return
+    dir=$(app_with_lib libchange)
+    if ! run_in "$dir/App" libchange-1 build; then fail "$name" "the first build failed"; return; fi
+    sleep 1
+    sed -i.bak 's/double total = 0;/double total = 1;/' "$dir/Geometry/Measure.cs" && rm -f "$dir/Geometry/Measure.cs.bak"
+    if ! run_in "$dir/App" libchange-2 build -v:n || ! ran_bflat; then fail "$name" "changing the library didn't run bflat"; return; fi
+    out=$("$dir/App/bin/Debug/$TFM/App"); if [ "$out" != "Floor area: 38.00" ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
+# add_source <nuget.config> <name> <dir>: one more package source.
+add_source() {
+    sed -i.bak "s|<clear />|<clear />\n    <add key=\"$2\" value=\"$3\" />|" "$1" && rm -f "$1.bak"
+}
+
+test_pack_and_package_reference() {
+    local name="pack and package reference" dir app out
+    linux_only "$name" || return
+    dir=$(app_with_lib pack)
+    rm -rf "$WORK/libfeed" "${NUGET_PACKAGES:-$HOME/.nuget/packages}/zerotest.geometry"
+    if ! run_in "$dir/Geometry" pack-lib pack -o "$WORK/libfeed"; then fail "$name" "dotnet pack failed"; return; fi
+    unzip -l "$WORK/libfeed/ZeroTest.Geometry.1.0.0.nupkg" > "$WORK/pack-list.txt" 2>&1
+    if ! grep -q " lib/$TFM/Geometry.dll$" "$WORK/pack-list.txt"; then fail "$name" "the package has no lib/$TFM/Geometry.dll"; return; fi
+    app=$(fixture app-with-pkg)/App
+    add_source "$app/../nuget.config" libs "$WORK/libfeed"
+    if ! run_in "$app" pkgref build; then fail "$name" "the program didn't build"; return; fi
+    out=$("$app/bin/Debug/$TFM/App"); if [ "$out" != "Floor area: 37.00" ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
+# A package made for another SDK version (lib/zero02/) must be refused.
+test_version_mismatch() {
+    local name="version mismatch" app pkg=$WORK/oldfeed
+    rm -rf "$pkg" "${NUGET_PACKAGES:-$HOME/.nuget/packages}/zerotest.geometry"
+    mkdir -p "$pkg/src/lib/zero02"
+    cp "$ROOT/sdk/ZeroCSharp.Sdk/payload/ref/BflatLib.dll" "$pkg/src/lib/zero02/Geometry.dll"
+    printf '%s\n' '<?xml version="1.0"?>' \
+        '<package><metadata><id>ZeroTest.Geometry</id><version>1.0.0</version><authors>test</authors><description>A zero library built for SDK 0.2.</description></metadata></package>' \
+        > "$pkg/src/ZeroTest.Geometry.nuspec"
+    (cd "$pkg/src" && zip -qr ../ZeroTest.Geometry.1.0.0.nupkg .)
+    app=$(fixture app-with-pkg oldpkg)/App
+    add_source "$app/../nuget.config" old "$pkg"
+    if run_in "$app" oldpkg restore; then fail "$name" "restore succeeded"; return; fi
+    if ! grep -q "NU1202" "$LOG" || ! grep -q "zero02" "$LOG" || ! grep -q "$TFM" "$LOG"; then
+        fail "$name" "no NU1202 naming zero02 and $TFM"; return
+    fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
-    bflat_failure_fails_the_build size macos_error)
+    bflat_failure_fails_the_build size macos_error
+    project_reference library_change_rebuilds pack_and_package_reference version_mismatch)
 
 # ---- Run ---------------------------------------------------------------------
 

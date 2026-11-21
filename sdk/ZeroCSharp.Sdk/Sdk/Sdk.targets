@@ -53,6 +53,10 @@
       <ZeroNativeArgsFile>$(IntermediateOutputPath)zero-native.args</ZeroNativeArgsFile>
     </PropertyGroup>
     <ItemGroup>
+      <!-- Zero libraries: every resolved reference that isn't zerocore or lib/
+           (project references and packages; NuGet only lets zero ones in). -->
+      <_ZeroFrameworkPath Include="@(Reference->'%(FullPath)')" Condition="'%(Reference.ZeroFramework)' == 'true'" />
+      <ZeroLibraryReference Include="@(ReferencePath)" Exclude="@(_ZeroFrameworkPath)" />
       <ZeroNativeInput Include="$(ZeroRefDir)*.dll;$(ZeroNativeDir)*" />
       <_ZeroArg Include="@(Compile->'&quot;%(FullPath)&quot;')" />
       <_ZeroArg Include="-r &quot;%(Reference.Identity)&quot;" Condition="'%(Reference.ZeroFramework)' == 'true'" />

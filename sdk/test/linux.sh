@@ -14,5 +14,5 @@ case "$(uname -m)" in x86_64 | amd64) platform=linux/amd64 ;; *) platform=linux/
 # file, strings and unzip for the tests; nothing else is installed.
 docker run --rm --platform "$platform" -v "$PWD:/w" -v zero-csharp-nuget:/root/.nuget -w /w \
     -e ZERO_NO_PACK=1 -e ZERO_HOSTS="${ZERO_HOSTS:-}" mcr.microsoft.com/dotnet/sdk:10.0 bash -c '
-    (apt-get update -qq && apt-get install -y -qq file binutils unzip) > /dev/null 2>&1
+    (apt-get update -qq && apt-get install -y -qq file binutils unzip zip) > /dev/null 2>&1
     sdk/test/run.sh "$@"' bash "$@"

@@ -93,7 +93,20 @@ test_plain_packages_refused() {
     pass "plain packages refused"
 }
 
-ALL_TESTS=(hello_compiles console_is_an_error unions_compile plain_packages_refused)
+test_payload_complete() {
+    local payload=$ROOT/sdk/ZeroCSharp.Sdk/payload f
+    LOG=
+    for f in ref/System.Private.CoreLib.dll ref/BflatLib.dll native/linux-x64/zerocore.o \
+             native/linux-arm64/zerocore.o native/win-x64/runtime.obj native/win-x64/zerocore.obj VERSIONS.txt; do
+        if [ ! -s "$payload/$f" ]; then fail "payload complete" "missing $f"; return; fi
+    done
+    if ! file "$payload/native/linux-x64/zerocore.o" | grep -q 'x86-64'; then fail "payload complete" "linux-x64 object isn't x86-64"; return; fi
+    if ! file "$payload/native/linux-arm64/zerocore.o" | grep -q 'aarch64'; then fail "payload complete" "linux-arm64 object isn't aarch64"; return; fi
+    if ! file "$payload/native/win-x64/runtime.obj" | grep -qiE 'COFF|x86-64'; then fail "payload complete" "win-x64 object isn't COFF"; return; fi
+    pass "payload complete"
+}
+
+ALL_TESTS=(payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused)
 
 # ---- Run ---------------------------------------------------------------------
 

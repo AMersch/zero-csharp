@@ -101,6 +101,8 @@ bflat build samples/Arena.cs -r bin/BflatLib.dll -r bin/System.Private.CoreLib.d
 
 This is how you ship a bflat library without header files. The assembly's metadata describes the public API, so `-r` takes the place of `#include`. The assembly holds IL, not native code, so each sample's build compiles just the parts it uses into one executable: generics are instantiated for the caller's types, calls are inlined across the library boundary, and code is generated for the caller's `-m` flags. One `BflatLib.dll` therefore gives NEON code on arm64 and AVX2 code on x64. Sizes match building from source to within about 1 KB.
 
+Your own libraries work the same way: each folder in `libs/` is compiled into `bin/libs/<folder>.dll` and referenced by every sample. [`libs/Geometry`](libs/Geometry) is an example; the guide [Create a reusable library](https://onurgumus.github.io/zero-csharp/how-to/create-a-library.html) explains it.
+
 - Pass `-O` to `build-il`. Unlike `bflat build`, it doesn't optimize unless you ask, and without `-O` the samples come out up to 1.4 KB bigger.
 - The library and its consumers must be built against the same core library.
 - The core library has to be named `System.Private.CoreLib`, and builds against it need `--no-reflection` and `-i` for each `[DllImport]` library (`build.sh` passes `-i libc -i libm.so.6`). [`zerocore/README.md`](zerocore/README.md) explains why.

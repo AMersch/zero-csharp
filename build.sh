@@ -27,10 +27,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
 
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Refs Llama)
+ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
 # Vga is a game for DOS only (lib/Dos.cs: graphics mode, keyboard, clock).
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Refs Llama Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama Vga)
 
 # Language version and memory safety rules for every sample.
 CSHARP_FLAGS=(--langversion preview --compiler-feature updated-memory-safety-rules)
@@ -152,9 +152,27 @@ build_core_native() {
     "$as" "zerocore/native/$BFLAT_ARCH.S" -o "$CORE_NATIVE"
 }
 
+# Your own libraries: each folder in libs/ is compiled, like lib/, into an IL
+# assembly, bin/libs/<folder>.dll, and every program references all of them.
+# A library can use zerocore, lib/ and the libraries before it in name order.
+# LIB_REFS holds the -r flags for lib/ and these.
+LIB_REFS=(-r "$LIB")
+
 build_lib() {
+    local dir name refs
     echo "[bflat] lib/*.cs -> $LIB"
     "$BFLAT_DIR/bflat" build-il lib/*.cs -O --stdlib:none -r "$CORE" "${CSHARP_FLAGS[@]}" --target Shared -o "$LIB"
+    LIB_REFS=(-r "$LIB")
+    for dir in libs/*/; do
+        [ -d "$dir" ] || continue
+        name=$(basename "$dir")
+        refs=("${LIB_REFS[@]}")
+        mkdir -p bin/libs
+        echo "[bflat] libs/$name/*.cs -> bin/libs/$name.dll"
+        "$BFLAT_DIR/bflat" build-il "$dir"*.cs -O --stdlib:none -r "$CORE" "${refs[@]}" "${CSHARP_FLAGS[@]}" \
+            --target Shared -o "bin/libs/$name.dll"
+        LIB_REFS+=(-r "bin/libs/$name.dll")
+    done
 }
 
 build_native() {
@@ -166,7 +184,7 @@ build_native() {
     for name in "$@"; do
         echo "[bflat] $name -> bin/$name"
         # shellcheck disable=SC2046
-        "$BFLAT_DIR/bflat" build $(sample_sources "$name") -r "$LIB" -r "$CORE" --stdlib:none "${CSHARP_FLAGS[@]}" \
+        "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none "${CSHARP_FLAGS[@]}" \
             "${NATIVE_FLAGS[@]}" --arch "$BFLAT_ARCH" $(bflat_flags "$name") "${LINK_FLAGS[@]}" -o "bin/$name"
         if [ "$name" = Tiny ]; then
             if [ "$BFLAT_ARCH" = "$HOST_ARCH" ]; then
@@ -197,11 +215,11 @@ compile_bitcode() {
     rm -rf "$obj"
     mkdir -p "$obj"
 
-    "$BFLAT_DIR/bflat" build-il $(sample_sources "$name") -r "$LIB" -r "$CORE" -O --stdlib:none "${CSHARP_FLAGS[@]}" -o "$obj/$name.dll"
+    "$BFLAT_DIR/bflat" build-il $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" -O --stdlib:none "${CSHARP_FLAGS[@]}" -o "$obj/$name.dll"
 
     # --directpinvoke binds [DllImport("libc")] and ("libm.so.6") at link time,
     # to the target's C library.
-    if ! "$WASM_ILC" "$obj/$name.dll" -r "$LIB" -r "$core" --reflectiondata:none \
+    if ! "$WASM_ILC" "$obj/$name.dll" "${LIB_REFS[@]}" -r "$core" --reflectiondata:none \
             --generateunmanagedentrypoints:System.Private.CoreLib \
             --targetos:wasi --targetarch:wasm -O --wasm-global-base:1024 \
             --codegenopt:Target=wasm32-unknown-wasip2 --codegenopt:LlvmExceptionHandlingModel=emulated \
@@ -387,7 +405,7 @@ build_win() {
         # /entry: bflat names __managed__Main, which expects argc and argv;
         # zero_start (win/runtime.c) makes them first. The later /entry wins.
         # shellcheck disable=SC2046
-        "$BFLAT_DIR/bflat" build $(sample_sources "$name") -r "$LIB" -r "$CORE" --stdlib:none \
+        "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none \
             "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os windows --arch x64 $(BFLAT_ARCH=x64 bflat_flags "$name") \
             --ldflags "/entry:zero_start $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
         rm -f "bin/win/$name.pdb"
@@ -410,7 +428,7 @@ build_mac_objects() {
     for name in "$@"; do
         echo "[bflat] $name -> $MAC_OBJ/$name.o"
         # shellcheck disable=SC2046
-        "$BFLAT_DIR/bflat" build $(sample_sources "$name") -r "$LIB" -r "$CORE" --stdlib:none \
+        "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none \
             "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os macos --arch arm64 -c \
             $(BFLAT_ARCH=arm64 bflat_flags "$name") -o "$MAC_OBJ/$name.o"
     done

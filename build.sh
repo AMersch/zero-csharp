@@ -27,10 +27,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
 
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Llama)
+ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Refs Llama)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
 # Vga is a game for DOS only (lib/Dos.cs: graphics mode, keyboard, clock).
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Llama Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Refs Llama Vga)
 
 # Language version and memory safety rules for every sample.
 CSHARP_FLAGS=(--langversion preview --compiler-feature updated-memory-safety-rules)

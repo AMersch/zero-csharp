@@ -43,3 +43,5 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   and the ready-made kernels in `lib/Kernels.cs`.
 - [Run a loop in parallel](run-in-parallel.html): `Parallel.For` over every processor, sharing a total
   with `Interlocked`, and one arena per thread.
+- [Run a language model](run-a-language-model.html): a small Llama-style model, compiled into the
+  program, telling stories on every target, DOS included.

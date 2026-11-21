@@ -62,6 +62,13 @@ public static class Out
 
     public static void Write(string text) => Write(text.AsSpan());
 
+    /// <summary>Writes bytes that are already UTF-8 (or any bytes), as they are.</summary>
+    public static void WriteUtf8(ReadOnlySpan<byte> bytes)
+    {
+        for (int i = 0; i < bytes.Length; i++)
+            Put(bytes[i]);
+    }
+
     public static void Write(char value)
     {
         Span<char> one = stackalloc char[1];

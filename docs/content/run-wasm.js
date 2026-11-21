@@ -141,7 +141,8 @@ for (const runner of document.querySelectorAll('[data-wasm-runner]')) {
       const url = `${base}${pick.value}.wasm`;
       const started = performance.now();
       const { output: text, exitCode, trapped } = await runWasm(url, {
-        args: args.value.split(/\s+/).filter(Boolean),
+        // Split like a shell, roughly: "quoted text" is one argument.
+        args: (args.value.match(/"[^"]*"|\S+/g) || []).map(a => a.replace(/^"(.*)"$/, '$1')),
         stdin: stdin.value,
       });
       const ms = Math.round(performance.now() - started);

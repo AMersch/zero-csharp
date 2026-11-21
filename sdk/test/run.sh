@@ -331,10 +331,29 @@ test_version_mismatch() {
     pass "$name"
 }
 
+# ---- Templates ----------------------------------------------------------------
+
+test_templates() {
+    local name="templates" dir=$WORK/templates out
+    linux_only "$name" || return
+    rm -rf "$dir" && mkdir -p "$dir"
+    fixture hello templates-config > /dev/null    # just for its nuget.config
+    cp "$WORK/templates-config/nuget.config" "$dir/"
+    dotnet new uninstall ZeroCSharp.Templates > /dev/null 2>&1 || true
+    if ! run_in "$dir" templates-install new install "$FEED/ZeroCSharp.Templates.$VERSION.nupkg"; then fail "$name" "install failed"; return; fi
+    if ! run_in "$dir" templates-new new zero -o Hello; then fail "$name" "dotnet new zero failed"; return; fi
+    if ! run_in "$dir/Hello" templates-build build; then fail "$name" "the program didn't build"; return; fi
+    out=$(echo Ann | "$dir/Hello/bin/Debug/$TFM/Hello")
+    if [[ "$out" != *"Hello, Ann!"* ]]; then fail "$name" "printed '$out'"; return; fi
+    if ! run_in "$dir" templates-newlib new zerolib -o Lib; then fail "$name" "dotnet new zerolib failed"; return; fi
+    if ! run_in "$dir/Lib" templates-pack pack -o "$dir/feed"; then fail "$name" "the library didn't pack"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
-    project_reference library_change_rebuilds pack_and_package_reference version_mismatch)
+    project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates)
 
 # ---- Run ---------------------------------------------------------------------
 

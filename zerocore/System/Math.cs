@@ -15,6 +15,29 @@ namespace System
         public const double PI = 3.14159265358979323846;
         public const double E = 2.7182818284590452354;
 
+        // What 32-bit targets (WebAssembly, DOS) call for a checked 64-bit
+        // multiplication, which has no instruction there: `checked` code on
+        // long, and the size of a `stackalloc` of nint. The compiler finds
+        // them by name.
+        private static ulong MultiplyChecked(ulong i, ulong j)
+        {
+            if (i != 0 && j > 0xFFFFFFFFFFFFFFFF / i)
+                Environment.FailFast("OverflowException");
+            return unchecked(i * j);
+        }
+
+        private static long MultiplyChecked(long i, long j)
+        {
+            bool negative = (i < 0) != (j < 0);
+            ulong a = i < 0 ? unchecked(0 - (ulong)i) : (ulong)i;
+            ulong b = j < 0 ? unchecked(0 - (ulong)j) : (ulong)j;
+            ulong limit = negative ? 0x8000000000000000 : 0x7FFFFFFFFFFFFFFF;
+            if (a != 0 && b > limit / a)
+                Environment.FailFast("OverflowException");
+            ulong product = unchecked(a * b);
+            return negative ? unchecked((long)(0 - product)) : (long)product;
+        }
+
         public static int Abs(int value) => value < 0 ? -value : value;
         public static long Abs(long value) => value < 0 ? -value : value;
 

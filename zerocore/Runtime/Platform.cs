@@ -16,6 +16,18 @@ namespace System.Runtime
         [DllImport("*"), SuppressGCTransition]
         internal static extern void abort();
 
+        // Thread-local storage, for ObjectAllocator. pthread_key_t is an int
+        // on Linux and a long on macOS: nuint holds either. Windows, DOS and
+        // WebAssembly get these from their runtime.c or C library.
+        [DllImport("*"), SuppressGCTransition]
+        internal static extern int pthread_key_create(nuint* key, void* destructor);
+
+        [DllImport("*"), SuppressGCTransition]
+        internal static extern void* pthread_getspecific(nuint key);
+
+        [DllImport("*"), SuppressGCTransition]
+        internal static extern int pthread_setspecific(nuint key, void* value);
+
         // ---- libm ----
 
         [DllImport("*"), SuppressGCTransition]

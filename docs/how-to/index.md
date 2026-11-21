@@ -41,3 +41,5 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
 
 - [Use SIMD](use-simd.html): `Vector128` and `Vector256` without run-time CPU detection, the `-m` flags,
   and the ready-made kernels in `lib/Kernels.cs`.
+- [Run a loop in parallel](run-in-parallel.html): `Parallel.For` over every processor, sharing a total
+  with `Interlocked`, and one arena per thread.

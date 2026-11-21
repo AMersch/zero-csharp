@@ -188,7 +188,8 @@ for (int i = 0; i < 1000; i++)
 long scoped = GC.GetTotalAllocatedBytes() - before;
 ```
 
-Only one thread may allocate while a scope is open: the setting applies to the whole program.
+A scope applies only to the thread that opens it, so each thread of a [parallel loop](../how-to/run-in-parallel.html)
+can send its objects to an arena of its own.
 
 ## Running out of memory
 

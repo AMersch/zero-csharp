@@ -251,6 +251,7 @@ unsafe { arena.Reset(); }                // SAFETY: p is not used after this
 | `samples/QuizStep1.cs` … `QuizStep3.cs` | The [tutorial](https://onurgumus.github.io/bflat_test/tutorial/index.html)'s first three steps towards Quiz: print the questions, read the answers, handle bad input. The site quotes them | ~52-56 KB |
 | `samples/Guards.cs` | The mistakes `lib/` ends the program for, one per run: marks restored out of order or in the wrong arena, collections used after their memory was freed (`DebugChecks`), a list index out of range, running out of memory in an arena created with `stopOnOutOfMemory`. `test.sh` checks the message of each | ~77 KB |
 | `samples/Queries.cs` | LINQ-style queries with `lib/Seq.cs`: `Where`, `Select`, `Count`, `Sum`, `Any`, `All`, `Take`, `Skip`, `Aggregate`, `TryFirst`, `ToList(arena)`, query syntax, state arguments instead of captures, and tuples instead of anonymous types. Checks with `GC.GetTotalAllocatedBytes()` that a thousand runs allocate nothing, and that a capturing lambda does |
+| `samples/Threads.cs` | `Parallel.For` from `lib/Threads.cs`: iterations spread over every processor, a counter shared through `Interlocked`, and one arena per part, each thread sending its own allocations there with `AllocateObjectsHere`. On WebAssembly and DOS the loops run on one thread and give the same answers |
 | `samples/Vga.cs` | DOS only (see [DOS](#dos)): a small game in 320x200 with 256 colors, steered with the arrow keys; `Vga test` checks the screen, keyboard and clock by itself | 36 KB (DOS) |
 
 Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is stripped); x64 is within a few KB. Run `strip` to shrink the others.
@@ -285,7 +286,8 @@ Zero mode has no garbage collector, no exceptions you can catch (`throw` and oth
 - Generics, including constrained calls and **static abstract interface members**. These are resolved at compile time, which suits per-format compute kernels.
 - Classes with virtual methods, and interfaces, including default interface methods. Every `new` calls calloc and is never freed. An interface call the compiler can't resolve at build time goes through a small per-call-site cache: a little slower than a virtual call, and slower again at a site that sees more than four classes.
 - Delegates and lambdas (they allocate), `try`/`finally` and `using`
-- Function pointers, `[UnmanagedCallersOnly]` callbacks, and P/Invoke. pthreads work, for example, with `Interlocked` and `Volatile` for shared state.
+- Function pointers, `[UnmanagedCallersOnly]` callbacks, and P/Invoke.
+- Threads: `Parallel.For` (`lib/Threads.cs`) spreads a loop over every processor, on pthreads (Windows threads on Windows), with `Interlocked` and `Volatile` for shared state. On WebAssembly and DOS the same loop runs on one thread.
 - `Math` and `MathF`, and array initializers (`new[] { 1, 2, 3 }`)
 
 [`zerocore/README.md`](zerocore/README.md) has the full list, including what doesn't work.
@@ -364,7 +366,7 @@ With zerocore, as `build.sh` builds:
 | `[DllImport]` of a library not passed with `-i` fails to compile ("Expected type 'Internal.Runtime.CompilerHelpers.InteropHelpers' not found") | Pass `-i <library>`; `build.sh` passes `-i libc -i libm.so.6` |
 | Building without `--no-reflection` fails ("Failed to load type 'Internal.Metadata.NativeFormat.TypeDefinition'") | Pass `--no-reflection`; `build.sh` does |
 | Non-baseline instruction sets (AVX2, FMA, dotprod) report `IsSupported == false` by default: there's no run-time CPU detection | Build with `-m x86-64-v3` / `-m dotprod`; `build.sh` does this for Simd and Kernels |
-| No `Console`, `Half`, `Thread` | `lib/Out.cs` for output, `lib/In.cs` for input; pthreads via P/Invoke for threads |
+| No `Console`, `Half`, `Thread` | `lib/Out.cs` for output, `lib/In.cs` for input; `Parallel.For` (`lib/Threads.cs`) for threads |
 | `"n=" + 5` doesn't compile (no `object.ToString`) | `Str.Format(arena, $"n={5}")` |
 | Casts and interface calls that need variance abort at run time | Not supported |
 | Windows: x64 only, and built from Linux or macOS | `./build.sh --win`; `build.ps1` (building on Windows) is untested and uses zerolib |

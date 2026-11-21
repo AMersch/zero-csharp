@@ -41,10 +41,10 @@ public static class Program
 ```
 
 The price is what the runtime used to do. Nothing collects garbage, so memory is your job (see
-[Memory without a GC](memory.html)). Nothing throws, so a failed cast or an index out of range prints a
-message and ends the program. And most library types you know from .NET are not there; `lib/` supplies
-the ones these programs need. The same program also builds as a WebAssembly module and as
-a DOS program for a 386 (see [Targets](targets.html)).
+[Memory without a GC](memory.html)). Nothing catches exceptions, so a `throw`, a failed cast or an
+index out of range prints a message and ends the program. And most library types you know from .NET
+are not there; `lib/` supplies the ones these programs need. The same program also builds as a
+WebAssembly module and as a DOS program for a 386 (see [Targets](targets.html)).
 
 ## bflat and the fork
 

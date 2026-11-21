@@ -18,7 +18,8 @@ Most of what follows comes from three facts about zero mode:
    it has comes from the core library, `zerocore/`, which is ordinary C# in this repository.
 2. **Nothing is ever freed for you.** `new` calls `calloc`, and there is no garbage collector to give
    the memory back. Short-lived data goes in arenas, which free everything at once.
-3. **There are no exceptions.** When something goes wrong, the program prints a message and ends.
+3. **Exceptions can't be caught.** When something goes wrong, including a `throw`, the program prints
+   a message and ends.
 
 ## The vocabulary
 

@@ -33,19 +33,20 @@ The samples don't use bflat's built-in zero-mode library (`--stdlib:zero`, zerol
 Prerequisites:
 
 - **The bflat fork** (see below). By default `../bflat/layouts/linux-glibc-<arch>`; override with `BFLAT_DIR`.
-- **macOS:** Docker. bflat can't target macOS, so it runs in a Linux container of your Mac's own architecture (native on Apple Silicon).
+- **macOS:** Docker. bflat is a Linux program, so it runs in a Linux container of your Mac's own architecture (native on Apple Silicon). By default the samples are Linux programs that run in that container too; `./build.sh --mac` builds macOS programs instead (see [macOS](#macos)), which also needs Xcode or its command line tools.
 - **Linux:** `libtinfo.so.5`, which bflat's bundled linker needs, and an assembler (`as`, from binutils) for zerocore's assembly routines. On Ubuntu 22.04: `sudo apt install libtinfo5 binutils`. Ubuntu 24.04 no longer ships libtinfo5. Cross-compiling needs the target's assembler too (`binutils-x86-64-linux-gnu` or `binutils-aarch64-linux-gnu`).
 
-Windows: `.\setup.ps1` and `.\build.ps1` use the fork's `windows-x64` layout but are **untested**. The samples P/Invoke into `libc`, which may not resolve on Windows. zerocore has no Windows port, so `build.ps1` still builds against zerolib and skips the Casts sample.
+Windows programs: `./build.sh --win` builds every sample as a 64-bit Windows program (see [Windows](#windows)). Building *on* Windows is another matter: `.\setup.ps1` and `.\build.ps1` use the fork's `windows-x64` layout but are **untested**, and still build against zerolib rather than zerocore.
 
 ## Getting bflat
 
-The samples need a bflat fork, [OnurGumus/bflat](https://github.com/OnurGumus/bflat) (branch `master`). `build.sh` uses it as a compiler only: the first, fourth and fifth items below. The rest are changes to the fork's zerolib, which matter if you build with `--stdlib:zero` (as `build.ps1` still does). The fork differs from upstream bflat 10.0.0-rc.1 in these ways:
+The samples need a bflat fork, [OnurGumus/bflat](https://github.com/OnurGumus/bflat) (branch `master`). `build.sh` uses it as a compiler only: the first, fourth, fifth and sixth items below. The rest are changes to the fork's zerolib, which matter if you build with `--stdlib:zero` (as `build.ps1` still does). The fork differs from upstream bflat 10.0.0-rc.1 in these ways:
 
 - **It compiles C# 15.** Roslyn is bumped to 5.12.0, the version shipped with the .NET 11 SDK. A new `--compiler-feature` option (the same as `csc -features:`) turns on the updated memory safety rules.
 - **SIMD.** zerolib defines `Vector64/128/256<T>` (with `Create` and `As*`) and a subset of the hardware intrinsics: `AdvSimd` and `Dp` (SDOT) on arm64; `Sse`, `Avx`, `Avx2` and `Fma` on x64. That covers float arithmetic, FMA, min/max, rounding, conversions, divide and int8 dot products. The compiler treats them as real intrinsics.
 - **Atomics and half floats.** `Interlocked` (compiled to `lock xadd`/`cmpxchg` and `ldaxr`/`stlxr`), `Volatile`, `Half`, `BFloat16` and the `BitConverter` bit conversions. Half/BFloat16 conversions are bit-for-bit identical to .NET 11's.
 - **Instruction sets beyond the baseline come only from `-m`.** Zero mode has no run-time CPU detection, and upstream bflat failed to link on arm64 when code checked e.g. `Dp.IsSupported` without `-m`. Now such checks are simply `false` unless the instruction set is given with `-m`.
+- **`--os macos`.** The compiler writes a Mach-O object file for macOS on arm64 or x64. bflat has no Mach-O linker, so this needs `-c` and `--stdlib:none`, and the object is linked on a Mac with clang (see [macOS](#macos)).
 - **The .NET 10 GA JIT.** Upstream bflat 10.0.0-rc.1 ships the .NET 10 RC1 JIT, which miscompiles some static-field stores on x64. The fork's build swaps in Microsoft's GA JIT, which fixes them.
 - **zerolib fixes.** `ThrowOverflowException` is added, so checked arithmetic and **integer division on arm64** compile. `Console.WriteLine(int)` is fixed.
 - **Strings, arrays, statics and casts in zerolib.** Upstream zero mode can't compile or run a lot of ordinary C#; the fork makes these work:
@@ -132,6 +133,28 @@ Differences from the native build:
 - **One exact compiler version.** `wasm/runtime.c` and zerocore implement NativeAOT-LLVM's internal runtime functions (`RhpNewArray`, `RhpResolveInterfaceDispatch` and others). Their names and signatures aren't documented; they were read from the compiler's output. A newer NativeAOT-LLVM can change them. A changed signature fails the link, since `build.sh` turns `wasm-ld`'s signature warnings into errors, but a changed meaning only shows up when a program runs. So treat the versions in `env.sh` as a set, and after changing any of them, rerun the WASM samples and compare their output with the native build.
 - **Not supported:** callbacks from native code into C# (`[UnmanagedCallersOnly]` reverse P/Invoke inside a running program), and `build.ps1` (Windows).
 
+## macOS
+
+On a Mac with Apple Silicon, `./build.sh --mac` builds all fifteen samples as macOS programs (`bin/mac/*`) that run directly, without Docker: `./run.sh --mac Core`, or just `bin/mac/Core`. Every sample exits with 0 and prints what the Linux build prints.
+
+bflat runs in the container as usual, but with `--os macos -c` it only compiles: the compiler writes a Mach-O object file, and the Mac's own clang links it. That option is new in the fork (bflat has no Mach-O linker, so it refuses to build for macOS without `-c`). Two small files are macOS-specific:
+
+- [`mac/runtime.c`](mac/runtime.c): `main`, and `clock_gettime`, because the samples ask for clock 1, which is `CLOCK_MONOTONIC` on Linux and no clock on macOS. Everything else zerocore and `lib/` call (`calloc`, `write`, `read`, `abort`, `puts`, the math functions) is in macOS's C library under the same names.
+- [`zerocore/native/mac-arm64.S`](zerocore/native/mac-arm64.S): `arm64.S` as a Mach-O object. Apple's arm64 calling convention agrees with Linux's for every register these routines use.
+
+zerocore itself is unchanged: it finds the compiler's module list between `__start___modules` and `__stop___modules`, which GNU ld defines on Linux, and the link maps Apple's names for the same bounds onto them with `-alias`.
+
+The programs are larger than on Linux, 63 KB for Tiny and Minimal, because a macOS arm64 program has four segments aligned to 16 KB pages. arm64 only: an Intel Mac would need an x64 version of the assembly.
+
+## Windows
+
+`./build.sh --win` compiles all fifteen samples to 64-bit Windows console programs: `bin/win/*.exe`, from 9 KB (Tiny) to 68 KB (Strings). The compiler is the same bflat, against the same zerocore and `lib/`, with `--os windows --arch x64`; only two small files are Windows-specific:
+
+- [`win/runtime.c`](win/runtime.c): the entry point, which builds `argc` and `argv` (in UTF-8) from the Windows command line, and `write`, `read` and `clock_gettime` on top of kernel32. The rest of the C library (`calloc`, `malloc`, `puts`, the math functions) is Windows' own Universal CRT.
+- [`zerocore/native/win-x64.S`](zerocore/native/win-x64.S): zerocore's assembly routines for the Windows calling convention, plus the stack probe Windows needs for frames larger than a page.
+
+clang compiles both (Xcode's on macOS), as for DOS. `./run.sh --win Core` and `./test.sh --win` run the programs under Wine, in an x64 container (`docker/wine`, emulated on Apple Silicon); every sample exits with 0 and prints what the native build prints. On Windows itself, run the `.exe` directly. Two differences from Linux: `puts` ends lines with `\r\n`, and a program that zerocore stops (a failed cast, an index out of range) exits with code 3, Windows' code for `abort`. Not tried on real Windows yet, or on Windows on arm64.
+
 ## DOS
 
 `./build.sh --dos` compiles thirteen of the samples, `lib/` and `zerocore/` to 32-bit DOS programs that run on a 386: `bin/dos/*.exe`, from 16 KB (Tiny) to 93 KB (Strings). On an emulated 386 with 4 MB of memory all thirteen exit with 0, and they print exactly what the WebAssembly build prints (which is what the native build prints, apart from the pointer-sized byte counts in Arena and Collections). Simd and Kernels are left out: they benchmark SIMD instructions, which a 386 doesn't have.
@@ -174,7 +197,7 @@ The guards are tested the other way round. Zero mode has no exceptions, so `lib/
 ./test.sh            # native, for this machine (or BFLAT_ARCH)
 ./test.sh --wasm     # WebAssembly
 ./test.sh --dos      # DOS, on an emulated 386 with 4 MB (including the game's self-test)
-./test.sh --all      # native, the other architecture under emulation (macOS), WebAssembly and DOS
+./test.sh --all      # native, the other architecture under emulation (macOS), macOS, Windows, WebAssembly and DOS
 ./test.sh --update   # rewrite tests/expected after an intended change in output
 ```
 
@@ -227,6 +250,7 @@ unsafe { arena.Reset(); }                // SAFETY: p is not used after this
 | `samples/Quiz.cs` | Asks questions in a loop and reads the answers with `In.ReadLine`: prompts formatted straight to stdout, answers read into a stack buffer, mistakes kept as strings in a `RefList` in a long-lived arena. `test.sh` feeds it `tests/input/Quiz.txt` (bad UTF-8, an over-long line, CRLF, end of input) | ~67 KB |
 | `samples/QuizStep1.cs` … `QuizStep3.cs` | The [tutorial](https://onurgumus.github.io/bflat_test/tutorial/index.html)'s first three steps towards Quiz: print the questions, read the answers, handle bad input. The site quotes them | ~52-56 KB |
 | `samples/Guards.cs` | The mistakes `lib/` ends the program for, one per run: marks restored out of order or in the wrong arena, collections used after their memory was freed (`DebugChecks`), a list index out of range, running out of memory in an arena created with `stopOnOutOfMemory`. `test.sh` checks the message of each | ~77 KB |
+| `samples/Queries.cs` | LINQ-style queries with `lib/Seq.cs`: `Where`, `Select`, `Count`, `Sum`, `Any`, `All`, `Take`, `Skip`, `Aggregate`, `TryFirst`, `ToList(arena)`, query syntax, state arguments instead of captures, and tuples instead of anonymous types. Checks with `GC.GetTotalAllocatedBytes()` that a thousand runs allocate nothing, and that a capturing lambda does |
 | `samples/Vga.cs` | DOS only (see [DOS](#dos)): a small game in 320x200 with 256 colors, steered with the arrow keys; `Vga test` checks the screen, keyboard and clock by itself | 36 KB (DOS) |
 
 Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is stripped); x64 is within a few KB. Run `strip` to shrink the others.
@@ -250,7 +274,7 @@ Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is s
 
 ## What zero mode supports
 
-Zero mode has no garbage collector, no exceptions (failures call `Environment.FailFast`), no async/await, no LINQ, and almost no base class library. On the other hand, these all work with zerocore:
+Zero mode has no garbage collector, no exceptions you can catch (`throw` and other failures print a message and abort), no async/await, no .NET LINQ (`lib/Seq.cs` has allocation-free `Where`, `Select`, `Sum` and friends), no anonymous types (tuples work), and almost no base class library. On the other hand, these all work with zerocore:
 
 - `Span<T>`, and arrays: `new T[n]`, including arrays of strings, objects and interfaces
 - Static fields of every type, including strings, objects and arrays; static constructors
@@ -343,7 +367,8 @@ With zerocore, as `build.sh` builds:
 | No `Console`, `Half`, `Thread` | `lib/Out.cs` for output, `lib/In.cs` for input; pthreads via P/Invoke for threads |
 | `"n=" + 5` doesn't compile (no `object.ToString`) | `Str.Format(arena, $"n={5}")` |
 | Casts and interface calls that need variance abort at run time | Not supported |
-| No Windows port | `build.ps1` builds against zerolib instead |
+| Windows: x64 only, and built from Linux or macOS | `./build.sh --win`; `build.ps1` (building on Windows) is untested and uses zerolib |
+| macOS: Apple Silicon only, and built on a Mac | `./build.sh --mac` |
 
 With bflat's zerolib (`--stdlib:zero`), for reference; the fork fixes most of these, and none of them affect `build.sh`:
 

@@ -49,6 +49,18 @@ void *RhpReversePInvokeAndPushSparseVirtualUnwindFrame(void *frame, void *a, voi
 
 void RhpReversePInvokeReturnAndPopSparseVirtualUnwindFrame(void *frame) { (void)frame; }
 
+// A method with a catch or fault block registers itself here, so the
+// exception dispatcher could find its handlers. `throw` never unwinds in zero
+// mode (it prints and aborts, in zerocore's RhpThrowEx), so nothing reads it.
+void RhpPushSparseVirtualUnwindFrame(void *frame, void *table, unsigned index)
+{
+    (void)frame;
+    (void)table;
+    (void)index;
+}
+
+void RhpPopSparseVirtualUnwindFrame(void) {}
+
 // Managed code calling native code: nothing to do without a GC.
 int RhpTrapThreads; // 0: never stop for a GC
 void RhpPInvoke(void *frame) { (void)frame; }

@@ -1,4 +1,4 @@
-# Build/run environment for macOS hosts (bflat has no macOS target).
+# Build/run environment for macOS hosts (bflat is a Linux program).
 # build.sh mounts the repo at /w and the bflat layout at /bflat. The image is
 # built for the Mac's own architecture, so it runs natively on Apple Silicon.
 #

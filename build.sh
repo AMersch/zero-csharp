@@ -12,16 +12,22 @@
 # With --dos, builds 32-bit DOS programs for a 386 and later (bin/dos/*.exe),
 # with NativeAOT-LLVM and a clang that has the x86 target (./setup.sh --dos).
 #
-# Usage:  ./build.sh [--wasm | --dos] [Sample ...]     default: all samples
+# With --win, builds 64-bit Windows programs (bin/win/*.exe), with bflat and
+# a clang that has the x86 target for the small C and assembly part.
+#
+# With --mac (on a Mac with Apple Silicon), builds macOS programs (bin/mac/*)
+# that run directly, without the container: bflat compiles, Xcode's clang links.
+#
+# Usage:  ./build.sh [--wasm | --dos | --win | --mac] [Sample ...]     default: all samples
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh)
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
 
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards)
+ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
 # Vga is a game for DOS only (lib/Dos.cs: graphics mode, keyboard, clock).
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Vga)
 
 # Language version and memory safety rules for every sample.
 CSHARP_FLAGS=(--langversion preview --compiler-feature updated-memory-safety-rules)
@@ -321,6 +327,84 @@ check_386() {
     done
 }
 
+# Windows, x64 only. The same bflat compiles the samples, against the same
+# zerocore, with two Windows object files linked in:
+#   win/runtime.c               the entry point, and write/read/clock_gettime
+#                               on top of kernel32 (the rest of the C library
+#                               is Windows' own Universal CRT)
+#   zerocore/native/win-x64.S   x64.S for the Windows calling convention
+# clang compiles both on the host (Xcode's on macOS), like dos/runtime.c.
+WIN_OBJ=bin/win/obj
+WIN_TARGET=(-target x86_64-pc-windows-msvc)
+
+# $1: clang
+build_win_objects() {
+    local clang=$1
+    mkdir -p "$WIN_OBJ"
+    echo "[clang] win/runtime.c, zerocore/native/win-x64.S -> $WIN_OBJ"
+    "$clang" "${WIN_TARGET[@]}" -O2 -ffreestanding -fno-builtin -Wall -Wextra -c win/runtime.c -o "$WIN_OBJ/runtime.obj"
+    "$clang" "${WIN_TARGET[@]}" -c zerocore/native/win-x64.S -o "$WIN_OBJ/zerocore.obj"
+}
+
+build_win() {
+    local name
+    check_bflat
+    build_core "$CORE"
+    build_lib
+    for name in "$@"; do
+        echo "[bflat] $name -> bin/win/$name.exe"
+        # /entry: bflat names __managed__Main, which expects argc and argv;
+        # zero_start (win/runtime.c) makes them first. The later /entry wins.
+        # shellcheck disable=SC2046
+        "$BFLAT_DIR/bflat" build "samples/$name.cs" -r "$LIB" -r "$CORE" --stdlib:none \
+            "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os windows --arch x64 $(BFLAT_ARCH=x64 bflat_flags "$name") \
+            --ldflags "/entry:zero_start $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
+        rm -f "bin/win/$name.pdb"
+    done
+}
+
+# macOS on Apple Silicon. bflat has no Mach-O linker, so it only compiles
+# (--os macos -c, in the container), and the Mac's own clang and linker do
+# the rest, with two macOS files:
+#   mac/runtime.c               main, and clock_gettime for the samples' clock
+#   zerocore/native/mac-arm64.S arm64.S, as a Mach-O object
+MAC_OBJ=bin/mac/obj
+
+build_mac_objects() {
+    local name
+    check_bflat
+    build_core "$CORE"
+    build_lib
+    mkdir -p "$MAC_OBJ"
+    for name in "$@"; do
+        echo "[bflat] $name -> $MAC_OBJ/$name.o"
+        # shellcheck disable=SC2046
+        "$BFLAT_DIR/bflat" build "samples/$name.cs" -r "$LIB" -r "$CORE" --stdlib:none \
+            "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os macos --arch arm64 -c \
+            $(BFLAT_ARCH=arm64 bflat_flags "$name") -o "$MAC_OBJ/$name.o"
+    done
+}
+
+# $1: clang; the rest: samples.
+build_mac_link() {
+    local clang=$1 name
+    shift
+    echo "[clang] mac/runtime.c, zerocore/native/mac-arm64.S -> $MAC_OBJ"
+    "$clang" -arch arm64 -O2 -Wall -Wextra -c mac/runtime.c -o "$MAC_OBJ/runtime.o"
+    "$clang" -arch arm64 -c zerocore/native/mac-arm64.S -o "$MAC_OBJ/zerocore.o"
+    for name in "$@"; do
+        echo "[ld]    $name -> bin/mac/$name"
+        # zerocore finds the compiler's module list between __start___modules
+        # and __stop___modules, which GNU ld defines on Linux. Apple's linker
+        # has its own names for a section's bounds; -alias maps them.
+        "$clang" -arch arm64 -o "bin/mac/$name" "$MAC_OBJ/$name.o" "$MAC_OBJ/runtime.o" "$MAC_OBJ/zerocore.o" \
+            -Wl,-dead_strip \
+            '-Wl,-alias,section$start$__DATA$__modules,___start___modules' \
+            '-Wl,-alias,section$end$__DATA$__modules,___stop___modules'
+        if [ "$name" = Tiny ]; then strip "bin/mac/$name"; fi
+    done
+}
+
 # Internal entry points used inside the container.
 if [ "${1:-}" = "--native-dos-bitcode" ]; then
     shift
@@ -337,6 +421,16 @@ if [ "${1:-}" = "--native" ]; then
     build_native "$@"
     exit 0
 fi
+if [ "${1:-}" = "--native-mac-objects" ]; then
+    shift
+    build_mac_objects "$@"
+    exit 0
+fi
+if [ "${1:-}" = "--native-win" ]; then
+    shift
+    build_win "$@"
+    exit 0
+fi
 if [ "${1:-}" = "--native-wasm" ]; then
     shift
     build_wasm "$@"
@@ -347,6 +441,8 @@ TARGET=native
 case "${1:-}" in
     --wasm) TARGET=wasm; shift ;;
     --dos)  TARGET=dos; shift ;;
+    --win)  TARGET=win; shift ;;
+    --mac)  TARGET=mac; shift ;;
 esac
 
 if [ $# -eq 0 ]; then
@@ -374,6 +470,8 @@ done
 case "$TARGET" in
     wasm)   output() { echo "bin/wasm/$1.wasm"; } ;;
     dos)    output() { echo "bin/dos/$1.exe"; } ;;
+    win)    output() { echo "bin/win/$1.exe"; } ;;
+    mac)    output() { echo "bin/mac/$1"; } ;;
     native) output() { echo "bin/$1"; } ;;
 esac
 
@@ -399,6 +497,22 @@ case "$TARGET" in
     wasm)   run wasm "$@" ;;
     native)
         if [ "$(uname -s)" = Darwin ]; then in_container --native "$@"; else build_native "$@"; fi ;;
+    mac)
+        if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
+            echo "Error: --mac builds on a Mac with Apple Silicon: it links with Apple's linker." >&2
+            exit 1
+        fi
+        run mac-objects "$@"
+        build_mac_link "${MAC_CC:-clang}" "$@"
+        ;;
+    win)
+        if ! WIN_CLANG=$(find_dos_clang); then
+            echo "Error: no clang that can compile for x86 Windows. Install clang (Xcode's works)." >&2
+            exit 1
+        fi
+        build_win_objects "$WIN_CLANG"
+        run win "$@"
+        ;;
     dos)
         if ! DOS_CLANG=$(find_dos_clang); then
             echo "Error: no clang that can compile for 32-bit x86. Run ./setup.sh --dos" >&2

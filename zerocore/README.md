@@ -1,6 +1,6 @@
 # zerocore
 
-A core library for C# programs compiled with [bflat](https://flattened.net/) that run without .NET's runtime: no garbage collector, no exceptions, no reflection. It takes the place of bflat's built-in `zerolib` (`--stdlib:zero`), under the MIT license, in about 2,400 lines of C# and under 100 lines of assembly.
+A core library for C# programs compiled with [bflat](https://flattened.net/) that run without .NET's runtime: no garbage collector, no exceptions you can catch, no reflection. It takes the place of bflat's built-in `zerolib` (`--stdlib:zero`), under the MIT license, in about 2,400 lines of C# and under 100 lines of assembly.
 
 A core library is the assembly that defines `object`, `int`, `string` and the other types C# itself is built on. It also has to contain the runtime code the native compiler expects to call: allocating objects, checking casts, calling interface methods, setting up static fields. With zerocore, that code is all a program gets linked with besides the C library.
 
@@ -31,11 +31,14 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 
 | File | What |
 |---|---|
-| `System/Primitives.cs`, `Object.cs`, `Array.cs`, `Attributes.cs`, `Collections.cs` | The types and attributes the C# compiler requires: primitives, `object`, `ValueType`, `Enum`, `Nullable<T>`, `Array`, delegates (`Action`, `Func`), `ValueTuple`, `IDisposable`, `IEnumerable` |
+| `System/Primitives.cs`, `Object.cs`, `Array.cs`, `Attributes.cs`, `Collections.cs` | The types and attributes the C# compiler requires: primitives, `object`, `ValueType`, `Enum`, `Nullable<T>`, `Array`, delegates (`Action`, `Func`), `ValueTuple` (2 to 7 elements), `IDisposable`, `IEnumerable` |
+| `System/GC.cs` | `GC.GetTotalAllocatedBytes()`: every byte allocated so far, so a test can check that a loop allocates nothing |
 | `System/String.cs` | `string`: `Length`, indexer, `==`, `!=`, `Equals`, `IsNullOrEmpty`, `Concat` (so `a + b` and `switch` on strings work) |
 | `System/Span.cs` | `Span<T>` and `ReadOnlySpan<T>`: indexing, `Slice`, `CopyTo`, `Fill`, `Clear`, `foreach`, `fixed` |
+| `System/Exceptions.cs` | `Exception` and a few standard subclasses (`InvalidOperationException`, `ArgumentException`, …), for `throw` as a panic and for code the compiler generates |
+| `System/Unions.cs` | `IUnion` and `UnionAttribute`, which C# 15 `union` declarations need |
 | `System/Environment.cs` | `Environment.FailFast`, which is what every failure ends in |
-| `Runtime/RuntimeExports.cs` | Allocation (`calloc`, never freed), boxing and unboxing |
+| `Runtime/RuntimeExports.cs` | Allocation (`calloc`, never freed), boxing and unboxing; `throw` (print the message, abort) |
 | `Runtime/TypeCast.cs` | `is`, `as` and casts to classes and interfaces; type-checked stores into arrays |
 | `Runtime/InterfaceDispatch.cs` | Calling an interface method on an object whose class isn't known at build time, with a small cache per call site |
 | `System/Math.cs` | `Math` and `MathF`: the processor's instruction where there is one, the C math library otherwise |
@@ -46,6 +49,8 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `Runtime/Platform.cs` | Everything used from outside: `calloc`, `write`, `abort` |
 | `Intrinsics/*.cs` | `Vector64/128/256<T>` and the NEON, AVX, AVX2 and FMA operations `../lib/Kernels.cs` uses |
 | `native/arm64.S`, `native/x64.S` | Three routines per architecture that need a calling convention C# can't express: two for storing object references, one for interface calls |
+| `native/mac-arm64.S` | `arm64.S` as a Mach-O object, for macOS |
+| `native/win-x64.S` | The same for Windows x64's calling convention, plus the stack probe Windows code calls for frames larger than a page. With `../win/runtime.c` (entry point, `write`, `read`) it is all a Windows build adds |
 
 Most of the library is a contract with the compiler: it looks types, methods and fields up by name (`System.Runtime.TypeCast.CheckCastClass`, `String._stringLength`, ...) and fails with "Expected type ... not found" when one is missing. Those names can't be changed.
 
@@ -59,18 +64,21 @@ Most of the library is a contract with the compiler: it looks types, methods and
 - `Math`, `MathF`, `Interlocked`, `Volatile`
 - `Main()`, `Main(string[] args)` and top-level statements
 - `try`/`finally` and `using` (but see exceptions below)
+- Extension methods and C# 14 extension members (properties, static members, `ref` receivers)
+- C# 15 unions (`union Result(Ok, Err);`) and `switch` on them; a struct case is boxed, and never freed
+- `throw`, as a panic: it prints the exception's message to stderr and aborts
 
 A failure that would throw in .NET (a failed cast, an index out of range, an arithmetic overflow in `checked` code) prints its name to stderr and aborts. A null dereference is a plain segmentation fault. Integer division by zero aborts with a message on arm64 and is a hardware trap on x64.
 
 ## What doesn't
 
 - **Freeing memory.** Every `new`, boxing and string concatenation calls `calloc`, and nothing is ever freed. Use it for objects that live as long as the program, and an arena (`../lib/Arena.cs`) for the rest.
-- **Exceptions.** There's no `Exception` type, so `throw` and `catch` don't compile. `try`/`finally` and `using` do work: with nothing to throw, the `finally` block simply runs when the `try` block ends.
+- **Catching exceptions.** `throw` compiles, and `catch` compiles, but nothing unwinds: `RhpThrowEx` prints `Unhandled exception: ` and the message, then aborts. No `catch` block ever runs, and neither do the `finally` blocks and `using` disposals between the `throw` and `Main`. `try`/`finally` and `using` work on the normal path: the `finally` block runs when the `try` block ends. Without reflection there's no type name to print, so the standard exception types use their name as the default message.
 - **Variance.** Casting or dispatching through it (`IEnumerable<string>` as `IEnumerable<object>`, `string[]` as `object[]`) aborts with a message saying so instead of answering wrongly. Arrays don't implement `IList<T>` or `IEnumerable<T>`.
 - **Interface calls cost a little more than virtual calls.** When the compiler can't tell which class is behind an interface, the call goes through a cache of the last four classes seen at that call site: about 1.6 ns on an Apple M-series core against 0.9 ns for a virtual call, and 3 to 4 ns when the site alternates between two to four classes. A site that sees more than four pays for a full search (about 5 ns) on each of the extras. In a hot loop, generics with a `struct` constraint or static abstract members are still faster: they're resolved at build time.
-- **Most of the base class library.** No `Console` (use `../lib/Out.cs`), `object.ToString`, `Equals` or `GetHashCode`, collections, LINQ, async, `Thread`, `typeof`, or `Nullable<T>` boxing.
+- **Most of the base class library.** No `Console` (use `../lib/Out.cs`), `object.ToString`, `Equals` or `GetHashCode` (so no anonymous types; tuples work), collections, LINQ (see `../lib/Seq.cs`), async, `Thread`, `typeof`, or `Nullable<T>` boxing.
 - **SIMD operations beyond the ones declared.** To add one, declare it in `Intrinsics/` with the name and signature it has in .NET; the compiler does the rest.
-- **Windows and UEFI.** Linux (x64, arm64), WebAssembly (WASI) and 32-bit DOS on a 386 (see the main README; it uses the WebAssembly build of this library) only.
+- **UEFI, Windows on arm64, and Intel Macs.** Linux (x64, arm64), macOS on Apple Silicon, Windows x64, WebAssembly (WASI) and 32-bit DOS on a 386 (see the main README; it uses the WebAssembly build of this library) only.
 - **A threading library.** There's no `Thread` or `lock`; create threads with pthreads through P/Invoke. Allocation, interface calls and `Interlocked` are safe to use from several threads (tested with eight on arm64). Static constructors are not: make sure a type's static fields are first touched before other threads start.
 
 ## Where the code comes from, and the license

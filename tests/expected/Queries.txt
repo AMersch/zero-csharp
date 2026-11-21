@@ -1,0 +1,11 @@
+PASS operators (8 checks)
+PASS query syntax (1 checks)
+PASS tuples (3 checks)
+PASS keeping results (1 checks)
+customer 7: total 420, count 2
+customer 3: total 250, count 2
+customer 5: total 75, count 1
+PASS grouping (3 checks)
+PASS allocation (3 checks)
+
+All checks passed.

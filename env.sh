@@ -15,17 +15,32 @@ esac
 BFLAT_ARCH=${BFLAT_ARCH:-$HOST_ARCH}
 BFLAT_DIR=${BFLAT_DIR:-${BFLAT_FORK:-../bflat}/layouts/linux-glibc-$HOST_ARCH}
 
-# bflat can't target macOS, so on macOS it runs in a Linux container of the
-# Mac's own architecture (native speed on Apple Silicon).
+# bflat is a Linux program, so on macOS it runs in a Linux container of the
+# Mac's own architecture (native speed on Apple Silicon). It can't link macOS
+# programs; ./build.sh --mac has it compile only, and links on the Mac.
 IMAGE="bflat-zero-build:2-$HOST_ARCH"
 
 ensure_image() {
     if ! command -v docker >/dev/null 2>&1; then
-        echo "Error: Docker is required on macOS (bflat can't target macOS)." >&2
+        echo "Error: Docker is required on macOS (bflat runs in a Linux container)." >&2
         exit 1
     fi
     if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
         docker build --platform "$DOCKER_PLATFORM" -t "$IMAGE" docker
+    fi
+}
+
+# Windows x64 programs (./build.sh --win) run under Wine, in an x64 Linux
+# container (docker/wine); on Apple Silicon, Docker emulates it.
+WIN_IMAGE="bflat-zero-wine:1"
+
+ensure_win_image() {
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker is required to run Windows programs here (under Wine)." >&2
+        exit 1
+    fi
+    if ! docker image inspect "$WIN_IMAGE" >/dev/null 2>&1; then
+        docker build --platform linux/amd64 -t "$WIN_IMAGE" docker/wine
     fi
 }
 

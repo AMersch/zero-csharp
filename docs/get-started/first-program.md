@@ -58,7 +58,8 @@ Hello from zero-mode!
 
 `build.sh` first compiles the core library (`zerocore/`) and the library (`lib/`), then the program,
 into `bin/Minimal`. On Linux, `bin/Minimal` is an ordinary executable. On macOS it is a Linux
-executable, and `run.sh` runs it in the container.
+executable, and `run.sh` runs it in the container. On a Mac with Apple Silicon,
+`./build.sh --mac Minimal` builds `bin/mac/Minimal` instead, a macOS program you can run directly.
 
 ## What you built
 

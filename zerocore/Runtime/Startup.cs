@@ -59,6 +59,12 @@ namespace Internal.Runtime.CompilerHelpers
 #endif
         }
 
+        // What the compiler calls instead on Windows, where .NET's arguments
+        // are UTF-16. win/runtime.c's entry point converts them to UTF-8 before
+        // calling Main, so they arrive as on Linux under another type.
+        private static void InitializeCommandLineArgsW(int argc, char** argv)
+            => InitializeCommandLineArgs(argc, (byte**)argv);
+
         // For Main(string[] args) and top-level statements: the arguments after
         // the program's name, converted from UTF-8.
         private static string[] GetMainMethodArguments()

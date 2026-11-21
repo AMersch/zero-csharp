@@ -133,7 +133,7 @@ if [ "$(uname -s)" = Darwin ]; then
         echo "Building the $DOCKER_PLATFORM build container..."
         docker build --platform "$DOCKER_PLATFORM" -t "$IMAGE" docker
     else
-        echo "Missing: Docker (bflat can't target macOS, so it runs in a Linux container)"
+        echo "Missing: Docker (bflat is a Linux program, so it runs in a Linux container)"
         ok=0
     fi
 elif ! ldconfig -p 2>/dev/null | grep -q 'libtinfo.so.5'; then

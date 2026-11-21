@@ -1,6 +1,8 @@
 // Example: the smaller parts of the core library (zerocore): Math and MathF,
-// Interlocked, Volatile, and interface calls from one call site to many
-// classes. Exit code = number of failed checks.
+// Interlocked, Volatile, interface calls from one call site to many classes,
+// extension members, and C# 15 unions (zerocore/System/Exceptions.cs and
+// Unions.cs explain what those two need from the library).
+// Exit code = number of failed checks.
 // Build: ./build.sh Core
 
 using System;
@@ -13,6 +15,53 @@ public interface IShape
 {
     int Sides { get; }
 }
+
+// docs:extension-members
+public struct Vec
+{
+    public int X, Y;
+}
+
+public static class VecExtensions
+{
+    // Classic extension method: `this` on the first parameter.
+    public static int Dot(this Vec a, Vec b) => a.X * b.X + a.Y * b.Y;
+
+    // C# 14 extension block: properties and methods on a Vec value.
+    extension(Vec v)
+    {
+        public int LengthSquared => v.Dot(v);
+        public bool IsZero => v.X == 0 && v.Y == 0;
+        public Vec Scale(int k) => new Vec { X = v.X * k, Y = v.Y * k };
+    }
+
+    // Static members, called as Vec.Zero and Vec.Of(1, 2).
+    extension(Vec)
+    {
+        public static Vec Zero => default;
+        public static Vec Of(int x, int y) => new Vec { X = x, Y = y };
+    }
+
+    // By reference: changes the caller's variable.
+    extension(ref Vec v)
+    {
+        public void Translate(int dx, int dy)
+        {
+            v.X += dx;
+            v.Y += dy;
+        }
+    }
+}
+// docs:end
+
+// docs:union-declaration
+public struct Parsed { public int Value; }
+public struct BadChar { public int Position; }
+
+// A ParseResult holds either a Parsed or a BadChar, and a switch on it must
+// handle both.
+public union ParseResult(Parsed, BadChar);
+// docs:end
 
 public class Triangle : IShape { public int Sides => 3; }
 public class Square : IShape { public int Sides => 4; }
@@ -59,6 +108,9 @@ public static class Program
     [MethodImpl(MethodImplOptions.NoInlining)]
     static object Opaque(object value) => value;
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static string Opaque(string value) => value;
+
     static bool Near(double actual, double expected) => Math.Abs(actual - expected) < 1e-12;
 
     static bool Near(float actual, float expected) => MathF.Abs(actual - expected) < 1e-5f;
@@ -71,6 +123,27 @@ public static class Program
             total += shapes[i].Sides;
         return total;
     }
+
+    // docs:union-function
+    static ParseResult ParseNumber(string text)
+    {
+        int value = 0;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c < '0' || c > '9')
+                return new BadChar { Position = i };
+            value = value * 10 + (c - '0');
+        }
+        return new Parsed { Value = value };
+    }
+
+    static int ValueOrMinusOne(string text) => ParseNumber(text) switch
+    {
+        Parsed p => p.Value,
+        BadChar => -1,
+    };
+    // docs:end
 
     public static int Main()
     {
@@ -146,6 +219,24 @@ public static class Program
             many += TotalSides(shapes);
         Check("ten thousand rounds", many == 330000);
         Section("interface calls to many classes");
+
+        // docs:extension-calls
+        Vec v = Vec.Of(Opaque(3), Opaque(4));
+        Check("extension method", v.Dot(Vec.Of(1, 1)) == 7);
+        Check("extension property", v.LengthSquared == 25);
+        Check("extension method in a block", v.Scale(2).LengthSquared == 100);
+        Check("static extension members", Vec.Zero.IsZero && !v.IsZero);
+        v.Translate(-3, -4);
+        Check("by-reference extension", v.IsZero);
+        // docs:end
+        Section("extension members");
+
+        // docs:union-calls
+        Check("union holding the first case", ParseNumber(Opaque("123")) is Parsed { Value: 123 });
+        Check("union holding the second case", ParseNumber(Opaque("12x")) is BadChar { Position: 2 });
+        Check("switch on a union", ValueOrMinusOne(Opaque("42")) == 42 && ValueOrMinusOne(Opaque("4.2")) == -1);
+        // docs:end
+        Section("unions");
 
         Out.Line();
         if (s_failures == 0)

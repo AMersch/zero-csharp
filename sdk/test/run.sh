@@ -17,6 +17,10 @@ VERSION=$(sed -n 's|.*<ZeroSdkVersion>\(.*\)</ZeroSdkVersion>.*|\1|p' sdk/versio
 # The target framework: zero + major and minor, without the dot (0.1 -> zero01).
 TFM=zero$(echo "$VERSION" | cut -d. -f1,2 | tr -d .)
 HOST_OS=$(uname -s)
+case "$(uname -m)" in
+    x86_64 | amd64)  HOST_ARCH_NAME=x64;   DOCKER_ARCH=amd64 ;;
+    *)               HOST_ARCH_NAME=arm64; DOCKER_ARCH=arm64 ;;
+esac
 
 passed=0
 failed=0
@@ -104,6 +108,30 @@ test_payload_complete() {
     if ! file "$payload/native/linux-arm64/zerocore.o" | grep -q 'aarch64'; then fail "payload complete" "linux-arm64 object isn't aarch64"; return; fi
     if ! file "$payload/native/win-x64/runtime.obj" | grep -qiE 'COFF|x86-64'; then fail "payload complete" "win-x64 object isn't COFF"; return; fi
     pass "payload complete"
+}
+
+# Trims the host's layout (sdk/trim-layout.sh) and builds with the result in a
+# clean Ubuntu 24.04: nothing installed, so it must need nothing the layout or
+# a stock system lacks. Slow (it traces builds in a container): run it by name.
+test_trimmed_layout_builds() {
+    local layout=${BFLAT_DIR:-$ROOT/../bflat/layouts/linux-glibc-$HOST_ARCH_NAME} out=$WORK/trimmed size
+    LOG=$WORK/trim.log
+    if ! sdk/trim-layout.sh "$layout" "$out" > "$LOG" 2>&1; then fail "trimmed layout builds" "trim-layout.sh failed"; return; fi
+    size=$(du -sm "$out" | cut -f1)
+    if [ "$size" -ge 150 ]; then fail "trimmed layout builds" "$size MB, not under 150"; return; fi
+    LOG=$WORK/trim-build.log
+    if ! docker run --rm --platform "linux/$DOCKER_ARCH" -v "$ROOT:/w" -v "$out:/bflat:ro" -w /w ubuntu:24.04 bash -c '
+            set -e
+            P=sdk/ZeroCSharp.Sdk/payload
+            F="--stdlib:none --langversion preview --compiler-feature updated-memory-safety-rules --no-reflection -i libc -i libm.so.6"
+            B="/bflat/bflat build samples/Strings.cs -r $P/ref/BflatLib.dll -r $P/ref/System.Private.CoreLib.dll $F"
+            $B --arch arm64 --ldflags $P/native/linux-arm64/zerocore.o --ldflags "-z nostart-stop-gc" -o /tmp/s-arm64
+            $B --arch x64 --ldflags $P/native/linux-x64/zerocore.o --ldflags "-z nostart-stop-gc" -o /tmp/s-x64
+            $B --os windows --arch x64 --ldflags "/entry:zero_start $P/native/win-x64/runtime.obj $P/native/win-x64/zerocore.obj" -o /tmp/s.exe
+            /tmp/s-'"$HOST_ARCH_NAME"' > /dev/null' > "$LOG" 2>&1; then
+        fail "trimmed layout builds" "building or running in ubuntu:24.04 failed"; return
+    fi
+    pass "trimmed layout builds ($size MB)"
 }
 
 ALL_TESTS=(payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused)

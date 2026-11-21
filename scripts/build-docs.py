@@ -26,6 +26,12 @@ SECTIONS = {
     'how-to': 'Task guides',
     'reference': 'Reference',
 }
+# Where the site is published, for the absolute links that link previews need.
+SITE_URL = 'https://onurgumus.github.io/bflat_test/'
+# The link-preview image, drawn from docs/social/card.html.
+SOCIAL_IMAGE = 'img/social.png'
+SOCIAL_IMAGE_ALT = ('C# code from the quiz tutorial next to a blue DOS screen running it: '
+                    'the quiz asks 38 + 8 and rejects the answer &quot;seven&quot;.')
 # Files and folders copied into the site as they are.
 ASSETS = ['index.html', 'content', 'fonts', 'img']
 
@@ -60,6 +66,22 @@ def prepare():
             target.write_text(matter + body[front.end():], encoding='utf-8')
             pages.append(f'{section}/{source.stem}.html')
     return pages
+
+
+def social_tags(title, address):
+    """The meta tags link previews read, for a guide page."""
+    tags = [
+        ('property', 'og:type', 'article'),
+        ('property', 'og:site_name', CONFIG['siteName']),
+        ('property', 'og:title', title),
+        ('property', 'og:url', address),
+        ('property', 'og:image', SITE_URL + SOCIAL_IMAGE),
+        ('property', 'og:image:width', '1200'),
+        ('property', 'og:image:height', '630'),
+        ('property', 'og:image:alt', SOCIAL_IMAGE_ALT),
+        ('name', 'twitter:card', 'summary_large_image'),
+    ]
+    return ''.join(f'<meta {kind}="{key}" content="{value}">' for kind, key, value in tags)
 
 
 def finish(pages):
@@ -101,6 +123,12 @@ def finish(pages):
                           rf'\g<1>{label}\g<2>', text)
         # Guides use the base prose size on every screen width; FsLiveDocs enlarges it from md up.
         text = re.sub(r'(<main\b[^>]*class="[^"]*?)\s+md:prose-lg', r'\1', text, count=1)
+        # Link previews (Open Graph and Twitter): the page's title, its address and the site's card.
+        if 'property="og:image"' not in text:
+            title = re.search(r'<title>(.*?)</title>', text, re.S)
+            title = ' '.join(title[1].split()).replace('"', '&quot;') if title else CONFIG['siteName']
+            address = SITE_URL + page.relative_to(OUTPUT).as_posix()
+            text = text.replace('</head>', social_tags(title, address) + '</head>', 1)
         # Search indexes page content only, not navigation.
         if 'data-pagefind-body' not in text:
             text, found = re.subn(r'<main(?=[\s>])', '<main data-pagefind-body', text, count=1)

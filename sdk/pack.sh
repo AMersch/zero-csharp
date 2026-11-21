@@ -8,6 +8,8 @@
 # Env:    ZERO_HOSTS     the hosts to pack bflat for (default "linux-x64 linux-arm64")
 #         ZERO_LAYOUTS   where the full layouts are (default ../bflat/layouts):
 #                        linux-glibc-x64, linux-glibc-arm64
+#         ZERO_PAYLOAD_PREBUILT=1   use sdk/ZeroCSharp.Sdk/payload as it is (CI builds it
+#                        in another job, like sdk/trimmed/)
 # Trimmed layouts are kept in sdk/trimmed/<rid> and redone only when the
 # layout or the trimming script is newer.
 set -euo pipefail
@@ -18,7 +20,7 @@ payload=sdk/ZeroCSharp.Sdk/payload
 
 mkdir -p sdk/feed
 rm -f sdk/feed/ZeroCSharp.*.nupkg
-./build.sh --sdk-payload "$payload"
+[ -n "${ZERO_PAYLOAD_PREBUILT:-}" ] || ./build.sh --sdk-payload "$payload"
 bflat_commit=$(sed -n 's/^bflat //p' "$payload/VERSIONS.txt")
 
 for rid in $hosts; do

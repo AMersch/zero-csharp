@@ -1,0 +1,57 @@
+/* Additions to FsLiveDocs's theme, adapted from FCQRS's site.css. */
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('../fonts/inter-latin-wght-normal.woff2') format('woff2');
+}
+
+/* Guide text size. Prose sizes headings, spacing, and inline code relative to it. */
+main.prose { font-size: 0.9375rem; }
+
+/* Code reads smaller than prose. The theme's rules otherwise size code like body text. */
+main.prose pre,
+main.prose pre code { font-size: 0.8125rem !important; line-height: 1.65 !important; }
+
+/* highlight.js colours C#, shell and C (content/csharp.js). Those blocks lack FsLiveDocs's
+   .code-frame palette, so define one for both themes. */
+main pre {
+  --livedocs-code-foreground: #24292f;
+  --livedocs-code-comment: #6e7781;
+  --livedocs-code-function: #8250df;
+  --livedocs-code-keyword: #cf222e;
+  --livedocs-code-number: #0550ae;
+  --livedocs-code-string: #0a3069;
+  --livedocs-code-type: #953800;
+}
+html[data-theme="dark"] main pre {
+  --livedocs-code-foreground: #c9d1d9;
+  --livedocs-code-comment: #8b949e;
+  --livedocs-code-function: #d2a8ff;
+  --livedocs-code-keyword: #ff7b72;
+  --livedocs-code-number: #79c0ff;
+  --livedocs-code-string: #a5d6ff;
+  --livedocs-code-type: #ffa657;
+}
+:is(.language-csharp, .language-c, .language-bash) .hljs-keyword,
+.language-c .hljs-meta { color: var(--livedocs-code-keyword); }
+:is(.language-csharp, .language-c, .language-bash) .hljs-string { color: var(--livedocs-code-string); }
+:is(.language-csharp, .language-c, .language-bash) .hljs-number,
+.language-csharp .hljs-literal { color: var(--livedocs-code-number); }
+:is(.language-csharp, .language-c, .language-bash) .hljs-comment { color: var(--livedocs-code-comment); font-style: italic; }
+.language-bash .hljs-built_in,
+.language-bash .hljs-variable { color: var(--livedocs-code-function); }
+:is(.language-csharp, .language-c) .hljs-type,
+.language-csharp .hljs-title,
+.language-csharp .hljs-built_in { color: var(--livedocs-code-type); }
+.language-csharp .hljs-title.function_,
+.language-csharp .hljs-meta,
+.language-c .hljs-title.function_ { color: var(--livedocs-code-function); }
+.language-csharp .hljs-subst { color: var(--livedocs-code-foreground); }
+
+/* Reference pages: a member's signature sits close to the text that explains it. */
+main.prose h3 + pre { margin-top: .5rem; }
+
+/* Keep the site name on one line next to the logo. */
+a.group > span.font-black { white-space: nowrap; }

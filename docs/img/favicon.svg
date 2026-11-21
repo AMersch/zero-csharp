@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="bflat zero mode">
+  <!-- A chip with a zero on it: C# compiled down to the metal, no runtime. -->
+  <g stroke="#e0a526" stroke-width="3" stroke-linecap="round">
+    <path d="M20 6v8M32 6v8M44 6v8M20 50v8M32 50v8M44 50v8M6 20h8M6 32h8M6 44h8M50 20h8M50 32h8M50 44h8"/>
+  </g>
+  <rect x="13" y="13" width="38" height="38" rx="6" fill="#16213a"/>
+  <ellipse cx="32" cy="32" rx="9" ry="12" fill="none" stroke="#e0a526" stroke-width="4"/>
+  <path d="M25 41L39 23" stroke="#e0a526" stroke-width="3" stroke-linecap="round"/>
+</svg>

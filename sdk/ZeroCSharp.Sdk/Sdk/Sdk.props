@@ -1,0 +1,46 @@
+<!--
+  ZeroCSharp.Sdk: zero-mode C# projects. <Project Sdk="ZeroCSharp.Sdk/0.1.0">.
+
+  A project gets a target framework of its own, zero<major><minor> (zero01 for
+  0.1), and compiles against zerocore (the core library, System.Private.CoreLib)
+  and lib/ (BflatLib) instead of .NET's libraries. NuGet then refuses ordinary
+  .NET packages, and packages of zero libraries built with another SDK version
+  (another framework name), with NU1202.
+-->
+<Project>
+  <Import Project="$(MSBuildThisFileDirectory)version.props" />
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <ZeroSdkRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..'))</ZeroSdkRoot>
+    <ZeroSdkTfm>zero$(ZeroSdkVersion.Split('.')[0])$(ZeroSdkVersion.Split('.')[1])</ZeroSdkTfm>
+
+    <!-- NuGet reads a framework name it doesn't know as name + version 0.0,
+         so the version is part of the name. -->
+    <TargetFramework>$(ZeroSdkTfm)</TargetFramework>
+    <TargetFrameworkIdentifier>$(ZeroSdkTfm)</TargetFrameworkIdentifier>
+    <TargetFrameworkVersion>v0.0</TargetFrameworkVersion>
+    <TargetFrameworkMoniker>$(ZeroSdkTfm),Version=v0.0</TargetFrameworkMoniker>
+
+    <!-- No .NET: zerocore and lib/ are the whole framework. -->
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <NoStdLib>true</NoStdLib>
+    <NoCompilerStandardLib>true</NoCompilerStandardLib>
+    <!-- zerocore has no assembly-info or target-framework attributes. -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+
+    <!-- The language as build.sh compiles it. -->
+    <LangVersion>preview</LangVersion>
+    <Features>$(Features);updated-memory-safety-rules</Features>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- A library's IL is what programs compile from: optimize it, as build.sh's -O does. -->
+    <Optimize>true</Optimize>
+
+    <!-- dotnet pack: the dll goes to lib/<framework>/ by a target in Sdk.targets,
+         because NuGet's pack rejects build output for a framework it doesn't know. -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <NoWarn>$(NoWarn);NU5103;NU5128</NoWarn>
+  </PropertyGroup>
+</Project>

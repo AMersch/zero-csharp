@@ -1,0 +1,24 @@
+<Project>
+  <PropertyGroup>
+    <ZeroRefDir>$(ZeroSdkRoot)payload/ref/</ZeroRefDir>
+    <!-- Setting these skips MSBuild's search for an installed targeting pack,
+         which doesn't exist for this framework. -->
+    <_TargetFrameworkDirectories>$(ZeroRefDir)</_TargetFrameworkDirectories>
+    <_FullFrameworkReferenceAssemblyPaths>$(ZeroRefDir)</_FullFrameworkReferenceAssemblyPaths>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="$(ZeroRefDir)System.Private.CoreLib.dll" Private="false" ZeroFramework="true" />
+    <Reference Include="$(ZeroRefDir)BflatLib.dll" Private="false" ZeroFramework="true" />
+    <!-- The compiler the bflat fork uses: unions and the updated memory safety rules. -->
+    <PackageReference Include="Microsoft.Net.Compilers.Toolset" Version="5.12.0" PrivateAssets="all" IsImplicitlyDefined="true" />
+  </ItemGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+  <Target Name="ZeroPackDll" BeforeTargets="_GetPackageFiles" Condition="'$(OutputType)' == 'Library'">
+    <ItemGroup>
+      <None Include="$(TargetPath)" Pack="true" PackagePath="lib/$(ZeroSdkTfm)/" />
+    </ItemGroup>
+  </Target>
+</Project>

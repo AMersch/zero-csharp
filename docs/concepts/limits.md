@@ -5,7 +5,7 @@ index: 6
 
 # Limits
 
-Zero mode has no garbage collector, no exceptions you can catch, no async/await, no LINQ, and almost no base class
+Zero mode has no garbage collector, no exceptions you can catch, no async/await, no .NET LINQ, and almost no base class
 library. A good deal of ordinary C# still works, because zerocore provides the parts the compiler
 needs. This page lists both sides and the known issues, so you can tell early whether a design fits.
 
@@ -190,7 +190,8 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
 - **Variance.** Casting or dispatching through it (`IEnumerable<string>` as `IEnumerable<object>`,
   `string[]` as `object[]`) aborts with a message saying so, instead of answering wrongly.
 - **Most of the base class library.** No `Console` (use `Out` and `In`), no `object.ToString`, `Equals`
-  or `GetHashCode`, no .NET collections (use [`lib/`'s](../how-to/choose-a-collection.html)), no LINQ,
+  or `GetHashCode`, no .NET collections (use [`lib/`'s](../how-to/choose-a-collection.html)), no LINQ
+  (use [`lib/Seq.cs`](../how-to/query-data.html)), no anonymous types (use tuples),
   async, `Thread`, `typeof`, `Half`, or boxing of `Nullable<T>`.
 - **Reflection.** Builds need `--no-reflection`.
 - **Run-time CPU detection.** Instruction sets beyond the baseline are available only when the build

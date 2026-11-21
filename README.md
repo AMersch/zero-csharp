@@ -250,6 +250,7 @@ unsafe { arena.Reset(); }                // SAFETY: p is not used after this
 | `samples/Quiz.cs` | Asks questions in a loop and reads the answers with `In.ReadLine`: prompts formatted straight to stdout, answers read into a stack buffer, mistakes kept as strings in a `RefList` in a long-lived arena. `test.sh` feeds it `tests/input/Quiz.txt` (bad UTF-8, an over-long line, CRLF, end of input) | ~67 KB |
 | `samples/QuizStep1.cs` … `QuizStep3.cs` | The [tutorial](https://onurgumus.github.io/bflat_test/tutorial/index.html)'s first three steps towards Quiz: print the questions, read the answers, handle bad input. The site quotes them | ~52-56 KB |
 | `samples/Guards.cs` | The mistakes `lib/` ends the program for, one per run: marks restored out of order or in the wrong arena, collections used after their memory was freed (`DebugChecks`), a list index out of range, running out of memory in an arena created with `stopOnOutOfMemory`. `test.sh` checks the message of each | ~77 KB |
+| `samples/Queries.cs` | LINQ-style queries with `lib/Seq.cs`: `Where`, `Select`, `Count`, `Sum`, `Any`, `All`, `Take`, `Skip`, `Aggregate`, `TryFirst`, `ToList(arena)`, query syntax, state arguments instead of captures, and tuples instead of anonymous types. Checks with `GC.GetTotalAllocatedBytes()` that a thousand runs allocate nothing, and that a capturing lambda does |
 | `samples/Vga.cs` | DOS only (see [DOS](#dos)): a small game in 320x200 with 256 colors, steered with the arrow keys; `Vga test` checks the screen, keyboard and clock by itself | 36 KB (DOS) |
 
 Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is stripped); x64 is within a few KB. Run `strip` to shrink the others.
@@ -273,7 +274,7 @@ Sizes are for linux-arm64 with 4 KB pages and include debug info (only Tiny is s
 
 ## What zero mode supports
 
-Zero mode has no garbage collector, no exceptions you can catch (`throw` and other failures print a message and abort), no async/await, no LINQ, and almost no base class library. On the other hand, these all work with zerocore:
+Zero mode has no garbage collector, no exceptions you can catch (`throw` and other failures print a message and abort), no async/await, no .NET LINQ (`lib/Seq.cs` has allocation-free `Where`, `Select`, `Sum` and friends), no anonymous types (tuples work), and almost no base class library. On the other hand, these all work with zerocore:
 
 - `Span<T>`, and arrays: `new T[n]`, including arrays of strings, objects and interfaces
 - Static fields of every type, including strings, objects and arrays; static constructors

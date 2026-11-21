@@ -108,9 +108,13 @@ namespace System.Runtime
         [RuntimeExport("RhpFallbackFailFast")]
         internal static void RhpFallbackFailFast() => Environment.FailFast("Unhandled exception");
 
+        // Every byte allocated so far, for GC.GetTotalAllocatedBytes.
+        internal static long s_allocatedBytes;
+
         // C# requires new objects to be zeroed, which calloc guarantees.
         private static object Allocate(MethodTable* type, nuint size)
         {
+            System.Threading.Interlocked.Add(ref s_allocatedBytes, (long)size);
             nint memory = (nint)Platform.calloc(1, size);
             if (memory == 0)
                 Environment.FailFast("Out of memory");

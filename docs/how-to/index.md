@@ -22,6 +22,9 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
 
 - [Choose a collection](choose-a-collection.html): `List`, `Dict`, `RefList`, `StrDict` or `RefDict`,
   keys for objects, and copying a collection into another arena.
+- [Query data without allocating](query-data.html): `Where`, `Select`, `Sum` and query syntax over
+  spans with `lib/Seq.cs`, tuples instead of anonymous types, and checking that a loop allocates
+  nothing.
 - [Catch arena mistakes](catch-arena-mistakes.html): turn on `Arena.DebugChecks`, name your arenas, and
   see what the library stops the program for.
 

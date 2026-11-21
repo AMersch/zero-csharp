@@ -33,6 +33,7 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 |---|---|
 | `System/Primitives.cs`, `Object.cs`, `Array.cs`, `Attributes.cs`, `Collections.cs` | The types and attributes the C# compiler requires: primitives, `object`, `ValueType`, `Enum`, `Nullable<T>`, `Array`, delegates (`Action`, `Func`), `ValueTuple` (2 to 7 elements), `IDisposable`, `IEnumerable` |
 | `Runtime/ObjectAllocator.cs` | Where each thread's objects come from: `calloc` by default, or a function a library sets for that thread (`../lib/Arena.cs`'s `AllocateObjectsHere` sends them to an arena); and a scan of static fields for debug checks |
+| `System/Equality.cs`, `System/Type.cs`, `System/Number.cs`, `System/Text/StringBuilder.cs` | What records, anonymous types and `"n=" + 5` need: `object`'s `Equals`, `GetHashCode` and `ToString` (overridden by every primitive, `string`, structs and enums), `EqualityComparer<T>`, `IEquatable<T>`, `string.Format` (`{0}` holes), `StringBuilder`, and `Type` for `typeof` and `GetType()`, one per type, compared by identity |
 | `System/GC.cs` | `GC.GetTotalAllocatedBytes()`: every byte allocated so far, so a test can check that a loop allocates nothing |
 | `System/String.cs` | `string`: `Length`, indexer, `==`, `!=`, `Equals`, `IsNullOrEmpty`, `Concat` (so `a + b` and `switch` on strings work) |
 | `System/Span.cs` | `Span<T>` and `ReadOnlySpan<T>`: indexing, `Slice`, `CopyTo`, `Fill`, `Clear`, `foreach`, `fixed` |
@@ -58,6 +59,7 @@ Most of the library is a contract with the compiler: it looks types, methods and
 ## What works
 
 - Classes, structs, generics, virtual methods, interfaces (including default methods and static abstract members), delegates and lambdas
+- Records (`record`, `record struct`) and anonymous types; `ToString()`, `Equals` and `GetHashCode` on every type; `"n=" + 5`; `typeof` and `GetType()` for comparing types
 - `is`, `as` and casts to classes and interfaces; pattern matching on types; boxing
 - Arrays of any type, `Span<T>`, `stackalloc`, function pointers, P/Invoke
 - Strings: comparison, concatenation, `switch`; literals; UTF-8 literals (`"..."u8`)
@@ -77,7 +79,7 @@ A failure that would throw in .NET (a failed cast, an index out of range, an ari
 - **Catching exceptions.** `throw` compiles, and `catch` compiles, but nothing unwinds: `RhpThrowEx` prints `Unhandled exception: ` and the message, then aborts. No `catch` block ever runs, and neither do the `finally` blocks and `using` disposals between the `throw` and `Main`. `try`/`finally` and `using` work on the normal path: the `finally` block runs when the `try` block ends. Without reflection there's no type name to print, so the standard exception types use their name as the default message.
 - **Variance.** Casting or dispatching through it (`IEnumerable<string>` as `IEnumerable<object>`, `string[]` as `object[]`) aborts with a message saying so instead of answering wrongly. Arrays don't implement `IList<T>` or `IEnumerable<T>`.
 - **Interface calls cost a little more than virtual calls.** When the compiler can't tell which class is behind an interface, the call goes through a cache of the last four classes seen at that call site: about 1.6 ns on an Apple M-series core against 0.9 ns for a virtual call, and 3 to 4 ns when the site alternates between two to four classes. A site that sees more than four pays for a full search (about 5 ns) on each of the extras. In a hot loop, generics with a `struct` constraint or static abstract members are still faster: they're resolved at build time.
-- **Most of the base class library.** No `Console` (use `../lib/Out.cs`), `object.ToString`, `Equals` or `GetHashCode` (so no anonymous types; tuples work), collections, LINQ (see `../lib/Seq.cs`), async, `Thread`, `typeof`, or `Nullable<T>` boxing.
+- **Most of the base class library.** No `Console` (use `../lib/Out.cs`), reflection (a `Type` only compares; a class without its own `ToString` prints `object`), collections, LINQ (see `../lib/Seq.cs`), async, `Thread`, or `Nullable<T>` boxing.
 - **SIMD operations beyond the ones declared.** To add one, declare it in `Intrinsics/` with the name and signature it has in .NET; the compiler does the rest.
 - **UEFI, Windows on arm64, and Intel Macs.** Linux (x64, arm64), macOS on Apple Silicon, Windows x64, WebAssembly (WASI) and 32-bit DOS on a 386 (see the main README; it uses the WebAssembly build of this library) only.
 - **A threading library.** There's no `Thread` or `lock`; `../lib/Threads.cs` has `Parallel.For`, on pthreads. Allocation, interface calls and `Interlocked` are safe to use from several threads (tested with eight on arm64). Static constructors are not: make sure a type's static fields are first touched before other threads start.

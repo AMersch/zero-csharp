@@ -130,6 +130,19 @@ namespace System.Runtime
         [RuntimeExport("RhpFallbackFailFast")]
         internal static void RhpFallbackFailFast() => Environment.FailFast("Unhandled exception");
 
+        // An object straight from calloc, ignoring any ObjectAllocator: for
+        // objects zerocore keeps for the rest of the run (see Type).
+        internal static T AllocateCalloc<T>() where T : class
+        {
+            MethodTable* type = MethodTable.Of<T>();
+            System.Threading.Interlocked.Add(ref s_allocatedBytes, (long)type->BaseSize);
+            nint memory = (nint)Platform.calloc(1, type->BaseSize);
+            if (memory == 0)
+                Environment.FailFast("Out of memory");
+            *(MethodTable**)memory = type;
+            return Unsafe.As<nint, T>(ref memory);
+        }
+
         // Every byte allocated with calloc so far, for GC.GetTotalAllocatedBytes.
         internal static long s_allocatedBytes;
 

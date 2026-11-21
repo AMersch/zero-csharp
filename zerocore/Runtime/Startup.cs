@@ -230,6 +230,9 @@ namespace Internal.Runtime.CompilerHelpers
     // the address the compiler passes.
     internal static unsafe class LdTokenHelpers
     {
+        // typeof(T): the compiler skips the handle and asks for the Type itself.
+        private static Type GetRuntimeType(MethodTable* type) => Type.Of(type);
+
         private static RuntimeTypeHandle GetRuntimeTypeHandle(MethodTable* type)
         {
             RuntimeTypeHandle handle;

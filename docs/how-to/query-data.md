@@ -90,9 +90,9 @@ the syntax has no way to say where. For grouping, call `GroupBy` with an arena (
 
 ## Return or select several values
 
-Anonymous types (`new { Name, Age }`) don't compile in zero mode: the compiler gives each one
-`Equals`, `GetHashCode` and `ToString`, which need parts of .NET that zerocore doesn't have. Tuples do
-the same job. A method can return one:
+Anonymous types (`new { Name, Age }`) work, but each one is a class, so a query that selects one
+allocates an object per item, never freed. Tuples do the same job as structs, without allocating. A
+method can return one:
 
 <!-- sample: samples/Queries.cs tuples -->
 ```csharp

@@ -158,6 +158,7 @@ keys came from, and looking up a span that was just read allocates nothing.
 
 ## What isn't there
 
-There is nothing culture-aware, no `string.Format`, and no `char` or number operands in `+`: `"n=" + 5`
-doesn't compile, because there is no `object.ToString`. Write `Str.Format(arena, $"n={5}")` instead.
+There is nothing culture-aware. `"n=" + 5`, `ToString()` and `string.Format` (with `{0}`-style holes
+only) work, but each allocates a new string with calloc that is never freed: fine once, not in a loop.
+There, write `Str.Format(arena, $"n={5}")`.
 With only string holes, a plain `$"..."` works, through `+`.

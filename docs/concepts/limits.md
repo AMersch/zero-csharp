@@ -222,8 +222,9 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
 - **Reflection.** Builds need `--no-reflection`.
 - **Run-time CPU detection.** Instruction sets beyond the baseline are available only when the build
   names them with `-m`.
-- **Windows.** zerocore runs on Linux (x64, arm64), WebAssembly and DOS. `build.ps1` exists but is
-  untested, and builds against bflat's zerolib instead.
+- **Some platforms.** zerocore runs on Linux (x64, arm64), macOS on Apple Silicon, Windows x64,
+  WebAssembly and DOS. Not on Windows on arm64 or Intel Macs. And Windows programs are built from
+  Linux or macOS: building *on* Windows (`build.ps1`) is untested and uses bflat's zerolib.
 
 `zerocore/README.md` has the full list.
 

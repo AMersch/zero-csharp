@@ -49,9 +49,9 @@ elsewhere, set `BFLAT_DIR`.
 - **Linux:** `libtinfo.so.5`, which bflat's bundled linker needs, and an assembler (`as`, from
   binutils) for zerocore's assembly routines. On Ubuntu 22.04:
   `sudo apt install libtinfo5 binutils`. Ubuntu 24.04 no longer ships libtinfo5.
-- **Windows** as the machine you build on: not supported. `setup.ps1` and `build.ps1` exist but are
-  untested. Windows as a target works from Linux or macOS: `./build.sh --win` (see
-  [Targets](../concepts/targets.html)), which also needs clang (Xcode's on macOS).
+- **Windows:** programs for Windows build from Linux or macOS with `./build.sh --win` (see
+  [Targets](../concepts/targets.html)), which also needs clang (Xcode's on macOS). Building on a
+  Windows machine isn't supported yet: `setup.ps1` and `build.ps1` exist but are untested.
 
 Then let `setup.sh` check them. On macOS it also builds the container image:
 

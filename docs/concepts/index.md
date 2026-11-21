@@ -33,7 +33,7 @@ Most of what follows comes from three facts about zero mode:
 - A **mark** remembers an arena's position, and a **scope** frees back to it when a `using` block ends.
 - A **span** is a view of characters or elements that someone else owns. Reading through one allocates
   nothing.
-- A **target** is where the program runs: native Linux, WebAssembly or DOS.
+- A **target** is where the program runs: native Linux, macOS or Windows, WebAssembly, or DOS.
 
 ## The pages
 

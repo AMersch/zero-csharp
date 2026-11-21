@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Zero-mode C#: C# compiled by a bflat fork into small native programs with no .NET runtime, for Linux, WebAssembly and DOS on a 386." />
+  <meta name="description" content="Zero-mode C#: C# compiled by a bflat fork into small native programs with no .NET runtime, for Linux, macOS, Windows, WebAssembly and DOS on a 386." />
   <title>Zero C# | C# without a runtime, from Linux to a 386</title>
   <link rel="icon" href="img/favicon.svg" type="image/svg+xml" />
   <!-- Link previews. The image is drawn from docs/social/card.html; build-docs.py adds the same to every guide page. -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Zero C#" />
   <meta property="og:title" content="Zero C#: C# with nothing underneath" />
-  <meta property="og:description" content="A bflat fork that compiles C# to small native programs with no .NET runtime and no garbage collector, for Linux, WebAssembly and DOS on a 386." />
+  <meta property="og:description" content="A bflat fork that compiles C# to small native programs with no .NET runtime and no garbage collector, for Linux, macOS, Windows, WebAssembly and DOS on a 386." />
   <meta property="og:url" content="https://onurgumus.github.io/bflat_test/" />
   <meta property="og:image" content="https://onurgumus.github.io/bflat_test/img/social.png" />
   <meta property="og:image:width" content="1200" />
@@ -114,12 +114,13 @@
     .code-caption { margin: 12px 4px 0; font-size: .875rem; }
     .code-caption a { color: var(--amber-ink); font-weight: 600; }
 
-    /* Three machines */
+    /* Five machines: three desktops on top, WebAssembly and DOS below. */
     .machines { padding: 56px 0 64px; border-top: 1px solid var(--line); }
     h2 { margin: 0 0 10px; color: var(--ink); font-size: 1.75rem; letter-spacing: -0.02em; line-height: 1.2; }
     .section-intro { margin: 0 0 32px; max-width: 40em; }
-    .screens { display: grid; grid-template-columns: 1fr 1fr 1.15fr; gap: 20px; align-items: stretch; }
-    .screen { display: flex; flex-direction: column; }
+    .screens { display: grid; grid-template-columns: repeat(6, 1fr); gap: 20px; align-items: stretch; }
+    .screen { display: flex; flex-direction: column; grid-column: span 2; }
+    .screen.wasm, .screen.dos { grid-column: span 3; }
     .screen-body {
       flex: 1; margin: 0; padding: 16px 18px; border-radius: 10px; font: .8125rem/1.65 var(--mono);
       white-space: pre; overflow-x: auto; min-height: 150px;
@@ -128,6 +129,9 @@
     .screen p { margin: 0 2px; font-size: .9375rem; }
     .linux .screen-body { background: #1d2333; color: #d8dde9; }
     .wasm .screen-body { background: #241b3a; color: #e4ddf7; }
+    .mac .screen-body { background: #1e1e1e; color: #e6e6e6; }
+    .win .screen-body { background: #0c0c0c; color: #cccccc; }
+    .win .prompt { color: #61d6d6; }
     .prompt { color: #7ee2a8; }
     .wasm .prompt { color: #c4a5ff; }
     /* The memorable one: DOS in 80x25 text mode, CGA colours. */
@@ -167,6 +171,7 @@
     @media (max-width: 900px) {
       .hero { grid-template-columns: 1fr; gap: 36px; padding-top: 48px; }
       .screens { grid-template-columns: 1fr; }
+      .screen, .screen.wasm, .screen.dos { grid-column: auto; }
       .idea-list { grid-template-columns: 1fr; }
       .path { grid-template-columns: 1fr 1fr; }
       .nav-links { gap: 16px; }
@@ -197,10 +202,11 @@
       <div>
         <h1>C# with nothing underneath</h1>
         <p class="lede">A fork of bflat compiles C# straight to a small native program: no .NET runtime, no garbage collector, nothing to install where it runs.</p>
-        <p>You keep C#'s syntax, type checking and generics. Memory comes from arenas you free all at once, and a small library gives you strings, collections, input and output on those terms. The same source runs on Linux, on WebAssembly, and on DOS on a 386.</p>
+        <p>You keep C#'s syntax, type checking and generics. Memory comes from arenas you free all at once, and a small library gives you strings, collections, input and output on those terms. The same source runs on Linux, macOS and Windows, on WebAssembly, and on DOS on a 386.</p>
         <div class="actions">
           <a class="button primary" href="get-started/index.html">Get started</a>
           <a class="button" href="tutorial/index.html">Build the quiz tutorial</a>
+          <a class="button" href="get-started/browser.html">Run it in your browser</a>
         </div>
       </div>
       <div>
@@ -219,7 +225,7 @@ mistakes.Add(<span class="t">Str</span>.Format(keep,
 
     <section class="machines">
       <div class="wrap">
-        <h2>One program, three machines</h2>
+        <h2>One program, five machines</h2>
         <p class="section-intro">The hello-world sample, unchanged, built for each target. Each build is checked by the same test suite, which requires the same output everywhere.</p>
         <div class="screens">
           <div class="screen linux">
@@ -230,6 +236,24 @@ Hello from zero-mode!
 39848 bin/Minimal</pre>
             <h3>Linux, x64 or arm64</h3>
             <p>A native program that needs only the C library. On macOS it builds and runs in a container.</p>
+          </div>
+          <div class="screen mac">
+<pre class="screen-body"><span class="prompt">$</span> ./build.sh --mac Minimal
+<span class="prompt">$</span> bin/mac/Minimal
+Hello from zero-mode!
+<span class="prompt">$</span> wc -c bin/mac/Minimal
+64728 bin/mac/Minimal</pre>
+            <h3>macOS on Apple Silicon</h3>
+            <p>A native Mac program: bflat compiles it, the Mac's own clang links it. No container to run it.</p>
+          </div>
+          <div class="screen win">
+<pre class="screen-body"><span class="prompt">$</span> ./build.sh --win Minimal
+<span class="prompt">$</span> ./run.sh --win Minimal
+Hello from zero-mode!
+<span class="prompt">$</span> wc -c bin/win/Minimal.exe
+10752 bin/win/Minimal.exe</pre>
+            <h3>Windows x64</h3>
+            <p>A console program on Windows' own C library, built from Linux or macOS. Tested under Wine.</p>
           </div>
           <div class="screen wasm">
 <pre class="screen-body"><span class="prompt">$</span> ./build.sh --wasm Minimal

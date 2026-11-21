@@ -80,7 +80,7 @@ This produces `layouts/linux-glibc-{x64,arm64}` and `layouts/windows-{x64,arm64}
 
 Every C# program needs a core library: the assembly that defines `object`, `int` and `string`, and holds the runtime code the compiler calls to allocate objects, check casts and set up static fields. .NET's is `System.Private.CoreLib` plus a native runtime, megabytes of it. bflat's zero mode replaces both with zerolib, about 4,000 lines, which is AGPL-3.0 and gets compiled into every binary.
 
-[`zerocore/`](zerocore/README.md) is this repo's replacement for zerolib: about 2,400 lines of C# and three short assembly routines per architecture, under the MIT license. `build.sh` compiles it from source and passes it to bflat with `--stdlib:none`. Compared with zerolib it adds casts to interfaces, interface calls the compiler can't resolve at build time, boxing, and `Main(string[] args)`; it leaves out `Console` and `Half`, and it runs on Linux, WebAssembly and DOS (through the WebAssembly build's bitcode). Its README lists what works, what doesn't, and where the code comes from, including a caveat about the license that's worth reading before building a product on it.
+[`zerocore/`](zerocore/README.md) is this repo's replacement for zerolib: about 2,400 lines of C# and three short assembly routines per architecture, under the MIT license. `build.sh` compiles it from source and passes it to bflat with `--stdlib:none`. Compared with zerolib it adds casts to interfaces, interface calls the compiler can't resolve at build time, boxing, and `Main(string[] args)`; it leaves out `Console` and `Half`, and it runs on Linux, macOS on Apple Silicon, Windows x64, WebAssembly and DOS (through the WebAssembly build's bitcode). Its README lists what works, what doesn't, and where the code comes from, including a caveat about the license that's worth reading before building a product on it.
 
 The same program comes out about 10 KB smaller than with zerolib, except Tiny, which is 0.6 KB larger.
 
@@ -131,7 +131,7 @@ Differences from the native build:
 - **Clocks.** Simd and Kernels call `clock_gettime(1, ...)`, Linux's numeric `CLOCK_MONOTONIC`. In WASI's C library a clock ID is a pointer, so this reads the clock ID from address 1, which is zero: the realtime clock. That still measures durations.
 - **Exit codes.** Modules are linked for WASI 0.1, which passes exit codes through. WASI 0.2 only reports success or failure.
 - **One exact compiler version.** `wasm/runtime.c` and zerocore implement NativeAOT-LLVM's internal runtime functions (`RhpNewArray`, `RhpResolveInterfaceDispatch` and others). Their names and signatures aren't documented; they were read from the compiler's output. A newer NativeAOT-LLVM can change them. A changed signature fails the link, since `build.sh` turns `wasm-ld`'s signature warnings into errors, but a changed meaning only shows up when a program runs. So treat the versions in `env.sh` as a set, and after changing any of them, rerun the WASM samples and compare their output with the native build.
-- **Not supported:** callbacks from native code into C# (`[UnmanagedCallersOnly]` reverse P/Invoke inside a running program), and `build.ps1` (Windows).
+- **Not supported:** callbacks from native code into C# (`[UnmanagedCallersOnly]` reverse P/Invoke inside a running program), and WebAssembly builds from `build.ps1` (building on Windows).
 
 ## macOS
 

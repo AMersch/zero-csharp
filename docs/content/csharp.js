@@ -122,6 +122,12 @@
       range.surroundContents(span);
     }
   }
+  // For code a page adds later, such as the sample runner's source view.
+  window.highlightCsharp = code => {
+    if (!window.hljs) return;
+    window.hljs.highlightElement(code);
+    colourCsharpTypes(code);
+  };
   window.addEventListener('DOMContentLoaded', () => {
     if (!window.hljs) return;
     document.querySelectorAll('code[class*="language-"]').forEach(code => {

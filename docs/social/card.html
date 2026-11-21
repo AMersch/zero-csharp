@@ -7,7 +7,7 @@
       --virtual-time-budget=2000 --screenshot=docs/img/social.png \
       "file://$PWD/docs/social/card.html"
   (On Linux, use google-chrome or chromium in place of the macOS path.)
-  The code and the session are the quiz from samples/Quiz.cs, its own lines and messages.
+  The list on the right is the landing page's "You keep / You do without", shortened.
 -->
 <html lang="en">
 <head>
@@ -19,89 +19,57 @@
     font-weight: 100 900;
     src: url('../fonts/inter-latin-wght-normal.woff2') format('woff2');
   }
-  :root {
-    --navy: #16213a;
-    --navy-deep: #0f1729;
-    --amber: #e0a526;
-    --code-ink: #e6e9f2;
-    --code-dim: #8e98b3;
-    --mono: "SF Mono", Menlo, Consolas, monospace;
-  }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
   body {
     width: 1200px; height: 630px; overflow: hidden; position: relative;
-    background: var(--navy); color: #fff; font-family: Inter, sans-serif;
+    background: #16213a; color: #fff; font-family: Inter, sans-serif;
   }
   /* A faint chip grid: the mark's pins, repeated. */
   body::before {
     content: ""; position: absolute; inset: 0;
     background-image: radial-gradient(rgb(224 165 38 / 13%) 1.5px, transparent 1.6px);
     background-size: 28px 28px;
-    mask-image: linear-gradient(100deg, transparent 30%, #000 75%);
+    mask-image: linear-gradient(100deg, transparent 35%, #000 80%);
   }
-  .text { position: absolute; left: 72px; top: 64px; width: 470px; }
+  .text { position: absolute; left: 72px; top: 64px; width: 520px; }
   .brand { display: flex; align-items: center; gap: 14px; font-weight: 700; font-size: 26px; letter-spacing: -0.01em; }
   .brand img { width: 48px; height: 48px; }
-  h1 { margin: 54px 0 22px; font-size: 64px; line-height: 1.02; letter-spacing: -0.035em; font-weight: 800; }
-  .sub { margin: 0; font-size: 23px; line-height: 1.45; color: #c5cce0; }
+  h1 { margin: 56px 0 24px; font-size: 68px; line-height: 1.0; letter-spacing: -0.035em; font-weight: 800; }
+  .sub { margin: 0; font-size: 24px; line-height: 1.45; color: #c5cce0; }
   .targets { position: absolute; left: 72px; bottom: 60px; display: flex; gap: 10px; }
   .targets span {
-    padding: 8px 14px; border: 1.5px solid rgb(224 165 38 / 55%); border-radius: 999px;
-    font-size: 18px; font-weight: 600; color: var(--amber);
+    padding: 7px 14px; border: 1.5px solid rgb(224 165 38 / 55%); border-radius: 999px;
+    font-size: 17px; font-weight: 600; color: #e0a526;
   }
 
-  .code {
-    position: absolute; left: 590px; top: 56px; width: 560px;
-    margin: 0; padding: 22px 26px; border-radius: 14px; background: var(--navy-deep);
+  .ledger {
+    position: absolute; left: 664px; top: 64px; width: 476px; margin: 0; padding: 38px 40px;
+    list-style: none; border-radius: 16px; background: #0f1729;
     box-shadow: 0 0 0 1px rgb(255 255 255 / 8%), 0 30px 60px rgb(0 0 0 / 35%);
-    font: 17px/1.62 var(--mono); color: var(--code-ink); white-space: pre;
   }
-  .c { color: var(--code-dim); font-style: italic; }
-  .k { color: #ff9e8a; }
-  .t { color: #f3c86a; }
-  .s { color: #a5d6ff; }
-
-  /* DOS, 80x25 text mode in CGA colours, as on the landing page. */
-  .dos {
-    position: absolute; left: 700px; top: 306px; width: 450px;
-    margin: 0; padding: 18px 22px; border-radius: 6px;
-    background: #0000aa; color: #aaaaaa;
-    box-shadow: inset 0 0 0 6px #000086, 0 0 0 1px #000, 0 30px 60px rgb(0 0 0 / 45%);
-    font: 18px/1.5 var(--mono); white-space: pre;
-  }
-  .dos .w { color: #fff; }
-  .dos .cursor { display: inline-block; width: .6em; height: 1em; vertical-align: -3px; background: #aaaaaa; }
-  .caption {
-    position: absolute; left: 700px; top: 578px; font-size: 16px; color: #8e98b3;
-  }
+  .ledger li { display: flex; align-items: center; gap: 18px; font-size: 32px; font-weight: 700; letter-spacing: -0.015em; }
+  .ledger li + li { margin-top: 20px; }
+  .ledger svg { width: 38px; height: 38px; flex: none; }
+  .ledger .gone { color: #8e98b3; text-decoration: line-through; text-decoration-color: #ff9e8a; text-decoration-thickness: 2.5px; }
+  .ledger hr { border: 0; border-top: 1px solid rgb(255 255 255 / 10%); margin: 28px 0; }
 </style>
 </head>
 <body>
   <div class="text">
     <div class="brand"><img src="../img/mark.svg" alt="">Zero C#</div>
     <h1>C# with nothing underneath</h1>
-    <p class="sub">A bflat fork that compiles C# to small native programs. No .NET runtime, no garbage collector.</p>
+    <p class="sub">A bflat fork that compiles C# to small native programs, from Linux to a 386.</p>
   </div>
-  <div class="targets"><span>Linux</span><span>WebAssembly</span><span>DOS on a 386</span></div>
-
-<pre class="code"><span class="t">Span</span>&lt;<span class="k">char</span>&gt; buffer = <span class="k">stackalloc char</span>[<span class="s">32</span>];
-
-<span class="t">Out</span>.Write(<span class="s">$"Q</span>{i}<span class="s">: </span>{a}<span class="s"> + </span>{b}<span class="s"> = "</span>);
-<span class="k">int</span> length = <span class="t">In</span>.ReadLine(buffer);
-
-<span class="c">// Kept until the end, so it goes in an arena.</span>
-mistakes.Add(<span class="t">Str</span>.Format(keep,
-    <span class="s">$"</span>{a}<span class="s"> + </span>{b}<span class="s"> = </span>{a + b}<span class="s">, not </span>{value}<span class="s">"</span>));</pre>
-
-<pre class="dos">D:\&gt;PROGRAM
-Q1: 38 + 8 = <span class="w">46</span>
-right
-Q2: 5 + 0 = <span class="w">seven</span>
-"seven" isn't a number
-Q2: 5 + 0 = <span class="w">7</span>
-no, it's 5
-Q3: 12 + 5 = <span class="cursor"></span></pre>
-  <div class="caption">The tutorial's quiz, running on a 386</div>
+  <div class="targets"><span>Linux</span><span>macOS</span><span>Windows</span><span>WebAssembly</span><span>DOS</span></div>
+  <ul class="ledger">
+    <li><svg viewBox="0 0 34 34"><circle cx="17" cy="17" r="16" fill="#e0a526"/><path d="M10 17.5l4.5 4.5L24 12.5" fill="none" stroke="#16213a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>C# 15</li>
+    <li><svg viewBox="0 0 34 34"><circle cx="17" cy="17" r="16" fill="#e0a526"/><path d="M10 17.5l4.5 4.5L24 12.5" fill="none" stroke="#16213a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>Real generics</li>
+    <li><svg viewBox="0 0 34 34"><circle cx="17" cy="17" r="16" fill="#e0a526"/><path d="M10 17.5l4.5 4.5L24 12.5" fill="none" stroke="#16213a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>Interfaces</li>
+    <li><svg viewBox="0 0 34 34"><circle cx="17" cy="17" r="16" fill="#e0a526"/><path d="M10 17.5l4.5 4.5L24 12.5" fill="none" stroke="#16213a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>Records and lambdas</li>
+    <hr>
+    <li><svg viewBox="0 0 34 34"><circle cx="17" cy="17" r="15" fill="none" stroke="#ff9e8a" stroke-width="2.2"/><path d="M12 12l10 10M22 12L12 22" fill="none" stroke="#ff9e8a" stroke-width="2.8" stroke-linecap="round"/></svg><span class="gone">Garbage collector</span></li>
+    <li><svg viewBox="0 0 34 34"><circle cx="17" cy="17" r="15" fill="none" stroke="#ff9e8a" stroke-width="2.2"/><path d="M12 12l10 10M22 12L12 22" fill="none" stroke="#ff9e8a" stroke-width="2.8" stroke-linecap="round"/></svg><span class="gone">.NET runtime</span></li>
+  </ul>
 </body>
 </html>

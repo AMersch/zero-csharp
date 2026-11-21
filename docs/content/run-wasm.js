@@ -16,7 +16,8 @@ class Exit {
   constructor(code) { this.code = code; }
 }
 
-// Runs one module to the end. Returns { output, exitCode, trapped }: a
+// Runs one module to the end. Returns { output, segments, exitCode, trapped,
+// size }: segments is the output with the input echoed, as { text, input }. A
 // program that aborts (zerocore and lib/ abort after printing why) ends in a
 // WebAssembly trap, reported here as trapped with exit code 134, the code a
 // shell shows for an abort.
@@ -29,7 +30,7 @@ export async function runWasm(url, { args = [], stdin = '' } = {}) {
   const argv = ['program', ...args].map(a => encoder.encode(a + '\0'));
   const input = encoder.encode(stdin);
   let inputPosition = 0;
-  const written = []; // byte chunks from stdout and stderr, in order
+  const written = []; // { bytes, input } chunks: output, and the input echoed, in order
   let memory;
   const view = () => new DataView(memory.buffer);
   const bytesAt = () => new Uint8Array(memory.buffer);
@@ -69,15 +70,20 @@ export async function runWasm(url, { args = [], stdin = '' } = {}) {
       return 0;
     },
     fd_seek() { return ESPIPE; },
+    // Like a terminal: each read returns at most one line, and the line is
+    // echoed into the output where the program read it.
     fd_read(fd, iovs, count, readOut) {
       if (fd !== 0) return EBADF;
+      const newline = input.indexOf(10, inputPosition);
+      const lineEnd = newline < 0 ? input.length : newline + 1;
       let total = 0;
       for (const [pointer, length] of buffers(iovs, count)) {
-        const chunk = input.subarray(inputPosition, inputPosition + length);
+        const chunk = input.subarray(inputPosition, Math.min(inputPosition + length, lineEnd));
         bytesAt().set(chunk, pointer);
+        written.push({ bytes: chunk.slice(), input: true });
         inputPosition += chunk.length;
         total += chunk.length;
-        if (chunk.length < length) break;
+        if (inputPosition >= lineEnd) break;
       }
       view().setUint32(readOut, total, true);
       return 0;
@@ -86,7 +92,7 @@ export async function runWasm(url, { args = [], stdin = '' } = {}) {
       if (fd !== 1 && fd !== 2) return EBADF;
       let total = 0;
       for (const [pointer, length] of buffers(iovs, count)) {
-        written.push(bytesAt().slice(pointer, pointer + length));
+        written.push({ bytes: bytesAt().slice(pointer, pointer + length), input: false });
         total += length;
       }
       view().setUint32(writtenOut, total, true);
@@ -105,53 +111,120 @@ export async function runWasm(url, { args = [], stdin = '' } = {}) {
     else if (e instanceof WebAssembly.RuntimeError) { exitCode = 134; trapped = e.message; }
     else throw e;
   }
-  const all = new Uint8Array(written.reduce((n, c) => n + c.length, 0));
-  let offset = 0;
+  // Joins neighbouring chunks of the same kind, so UTF-8 split across writes decodes.
+  const parts = [];
   for (const chunk of written) {
-    all.set(chunk, offset);
-    offset += chunk.length;
+    const last = parts[parts.length - 1];
+    if (last && last.input === chunk.input) last.chunks.push(chunk.bytes);
+    else parts.push({ input: chunk.input, chunks: [chunk.bytes] });
   }
-  return { output: new TextDecoder().decode(all), exitCode, trapped };
+  const decoder = new TextDecoder();
+  const segments = parts.map(({ input, chunks }) => {
+    const all = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+    let offset = 0;
+    for (const c of chunks) { all.set(c, offset); offset += c.length; }
+    return { text: decoder.decode(all), input };
+  });
+  const output = segments.filter(s => !s.input).map(s => s.text).join('');
+  return { output, segments, exitCode, trapped, size: bytes.byteLength };
 }
 
-// Wires up every [data-wasm-runner] element: a sample picker, arguments,
-// standard input, a Run button and the output.
+// Wires up every [data-wasm-runner] element: a row of samples, the picked
+// sample's source, its command line (the arguments are editable), its
+// standard input, and the output. Picking a sample runs it.
+const sources = new Map(); // sample name -> its source text, as a promise
+
+function sourceOf(base, name) {
+  if (!sources.has(name)) {
+    sources.set(name, fetch(`${base}src/${name}.cs`).then(r => (r.ok ? r.text() : null)).catch(() => null));
+  }
+  return sources.get(name);
+}
+
+const kilobytes = n => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.round(n / 1000)} KB`);
+
 for (const runner of document.querySelectorAll('[data-wasm-runner]')) {
   const base = runner.dataset.wasmRunner;
-  const pick = runner.querySelector('select');
-  const args = runner.querySelector('input');
+  const picks = [...runner.querySelectorAll('[data-sample]')];
+  const args = runner.querySelector('.term-command input');
   const stdin = runner.querySelector('textarea');
-  const button = runner.querySelector('button');
+  const inputBox = runner.querySelector('.term-input');
+  const run = runner.querySelector('[data-run]');
   const output = runner.querySelector('output');
+  const status = runner.querySelector('[data-status]');
   const note = runner.querySelector('[data-sample-note]');
+  const moduleName = runner.querySelector('[data-module-name]');
+  const sourceName = runner.querySelector('[data-source-name]');
+  const source = runner.querySelector('[data-source]');
+  let picked = picks[0];
+  let shownSource = null;
 
-  const showDefaults = () => {
-    const option = pick.selectedOptions[0];
-    args.value = option.dataset.args || '';
-    stdin.value = option.dataset.stdin || '';
-    note.textContent = option.dataset.note || '';
-  };
-  pick.addEventListener('change', showDefaults);
-  showDefaults();
+  async function showSource(name) {
+    if (shownSource === name) return;
+    shownSource = name;
+    sourceName.textContent = `samples/${name}.cs`;
+    source.removeAttribute('data-highlighted');
+    source.className = 'language-csharp';
+    source.textContent = 'Loading…';
+    const text = await sourceOf(base, name);
+    if (shownSource !== name) return;
+    // The // docs:name markers only tell the site which lines to quote.
+    source.textContent = text === null
+      ? 'The source isn’t on this site.'
+      : text.split('\n').filter(line => !/^\s*\/\/ docs:/.test(line)).join('\n').trimEnd();
+    if (text !== null) window.highlightCsharp?.(source);
+    source.closest('pre').scrollTop = 0;
+  }
 
-  button.addEventListener('click', async () => {
-    button.disabled = true;
-    output.textContent = 'Running…';
+  async function runPicked() {
+    run.disabled = true;
+    output.textContent = '';
+    status.textContent = 'Running…';
+    const name = picked.dataset.sample;
     try {
-      const url = `${base}${pick.selectedOptions[0].dataset.module || pick.value}.wasm`;
+      const url = `${base}${name}.wasm`;
       const started = performance.now();
-      const { output: text, exitCode, trapped } = await runWasm(url, {
+      const result = await runWasm(url, {
         // Split like a shell, roughly: "quoted text" is one argument.
         args: (args.value.match(/"[^"]*"|\S+/g) || []).map(a => a.replace(/^"(.*)"$/, '$1')),
         stdin: stdin.value,
       });
-      const ms = Math.round(performance.now() - started);
-      const ending = trapped ? `stopped (${trapped}), exit code ${exitCode}` : `exit code ${exitCode}`;
-      output.textContent = `${text}\n[${ending}, ${ms} ms]`;
+      const ms = Math.max(1, Math.round(performance.now() - started));
+      output.replaceChildren(...result.segments.map(s => {
+        if (!s.input) return s.text;
+        const typed = document.createElement('span');
+        typed.className = 'typed';
+        typed.textContent = s.text;
+        return typed;
+      }));
+      if (!result.segments.length) output.textContent = '(no output)';
+      const ending = result.trapped ? `Stopped with exit code ${result.exitCode}` : `Exit code ${result.exitCode}`;
+      status.textContent = `${ending}, in ${ms} ms, from a ${kilobytes(result.size)} module.`;
+      status.classList.toggle('failed', result.exitCode !== 0);
     } catch (e) {
-      output.textContent = `Couldn't run it: ${e.message}`;
+      status.textContent = `Couldn't run it: ${e.message}`;
+      status.classList.add('failed');
     } finally {
-      button.disabled = false;
+      run.disabled = false;
     }
-  });
+  }
+
+  function pick(button) {
+    picked = button;
+    for (const b of picks) b.setAttribute('aria-pressed', String(b === button));
+    args.value = button.dataset.args || '';
+    stdin.value = button.dataset.stdin || '';
+    inputBox.open = stdin.value !== '';
+    note.textContent = button.dataset.note || '';
+    moduleName.textContent = `${button.dataset.sample}.wasm`;
+    showSource(button.dataset.sample);
+    runPicked();
+  }
+
+  for (const button of picks) button.addEventListener('click', () => pick(button));
+  run.addEventListener('click', runPicked);
+  args.addEventListener('keydown', e => { if (e.key === 'Enter') runPicked(); });
+  // The highlighter loads after this script; start once the page has.
+  if (document.readyState === 'complete') pick(picked);
+  else window.addEventListener('load', () => pick(picked), { once: true });
 }

@@ -56,21 +56,91 @@ main.prose h3 + pre { margin-top: .5rem; }
 /* Keep the site name on one line next to the logo. */
 a.group > span.font-black { white-space: nowrap; }
 
-/* The sample runner on "Run it in your browser". */
-.wasm-runner { display: grid; gap: 0.75rem; margin: 1.5rem 0; }
-.wasm-runner label { display: grid; gap: 0.25rem; font-size: 0.9rem; }
-.wasm-runner select, .wasm-runner input, .wasm-runner textarea {
-  font: inherit; font-family: ui-monospace, monospace; padding: 0.4rem 0.5rem;
-  border: 1px solid #9ca3af; border-radius: 0.375rem; background: transparent; color: inherit;
+/* The sample runner on "Run it in your browser": the samples, then the picked one's source
+   beside a terminal running it. The terminal is dark in both themes, like a real one. */
+.wasm-runner {
+  --runner-line: #d5dae5;
+  --runner-pick: #16213a;
+  --runner-pick-ink: #fff;
+  --term-bg: #0f1729;
+  --term-ink: #e6e9f2;
+  --term-dim: #8e98b3;
+  --term-amber: #e0a526;
+  --term-red: #ff9e8a;
+  container-type: inline-size;
+  margin: 1.5rem 0 2rem;
+  font-size: 0.875rem;
 }
-.wasm-runner button {
-  justify-self: start; padding: 0.4rem 1.2rem; border-radius: 0.375rem; border: 0;
-  background: #2563eb; color: #fff; font-weight: 600; cursor: pointer;
+html[data-theme="dark"] .wasm-runner {
+  --runner-line: #2a3654;
+  --runner-pick: #e0a526;
+  --runner-pick-ink: #16213a;
+  --term-bg: #0a1020;
 }
-.wasm-runner button:disabled { opacity: 0.6; cursor: wait; }
-.wasm-runner [data-sample-note] { margin: 0; font-size: 0.9rem; opacity: 0.8; }
-.wasm-runner output {
-  display: block; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.85rem;
-  padding: 0.75rem; border-radius: 0.375rem; background: rgba(127, 127, 127, 0.12); min-height: 3rem;
+.runner-picks { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+.runner-picks button {
+  padding: 0.3rem 0.75rem; border-radius: 999px; border: 1px solid var(--runner-line);
+  background: transparent; color: inherit; font: inherit; font-weight: 550; cursor: pointer;
 }
-.wasm-runner output:empty::before { content: "The output appears here."; opacity: 0.55; }
+.runner-picks button:hover { border-color: currentColor; }
+.runner-picks button[aria-pressed="true"] {
+  background: var(--runner-pick); border-color: var(--runner-pick); color: var(--runner-pick-ink);
+}
+.wasm-runner button:focus-visible,
+.wasm-runner input:focus-visible,
+.wasm-runner textarea:focus-visible,
+.wasm-runner summary:focus-visible { outline: 2px solid var(--term-amber); outline-offset: 2px; }
+.wasm-runner [data-sample-note] { margin: 0.75rem 0 1rem; min-height: 2.6em; }
+
+.runner-panes { display: grid; gap: 0.75rem; }
+@container (min-width: 1000px) {
+  .runner-panes { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); }
+}
+.runner-source { margin: 0; min-width: 0; display: flex; flex-direction: column; }
+.runner-source figcaption {
+  padding: 0.4rem 0.75rem; border: 1px solid var(--runner-line); border-bottom: 0;
+  border-radius: 0.5rem 0.5rem 0 0; font: 0.75rem ui-monospace, Menlo, monospace; opacity: 0.8;
+}
+main .wasm-runner .runner-source pre {
+  flex: 1; margin: 0 !important; height: 22rem; overflow: auto; border-radius: 0 0 0.5rem 0.5rem !important;
+  border: 1px solid var(--runner-line); padding: 0.75rem !important;
+}
+main.prose .wasm-runner .runner-source pre code { font-size: 0.75rem !important; line-height: 1.6 !important; white-space: pre; }
+
+.runner-term {
+  min-width: 0; display: flex; flex-direction: column;
+  background: var(--term-bg); color: var(--term-ink); border-radius: 0.5rem;
+  font: 0.8125rem/1.6 ui-monospace, Menlo, Consolas, monospace;
+}
+.term-command {
+  display: flex; align-items: baseline; gap: 0.5ch; padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid rgb(255 255 255 / 8%); color: var(--term-amber); white-space: nowrap;
+}
+.term-command input {
+  flex: 1; min-width: 0; margin-left: 1ch; padding: 0; border: 0; background: transparent; color: var(--term-ink);
+  font: inherit; caret-color: var(--term-amber);
+}
+.term-command input:focus { outline: none; }
+.term-command:focus-within { box-shadow: inset 0 -2px 0 var(--term-amber); }
+.runner-term output {
+  display: block; min-height: 9rem; max-height: 22rem; overflow: auto; padding: 0.75rem 0.85rem;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.runner-term output .typed { color: var(--term-amber); }
+.term-status { margin: 0; padding: 0 0.85rem 0.6rem; color: var(--term-dim); font-size: 0.75rem; }
+.term-status.failed { color: var(--term-red); }
+.term-input { border-top: 1px solid rgb(255 255 255 / 8%); padding: 0.5rem 0.85rem; }
+.term-input summary { cursor: pointer; color: var(--term-dim); font-size: 0.75rem; }
+.term-input textarea {
+  display: block; width: 100%; margin-top: 0.4rem; padding: 0.4rem 0.5rem; resize: vertical;
+  border: 1px solid rgb(255 255 255 / 15%); border-radius: 0.375rem; background: rgb(255 255 255 / 4%);
+  color: var(--term-ink); font: inherit;
+}
+.runner-term [data-run] {
+  margin: 0 0.85rem 0.75rem; align-self: flex-start; padding: 0.3rem 1rem; border-radius: 0.375rem; border: 0;
+  background: var(--term-amber); color: #16213a; font: 600 0.8125rem Inter, sans-serif; cursor: pointer;
+}
+.runner-term [data-run]:disabled { opacity: 0.6; cursor: wait; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}

@@ -12,10 +12,10 @@
   <meta property="og:title" content="Zero C#: C# with nothing underneath" />
   <meta property="og:description" content="A bflat fork that compiles C# to small native programs with no .NET runtime and no garbage collector, for Linux, macOS, Windows, WebAssembly and DOS on a 386." />
   <meta property="og:url" content="https://onurgumus.github.io/zero-csharp/" />
-  <meta property="og:image" content="https://onurgumus.github.io/zero-csharp/img/social.png" />
+  <meta property="og:image" content="https://onurgumus.github.io/zero-csharp/img/social.png?v=2" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="C# code from the quiz tutorial next to a blue DOS screen running it: the quiz asks 38 + 8 and rejects the answer &quot;seven&quot;." />
+  <meta property="og:image:alt" content="Zero C#, C# with nothing underneath. Kept: C# 15, real generics, interfaces, records and lambdas. Left out: the garbage collector and the .NET runtime. Runs on Linux, macOS, Windows, WebAssembly and DOS." />
   <meta name="twitter:card" content="summary_large_image" />
   <style>
     /* Self-hosted Inter (variable, Latin subset), as on the guide pages. SIL OFL 1.1, see fonts/LICENSE. */
@@ -114,8 +114,24 @@
     .code-caption { margin: 12px 4px 0; font-size: .875rem; }
     .code-caption a { color: var(--amber-ink); font-weight: 600; }
 
+    /* What you keep and what you leave behind: the page's one dark band. */
+    .ledger { background: var(--navy); color: #c5cce0; padding: 56px 0 60px; }
+    .ledger h2 { color: #fff; }
+    .ledger .section-intro { margin-bottom: 36px; }
+    .ledger-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 28px 64px; }
+    .ledger h3 { margin: 0 0 14px; font-size: .9375rem; font-weight: 650; color: #8e98b3; }
+    .ledger ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 16px; }
+    .kept ul { grid-template-columns: 1fr 1fr; gap: 18px 36px; }
+    .ledger li { display: grid; grid-template-columns: 34px 1fr; column-gap: 14px; align-items: start; }
+    .ledger li svg { width: 34px; height: 34px; grid-row: span 2; }
+    .ledger b { color: #fff; font-size: 1.1875rem; font-weight: 720; letter-spacing: -0.01em; line-height: 1.3; }
+    .ledger li span { font-size: .9375rem; line-height: 1.5; }
+    .gone b { color: #8e98b3; text-decoration: line-through; text-decoration-color: #ff9e8a; text-decoration-thickness: 2px; }
+    .gone li span { color: #c5cce0; }
+    .ledger code { font: .875em var(--mono); color: #f3c86a; }
+
     /* Five machines: three desktops on top, WebAssembly and DOS below. */
-    .machines { padding: 56px 0 64px; border-top: 1px solid var(--line); }
+    .machines { padding: 56px 0 64px; }
     h2 { margin: 0 0 10px; color: var(--ink); font-size: 1.75rem; letter-spacing: -0.02em; line-height: 1.2; }
     .section-intro { margin: 0 0 32px; max-width: 40em; }
     .screens { display: grid; grid-template-columns: repeat(6, 1fr); gap: 20px; align-items: stretch; }
@@ -173,6 +189,7 @@
       .screens { grid-template-columns: 1fr; }
       .screen, .screen.wasm, .screen.dos { grid-column: auto; }
       .idea-list { grid-template-columns: 1fr; }
+      .ledger-grid, .kept ul { grid-template-columns: 1fr; }
       .path { grid-template-columns: 1fr 1fr; }
       .nav-links { gap: 16px; }
     }
@@ -220,6 +237,35 @@
 mistakes.Add(<span class="t">Str</span>.Format(keep,
     <span class="s">$"</span>{a}<span class="s"> + </span>{b}<span class="s"> = </span>{a + b}<span class="s">, not </span>{value}<span class="s">"</span>));</code></pre>
         <p class="code-caption">From the quiz the <a href="tutorial/index.html">tutorial</a> builds, step by step.</p>
+      </div>
+    </section>
+
+    <section class="ledger" aria-labelledby="ledger-title">
+      <div class="wrap">
+        <h2 id="ledger-title">The language stays, the runtime goes</h2>
+        <p class="section-intro">The compiler still checks everything it checks in .NET. What's missing is what a runtime would do while your program runs.</p>
+        <div class="ledger-grid">
+          <div class="kept">
+            <h3>You keep</h3>
+            <ul>
+              <li><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="16" fill="#e0a526"/><path d="M10 17.5l4.5 4.5L24 12.5" fill="none" stroke="#16213a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><b>C# 15</b><span>Unions, extension members and the new memory safety rules.</span></li>
+              <li><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="16" fill="#e0a526"/><path d="M10 17.5l4.5 4.5L24 12.5" fill="none" stroke="#16213a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><b>Real generics</b><span>A specialized copy for each type, and static abstract members.</span></li>
+              <li><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="16" fill="#e0a526"/><path d="M10 17.5l4.5 4.5L24 12.5" fill="none" stroke="#16213a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><b>Interfaces and virtual methods</b><span>Default interface methods, casts, <code>is</code> and <code>as</code>.</span></li>
+              <li><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="16" fill="#e0a526"/><path d="M10 17.5l4.5 4.5L24 12.5" fill="none" stroke="#16213a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><b>Records, tuples, anonymous types</b><span>Value equality, <code>with</code>, and the generated <code>ToString</code>.</span></li>
+              <li><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="16" fill="#e0a526"/><path d="M10 17.5l4.5 4.5L24 12.5" fill="none" stroke="#16213a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><b>Lambdas and queries</b><span><code>Where</code>, <code>Select</code> and <code>GroupBy</code>, from a small library instead of LINQ.</span></li>
+              <li><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="16" fill="#e0a526"/><path d="M10 17.5l4.5 4.5L24 12.5" fill="none" stroke="#16213a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><b>Threads</b><span><code>Parallel.For</code> runs a loop on every core.</span></li>
+            </ul>
+          </div>
+          <div class="gone">
+            <h3>You do without</h3>
+            <ul>
+              <li><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="none" stroke="#ff9e8a" stroke-width="2"/><path d="M12 12l10 10M22 12L12 22" fill="none" stroke="#ff9e8a" stroke-width="2.6" stroke-linecap="round"/></svg><b>Garbage collector</b><span>Arenas free their memory all at once, when you say.</span></li>
+              <li><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="none" stroke="#ff9e8a" stroke-width="2"/><path d="M12 12l10 10M22 12L12 22" fill="none" stroke="#ff9e8a" stroke-width="2.6" stroke-linecap="round"/></svg><b>.NET runtime</b><span>Hello world is 11 KB on Windows and 40 KB on Linux, with nothing to install.</span></li>
+              <li><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="none" stroke="#ff9e8a" stroke-width="2"/><path d="M12 12l10 10M22 12L12 22" fill="none" stroke="#ff9e8a" stroke-width="2.6" stroke-linecap="round"/></svg><b>Catching exceptions</b><span><code>throw</code> ends the program. Return errors as unions.</span></li>
+              <li><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="none" stroke="#ff9e8a" stroke-width="2"/><path d="M12 12l10 10M22 12L12 22" fill="none" stroke="#ff9e8a" stroke-width="2.6" stroke-linecap="round"/></svg><b>Reflection and async</b><span>A type can be compared, but it has no name.</span></li>
+            </ul>
+          </div>
+        </div>
       </div>
     </section>
 

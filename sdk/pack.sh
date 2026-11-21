@@ -1,11 +1,40 @@
 #!/usr/bin/env bash
-# Packs the Zero C# packages into sdk/feed/.
+# Packs the Zero C# packages into sdk/feed/:
+#   ZeroCSharp.Sdk               the MSBuild SDK and its payload (./build.sh --sdk-payload)
+#   ZeroCSharp.Bflat.<rid>       bflat for each Linux host, trimmed (sdk/trim-layout.sh)
+#   ZeroCSharp.Templates         dotnet new zero and zerolib (when it exists)
 #
-# Usage: sdk/pack.sh
+# Usage:  sdk/pack.sh
+# Env:    ZERO_HOSTS     the hosts to pack bflat for (default "linux-x64 linux-arm64")
+#         ZERO_LAYOUTS   where the full layouts are (default ../bflat/layouts):
+#                        linux-glibc-x64, linux-glibc-arm64
+# Trimmed layouts are kept in sdk/trimmed/<rid> and redone only when the
+# layout or the trimming script is newer.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+hosts=${ZERO_HOSTS:-linux-x64 linux-arm64}
+layouts=${ZERO_LAYOUTS:-../bflat/layouts}
+payload=sdk/ZeroCSharp.Sdk/payload
 
 mkdir -p sdk/feed
-./build.sh --sdk-payload sdk/ZeroCSharp.Sdk/payload
-rm -f sdk/feed/ZeroCSharp.Sdk.*.nupkg
+rm -f sdk/feed/ZeroCSharp.*.nupkg
+./build.sh --sdk-payload "$payload"
+bflat_commit=$(sed -n 's/^bflat //p' "$payload/VERSIONS.txt")
+
+for rid in $hosts; do
+    layout=$layouts/linux-glibc-${rid#linux-}
+    trimmed=sdk/trimmed/$rid
+    if [ ! -f "$trimmed/bflat" ] || [ "$layout/bflat" -nt "$trimmed/bflat" ] || [ "$layout/bin/lld" -nt "$trimmed/bflat" ] \
+            || [ sdk/trim-layout.sh -nt "$trimmed/bflat" ]; then
+        echo "[trim]  $layout -> $trimmed"
+        sdk/trim-layout.sh "$layout" "$trimmed"
+    fi
+    dotnet pack sdk/ZeroCSharp.Bflat/ZeroCSharp.Bflat.csproj -o sdk/feed -v:q -nologo \
+        -p:HostRid="$rid" -p:LayoutDir="$PWD/$trimmed" -p:BflatCommit="$bflat_commit"
+done
+
 dotnet pack sdk/ZeroCSharp.Sdk/ZeroCSharp.Sdk.csproj -o sdk/feed -v:q -nologo
+if [ -f sdk/ZeroCSharp.Templates/ZeroCSharp.Templates.csproj ]; then
+    dotnet pack sdk/ZeroCSharp.Templates/ZeroCSharp.Templates.csproj -o sdk/feed -v:q -nologo
+fi
+ls -la sdk/feed

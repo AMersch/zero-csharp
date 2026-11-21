@@ -6,6 +6,8 @@
 # Usage:  sdk/test/run.sh                 pack (sdk/pack.sh), then run every test
 #         sdk/test/run.sh name...         only these tests (names as in the list below)
 # Env:    ZERO_NO_PACK=1                  use sdk/feed as it is (CI downloads it)
+#         ZERO_HOSTS                      the host packages to expect (default: both,
+#                                         "linux-x64 linux-arm64"); also passed to pack.sh
 #
 # Exit code: the number of failed tests.
 set -uo pipefail
@@ -17,6 +19,7 @@ VERSION=$(sed -n 's|.*<ZeroSdkVersion>\(.*\)</ZeroSdkVersion>.*|\1|p' sdk/versio
 # The target framework: zero + major and minor, without the dot (0.1 -> zero01).
 TFM=zero$(echo "$VERSION" | cut -d. -f1,2 | tr -d .)
 HOST_OS=$(uname -s)
+export ZERO_HOSTS=${ZERO_HOSTS:-linux-x64 linux-arm64}
 case "$(uname -m)" in
     x86_64 | amd64)  HOST_ARCH_NAME=x64;   DOCKER_ARCH=amd64 ;;
     *)               HOST_ARCH_NAME=arm64; DOCKER_ARCH=arm64 ;;
@@ -134,7 +137,23 @@ test_trimmed_layout_builds() {
     pass "trimmed layout builds ($size MB)"
 }
 
-ALL_TESTS=(payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused)
+test_host_packages() {
+    local rid pkg size listing
+    LOG=
+    for rid in $ZERO_HOSTS; do
+        pkg=$FEED/ZeroCSharp.Bflat.$rid.$VERSION.nupkg
+        if [ ! -f "$pkg" ]; then fail "host packages" "no $(basename "$pkg")"; return; fi
+        size=$(( $(wc -c < "$pkg") / 1000000 ))
+        if [ "$size" -ge 100 ]; then fail "host packages" "$(basename "$pkg") is $size MB, not under 100"; return; fi
+        # Listed once: grep -q stops reading early, which pipefail counts as a failure.
+        listing=$(unzip -l "$pkg")
+        if ! grep -q ' tools/bflat/bflat$' <<< "$listing"; then fail "host packages" "$rid: no tools/bflat/bflat"; return; fi
+        if ! grep -q ' tools/bflat/bin/lld$' <<< "$listing"; then fail "host packages" "$rid: no tools/bflat/bin/lld"; return; fi
+    done
+    pass "host packages ($ZERO_HOSTS)"
+}
+
+ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused)
 
 # ---- Run ---------------------------------------------------------------------
 

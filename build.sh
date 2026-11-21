@@ -588,6 +588,7 @@ case "$TARGET" in
             echo "zero-csharp $(git rev-parse HEAD)"
             echo "bflat $(git -C "${BFLAT_FORK:-../bflat}" rev-parse HEAD 2>/dev/null || echo unknown)"
         } > "$PAYLOAD_DIR/VERSIONS.txt"
+        exit 0
         ;;
     wasm)   run wasm "$@" ;;
     native)

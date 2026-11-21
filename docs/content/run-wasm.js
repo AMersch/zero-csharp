@@ -138,7 +138,7 @@ for (const runner of document.querySelectorAll('[data-wasm-runner]')) {
     button.disabled = true;
     output.textContent = 'Running…';
     try {
-      const url = `${base}${pick.value}.wasm`;
+      const url = `${base}${pick.selectedOptions[0].dataset.module || pick.value}.wasm`;
       const started = performance.now();
       const { output: text, exitCode, trapped } = await runWasm(url, {
         // Split like a shell, roughly: "quoted text" is one argument.

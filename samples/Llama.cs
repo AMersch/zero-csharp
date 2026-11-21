@@ -1,12 +1,15 @@
 // Example: a small language model telling a story (lib/Llama.cs), with the
 // model compiled into the program.
 // Build: ./build.sh Llama    Run: ./run.sh Llama [-n steps] [-t temperature] [-p top-p] [-s seed] [-i prompt] [-v]
+//                            or: ./run.sh Llama -c     (take turns telling a story)
 //
 // The model is Karpathy's stories260K (models/): about 260,000 parameters
 // trained on children's stories, and its 512-token tokenizer. build.sh turns
 // both into byte literals, so the program reads them in place, with no files.
 // By default it continues "Once upon a time" greedily for 64 tokens, which is
 // the same story every run and on every target; -t picks words by chance.
+// With -c you take turns: type a line, and the model continues the story
+// from there, keeping everything said so far as its context.
 
 using System;
 
@@ -17,12 +20,15 @@ public static class Program
     static void Usage()
     {
         Out.Line("Usage: Llama [-n steps] [-t temperature] [-p top-p] [-s seed] [-i prompt] [-v]");
+        Out.Line("       Llama -c [-e] [-t temperature] [-p top-p] [-s seed]");
         Out.Line("  -n  tokens to produce, the prompt's included (default 64)");
         Out.Line("  -t  0 picks the likeliest token (default); higher is more random");
         Out.Line("  -p  with -t, choose only among the likeliest tokens that add up to p (default 0.9)");
         Out.Line("  -s  random seed, for -t (default 42)");
         Out.Line("  -i  the start of the story (default \"Once upon a time\")");
         Out.Line("  -v  print the token ids and the speed");
+        Out.Line("  -c  take turns: each line you type joins the story, then the model adds to it");
+        Out.Line("  -e  with -c, print each line read (for input from a file)");
     }
 
     public static int Main(string[] args)
@@ -31,13 +37,16 @@ public static class Program
         double temperature = 0, topP = 0.9;
         long seed = 42;
         string prompt = "Once upon a time";
-        bool verbose = false;
+        bool verbose = false, turns = false, echo = false;
+        bool temperatureGiven = false;
         for (int i = 0; i < args.Length; i++)
         {
             string flag = args[i];
-            if (flag == "-v")
+            if (flag == "-v" || flag == "-c" || flag == "-e")
             {
-                verbose = true;
+                verbose |= flag == "-v";
+                turns |= flag == "-c";
+                echo |= flag == "-e";
                 continue;
             }
             if (i + 1 >= args.Length)
@@ -49,7 +58,7 @@ public static class Program
             bool ok = flag switch
             {
                 "-n" => Str.TryParse(value, out steps),
-                "-t" => Str.TryParse(value, out temperature),
+                "-t" => temperatureGiven = Str.TryParse(value, out temperature),
                 "-p" => Str.TryParse(value, out topP),
                 "-s" => Str.TryParse(value, out seed),
                 "-i" => (prompt = value) != null,
@@ -86,7 +95,13 @@ public static class Program
         int textLength = Utf8(prompt, text);
         int promptCount = llama.Encode(text.Slice(0, textLength), promptIds);
 
+        // Taking turns: greedy picking makes the model repeat itself, so
+        // words are picked by chance unless -t says otherwise.
+        if (turns && !temperatureGiven)
+            temperature = 0.8;
         LlamaSampler sampler = LlamaSampler.Create(llama.VocabSize, (float)temperature, (float)topP, (ulong)seed, arena);
+        if (turns)
+            return TakeTurns(llama, sampler, arena, echo);
 
         // docs:generate
         int token = promptIds[0]; // BOS
@@ -112,8 +127,98 @@ public static class Program
         return 0;
     }
 
+    // docs:turns
+    // You and the model take turns adding to one story. The model's memory
+    // (its key/value cache) keeps every token so far, so each turn only feeds
+    // the new tokens: yours, then the ones it picks, until it ends two
+    // sentences or 48 tokens. When the story fills the model's context, or
+    // the model ends it, a new one begins.
+    static int TakeTurns(Llama llama, LlamaSampler sampler, Arena arena, bool echo)
+    {
+        Out.Line("Tell a story together: type a line, and the model continues it.");
+        Out.Line("An empty line lets it go on by itself; end of input stops.");
+        Span<char> line = stackalloc char[200];
+        Span<byte> text;
+        Span<int> ids;
+        unsafe
+        {
+            // SAFETY: both stay inside the arena, which outlives this method.
+            text = new Span<byte>(arena.AllocArray<byte>(600), 600);
+            ids = new Span<int>(arena.AllocArray<int>(602), 602);
+        }
+        int position = 0;
+        int token = 1; // BOS: the start of a story, not yet fed to the model
+
+        while (true)
+        {
+            Out.Write("> ");
+            int length = In.ReadLine(line);
+            if (length < 0)
+            {
+                Out.Line();
+                return 0;
+            }
+            if (length > line.Length)
+            {
+                Out.Line($"(a line is at most {line.Length} characters)");
+                continue;
+            }
+            ReadOnlySpan<char> said = line.Slice(0, length).Trim();
+            if (echo)
+                Out.Line(said);
+
+            // Your line, as tokens after the story so far. Encode starts
+            // with BOS, which the model has already seen unless the story is new.
+            int count = llama.Encode(text.Slice(0, Utf8(said, text)), ids);
+            if (said.Length == 0)
+                count = 1;
+            if (position + count + 48 >= llama.SeqLen)
+            {
+                Out.Line("(The story is as long as the model can remember.");
+                Out.Line(" A new one begins.)");
+                position = 0;
+                token = 1;
+            }
+            for (int i = 1; i < count; i++)
+            {
+                // SAFETY: the logits aren't used.
+                unsafe { llama.Forward(token, position++); }
+                token = ids[i];
+            }
+
+            // The model's turn.
+            int sentences = 0;
+            for (int produced = 0; produced < 48 && sentences < 2; produced++)
+            {
+                int next;
+                unsafe
+                {
+                    // SAFETY: the logits are sampled before the next Forward.
+                    float* logits = llama.Forward(token, position++);
+                    next = sampler.Sample(logits, llama.VocabSize);
+                }
+                if (next == 1)
+                {
+                    Out.Line();
+                    Out.Line("(The end. A new story begins.)");
+                    position = 0;
+                    token = 1;
+                    break;
+                }
+                ReadOnlySpan<byte> piece = llama.Decode(token, next);
+                Out.WriteUtf8(piece);
+                byte last = piece.Length > 0 ? piece[piece.Length - 1] : (byte)0;
+                if (last == '.' || last == '!' || last == '?' || last == '\n')
+                    sentences++;
+                token = next;
+            }
+            Out.Line();
+        }
+    }
+    // docs:end
+
     // UTF-16 to UTF-8; returns the byte count. output needs 3 bytes per char.
-    static int Utf8(string s, Span<byte> output)
+    static int Utf8(ReadOnlySpan<char> s, Span<byte> output)
     {
         int n = 0;
         for (int i = 0; i < s.Length; i++)

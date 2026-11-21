@@ -22,6 +22,7 @@ Each one is a few dozen kilobytes. Pick one and run it.
       <option value="Quiz" data-stdin="46&#10;seven&#10;5&#10;17&#10;44&#10;&#10;74&#10;" data-note="The tutorial's quiz, answered from the input box: one line per question, an empty line skips one. Change the answers and run it again.">Quiz</option>
       <option value="Guards" data-args="list-index" data-note="A mistake lib/ stops the program for; try restore-order or throw as the argument.">Guards</option>
       <option value="Llama" data-args="-t 0.8 -s 7 -i &quot;The dragon&quot;" data-note="A language model of 260,000 parameters, compiled into a 1.1 MB module, telling a story. Change the seed (-s) or the start (-i) and run it again.">Llama</option>
+      <option value="Llama-turns" data-module="Llama" data-args="-c -e -s 3" data-stdin="Tom found a tiny robot in the garden.&#10;The robot said hello.&#10;&#10;Then they went home.&#10;" data-note="The same model, taking turns: each line of the input box joins the story and the model continues it; an empty line lets it go on by itself.">Llama, taking turns</option>
       <option value="Tiny" data-note="The smallest program.">Tiny</option>
     </select>
   </label>

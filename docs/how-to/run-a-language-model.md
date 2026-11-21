@@ -13,6 +13,7 @@ a model file and a tokenizer file. `samples/Llama.cs` uses it with stories260K, 
 ./build.sh Llama
 ./run.sh Llama                              # "Once upon a time", the likeliest word each time
 ./run.sh Llama -t 0.8 -s 7 -i "The dragon"  # a different start, words picked by chance
+./run.sh Llama -c                           # take turns telling a story with it
 ```
 
 The program is about 1.1 MB, of which the model is 1 MB, and it needs no files: `build.sh` compiles
@@ -65,6 +66,117 @@ Out.Line();
 
 Generating allocates nothing: `Forward` works in the buffers `Create` took from the arena, and
 `Decode` points into the tokenizer.
+
+## Take turns telling a story
+
+With `-c`, you and the model take turns: each line you type joins the story, and the model adds a
+sentence or two. An empty line lets it go on by itself; end of input (Ctrl-D) stops.
+
+```text
+> Tom found a tiny robot in the garden.
+ He was very fast and could not pick it up. He wanted to make a big, soft, store, but it was not bad.
+> The robot said hello.
+
+Tom was surprised.
+```
+
+It isn't a chat: the model was trained only to continue children's stories, so a question becomes
+the start of one. What makes the turns work is the model's memory, its key/value cache: it keeps
+every token of the story so far, so each turn only runs the new tokens, yours and then its own.
+
+<!-- sample: samples/Llama.cs turns -->
+```csharp
+// You and the model take turns adding to one story. The model's memory
+// (its key/value cache) keeps every token so far, so each turn only feeds
+// the new tokens: yours, then the ones it picks, until it ends two
+// sentences or 48 tokens. When the story fills the model's context, or
+// the model ends it, a new one begins.
+static int TakeTurns(Llama llama, LlamaSampler sampler, Arena arena, bool echo)
+{
+    Out.Line("Tell a story together: type a line, and the model continues it.");
+    Out.Line("An empty line lets it go on by itself; end of input stops.");
+    Span<char> line = stackalloc char[200];
+    Span<byte> text;
+    Span<int> ids;
+    unsafe
+    {
+        // SAFETY: both stay inside the arena, which outlives this method.
+        text = new Span<byte>(arena.AllocArray<byte>(600), 600);
+        ids = new Span<int>(arena.AllocArray<int>(602), 602);
+    }
+    int position = 0;
+    int token = 1; // BOS: the start of a story, not yet fed to the model
+
+    while (true)
+    {
+        Out.Write("> ");
+        int length = In.ReadLine(line);
+        if (length < 0)
+        {
+            Out.Line();
+            return 0;
+        }
+        if (length > line.Length)
+        {
+            Out.Line($"(a line is at most {line.Length} characters)");
+            continue;
+        }
+        ReadOnlySpan<char> said = line.Slice(0, length).Trim();
+        if (echo)
+            Out.Line(said);
+
+        // Your line, as tokens after the story so far. Encode starts
+        // with BOS, which the model has already seen unless the story is new.
+        int count = llama.Encode(text.Slice(0, Utf8(said, text)), ids);
+        if (said.Length == 0)
+            count = 1;
+        if (position + count + 48 >= llama.SeqLen)
+        {
+            Out.Line("(The story is as long as the model can remember.");
+            Out.Line(" A new one begins.)");
+            position = 0;
+            token = 1;
+        }
+        for (int i = 1; i < count; i++)
+        {
+            // SAFETY: the logits aren't used.
+            unsafe { llama.Forward(token, position++); }
+            token = ids[i];
+        }
+
+        // The model's turn.
+        int sentences = 0;
+        for (int produced = 0; produced < 48 && sentences < 2; produced++)
+        {
+            int next;
+            unsafe
+            {
+                // SAFETY: the logits are sampled before the next Forward.
+                float* logits = llama.Forward(token, position++);
+                next = sampler.Sample(logits, llama.VocabSize);
+            }
+            if (next == 1)
+            {
+                Out.Line();
+                Out.Line("(The end. A new story begins.)");
+                position = 0;
+                token = 1;
+                break;
+            }
+            ReadOnlySpan<byte> piece = llama.Decode(token, next);
+            Out.WriteUtf8(piece);
+            byte last = piece.Length > 0 ? piece[piece.Length - 1] : (byte)0;
+            if (last == '.' || last == '!' || last == '?' || last == '\n')
+                sentences++;
+            token = next;
+        }
+        Out.Line();
+    }
+}
+```
+
+When the story reaches the 512 tokens the model can remember, or the model ends it, a new story
+begins. `-e` prints each line it reads, for turns that come from a file.
 
 ## Choose how words are picked
 

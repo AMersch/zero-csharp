@@ -32,7 +32,7 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | File | What |
 |---|---|
 | `System/Primitives.cs`, `Object.cs`, `Array.cs`, `Attributes.cs`, `Collections.cs` | The types and attributes the C# compiler requires: primitives, `object`, `ValueType`, `Enum`, `Nullable<T>`, `Array`, delegates (`Action`, `Func`), `ValueTuple` (2 to 7 elements), `IDisposable`, `IEnumerable` |
-| `Runtime/ObjectAllocator.cs` | Where objects come from: `calloc` by default, or a function a library sets (`../lib/Arena.cs`'s `AllocateObjectsHere` sends them to an arena); and a scan of static fields for debug checks |
+| `Runtime/ObjectAllocator.cs` | Where each thread's objects come from: `calloc` by default, or a function a library sets for that thread (`../lib/Arena.cs`'s `AllocateObjectsHere` sends them to an arena); and a scan of static fields for debug checks |
 | `System/GC.cs` | `GC.GetTotalAllocatedBytes()`: every byte allocated so far, so a test can check that a loop allocates nothing |
 | `System/String.cs` | `string`: `Length`, indexer, `==`, `!=`, `Equals`, `IsNullOrEmpty`, `Concat` (so `a + b` and `switch` on strings work) |
 | `System/Span.cs` | `Span<T>` and `ReadOnlySpan<T>`: indexing, `Slice`, `CopyTo`, `Fill`, `Clear`, `foreach`, `fixed` |
@@ -80,7 +80,7 @@ A failure that would throw in .NET (a failed cast, an index out of range, an ari
 - **Most of the base class library.** No `Console` (use `../lib/Out.cs`), `object.ToString`, `Equals` or `GetHashCode` (so no anonymous types; tuples work), collections, LINQ (see `../lib/Seq.cs`), async, `Thread`, `typeof`, or `Nullable<T>` boxing.
 - **SIMD operations beyond the ones declared.** To add one, declare it in `Intrinsics/` with the name and signature it has in .NET; the compiler does the rest.
 - **UEFI, Windows on arm64, and Intel Macs.** Linux (x64, arm64), macOS on Apple Silicon, Windows x64, WebAssembly (WASI) and 32-bit DOS on a 386 (see the main README; it uses the WebAssembly build of this library) only.
-- **A threading library.** There's no `Thread` or `lock`; create threads with pthreads through P/Invoke. Allocation, interface calls and `Interlocked` are safe to use from several threads (tested with eight on arm64). Static constructors are not: make sure a type's static fields are first touched before other threads start.
+- **A threading library.** There's no `Thread` or `lock`; `../lib/Threads.cs` has `Parallel.For`, on pthreads. Allocation, interface calls and `Interlocked` are safe to use from several threads (tested with eight on arm64). Static constructors are not: make sure a type's static fields are first touched before other threads start.
 
 ## Where the code comes from, and the license
 

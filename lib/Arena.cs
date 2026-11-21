@@ -545,8 +545,8 @@ public struct Arena
     /// unsafe { frame.Reset(); } // SAFETY: nothing from the frame is kept
     /// </code>
     /// Scopes nest: disposing one puts back whatever was in effect before it.
-    /// The arena must outlive the scope, and while it is open only one thread
-    /// may allocate.
+    /// The arena must outlive the scope. The scope applies only to the thread
+    /// that opens it: other threads keep allocating as before.
     /// </summary>
     /// <safety>
     /// The objects die with the arena (Reset, Restore, Destroy), so no
@@ -579,9 +579,10 @@ public struct Arena
         return scope;
     }
 
-    // ObjectAllocator's function: objects are pointer-aligned and zeroed.
+    // ObjectAllocator's function: objects are zeroed and 8-byte aligned (a
+    // long or double in an object needs it on 32-bit targets).
     static unsafe void* AllocateObject(void* context, nuint size)
-        => new Arena { _state = (State*)context }.Alloc(size, (nuint)sizeof(nint), zero: true);
+        => new Arena { _state = (State*)context }.Alloc(size, 8, zero: true);
 
     /// <summary>From AllocateObjectsHere, for a using block: disposing it puts back the allocator that was in effect before.</summary>
     public ref struct ObjectScope
@@ -590,6 +591,7 @@ public struct Arena
         internal void* PreviousContext;
         internal void* State; // the arena's State*
 
+        /// <summary>Puts back the previous allocator; with DebugChecks, also checks that no static field points into the arena.</summary>
         public void Dispose()
         {
             // SAFETY: puts back what AllocateObjectsHere found.

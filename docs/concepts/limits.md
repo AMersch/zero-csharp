@@ -23,8 +23,9 @@ With zerocore, as `build.sh` builds it:
 - **Static fields of every type**, including strings, objects and arrays, and static constructors.
 - **Strings**: `==`, `+`, `switch`, plus `lib/` for the rest (see [Strings without a GC](strings.html)).
 - **Delegates and lambdas** (they allocate), `try`/`finally` and `using`.
-- **Function pointers, P/Invoke and `[UnmanagedCallersOnly]` callbacks.** Threads come from pthreads
-  through P/Invoke, with `Interlocked` and `Volatile` for shared state.
+- **Function pointers, P/Invoke and `[UnmanagedCallersOnly]` callbacks.**
+- **Threads**: [`Parallel.For`](../how-to/run-in-parallel.html) runs a loop on every processor, with
+  `Interlocked` and `Volatile` for shared state. There is no `Thread` class or `lock`.
 - **`Math` and `MathF`**, and `Main(string[] args)` and top-level statements.
 - **Extension methods**, and C# 14 **extension members**: properties, static members and
   `ref` receivers in `extension(...)` blocks.
@@ -210,7 +211,7 @@ These are the issues you may hit with zerocore, as `build.sh` builds:
 | `[DllImport]` of a library not passed with `-i` fails to compile ("Expected type 'Internal.Runtime.CompilerHelpers.InteropHelpers' not found") | Pass `-i <library>`; `build.sh` passes `-i libc -i libm.so.6` |
 | Building without `--no-reflection` fails ("Failed to load type 'Internal.Metadata.NativeFormat.TypeDefinition'") | Pass `--no-reflection`; `build.sh` does |
 | Non-baseline instruction sets (AVX2, FMA, dotprod) report `IsSupported == false` | Build with `-m x86-64-v3` or `-m dotprod`; `build.sh` does this for Simd and Kernels |
-| No `Console`, `Half`, `Thread` | `lib/Out.cs` for output, `lib/In.cs` for input; pthreads through P/Invoke for threads |
+| No `Console`, `Half`, `Thread` | `lib/Out.cs` for output, `lib/In.cs` for input; `Parallel.For` (`lib/Threads.cs`) for threads |
 | `"n=" + 5` doesn't compile (no `object.ToString`) | `Str.Format(arena, $"n={5}")` |
 | Casts and interface calls that need variance abort at run time | Not supported |
 | Windows: x64 only, built from Linux or macOS | `./build.sh --win`; building on Windows (`build.ps1`) is untested |

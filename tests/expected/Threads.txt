@@ -1,0 +1,4 @@
+PASS Parallel.For (4 checks)
+PASS an arena per part (2 checks)
+
+All checks passed.

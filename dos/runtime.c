@@ -150,6 +150,49 @@ static void fatal(const char *message, size_t length)
     abort();
 }
 
+// ---- threads: there are none --------------------------------------------------
+//
+// lib/Threads.cs starts no thread when pthread_create fails, and runs its loop
+// itself. zerocore's ObjectAllocator keeps its per-thread setting in a key;
+// with one thread, a key is a variable.
+
+#define MAX_KEYS 8
+static void *key_values[MAX_KEYS];
+static unsigned key_count;
+
+int pthread_create(void *thread, void *attributes, void *(*start)(void *), void *argument)
+{
+    (void)thread; (void)attributes; (void)start; (void)argument;
+    return 38; // ENOSYS
+}
+
+int pthread_join(void *thread, void **result)
+{
+    (void)thread; (void)result;
+    return 3; // ESRCH: no thread was started
+}
+
+int pthread_key_create(unsigned *key, void (*destructor)(void *))
+{
+    (void)destructor;
+    if (key_count == MAX_KEYS)
+        return 11; // EAGAIN
+    *key = key_count++;
+    return 0;
+}
+
+void *pthread_getspecific(unsigned key) { return key < key_count ? key_values[key] : 0; }
+
+int pthread_setspecific(unsigned key, void *value)
+{
+    if (key >= key_count)
+        return 22; // EINVAL
+    key_values[key] = value;
+    return 0;
+}
+
+int get_nprocs(void) { return 1; }
+
 // ---- entry -------------------------------------------------------------------
 
 int __managed__Main(int argc, char **argv);

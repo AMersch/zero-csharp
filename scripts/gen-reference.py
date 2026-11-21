@@ -25,6 +25,7 @@ PAGES = [
     ('StrDict.cs', ['StrDict'], 'strdict', 'Hash map with string keys compared by text, values of any type.'),
     ('RefDict.cs', ['RefDict'], 'refdict', 'Hash map with unmanaged keys and reference values.'),
     ('Seq.cs', ['Seq', 'Query'], 'seq', 'Allocation-free query operators over spans: Where, Select, Sum, ...'),
+    ('Threads.cs', ['Parallel'], 'parallel', 'Loops whose iterations run on every processor.'),
     ('Str.cs', ['Str', 'MemoryExtensions'], 'str', 'Parsing, comparing and arena strings; span and string operations.'),
     ('StrBuilder.cs', ['StrBuilder'], 'strbuilder', 'Growable string buffer in an arena.'),
     ('Out.cs', ['Out'], 'out', 'Buffered, UTF-8 standard output with $"..." formatting.'),

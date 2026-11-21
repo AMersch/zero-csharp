@@ -36,6 +36,28 @@ namespace System.Runtime
         [RuntimeExport("RhpNewPtrArrayFast")]
         internal static object RhpNewPtrArrayFast(MethodTable* type, int length) => RhpNewArray(type, length);
 
+        // On 32-bit targets (WebAssembly, DOS), objects holding a long or a
+        // double ask for 8-byte alignment. calloc and ObjectAllocator give it,
+        // so these allocate as usual.
+        [RuntimeExport("RhpNewFastAlign8")]
+        internal static object RhpNewFastAlign8(MethodTable* type) => RhpNewFast(type);
+
+        [RuntimeExport("RhpNewArrayFastAlign8")]
+        internal static object RhpNewArrayFastAlign8(MethodTable* type, int length) => RhpNewArray(type, length);
+
+        // A boxed long or double on a 32-bit target: its value follows the
+        // 4-byte method table pointer, so the object must start 4 bytes past
+        // an 8-byte boundary for the value to be aligned.
+        [RuntimeExport("RhpNewFastMisalign")]
+        internal static object RhpNewFastMisalign(MethodTable* type)
+        {
+            nint memory = AllocateZeroed(type->BaseSize + 4);
+            if ((memory & 7) == 0)
+                memory += 4;
+            *(MethodTable**)memory = type;
+            return Unsafe.As<nint, object>(ref memory);
+        }
+
         // Boxing: a struct converted to object or to an interface becomes an
         // object holding a copy of it.
         internal static object RhBox(MethodTable* type, ref byte data)
@@ -115,10 +137,21 @@ namespace System.Runtime
         // so must an ObjectAllocator.
         private static object Allocate(MethodTable* type, nuint size)
         {
+            nint memory = AllocateZeroed(size);
+            *(MethodTable**)memory = type;
+            return Unsafe.As<nint, object>(ref memory);
+        }
+
+        // size zeroed bytes, 8-byte aligned, from this thread's ObjectAllocator
+        // or calloc.
+        private static nint AllocateZeroed(nuint size)
+        {
             nint memory;
-            if (ObjectAllocator.s_allocate != null)
+            void* setting = System.Threading.Volatile.Read(ref ObjectAllocator.s_threadsWithSetting) != 0
+                ? ObjectAllocator.CurrentSetting() : null;
+            if (ObjectAllocator.HasAllocate(setting))
             {
-                memory = (nint)ObjectAllocator.s_allocate(ObjectAllocator.s_context, size);
+                memory = (nint)ObjectAllocator.Allocate(setting, size);
             }
             else
             {
@@ -127,8 +160,7 @@ namespace System.Runtime
             }
             if (memory == 0)
                 Environment.FailFast("Out of memory");
-            *(MethodTable**)memory = type;
-            return Unsafe.As<nint, object>(ref memory);
+            return memory;
         }
     }
 }

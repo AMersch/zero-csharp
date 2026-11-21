@@ -1,6 +1,6 @@
 // The C side of a 64-bit Windows program: the entry point, and the POSIX
 // functions zerocore and lib/ call that Windows doesn't have under those names
-// (write, read, clock_gettime). The rest of the C library (calloc, malloc,
+// (write, read, clock_gettime, the pthreads lib/Threads.cs uses). The rest of the C library (calloc, malloc,
 // puts, abort, the math functions) comes from Windows' own, the Universal CRT;
 // memset and memmove from ntdll.
 //
@@ -30,6 +30,15 @@ IMPORT int QueryPerformanceCounter(i64 *count);
 IMPORT int QueryPerformanceFrequency(i64 *frequency);
 IMPORT __declspec(noreturn) void ExitProcess(u32 code);
 IMPORT unsigned int _set_abort_behavior(unsigned int flags, unsigned int mask);
+IMPORT Handle CreateThread(void *security, u64 stackSize, u32 (*start)(void *), void *argument,
+                           u32 flags, u32 *id);
+IMPORT u32 WaitForSingleObject(Handle handle, u32 milliseconds);
+IMPORT int CloseHandle(Handle handle);
+IMPORT int HeapFree(Handle heap, u32 flags, void *memory);
+IMPORT u32 TlsAlloc(void);
+IMPORT void *TlsGetValue(u32 index);
+IMPORT int TlsSetValue(u32 index, void *value);
+IMPORT u32 GetActiveProcessorCount(unsigned short group);
 
 #define CP_UTF8 65001
 #define STD_INPUT_HANDLE ((u32)-10)
@@ -131,6 +140,62 @@ i64 read(int fd, void *buffer, u64 count)
             return kept;
     }
 }
+
+// ---- threads, as pthreads ---------------------------------------------------
+//
+// lib/Threads.cs and zerocore's ObjectAllocator use the POSIX names; these are
+// the few they need, on Windows threads and thread-local storage.
+
+typedef struct { void *(*start)(void *); void *argument; } ThreadStart;
+
+static u32 run_thread(void *parameter)
+{
+    ThreadStart start = *(ThreadStart *)parameter;
+    HeapFree(GetProcessHeap(), 0, parameter);
+    start.start(start.argument);
+    return 0;
+}
+
+int pthread_create(Handle *thread, void *attributes, void *(*start)(void *), void *argument)
+{
+    (void)attributes;
+    ThreadStart *parameter = HeapAlloc(GetProcessHeap(), 0, sizeof(ThreadStart));
+    if (!parameter)
+        return 11; // EAGAIN
+    parameter->start = start;
+    parameter->argument = argument;
+    *thread = CreateThread(0, 0, run_thread, parameter, 0, 0);
+    if (!*thread) {
+        HeapFree(GetProcessHeap(), 0, parameter);
+        return 11;
+    }
+    return 0;
+}
+
+int pthread_join(Handle thread, void **result)
+{
+    WaitForSingleObject(thread, 0xFFFFFFFF);
+    CloseHandle(thread);
+    if (result)
+        *result = 0;
+    return 0;
+}
+
+int pthread_key_create(u64 *key, void (*destructor)(void *))
+{
+    (void)destructor;
+    u32 index = TlsAlloc();
+    if (index == 0xFFFFFFFF)
+        return 11;
+    *key = index;
+    return 0;
+}
+
+void *pthread_getspecific(u64 key) { return TlsGetValue((u32)key); }
+
+int pthread_setspecific(u64 key, void *value) { return TlsSetValue((u32)key, value) ? 0 : 22; }
+
+int get_nprocs(void) { return (int)GetActiveProcessorCount(0xFFFF); }
 
 // CLOCK_MONOTONIC only, which is all the samples ask for.
 int clock_gettime(int clock, i64 *timespec)

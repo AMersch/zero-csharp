@@ -42,6 +42,8 @@ is one thread, no SIMD, and native code can't call back into C#. The test suite 
 output with its native build's, except where it can't match: Arena and Collections print
 pointer-sized byte counts, and Simd and Kernels print timings, so only their exit codes are checked.
 
+The same modules also run [in your browser](browser.html), on this site.
+
 For the details (what the toolchain does, the shadow stack, and what doesn't carry over), see
 [Build for WebAssembly](../how-to/build-for-webassembly.html) and
 [How the targets work](../concepts/targets.html).

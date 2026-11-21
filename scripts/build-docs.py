@@ -94,6 +94,15 @@ def finish(pages):
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta http-equiv="refresh" content="0; url=../reference/index.html"><title>Reference</title></head>'
         '<body><a href="../reference/index.html">Reference</a></body></html>\n')
+    # The samples' WebAssembly builds, for "Run it in your browser". CI builds them first
+    # (./build.sh --wasm); without them the page still builds, and says so when run.
+    modules = sorted((ROOT / 'bin/wasm').glob('*.wasm'))
+    if modules:
+        (OUTPUT / 'wasm').mkdir(exist_ok=True)
+        for module in modules:
+            shutil.copyfile(module, OUTPUT / 'wasm' / module.name)
+    else:
+        print('No bin/wasm/*.wasm: the browser page will have nothing to run.', flush=True)
     for name in ASSETS:
         source = DOCS / name
         if source.is_dir():
@@ -106,6 +115,9 @@ def finish(pages):
             continue
         depth = len(page.relative_to(OUTPUT).parts) - 1
         up = '../' * depth
+        # Pages with a sample runner get the script that runs the WebAssembly builds.
+        if 'data-wasm-runner' in text and 'content/run-wasm.js"' not in text:
+            text = text.replace('</body>', f'<script type="module" src="{up}content/run-wasm.js"></script></body>')
         # FsLiveDocs has no setting for extra scripts: add the highlighter for C#, shell and C.
         if 'content/csharp.js' not in text:
             text = text.replace('</body>', f'<script src="{up}content/highlight.min.js" defer></script>'

@@ -29,6 +29,9 @@ terms.
 2. [Build your first program](first-program.html) and run it.
 3. Run the same program [on WebAssembly](webassembly.html) and [on DOS](dos.html).
 
+Or skip the installing: [run the samples in your browser](browser.html), compiled to WebAssembly from
+this site's version of the code.
+
 Then the [tutorial](../tutorial/index.html) builds a small interactive program step by step, the
 [concepts](../concepts/index.html) explain how zero mode works and why, and the
 [task guides](../how-to/index.html) answer specific questions.

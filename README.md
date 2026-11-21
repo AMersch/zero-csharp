@@ -6,6 +6,8 @@ Exploring [bflat](https://flattened.net/)'s zero mode: C# compiled to tiny nativ
 
 **Zero mode is essentially "C with proper generics"**: C#'s syntax, type safety, and generics with C-like binary sizes (16-160 KB).
 
+**Without cloning:** on Linux with the .NET 10 SDK, `dotnet new install ZeroCSharp.Templates`, `dotnet new zero -o Hello`, `cd Hello && dotnet build` makes a native program; `-p:ZeroTarget=win-x64` makes a Windows one. The packages are built from [`sdk/`](sdk/); see [Install with dotnet](https://onurgumus.github.io/zero-csharp/get-started/install-with-dotnet.html).
+
 **Documentation:** <https://onurgumus.github.io/zero-csharp/>, a guide to installing the fork, a tutorial, concepts, task guides and a reference for `lib/`. Its source is in `docs/`; build it with `dotnet tool restore && python3 scripts/build-docs.py` (needs .NET 10, Python 3 and Node), then `python3 -m http.server -d output`.
 
 The samples don't use bflat's built-in zero-mode library (`--stdlib:zero`, zerolib). They use [`zerocore/`](zerocore/README.md), an MIT-licensed core library in this repo that `build.sh` compiles from source, so nothing AGPL-licensed is linked into the binaries (see [Core library](#core-library)).
@@ -406,6 +408,6 @@ With bflat's zerolib (`--stdlib:zero`), for reference; the fork fixes most of th
 
 ## License
 
-MIT, including `zerocore/` (see [`zerocore/LICENSE`](zerocore/LICENSE)). zerocore's README explains where its code comes from and carries a caveat: it wasn't written in a clean room, so have it reviewed before shipping a commercial product on it.
+MIT ([`LICENSE`](LICENSE)), including `zerocore/` (see [`zerocore/LICENSE`](zerocore/LICENSE)) and the `ZeroCSharp.Sdk` and `ZeroCSharp.Templates` packages. zerocore's README explains where its code comes from and carries a caveat: it wasn't written in a clean room, so have it reviewed before shipping a commercial product on it.
 
-bflat and the fork are AGPL-3.0. `build.sh` uses them as a compiler; their zerolib is not linked into the binaries it produces. Each binary does link the C library of the system it targets (glibc on Linux, WASI's libc on WebAssembly), under its own license.
+bflat and the fork are AGPL-3.0, and so are the `ZeroCSharp.Bflat.*` packages that carry it; the SDK downloads them as a tool, and nothing from them is linked into programs. `build.sh` uses them as a compiler; their zerolib is not linked into the binaries it produces. Each binary does link the C library of the system it targets (glibc on Linux, WASI's libc on WebAssembly), under its own license.

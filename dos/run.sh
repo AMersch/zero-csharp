@@ -65,6 +65,16 @@ fi
 # HXLDR32 stays resident and makes DOS start Windows console programs through
 # HX's loader, so the program is run by its name like any DOS program.
 # CTMOUSE is FreeDOS's mouse driver; without a mouse it just doesn't load.
+# The program's arguments as a DOS command line: one with a space in it is
+# quoted, and the program's startup code (dos/runtime.c) splits it back.
+arguments=
+for argument in "$@"; do
+    case "$argument" in
+        *" "*) arguments+=" \"$argument\"" ;;
+        *) arguments+=" $argument" ;;
+    esac
+done
+
 files=("$exe=PROGRAM.EXE" "$work/RUN.BAT"
     "$DOS_HX/HXLDR32.EXE" "$DOS_HX/DPMILD32.EXE" "$DOS_HX/HDPMI32.EXE" "$DOS_HX/DKRNL32.DLL")
 {
@@ -74,9 +84,9 @@ files=("$exe=PROGRAM.EXE" "$work/RUN.BAT"
         files+=("$DOS_MOUSE")
     fi
     if [ "$window" = 1 ]; then
-        printf 'PROGRAM.EXE %s\r\n' "$*"
+        printf 'PROGRAM.EXE%s\r\n' "$arguments"
     else
-        printf 'PROGRAM.EXE %s%s > OUT.TXT\r\n' "$*" "$input"
+        printf 'PROGRAM.EXE%s%s > OUT.TXT\r\n' "$arguments" "$input"
         printf 'echo %%ERRORLEVEL%% > CODE.TXT\r\n'
         printf 'FDAPM POWEROFF\r\n'
     fi

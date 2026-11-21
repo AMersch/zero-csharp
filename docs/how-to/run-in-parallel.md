@@ -1,6 +1,6 @@
 ---
 title: Run a loop in parallel
-index: 11
+index: 12
 ---
 
 # Run a loop in parallel

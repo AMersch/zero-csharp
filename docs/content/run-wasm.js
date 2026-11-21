@@ -138,10 +138,11 @@ for (const runner of document.querySelectorAll('[data-wasm-runner]')) {
     button.disabled = true;
     output.textContent = 'Running…';
     try {
-      const url = `${base}${pick.value}.wasm`;
+      const url = `${base}${pick.selectedOptions[0].dataset.module || pick.value}.wasm`;
       const started = performance.now();
       const { output: text, exitCode, trapped } = await runWasm(url, {
-        args: args.value.split(/\s+/).filter(Boolean),
+        // Split like a shell, roughly: "quoted text" is one argument.
+        args: (args.value.match(/"[^"]*"|\S+/g) || []).map(a => a.replace(/^"(.*)"$/, '$1')),
         stdin: stdin.value,
       });
       const ms = Math.round(performance.now() - started);

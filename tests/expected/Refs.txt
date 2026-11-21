@@ -1,0 +1,9 @@
+a = (11, 99), b = (5, 5)
+PASS refs into an arena (5 checks)
+PASS refs to elements (3 checks)
+first.X = 42, list[0].X = 0
+PASS a ref outlives a list's buffer (1 checks)
+leaked = (1, 1)
+PASS a ref outlives an arena scope (1 checks)
+
+All checks passed.

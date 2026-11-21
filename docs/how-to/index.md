@@ -25,6 +25,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
 - [Query data without allocating](query-data.html): `Where`, `Select`, `Sum` and query syntax over
   spans with `lib/Seq.cs`, tuples instead of anonymous types, and checking that a loop allocates
   nothing.
+- [Pass structs by reference](pass-structs-by-ref.html): allocate a struct in an arena, pass it with
+  `ref` and `in`, return a ref, and keep the ref from outliving a list's buffer or an arena scope.
 - [Catch arena mistakes](catch-arena-mistakes.html): turn on `Arena.DebugChecks`, name your arenas, and
   see what the library stops the program for.
 
@@ -43,3 +45,5 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   and the ready-made kernels in `lib/Kernels.cs`.
 - [Run a loop in parallel](run-in-parallel.html): `Parallel.For` over every processor, sharing a total
   with `Interlocked`, and one arena per thread.
+- [Run a language model](run-a-language-model.html): a small Llama-style model, compiled into the
+  program, telling stories on every target, DOS included.

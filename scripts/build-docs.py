@@ -29,9 +29,11 @@ SECTIONS = {
 # Where the site is published, for the absolute links that link previews need.
 SITE_URL = 'https://onurgumus.github.io/zero-csharp/'
 # The link-preview image, drawn from docs/social/card.html.
-SOCIAL_IMAGE = 'img/social.png'
-SOCIAL_IMAGE_ALT = ('C# code from the quiz tutorial next to a blue DOS screen running it: '
-                    'the quiz asks 38 + 8 and rejects the answer &quot;seven&quot;.')
+# The ?v= changes with the image, so sites that cached the old one fetch it again.
+SOCIAL_IMAGE = 'img/social.png?v=2'
+SOCIAL_IMAGE_ALT = ('Zero C#, C# with nothing underneath. Kept: C# 15, real generics, interfaces, '
+                    'records and lambdas. Left out: the garbage collector and the .NET runtime. '
+                    'Runs on Linux, macOS, Windows, WebAssembly and DOS.')
 # Files and folders copied into the site as they are.
 ASSETS = ['index.html', 'content', 'fonts', 'img']
 
@@ -99,8 +101,13 @@ def finish(pages):
     modules = sorted((ROOT / 'bin/wasm').glob('*.wasm'))
     if modules:
         (OUTPUT / 'wasm').mkdir(exist_ok=True)
+        (OUTPUT / 'wasm/src').mkdir(exist_ok=True)
         for module in modules:
             shutil.copyfile(module, OUTPUT / 'wasm' / module.name)
+            # The sample's source, which the page shows next to its output.
+            source = ROOT / 'samples' / (module.stem + '.cs')
+            if source.exists():
+                shutil.copyfile(source, OUTPUT / 'wasm/src' / source.name)
     else:
         print('No bin/wasm/*.wasm: the browser page will have nothing to run.', flush=True)
     for name in ASSETS:

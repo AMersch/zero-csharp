@@ -125,9 +125,8 @@
       <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != ''" />
       <_ZeroArg Include="-o &quot;$(ZeroNativeOutput)&quot;" Condition="'$(ZeroTarget)' != 'osx-arm64'" />
       <_ZeroArg Include="-o &quot;$(ZeroNativeObject)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
-      <!-- ld64.lld (macOS 11 or newer, arm64). zerocore finds the compiler's
-           module list between __start___modules and __stop___modules, GNU
-           ld's names; -alias gives them to the section's bounds. Chained
+      <!-- ld64.lld (macOS 11 or newer, arm64). zerocore's module list comes
+           from the payload's objects (mac/runtime.c, mac-arm64.S). Chained
            fixups: the classic lazy binding needs dyld_stub_binder's library.
            lld reads response files the GNU way, where a backslash escapes,
            so paths get forward slashes (which Windows takes too). -->
@@ -144,7 +143,6 @@
         <Forward>$([System.String]::Copy('%(FullPath)').Replace('\', '/'))</Forward>
       </_ZeroMacLibrary>
       <_ZeroLinkArg Include="@(_ZeroMacLibrary->'&quot;%(Forward)&quot;')" />
-      <_ZeroLinkArg Include="-alias section$start$__DATA$__modules ___start___modules -alias section$end$__DATA$__modules ___stop___modules" />
       <_ZeroLinkArg Include="-o &quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$(ZeroNativeOutput)'))').Replace('\', '/'))&quot;" />
     </ItemGroup>
     <PropertyGroup>

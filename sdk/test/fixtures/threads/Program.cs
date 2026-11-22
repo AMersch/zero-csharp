@@ -10,7 +10,7 @@ public sealed class Box
 
 public static class Program
 {
-    public static unsafe int Main()
+    public static int Main()
     {
         var box = new Box { Results = new long[1000] };
         Parallel.For(0, 1000, box, static (b, i) => b.Results[i] = i);
@@ -20,10 +20,16 @@ public static class Program
         Out.Write(sum);
         Out.Line();
 
-        float* x = stackalloc float[1];
-        x[0] = (float)(sum - 499500);
-        Kernels.Softmax(x, 1);                              // 1
-        Out.Write((long)(MathF.Exp(x[0] - 1f) + 0.5f));     // e^0 = 1
+        long one;
+        unsafe
+        {
+            // SAFETY: x points at one float on this method's stack.
+            float* x = stackalloc float[1];
+            x[0] = (float)(sum - 499500);
+            Kernels.Softmax(x, 1);                          // 1
+            one = (long)(MathF.Exp(x[0] - 1f) + 0.5f);      // e^0 = 1
+        }
+        Out.Write(one);
         Out.Line();
         return 0;
     }

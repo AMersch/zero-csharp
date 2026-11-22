@@ -813,7 +813,10 @@ test_newer_sdk_library() {
         mkdir -p "$src" "$WORK/newersdk-feeds/$v"
         (cd "$src" && unzip -qo "$WORK/newersdk-feed/ZeroTest.Geometry.1.0.0.nupkg")
         if [ ! -f "$src/build/ZeroTest.Geometry.props" ]; then fail "$name" "the package has no build/ZeroTest.Geometry.props"; return; fi
-        sed -i.bak "s|SdkVersion=\"[^\"]*\"|SdkVersion=\"$v\"|" "$src/build/ZeroTest.Geometry.props" && rm -f "$src/build/ZeroTest.Geometry.props.bak"
+        # NuGet imports buildTransitive/'s copy when there is one: change both.
+        for f in "$src/build/ZeroTest.Geometry.props" "$src/buildTransitive/ZeroTest.Geometry.props"; do
+            sed -i.bak "s|SdkVersion=\"[^\"]*\"|SdkVersion=\"$v\"|" "$f" && rm -f "$f.bak"
+        done
         rm -f "$WORK/newersdk-feeds/$v/ZeroTest.Geometry.1.0.0.nupkg"
         zip_dir "$src" "$WORK/newersdk-feeds/$v/ZeroTest.Geometry.1.0.0.nupkg"
         rm -rf "${NUGET_PACKAGES:-$HOME/.nuget/packages}/zerotest.geometry"
@@ -873,7 +876,7 @@ test_mac_target_undefined_import() {
 using System.Runtime.InteropServices;
 public static class Program
 {
-    [DllImport("libc")] static extern int zero_no_such_function();
+    [DllImport("libc")] static safe extern int zero_no_such_function();
     public static int Main() => zero_no_such_function();
 }
 CS

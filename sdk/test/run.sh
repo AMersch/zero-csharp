@@ -545,8 +545,9 @@ test_read_only_packages_folder() {
 test_release_tag_check() {
     local name="release tag check"
     LOG=$WORK/tagcheck.log
-    if ! sdk/check-tag.sh "sdk-v$VERSION" > "$LOG" 2>&1; then fail "$name" "sdk-v$VERSION was refused"; return; fi
-    if sdk/check-tag.sh "sdk-v0.0.9" > "$LOG" 2>&1; then fail "$name" "sdk-v0.0.9 was accepted for $VERSION"; return; fi
+    # BFLAT_REF named: CI's environment sets it (sdk.yml).
+    if ! BFLAT_REF=master sdk/check-tag.sh "sdk-v$VERSION" > "$LOG" 2>&1; then fail "$name" "sdk-v$VERSION was refused"; return; fi
+    if BFLAT_REF=master sdk/check-tag.sh "sdk-v0.0.9" > "$LOG" 2>&1; then fail "$name" "sdk-v0.0.9 was accepted for $VERSION"; return; fi
     if ! grep -q "$VERSION" "$LOG"; then fail "$name" "the error doesn't name $VERSION"; return; fi
     # A release carries bflat from the fork's master, never a branch build.
     if BFLAT_REF=windows-lld sdk/check-tag.sh "sdk-v$VERSION" > "$LOG" 2>&1; then fail "$name" "a release from the fork branch windows-lld was accepted"; return; fi

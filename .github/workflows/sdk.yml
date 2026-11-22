@@ -21,7 +21,7 @@ on:
 
 # The fork's branch whose bflat the packages carry. master for a release.
 env:
-  BFLAT_REF: windows-lld
+  BFLAT_REF: master
 
 permissions:
   contents: read

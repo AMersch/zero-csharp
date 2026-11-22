@@ -95,7 +95,7 @@ dotnet build -p:ZeroTarget=osx-arm64      # bin/Debug/zero03/osx-arm64/Hello, fo
 `dotnet clean` removes all of them.
 
 A macOS program needs no Mac and no Xcode to build: bflat compiles it, and the package's lld links it
-against a list of macOS's C functions that the SDK carries (`libSystem.tbd`). It runs on macOS 11 or
+against a list of macOS's C functions that the SDK carries (`libSystem.tbd`). It runs on macOS 12 or
 newer on Apple Silicon, with an ad-hoc signature, which is what a Mac needs to run a program built
 there or copied over without a quarantine flag (a browser download gets one: `xattr -d
 com.apple.quarantine Hello` clears it). It can call macOS's C library (libc, libm, pthreads): the

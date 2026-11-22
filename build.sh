@@ -573,8 +573,8 @@ case "$TARGET" in
         # and our libSystem stub, for ld64.lld to link osx-arm64 programs.
         mkdir -p "$PAYLOAD_DIR/native/osx-arm64"
         echo "[clang] mac/runtime.c, zerocore/native/mac-arm64.S -> $PAYLOAD_DIR/native/osx-arm64"
-        "$WIN_CLANG" -target arm64-apple-macos11 -O2 -Wall -Wextra -c mac/runtime.c -o "$PAYLOAD_DIR/native/osx-arm64/runtime.o"
-        "$WIN_CLANG" -target arm64-apple-macos11 -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/osx-arm64/zerocore.o"
+        "$WIN_CLANG" -target arm64-apple-macos12 -O2 -Wall -Wextra -c mac/runtime.c -o "$PAYLOAD_DIR/native/osx-arm64/runtime.o"
+        "$WIN_CLANG" -target arm64-apple-macos12 -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/osx-arm64/zerocore.o"
         cp mac/libSystem.tbd "$PAYLOAD_DIR/native/osx-arm64/"
         {
             echo "zero-csharp $(git rev-parse HEAD)"

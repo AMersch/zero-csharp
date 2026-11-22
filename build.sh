@@ -15,13 +15,16 @@
 # With --win, builds 64-bit Windows programs (bin/win/*.exe), with bflat and
 # a clang that has the x86 target for the small C and assembly part.
 #
+# With --uefi, builds UEFI programs (bin/uefi/*.efi), which the firmware
+# starts without an operating system, for BFLAT_ARCH (x64 or arm64).
+#
 # With --mac (on a Mac with Apple Silicon), builds macOS programs (bin/mac/*)
 # that run directly, without the container: bflat compiles, Xcode's clang links.
 # With MAC_OBJECTS_PREBUILT=1 it only links, using the object files already in
 # bin/mac/obj (from `./build.sh --native-mac-objects <samples>` on Linux), and
 # needs neither bflat nor Docker: that is how CI's macOS job works.
 #
-# Usage:  ./build.sh [--wasm | --dos | --win | --mac] [Sample ...]     default: all samples
+# Usage:  ./build.sh [--wasm | --dos | --win | --mac | --uefi] [Sample ...]     default: all samples
 #         ./build.sh --sdk-payload <dir>     what the ZeroCSharp.Sdk package carries (sdk/)
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh),
 #         BFLAT_EXTRA_FLAGS (see bflat_flags)
@@ -31,8 +34,10 @@ source ./env.sh
 
 ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
-# Vga is a game for DOS only (lib/Dos.cs: graphics mode, keyboard, clock).
+# Vga is a game for DOS and UEFI (lib/Dos.cs, lib/Uefi.cs: graphics, keyboard, clock).
 DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama Vga)
+# UEFI gets every sample, and Vga too (lib/Uefi.cs has what it uses of lib/Dos.cs).
+UEFI_SAMPLES=("${ALL_SAMPLES[@]}" Vga)
 
 # Language version and memory safety rules for every sample.
 CSHARP_FLAGS=(--langversion preview --compiler-feature updated-memory-safety-rules)
@@ -448,6 +453,76 @@ build_mac_link() {
     done
 }
 
+# ---- UEFI --------------------------------------------------------------------
+#
+# Programs the firmware starts, before any operating system: bin/uefi/*.efi,
+# for x64 or arm64 (BFLAT_ARCH). bflat compiles and links them (--os uefi: the
+# Windows calling convention, an EFI application, no import libraries), and
+# efi/ stands in for the C library, which doesn't exist there:
+#   efi/start.c, efi/<arch>.S   the entry point, arguments, a larger stack
+#   efi/runtime.c               memory, write/read, the clock, pthreads, abort,
+#                               on top of the firmware's boot services
+#   efi/machine.c               what lib/Uefi.cs calls: screen, keys, files
+#   efi/libm/                   the math functions, from musl (efi/libm/COPYRIGHT)
+#   zerocore/native/win-<arch>.S  zerocore's routines, Windows calling convention
+# clang compiles them on the host (Xcode's on macOS), like win/, and bflat's
+# linker bundles libm into a library, so a program only gets what it calls.
+UEFI_OBJ=bin/uefi/obj-$BFLAT_ARCH
+# Each function in its own section, so the linker leaves out what isn't called.
+UEFI_CFLAGS=(-O2 -ffreestanding -fno-builtin -fno-stack-protector -fno-math-errno -ffunction-sections -fdata-sections)
+
+uefi_triple() {
+    case "$BFLAT_ARCH" in
+        x64)   echo x86_64-pc-windows-msvc ;;
+        arm64) echo aarch64-pc-windows-msvc ;;
+    esac
+}
+
+# $1: clang
+build_uefi_objects() {
+    local clang=$1 triple name source object
+    triple=$(uefi_triple)
+    mkdir -p "$UEFI_OBJ/libm"
+    echo "[clang] efi/{start,runtime,machine}.c, efi/$BFLAT_ARCH.S, zerocore/native/win-$BFLAT_ARCH.S -> $UEFI_OBJ"
+    for name in start runtime machine; do
+        "$clang" -target "$triple" "${UEFI_CFLAGS[@]}" -Wall -Wextra -c "efi/$name.c" -o "$UEFI_OBJ/$name.obj"
+    done
+    "$clang" -target "$triple" -c "efi/$BFLAT_ARCH.S" -o "$UEFI_OBJ/stack.obj"
+    "$clang" -target "$triple" -c "zerocore/native/win-$BFLAT_ARCH.S" -o "$UEFI_OBJ/zerocore.obj"
+    echo "[clang] efi/libm/*.c -> $UEFI_OBJ/libm"
+    for source in efi/libm/*.c; do
+        object=$UEFI_OBJ/libm/$(basename "$source" .c).obj
+        if [ "$source" -nt "$object" ] || [ efi/libm/include/libm.h -nt "$object" ]; then
+            # -w: musl's code, kept as it is
+            "$clang" -target "$triple" "${UEFI_CFLAGS[@]}" -std=c99 -w -Iefi/libm/include -c "$source" -o "$object"
+        fi
+    done
+}
+
+# $1: a folder of objects (build_uefi_objects's), whose libm/*.obj become libm.lib
+build_uefi_lib() {
+    check_bflat
+    echo "[lld]   $1/libm/*.obj -> $1/libm.lib"
+    "$BFLAT_DIR/bin/lld" -flavor link /lib /out:"$1/libm.lib" "$1"/libm/*.obj
+}
+
+build_uefi() {
+    local name
+    check_bflat
+    build_core "$CORE"
+    build_lib
+    build_uefi_lib "$UEFI_OBJ"
+    for name in "$@"; do
+        echo "[bflat] $name -> bin/uefi/$name.efi"
+        # shellcheck disable=SC2046
+        "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none \
+            "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os uefi --arch "$BFLAT_ARCH" $(bflat_flags "$name") \
+            --ldflags "$UEFI_OBJ/start.obj $UEFI_OBJ/runtime.obj $UEFI_OBJ/machine.obj $UEFI_OBJ/stack.obj $UEFI_OBJ/zerocore.obj $UEFI_OBJ/libm.lib" \
+            -o "bin/uefi/$name.efi"
+        rm -f "bin/uefi/$name.pdb"
+    done
+}
+
 # ---- The SDK's payload -------------------------------------------------------
 #
 # What the ZeroCSharp.Sdk package (sdk/) carries, so that users build without
@@ -495,6 +570,16 @@ if [ "${1:-}" = "--native-win" ]; then
     build_win "$@"
     exit 0
 fi
+if [ "${1:-}" = "--native-uefi" ]; then
+    shift
+    build_uefi "$@"
+    exit 0
+fi
+if [ "${1:-}" = "--native-uefi-lib" ]; then
+    shift
+    build_uefi_lib "$@"
+    exit 0
+fi
 if [ "${1:-}" = "--native-sdk-payload" ]; then
     shift
     build_sdk_payload "$@"
@@ -512,6 +597,7 @@ case "${1:-}" in
     --dos)  TARGET=dos; shift ;;
     --win)  TARGET=win; shift ;;
     --mac)  TARGET=mac; shift ;;
+    --uefi) TARGET=uefi; shift ;;
     --sdk-payload)
         TARGET=sdk-payload
         PAYLOAD_DIR=${2:?--sdk-payload needs a directory, inside this one}
@@ -526,6 +612,8 @@ esac
 if [ $# -eq 0 ]; then
     if [ "$TARGET" = dos ]; then
         set -- "${DOS_SAMPLES[@]}"
+    elif [ "$TARGET" = uefi ]; then
+        set -- "${UEFI_SAMPLES[@]}"
     else
         set -- "${ALL_SAMPLES[@]}"
     fi
@@ -537,8 +625,10 @@ for name in "$@"; do
             echo "$name isn't built for DOS: it benchmarks SIMD instructions, which a 386 doesn't have." >&2
             exit 1
         fi
+    elif [ "$TARGET" = uefi ] && [[ " ${UEFI_SAMPLES[*]} " == *" $name "* ]]; then
+        :
     elif [[ " ${DOS_SAMPLES[*]} " == *" $name "* ]] && [[ " ${ALL_SAMPLES[*]} " != *" $name "* ]]; then
-        echo "$name is a DOS program: ./build.sh --dos $name" >&2
+        echo "$name is a DOS and UEFI program: ./build.sh --dos $name or ./build.sh --uefi $name" >&2
         exit 1
     else
         check_sample "$name"
@@ -550,6 +640,7 @@ case "$TARGET" in
     dos)    output() { echo "bin/dos/$1.exe"; } ;;
     win)    output() { echo "bin/win/$1.exe"; } ;;
     mac)    output() { echo "bin/mac/$1"; } ;;
+    uefi)   output() { echo "bin/uefi/$1.efi"; } ;;
     native) output() { echo "bin/$1"; } ;;
 esac
 
@@ -593,6 +684,15 @@ case "$TARGET" in
         done
         "$WIN_CLANG" -target arm64-apple-macos12 -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/osx-arm64/zerocore.o"
         cp mac/libSystem.tbd "$PAYLOAD_DIR/native/osx-arm64/"
+        # UEFI: efi/'s objects for each architecture, and libm as one library.
+        for arch in x64 arm64; do
+            BFLAT_ARCH=$arch UEFI_OBJ=$PAYLOAD_DIR/native/uefi-$arch.obj build_uefi_objects "$WIN_CLANG"
+            BFLAT_ARCH=$arch run uefi-lib "$PAYLOAD_DIR/native/uefi-$arch.obj"
+            mkdir -p "$PAYLOAD_DIR/native/uefi-$arch"
+            mv "$PAYLOAD_DIR/native/uefi-$arch.obj"/{start,runtime,machine,stack,zerocore}.obj \
+                "$PAYLOAD_DIR/native/uefi-$arch.obj/libm.lib" "$PAYLOAD_DIR/native/uefi-$arch/"
+            rm -rf "$PAYLOAD_DIR/native/uefi-$arch.obj"
+        done
         {
             echo "zero-csharp $(git rev-parse HEAD)"
             # BFLAT_COMMIT when the layouts came without their checkout (CI's cache).
@@ -618,6 +718,15 @@ case "$TARGET" in
         fi
         build_win_objects "$WIN_CLANG"
         run win "$@"
+        ;;
+    uefi)
+        if ! UEFI_CLANG=$(find_dos_clang); then
+            echo "Error: no clang that can compile for Windows targets. Install clang (Xcode's works)." >&2
+            exit 1
+        fi
+        mkdir -p bin/uefi
+        build_uefi_objects "$UEFI_CLANG"
+        run uefi "$@"
         ;;
     dos)
         if ! DOS_CLANG=$(find_dos_clang); then

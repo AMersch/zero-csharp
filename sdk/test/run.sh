@@ -71,6 +71,20 @@ is_elf() {
 }
 is_pe() { [ "$(head -c 2 "$1" 2>/dev/null)" = MZ ]; }
 is_coff_x64() { [ "$(byte_at "$1" 0)" = 100 ] && [ "$(byte_at "$1" 1)" = 134 ]; }
+is_coff_arm64() { [ "$(byte_at "$1" 0)" = 100 ] && [ "$(byte_at "$1" 1)" = 170 ]; }
+# A UEFI application for $2 (x64 or arm64): a PE file whose machine is that
+# architecture and whose subsystem is 10 (EFI application).
+is_efi_app() {
+    local pe machine
+    is_pe "$1" || return 1
+    pe=$(od -An -tu4 -j60 -N4 "$1" | tr -d ' ')
+    machine=$(od -An -tu2 -j$((pe + 4)) -N2 "$1" | tr -d ' ')
+    case "$2" in
+        x64)   [ "$machine" = 34404 ] || return 1 ;;
+        arm64) [ "$machine" = 43620 ] || return 1 ;;
+    esac
+    [ "$(od -An -tu2 -j$((pe + 92)) -N2 "$1" | tr -d ' ')" = 10 ]
+}
 # is_macho_arm64 <file>: 64-bit Mach-O (cf fa ed fe) for arm64 (CPU type 0x0100000c).
 is_macho_arm64() {
     [ "$(byte_at "$1" 0)" = 207 ] && [ "$(byte_at "$1" 1)" = 250 ] && [ "$(byte_at "$1" 2)" = 237 ] && [ "$(byte_at "$1" 3)" = 254 ] &&
@@ -204,7 +218,9 @@ test_payload_complete() {
              native/linux-arm64/zerocore.o native/linux-arm64/library.o \
              native/win-x64/start.obj native/win-x64/runtime.obj native/win-x64/library.obj native/win-x64/zerocore.obj \
              native/osx-arm64/start.o native/osx-arm64/runtime.o native/osx-arm64/library.o native/osx-arm64/zerocore.o \
-             native/osx-arm64/libSystem.tbd VERSIONS.txt; do
+             native/osx-arm64/libSystem.tbd VERSIONS.txt \
+             native/uefi-x64/{start,runtime,machine,stack,zerocore}.obj native/uefi-x64/libm.lib \
+             native/uefi-arm64/{start,runtime,machine,stack,zerocore}.obj native/uefi-arm64/libm.lib; do
         if [ ! -s "$payload/$f" ]; then fail "payload complete" "missing $f"; return; fi
     done
     if ! is_elf "$payload/native/linux-x64/zerocore.o" x86-64; then fail "payload complete" "linux-x64 object isn't x86-64"; return; fi
@@ -213,6 +229,10 @@ test_payload_complete() {
     if ! is_elf "$payload/native/linux-arm64/library.o" aarch64; then fail "payload complete" "linux-arm64 library.o isn't aarch64"; return; fi
     for f in start.obj runtime.obj library.obj; do
         if ! is_coff_x64 "$payload/native/win-x64/$f"; then fail "payload complete" "win-x64/$f isn't COFF"; return; fi
+    done
+    for f in start runtime machine stack zerocore; do
+        if ! is_coff_x64 "$payload/native/uefi-x64/$f.obj"; then fail "payload complete" "uefi-x64/$f.obj isn't x64 COFF"; return; fi
+        if ! is_coff_arm64 "$payload/native/uefi-arm64/$f.obj"; then fail "payload complete" "uefi-arm64/$f.obj isn't arm64 COFF"; return; fi
     done
     for f in start.o runtime.o library.o zerocore.o; do
         if ! is_macho_arm64 "$payload/native/osx-arm64/$f"; then fail "payload complete" "osx-arm64/$f isn't arm64 Mach-O"; return; fi
@@ -295,6 +315,10 @@ test_cross_targets() {
     if [ "$HOST_ARCH_NAME" = x64 ]; then other=linux-arm64; other_arch=aarch64; else other=linux-x64; other_arch=x86-64; fi
     if ! run_in "$dir" cross-linux build -p:ZeroTarget=$other; then fail "$name" "$other build failed"; return; fi
     if ! is_elf "$dir/bin/Debug/$TFM/$other/native" "$other_arch"; then fail "$name" "not an ELF for $other_arch"; return; fi
+    for other in x64 arm64; do
+        if ! run_in "$dir" cross-uefi-$other build -p:ZeroTarget=uefi-$other; then fail "$name" "uefi-$other build failed"; return; fi
+        if ! is_efi_app "$dir/bin/Debug/$TFM/uefi-$other/native.efi" $other; then fail "$name" "native.efi isn't a UEFI application for $other"; return; fi
+    done
     pass "$name"
 }
 

@@ -14,6 +14,9 @@
     <!-- Whether the build makes native code: a program, or a native library. -->
     <ZeroBuildsNative Condition="'$(OutputType)' != 'Library' or '$(ZeroNativeLibrary)' == 'true'">true</ZeroBuildsNative>
     <IsPackable Condition="'$(NativeLib)' != ''">false</IsPackable>
+    <!-- A program's PDB in the output folder is the linker's (Windows), the one
+         debuggers want: the C# compiler's, for IL that nothing runs, stays in obj/. -->
+    <CopyOutputSymbolsToOutputDirectory Condition="'$(OutputType)' != 'Library'">false</CopyOutputSymbolsToOutputDirectory>
   </PropertyGroup>
 
   <ItemGroup>
@@ -49,7 +52,7 @@
           Condition="'$(ZeroBuildsNative)' == 'true'"
           DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand"
           Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);$(ZeroNativeArgsFile)"
-          Outputs="$(ZeroNativeOutput)">
+          Outputs="$(ZeroNativeOutput);$(ZeroDebugObject)">
     <!-- NuGet doesn't keep the executable bit; a packages folder that's
          read-only (shared or mounted) must already have it. -->
     <Exec Condition="'$(OS)' != 'Windows_NT'" Command="test -x &quot;$(ZeroBflatDir)bflat&quot; &amp;&amp; test -x &quot;$(ZeroBflatDir)bin/lld&quot; || chmod +x &quot;$(ZeroBflatDir)bflat&quot; &quot;$(ZeroBflatDir)bin/lld&quot;" />
@@ -117,6 +120,8 @@
            Text="Zero C# can't make native programs on this machine yet; build on Linux (x64 or arm64), Windows x64 or an Apple Silicon Mac." />
     <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64' and '$(ZeroTarget)' != 'osx-arm64'"
            Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64, osx-arm64." />
+    <Error Condition="'$(ZeroOptimizeFor)' != 'None' and '$(ZeroOptimizeFor)' != 'Speed' and '$(ZeroOptimizeFor)' != 'Size'"
+           Text="ZeroOptimizeFor '$(ZeroOptimizeFor)' isn't supported. Use one of: None, Speed, Size." />
   </Target>
 
   <Target Name="ZeroNativeCommand" DependsOnTargets="ZeroNativeFiles">
@@ -142,6 +147,9 @@
       <!-- macOS: bflat's object, then ld64.lld's command line. -->
       <ZeroNativeObject>$(IntermediateOutputPath)zero-native.$(ZeroTarget).o</ZeroNativeObject>
       <ZeroLinkArgsFile>$(IntermediateOutputPath)zero-link.$(ZeroTarget).args</ZeroLinkArgsFile>
+      <!-- The macOS program's debug information stays in bflat's object (the
+           program only points at it), so a missing object is a reason to rebuild. -->
+      <ZeroDebugObject Condition="'$(ZeroTarget)' == 'osx-arm64'">$(ZeroNativeObject)</ZeroDebugObject>
     </PropertyGroup>
     <ItemGroup>
       <!-- Zero libraries: every resolved reference that isn't zerocore or lib/
@@ -187,6 +195,7 @@
            the entry points; zero_dll_start (win/library.c) sets up zerocore
            when it loads. -->
       <_ZeroArg Include="--os windows --target Shared --ldflags /entry:zero_dll_start --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)library.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' == 'true'" />
+      <_ZeroArg Include="-O0" Condition="'$(ZeroOptimizeFor)' == 'None'" />
       <_ZeroArg Include="-Os" Condition="'$(ZeroOptimizeFor)' == 'Size'" />
       <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != ''" />
       <_ZeroArg Include="-o &quot;$(ZeroNativeOutput)&quot;" Condition="'$(ZeroTarget)' != 'osx-arm64'" />
@@ -244,6 +253,14 @@
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName)')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName).exe')" />
       <ZeroNativeFile Include="$(IntermediateOutputPath)zero-native*.args" />
+      <!-- macOS: bflat's objects (the programs' debug information) and exports
+           lists, and the linker's command lines. -->
+      <ZeroNativeFile Include="$(IntermediateOutputPath)zero-native.*.o;$(IntermediateOutputPath)zero-native.*.txt;$(IntermediateOutputPath)zero-link.*.args" />
+      <!-- Windows: the linker's PDB next to the program or library. -->
+      <ZeroNativeFile Include="$(OutDir)$(AssemblyName).pdb" Condition="'$(OutputType)' != 'Library'" />
+      <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName).pdb')" />
+      <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).pdb')" />
+      <ZeroNativeFile Include="$(OutDir)native/$(AssemblyName).pdb" />
       <_ZeroNativeLibraryFile Include="$(AssemblyName).so;$(AssemblyName).dylib;$(AssemblyName).dll;$(AssemblyName).lib" />
       <ZeroNativeFile Include="@(_ZeroNativeLibraryFile->'$(OutDir)native/%(Identity)')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).so')" />

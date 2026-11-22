@@ -348,7 +348,12 @@ test_bflat_failure_fails_the_build() {
     # The build fails because bflat did (its command exited with an error), over
     # the import it can't bind.
     if ! grep -qE 'tools/bflat/bflat(\.exe)?" build @.*exited with code' "$LOG"; then fail "$name" "the failing command wasn't bflat"; return; fi
-    if ! grep -q 'nosuchfunction' "$LOG"; then fail "$name" "the error doesn't name nosuchfunction"; return; fi
+    # Debug isn't optimized, and bflat then fails before naming the function: on
+    # the runtime support that binding at run time would need (zerocore/README.md).
+    if ! grep -q 'InteropHelpers' "$LOG"; then fail "$name" "Debug: the error doesn't name InteropHelpers"; return; fi
+    if run_in "$dir" badimport-release build -c Release; then fail "$name" "the Release build succeeded"; return; fi
+    if ! grep -qE 'tools/bflat/bflat(\.exe)?" build @.*exited with code' "$LOG"; then fail "$name" "Release: the failing command wasn't bflat"; return; fi
+    if ! grep -q 'nosuchfunction' "$LOG"; then fail "$name" "Release: the error doesn't name nosuchfunction"; return; fi
     pass "$name"
 }
 
@@ -358,6 +363,78 @@ test_size() {
     dir=$(fixture native size)
     if ! run_in "$dir" size build -v:n -p:ZeroOptimizeFor=Size; then fail "$name" "dotnet build failed"; return; fi
     if ! grep -q 'bflat arguments:.* -Os' "$LOG"; then fail "$name" "bflat wasn't given -Os"; return; fi
+    pass "$name"
+}
+
+# Debug builds aren't optimized (-O0), for debuggers; Release and a chosen
+# ZeroOptimizeFor are; an unknown ZeroOptimizeFor is an error.
+test_debug_unoptimized() {
+    local name="debug unoptimized" dir
+    can_build "$name" || return
+    dir=$(fixture native debugopt)
+    if ! run_in "$dir" debugopt-debug build -v:n; then fail "$name" "dotnet build failed"; return; fi
+    if ! grep -q 'bflat arguments:.* -O0' "$LOG"; then fail "$name" "Debug: bflat wasn't given -O0"; return; fi
+    if ! run_in "$dir" debugopt-release build -c Release -v:n; then fail "$name" "dotnet build -c Release failed"; return; fi
+    if ! grep -q 'bflat arguments:' "$LOG"; then fail "$name" "Release: no bflat arguments line"; return; fi
+    if grep -q 'bflat arguments:.* -O0' "$LOG"; then fail "$name" "Release: bflat was given -O0"; return; fi
+    if ! run_in "$dir" debugopt-speed build -v:n -p:ZeroOptimizeFor=Speed; then fail "$name" "Debug with Speed failed"; return; fi
+    if grep -q 'bflat arguments:.* -O0' "$LOG"; then fail "$name" "Debug with Speed: bflat was given -O0"; return; fi
+    # dotnet publish builds Release (PublishRelease), as for .NET 8 and later.
+    if ! run_in "$dir" debugopt-publish publish -v:n -o "$dir/out"; then fail "$name" "dotnet publish failed"; return; fi
+    if ! grep -qE "Copying file from .*[/\\]bin[/\\]Release[/\\]$TFM[/\\]native(\.exe)?\"" "$LOG"; then fail "$name" "dotnet publish didn't publish the Release program"; return; fi
+    if run_in "$dir" debugopt-bad build -p:ZeroOptimizeFor=Fast; then fail "$name" "ZeroOptimizeFor=Fast built"; return; fi
+    if ! grep -q "ZeroOptimizeFor 'Fast' isn't supported" "$LOG"; then fail "$name" "ZeroOptimizeFor=Fast: no message"; return; fi
+    pass "$name"
+}
+
+# Windows: the PDB next to a Debug program is the linker's, also after a build
+# that changed nothing, and debuggers stop on a line of Program.cs and read its
+# locals: cdb (Windows SDK), and CodeLLDB's lldb with the templates'
+# zero_lldb.py when ZERO_CODELLDB names an unpacked CodeLLDB .vsix (CI).
+test_windows_debugger() {
+    local name="windows debugger" dir pdb line cdb lldb out
+    if [ "$HOST_OS" != Windows ]; then skip "$name" "Windows only"; return; fi
+    dir=$(fixture debugme)
+    pdb=$dir/bin/Debug/$TFM/debugme.pdb
+    line=$(grep -n 'the breakpoint' "$dir/Program.cs" | cut -d: -f1)
+    if ! run_in "$dir" debugme build; then fail "$name" "dotnet build failed"; return; fi
+    if [ "$(head -c 24 "$pdb" 2> /dev/null)" != "Microsoft C/C++ MSF 7.00" ]; then fail "$name" "$pdb isn't the linker's PDB"; return; fi
+    if ! run_in "$dir" debugme-again build; then fail "$name" "the second dotnet build failed"; return; fi
+    if [ "$(head -c 24 "$pdb" 2> /dev/null)" != "Microsoft C/C++ MSF 7.00" ]; then fail "$name" "after a second build, $pdb isn't the linker's PDB"; return; fi
+    cdb="/c/Program Files (x86)/Windows Kits/10/Debuggers/x64/cdb.exe"
+    if [ ! -x "$cdb" ]; then fail "$name" "no cdb at $cdb"; return; fi
+    LOG=$WORK/debugme-cdb.log
+    (cd "$dir" && run_limited 300 "$LOG" "$cdb" -lines -c "bp \`debugme!Program.cs:$line\`;g;dv;q" "bin\\Debug\\$TFM\\debugme.exe")
+    if ! grep -qE 'total = (0n)?45' "$LOG"; then fail "$name" "cdb didn't show total = 45 at Program.cs:$line"; return; fi
+    if [ -n "${ZERO_CODELLDB:-}" ]; then
+        lldb=$(find "$ZERO_CODELLDB" -name lldb.exe | head -1)
+        if [ -z "$lldb" ]; then fail "$name" "no lldb.exe in $ZERO_CODELLDB"; return; fi
+        LOG=$WORK/debugme-lldb.log
+        (cd "$dir" && run_limited 300 "$LOG" "$lldb" -b \
+            -o "command script import $(native_path "$ROOT/sdk/ZeroCSharp.Templates/vscode/zero_lldb.py")" \
+            -o "b Program.cs:$line" -o run -o "frame variable total word" -o kill \
+            "bin\\Debug\\$TFM\\debugme.exe")
+        out=$(tr -d '\r' < "$LOG")
+        if [[ "$out" != *"total = 45"* ]]; then fail "$name" "CodeLLDB's lldb didn't show total = 45 at Program.cs:$line"; return; fi
+        if [[ "$out" != *'word = "zero" length=4'* ]]; then fail "$name" "zero_lldb.py didn't show word as \"zero\""; return; fi
+    fi
+    pass "$name"
+}
+
+# A macOS program's debug information stays in bflat's object in obj/: building
+# for another target keeps it, and a missing one is rebuilt.
+test_mac_debug_object_kept() {
+    local name="mac debug object kept" dir object
+    can_build "$name" || return
+    dir=$(fixture native macdebug)
+    object=$dir/obj/Debug/$TFM/zero-native.osx-arm64.o
+    if ! run_in "$dir" macdebug-mac build -p:ZeroTarget=osx-arm64; then fail "$name" "the osx-arm64 build failed"; return; fi
+    if [ ! -f "$object" ]; then fail "$name" "no $object"; return; fi
+    if ! run_in "$dir" macdebug-win build -p:ZeroTarget=win-x64; then fail "$name" "the win-x64 build failed"; return; fi
+    if [ ! -f "$object" ]; then fail "$name" "building for win-x64 removed the osx-arm64 object"; return; fi
+    rm -f "$object"
+    if ! run_in "$dir" macdebug-again build -p:ZeroTarget=osx-arm64; then fail "$name" "the second osx-arm64 build failed"; return; fi
+    if [ ! -f "$object" ]; then fail "$name" "a missing object wasn't rebuilt"; return; fi
     pass "$name"
 }
 
@@ -448,7 +525,7 @@ test_version_mismatch() {
 # ---- Templates ----------------------------------------------------------------
 
 test_templates() {
-    local name="templates" dir=$WORK/templates out
+    local name="templates" dir=$WORK/templates out file
     can_build "$name" || return
     rm -rf "$dir" && mkdir -p "$dir"
     fixture hello templates-config > /dev/null    # just for its nuget.config
@@ -459,6 +536,12 @@ test_templates() {
     if ! run_in "$dir/Hello" templates-build build; then fail "$name" "the program didn't build"; return; fi
     out=$(echo Ann | "$(exe "$dir/Hello/bin/Debug/$TFM/Hello")")
     if [[ "$out" != *"Hello, Ann!"* ]]; then fail "$name" "printed '$out'"; return; fi
+    # VS Code debugging: the program's name and folder filled in, and the rest.
+    for file in launch.json tasks.json settings.json extensions.json zero_lldb.py; do
+        if [ ! -f "$dir/Hello/.vscode/$file" ]; then fail "$name" "no .vscode/$file"; return; fi
+    done
+    if ! grep -q "\"\${workspaceFolder}/bin/Debug/$TFM/Hello\"" "$dir/Hello/.vscode/launch.json"; then fail "$name" "launch.json doesn't start bin/Debug/$TFM/Hello"; return; fi
+    if grep -q '@ZERO_' "$dir/Hello/.vscode/launch.json"; then fail "$name" "launch.json has a placeholder left"; return; fi
     if ! run_in "$dir" templates-newlib new zerolib -o Lib; then fail "$name" "dotnet new zerolib failed"; return; fi
     if ! run_in "$dir/Lib" templates-pack pack -o "$dir/feed"; then fail "$name" "the library didn't pack"; return; fi
     pass "$name"
@@ -1072,7 +1155,7 @@ test_native_library_app_recipe() {
 
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
-    bflat_failure_fails_the_build size macos_error
+    bflat_failure_fails_the_build size debug_unoptimized mac_debug_object_kept windows_debugger macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder

@@ -59,9 +59,14 @@
          output folder of its own, see Sdk.targets. -->
     <ZeroTargetChosen Condition="'$(ZeroTarget)' != ''">true</ZeroTargetChosen>
     <ZeroTarget Condition="'$(ZeroTarget)' == ''">$(ZeroHostRid)</ZeroTarget>
-    <!-- Speed (bflat's default) or Size (-Os). The native program is optimized
-         in Debug and Release alike, as build.sh does. -->
+    <!-- None (-O0), Speed (bflat's default) or Size (-Os). Debug builds aren't
+         optimized, so a debugger stops on every line and sees every local;
+         other configurations are. (The IL above is optimized either way.) -->
+    <ZeroOptimizeFor Condition="'$(ZeroOptimizeFor)' == '' and '$(Configuration)' == 'Debug'">None</ZeroOptimizeFor>
     <ZeroOptimizeFor Condition="'$(ZeroOptimizeFor)' == ''">Speed</ZeroOptimizeFor>
+    <!-- dotnet publish builds Release, as it does for .NET 8 and later (which
+         decide by the target framework, and don't know this one). -->
+    <PublishRelease Condition="'$(PublishRelease)' == ''">true</PublishRelease>
     <!-- ZeroDllImports: more libraries whose [DllImport]s are bound when the
          program is linked, besides libc and libm.so.6, which always are. -->
     <!-- ZeroInstructionSet: passed to bflat as -m (x86-64-v3, dotprod, ...). -->

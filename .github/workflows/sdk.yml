@@ -349,6 +349,14 @@ jobs:
         with:
           name: feed
           path: sdk/feed
+      # CodeLLDB as VS Code installs it, for the windows debugger test: its
+      # own lldb and Python, which the templates' launch.json starts.
+      - name: CodeLLDB
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/codelldb.zip" \
+            https://github.com/vadimcn/codelldb/releases/download/v1.12.3/codelldb-win32-x64.vsix
+          powershell.exe -NoProfile -Command "Expand-Archive -Path '$RUNNER_TEMP\codelldb.zip' -DestinationPath '$RUNNER_TEMP\codelldb'"
+          echo "ZERO_CODELLDB=$RUNNER_TEMP/codelldb" >> "$GITHUB_ENV"
       - name: Test
         env:
           ZERO_NO_PACK: '1'

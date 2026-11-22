@@ -1,0 +1,10 @@
+add 5
+mul 6000000000
+scale 7.5
+sum 10
+offset 11,22
+negate -3,-4
+remember 3
+cctor 42
+threads 8 7 1
+hidden ok

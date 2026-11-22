@@ -76,6 +76,8 @@ is_macho_arm64() {
     [ "$(byte_at "$1" 0)" = 207 ] && [ "$(byte_at "$1" 1)" = 250 ] && [ "$(byte_at "$1" 2)" = 237 ] && [ "$(byte_at "$1" 3)" = 254 ] &&
         [ "$(byte_at "$1" 4)" = 12 ] && [ "$(byte_at "$1" 5)" = 0 ] && [ "$(byte_at "$1" 6)" = 0 ] && [ "$(byte_at "$1" 7)" = 1 ]
 }
+# The host's own target's native library suffix (NativeLib=Shared).
+case "$HOST_OS" in Windows) HOST_LIB_EXT=.dll ;; Darwin) HOST_LIB_EXT=.dylib ;; *) HOST_LIB_EXT=.so ;; esac
 # is_host_program <file>: a program for the host's own target.
 is_host_program() {
     case "$HOST_OS" in Windows) is_pe "$1" ;; Darwin) is_macho_arm64 "$1" ;; *) is_elf "$1" "$HOST_ELF_ARCH" ;; esac
@@ -756,6 +758,172 @@ test_static_constructor_threads() {
     pass "$name"
 }
 
+# ---- Native libraries (NativeLib=Shared) --------------------------------------
+
+# call_native <call-native-lib.sh args>: the .NET caller (a fresh copy of its
+# fixture, with the test feed's nuget.config) on a library; output to a log.
+call_native() {
+    local caller
+    caller=$(fixture nativelib-caller)
+    LOG=$WORK/call-native.log
+    ZERO_CALLER_DIR=$caller "$ROOT/sdk/test/call-native-lib.sh" "$@" > "$LOG" 2>&1
+}
+
+# build_nativelib <dir> <log> [dotnet build args]: builds a copy of
+# fixtures/nativelib; NATIVELIB is then the host target's library.
+build_nativelib() {
+    local dir=$1 log=$2
+    shift 2
+    NATIVELIB=$dir/bin/Debug/$TFM/native/nativelib$HOST_LIB_EXT
+    run_in "$dir" "$log" build "$@"
+}
+
+test_native_library_dotnet() {
+    local name="native library dotnet" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib)
+    if ! build_nativelib "$dir" nativelib; then fail "$name" "dotnet build failed"; return; fi
+    if [ ! -f "$NATIVELIB" ]; then fail "$name" "no native/nativelib$HOST_LIB_EXT"; return; fi
+    if ! call_native "$NATIVELIB"; then fail "$name" "the .NET caller didn't get what it should"; return; fi
+    pass "$name"
+}
+
+# Exactly the [UnmanagedCallersOnly(EntryPoint)] methods are exported (on
+# Windows the caller's "hidden ok" line checks zerocore's symbols instead).
+test_native_library_exports() {
+    local name="native library exports" dir exported expected
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-exports)
+    if ! build_nativelib "$dir" nativelib-exports; then fail "$name" "dotnet build failed"; return; fi
+    expected=$(printf '%s\n' nl_add nl_cctor_value nl_mul_long nl_negate nl_offset nl_remember nl_scale nl_slow_runs nl_slow_value nl_sum)
+    case "$HOST_OS" in
+        Linux)  exported=$(nm -D --defined-only "$NATIVELIB" | awk '{print $3}' | sed 's/@.*//' | sort) ;;
+        Darwin) exported=$(nm -gU "$NATIVELIB" | awk '{print $3}' | sed 's/^_//' | sort) ;;
+        *)      skip "$name" "checked by the caller's hidden line on Windows"; return ;;
+    esac
+    if [ "$exported" != "$expected" ]; then fail "$name" "exports: $(echo $exported)"; return; fi
+    pass "$name"
+}
+
+# Two copies of one library in a process keep separate state.
+test_native_library_two() {
+    local name="native library two" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-two)
+    if ! build_nativelib "$dir" nativelib-two; then fail "$name" "dotnet build failed"; return; fi
+    mkdir -p "$WORK/two"
+    cp "$NATIVELIB" "$WORK/two/a$HOST_LIB_EXT"
+    cp "$NATIVELIB" "$WORK/two/b$HOST_LIB_EXT"
+    if ! call_native two "$WORK/two/a$HOST_LIB_EXT" "$WORK/two/b$HOST_LIB_EXT"; then fail "$name" "the copies share state"; return; fi
+    pass "$name"
+}
+
+test_native_library_errors() {
+    local name="native library errors" dir
+    dir=$(fixture native nativelib-exe)
+    if run_in "$dir" nativelib-exe build -p:NativeLib=Shared || ! grep -q "set OutputType to Library" "$LOG"; then
+        fail "$name" "NativeLib with an Exe wasn't refused"; return
+    fi
+    dir=$(fixture nativelib nativelib-static)
+    if run_in "$dir" nativelib-static build -p:NativeLib=Static || ! grep -q "NativeLib 'Static' isn't supported" "$LOG"; then
+        fail "$name" "NativeLib=Static wasn't refused"; return
+    fi
+    dir=$(fixture nativelib nativelib-wasm)
+    if run_in "$dir" nativelib-wasm build -p:ZeroTarget=wasm || ! grep -q "ZeroTarget 'wasm' has no shared libraries" "$LOG"; then
+        fail "$name" "a wasm library wasn't refused"; return
+    fi
+    dir=$(fixture native nativelib-ref/App)
+    fixture nativelib nativelib-ref/nativelib > /dev/null
+    sed -i.bak 's|</Project>|  <ItemGroup><ProjectReference Include="../nativelib/nativelib.csproj" /></ItemGroup>\n</Project>|' "$dir/native.csproj" && rm -f "$dir/native.csproj.bak"
+    if run_in "$dir" nativelib-ref build || ! grep -q "references a native library (NativeLib=Shared): nativelib" "$LOG"; then
+        fail "$name" "a ProjectReference to a native library wasn't refused"; return
+    fi
+    dir=$(fixture nativelib nativelib-run)
+    if run_in "$dir" nativelib-run run || ! grep -qi "library" "$LOG"; then
+        fail "$name" "dotnet run of a native library didn't fail saying it's a library"; return
+    fi
+    pass "$name"
+}
+
+test_native_library_not_packable() {
+    local name="native library not packable" dir
+    dir=$(fixture nativelib nativelib-pack)
+    run_in "$dir" nativelib-pack pack
+    if [ -n "$(find "$dir" -name '*.nupkg')" ]; then fail "$name" "dotnet pack made a package"; return; fi
+    pass "$name"
+}
+
+test_native_library_publish() {
+    local name="native library publish" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-publish)
+    if ! run_in "$dir" nativelib-publish publish -c Release -o "$dir/out"; then fail "$name" "dotnet publish failed"; return; fi
+    if [ ! -f "$dir/out/nativelib$HOST_LIB_EXT" ]; then fail "$name" "no nativelib$HOST_LIB_EXT in the publish folder"; return; fi
+    if ! call_native "$dir/out/nativelib$HOST_LIB_EXT"; then fail "$name" "the published library doesn't work"; return; fi
+    pass "$name"
+}
+
+test_native_library_incremental() {
+    local name="native library incremental" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-incremental)
+    if ! run_in "$dir" nativelib-incremental-1 build -v:n || ! ran_bflat; then fail "$name" "the first build didn't run bflat"; return; fi
+    if ! run_in "$dir" nativelib-incremental-2 build -v:n || ran_bflat; then fail "$name" "an unchanged library ran bflat again"; return; fi
+    sleep 1; touch "$dir/Exports.cs"
+    if ! run_in "$dir" nativelib-incremental-3 build -v:n || ! ran_bflat; then fail "$name" "a changed export didn't run bflat"; return; fi
+    pass "$name"
+}
+
+test_native_library_clean() {
+    local name="native library clean" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-clean)
+    if ! build_nativelib "$dir" nativelib-clean || [ ! -f "$NATIVELIB" ]; then fail "$name" "dotnet build failed"; return; fi
+    if ! run_in "$dir" nativelib-clean-2 clean || [ -e "$NATIVELIB" ]; then fail "$name" "dotnet clean left the library"; return; fi
+    pass "$name"
+}
+
+test_native_library_path_with_spaces() {
+    local name="native library path with spaces" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib "with spaces/native lib")
+    if ! build_nativelib "$dir" nativelib-spaces; then fail "$name" "dotnet build failed"; return; fi
+    if ! call_native "$NATIVELIB"; then fail "$name" "the .NET caller didn't get what it should"; return; fi
+    pass "$name"
+}
+
+# A native library that uses a zero library (a ProjectReference) compiles it in.
+test_native_library_with_zero_reference() {
+    local name="native library with zero reference" dir
+    can_build "$name" || return
+    app_with_lib nativelib-zeroref > /dev/null
+    dir=$(fixture nativelib nativelib-zeroref/nativelib)
+    sed -i.bak 's|</Project>|  <ItemGroup><ProjectReference Include="../Geometry/Geometry.csproj" /></ItemGroup>\n</Project>|' "$dir/nativelib.csproj" && rm -f "$dir/nativelib.csproj.bak"
+    cat > "$dir/Area.cs" <<'CS'
+using System.Runtime.InteropServices;
+
+public static class AreaExport
+{
+    [UnmanagedCallersOnly(EntryPoint = "nl_rect_area")]
+    public static double RectArea(double width, double height) => new Geometry.Rect(width, height).Area;
+}
+CS
+    if ! build_nativelib "$dir" nativelib-zeroref; then fail "$name" "dotnet build failed"; return; fi
+    if ! call_native area "$NATIVELIB"; then fail "$name" "nl_rect_area didn't return 6"; return; fi
+    pass "$name"
+}
+
+test_native_library_dotted_name() {
+    local name="native library dotted name" dir lib
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-dotted)
+    if ! run_in "$dir" nativelib-dotted build -p:AssemblyName=My.Native; then fail "$name" "dotnet build failed"; return; fi
+    lib=$dir/bin/Debug/$TFM/native/My.Native$HOST_LIB_EXT
+    if [ ! -f "$lib" ]; then fail "$name" "no native/My.Native$HOST_LIB_EXT"; return; fi
+    if ! call_native "$lib"; then fail "$name" "the .NET caller didn't get what it should"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
@@ -768,7 +936,10 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     framework_from_property newer_sdk_library
     mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
     trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd
-    tutorial_steps simd_instruction_set static_constructor_threads)
+    tutorial_steps simd_instruction_set static_constructor_threads
+    native_library_dotnet native_library_exports native_library_two native_library_errors
+    native_library_not_packable native_library_publish native_library_incremental native_library_clean
+    native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim

@@ -76,8 +76,9 @@ also builds for WebAssembly and DOS (next page).
 ls -l bin/Debug/zero03/Minimal
 ```
 
-Under 40 KB, debug information included. It needs nothing installed to run: no .NET, no runtime,
-only the C library every system has. In the repository, `./build.sh Tiny` builds the smallest sample,
+About 57 KB on Linux, debug information included, as a Debug build: unoptimized, for debugging.
+`dotnet build -c Release` optimizes it, to under 40 KB. Either needs nothing installed to run: no
+.NET, no runtime, only the C library every system has. In the repository, `./build.sh Tiny` builds the smallest sample,
 stripped and optimized for size: 16 KB.
 
 ## Without puts

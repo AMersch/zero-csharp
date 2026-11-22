@@ -36,6 +36,10 @@ dotnet run -- -c               # take turns telling a story with it
 dotnet build -p:ZeroTarget=win-x64
 ```
 
+`dotnet run` builds Debug, which isn't optimized and tells stories at about half the speed;
+`dotnet run -c Release` is the fast one. The project's `.vscode` folder debugs it in VS Code
+([Debug a program](debug-a-program.html)).
+
 Its `Program.cs` is `samples/Llama.cs`. To use another model of llama2.c's format, pass its bytes
 to `Llama.Create` instead of `Stories260K.Model` and `Stories260K.Tokenizer`.
 [Install with dotnet](../get-started/install-with-dotnet.html) covers the SDK itself.

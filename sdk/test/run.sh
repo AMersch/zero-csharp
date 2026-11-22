@@ -610,6 +610,32 @@ test_long_command_line() {
     pass "$name"
 }
 
+# From Windows, both Linux targets: ELF programs for their architectures.
+test_windows_builds_linux() {
+    local name="windows builds linux" dir
+    if [ "$HOST_OS" != Windows ]; then skip "$name" "Windows only"; return; fi
+    dir=$(fixture native winlinux)
+    if ! run_in "$dir" winlinux-x64 build -p:ZeroTarget=linux-x64; then fail "$name" "the linux-x64 build failed"; return; fi
+    if ! run_in "$dir" winlinux-arm64 build -p:ZeroTarget=linux-arm64; then fail "$name" "the linux-arm64 build failed"; return; fi
+    if ! is_elf "$dir/bin/Debug/$TFM/linux-x64/native" x86-64; then fail "$name" "linux-x64/native isn't an x86-64 ELF"; return; fi
+    if ! is_elf "$dir/bin/Debug/$TFM/linux-arm64/native" aarch64; then fail "$name" "linux-arm64/native isn't an aarch64 ELF"; return; fi
+    pass "$name"
+}
+
+# A packages folder with a space and a non-ASCII letter, as a Windows user
+# profile can have (C:\Users\Zoë Ann\.nuget\packages).
+test_unusual_packages_folder() {
+    local name="unusual packages folder" dir out pkgs="$WORK/pkgs Zoë Ann"
+    can_build "$name" || return
+    dir=$(fixture native unusualpkgs)
+    rm -rf "$pkgs"
+    if ! (export NUGET_PACKAGES=$(native_path "$pkgs"); run_in "$dir" unusualpkgs build); then
+        LOG=$WORK/unusualpkgs.log; fail "$name" "dotnet build failed"; return
+    fi
+    out=$("$(exe "$dir/bin/Debug/$TFM/native")"); if [ "$out" != hi ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
@@ -617,7 +643,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
     release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0
-    long_command_line)
+    long_command_line windows_builds_linux unusual_packages_folder)
 
 # ---- Run ---------------------------------------------------------------------
 

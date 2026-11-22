@@ -49,9 +49,10 @@
     <UseAppHost>false</UseAppHost>
 
     <!-- The native step (Sdk.targets). The host is the machine running the
-         build: bflat runs on Linux only in this version. -->
+         build: Linux x64 and arm64, and Windows x64. -->
     <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">linux-x64</ZeroHostRid>
     <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">linux-arm64</ZeroHostRid>
+    <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">win-x64</ZeroHostRid>
     <!-- linux-x64, linux-arm64 or win-x64; the host's own by default. A chosen
          one (here: on the command line or in Directory.Build.props) gets an
          output folder of its own, see Sdk.targets. -->

@@ -79,9 +79,11 @@ To check every sample against the native output:
 - **No SIMD.** Instruction sets report `IsSupported == false`, so Simd and Kernels take their scalar
   paths. WebAssembly has 128-bit SIMD, but `lib/Kernels.cs` has no path for it yet.
 - **One thread.** zerocore's WebAssembly build is its single-threaded 32-bit build.
-- **Clocks.** Simd and Kernels call `clock_gettime(1, ...)`, Linux's numeric `CLOCK_MONOTONIC`. In
-  WASI's C library a clock ID is a pointer, so this reads the clock ID from address 1, which is zero:
-  the realtime clock. That still measures durations.
+- **Clocks.** `lib/Clock.cs` and the samples call `clock_gettime` with Linux's clock numbers, 0 for
+  the wall clock and 1 for the monotonic one. In WASI's C library a clock ID is a pointer, so
+  `wasm/runtime.c` has its own `clock_gettime`, linked before the library's, that takes the numbers.
+- **Files.** A module sees only the directories its runtime grants it. `./run.sh --wasm` runs
+  wasmtime with `--dir=.`, so [`File`](read-and-write-files.html) works in the current directory.
 - **Exit codes.** Modules are linked for WASI 0.1 (`wasm32-wasip1`), which passes exit codes through.
   WASI 0.2 only reports success or failure, and the samples report failed checks in their exit code.
 - **Stacks.** The link sets a 1 MB stack, and `wasm/runtime.c` reserves a 1 MB shadow stack, where

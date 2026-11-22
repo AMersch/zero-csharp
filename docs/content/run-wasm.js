@@ -56,8 +56,10 @@ export async function runWasm(url, { args = [], stdin = '' } = {}) {
       }
       return 0;
     },
+    // Clock 0 is the wall clock; the others are monotonic.
     clock_time_get(id, precision, timeOut) {
-      view().setBigUint64(timeOut, BigInt(Math.round(performance.now() * 1e6)), true);
+      const ms = id === 0 ? Date.now() : performance.now();
+      view().setBigUint64(timeOut, BigInt(Math.round(ms * 1e6)), true);
       return 0;
     },
     fd_close() { return 0; },

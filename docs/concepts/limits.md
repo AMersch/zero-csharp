@@ -260,7 +260,9 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
   `string[]` as `object[]`) aborts with a message saying so, instead of answering wrongly.
 - **Most of the base class library.** No `Console` (use `Out` and `In`), no .NET collections (use
   [`lib/`'s](../how-to/choose-a-collection.html)), no LINQ (use [`lib/Seq.cs`](../how-to/query-data.html)),
-  no reflection (a `Type` only compares), async, `Thread`, or boxing of `Nullable<T>`.
+  no `System.IO` (use [`File`](../how-to/read-and-write-files.html)), `DateTime`, `Stopwatch` or
+  `Random` (use [`Clock` and `Random`](../how-to/use-the-clock-and-random-numbers.html)), no
+  reflection (a `Type` only compares), async, `Thread`, or boxing of `Nullable<T>`.
 - **A struct's default `Equals` compares bytes.** A reference field compares by reference, where .NET
   would call its `Equals`. Records and `IEquatable<T>` compare field by field.
 - **Reflection.** Builds need `--no-reflection`.

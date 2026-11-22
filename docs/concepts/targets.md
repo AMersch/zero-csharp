@@ -53,8 +53,8 @@ A few things `build.sh` adds matter for what you get:
 in the container, but with `--os macos -c` it only compiles: it writes a Mach-O object file, and the
 Mac's own clang links it with a few small files:
 
-- `mac/start.c` holds `main`, and `mac/runtime.c` a `clock_gettime` that answers the samples' Linux clock number.
-  The rest of the C library calls have the same names on macOS.
+- `mac/start.c` holds `main`, and `mac/runtime.c` a `clock_gettime` that takes Linux's clock numbers,
+  as `lib/Clock.cs` passes them. The rest of the C library calls have the same names on macOS.
 - `zerocore/native/mac-arm64.S` is `arm64.S` as a Mach-O object.
 
 ```bash
@@ -72,8 +72,9 @@ zerocore is unchanged. The link maps Apple's names for the module section's boun
 `lib/`. A few small files supply what is Windows-specific:
 
 - `win/start.c` is the entry point. Windows starts a program with no `argc` or `argv`, so it builds
-  them from the command line, in UTF-8 as on Linux, and calls `Main`. `win/runtime.c` provides `write`, `read`
-  and `clock_gettime` on top of kernel32. The rest of the C library comes from Windows' Universal CRT.
+  them from the command line, in UTF-8 as on Linux, and calls `Main`. `win/runtime.c` provides `write`,
+  `read` and `clock_gettime` on top of kernel32, and `fseeko` and `ftello`, which the Universal CRT
+  calls `_fseeki64` and `_ftelli64`. The rest of the C library comes from the Universal CRT.
 - `zerocore/native/win-x64.S` is zerocore's assembly for the Windows calling convention, plus the stack
   probe that Windows needs for frames larger than a page.
 
@@ -135,7 +136,8 @@ output isn't tied to a processor until the last step. So `./build.sh --dos` reus
 
 The [HX DOS extender](https://github.com/Baron-von-Riedesel/HX) runs such programs under DOS and supplies
 the few Windows functions `runtime.c` calls. There is no C library, so `dos/runtime.c` is one: the entry
-point, `calloc`, `write`, the math functions and 64-bit division, plus what `wasm/runtime.c` holds for
+point, `calloc`, `write`, `clock_gettime`, `fopen` and the other file functions `lib/File.cs` calls,
+the math functions and 64-bit division, plus what `wasm/runtime.c` holds for
 WebAssembly. Managed code still passes its shadow stack as a hidden first argument, because it is the
 same bitcode. `runtime.c` also gives C# the PC itself: the VGA's graphics mode, keyboard, mouse,
 speaker, clock and files, which `lib/Dos.cs` wraps.
@@ -175,10 +177,11 @@ library, so `efi/` supplies the few C functions zerocore and `lib/` call, on top
   on AVX on x64 (the firmware leaves it off, and `-m x86-64-v3` code needs it), and returns `Main`'s
   result as the program's status.
 - **`efi/runtime.c`**: memory from the firmware's pool, `write` and `read` (files when the shell
-  redirects them, the console otherwise), the clock from the processor's counter, and threads that
-  run to their end when they're created.
+  redirects them, the console otherwise), the monotonic clock from the processor's counter and the
+  wall clock from the firmware's, and threads that run to their end when they're created.
 - **`efi/machine.c`**: what [`Uefi`](../reference/uefi.html) wraps: graphics, keyboard, files, the
-  PC speaker, power. It has the same members as `Dos`, so the Vga game runs on both.
+  PC speaker, power. It has the same members as `Dos`, so the Vga game runs on both. It also has
+  `fopen` and the other file functions [`File`](../how-to/read-and-write-files.html) calls.
 - **`efi/libm/`**: the math functions, from musl. On Windows they come from the system's C library;
   here nothing else would provide them.
 

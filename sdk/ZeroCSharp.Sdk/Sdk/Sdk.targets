@@ -50,6 +50,10 @@
          8191 characters, which a project's full source paths can pass. -->
     <Message Text="bflat arguments: $(ZeroNativeArgs)" />
     <Exec Command="&quot;$(ZeroBflatExe)&quot; build @&quot;$(ZeroNativeArgsFile)&quot;" />
+    <!-- macOS: bflat only compiles (it has no Mach-O linker); the package's
+         lld links, as ld64.lld, against the payload's libSystem.tbd. -->
+    <Message Text="ld64.lld arguments: $(ZeroLinkArgs)" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+    <Exec Command="&quot;$(ZeroLldExe)&quot; -flavor darwin @&quot;$(ZeroLinkArgsFile)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
     <Message Importance="high" Text="$(MSBuildProjectName) -> $(ZeroNativeOutput)" />
   </Target>
 
@@ -66,8 +70,8 @@
            Text="Zero C# can't make native programs on macOS yet; build on Linux or Windows, or use the repository's build.sh." />
     <Error Condition="'$(ZeroHostRid)' == '' and !$([MSBuild]::IsOSPlatform('OSX'))"
            Text="Zero C# can't make native programs on this machine yet; build on Linux (x64 or arm64) or Windows x64." />
-    <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64'"
-           Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64." />
+    <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64' and '$(ZeroTarget)' != 'osx-arm64'"
+           Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64, osx-arm64." />
   </Target>
 
   <Target Name="ZeroNativeCommand" DependsOnTargets="ZeroNativeFiles">
@@ -77,11 +81,16 @@
       <ZeroBflatDir>$([MSBuild]::EnsureTrailingSlash('$(NuGetPackageRoot)'))zerocsharp.bflat.$(ZeroHostRid)/$(ZeroSdkVersion.ToLowerInvariant())/tools/bflat/</ZeroBflatDir>
       <ZeroBflatExe>$(ZeroBflatDir)bflat</ZeroBflatExe>
       <ZeroBflatExe Condition="'$(OS)' == 'Windows_NT'">$(ZeroBflatDir)bflat.exe</ZeroBflatExe>
+      <ZeroLldExe>$(ZeroBflatDir)bin/lld</ZeroLldExe>
+      <ZeroLldExe Condition="'$(OS)' == 'Windows_NT'">$(ZeroBflatDir)bin/lld.exe</ZeroLldExe>
       <ZeroNativeDir>$(ZeroSdkRoot)payload/native/$(ZeroTarget)/</ZeroNativeDir>
       <ZeroNativeOutput>$(OutDir)$(ZeroTargetFolder)$(AssemblyName)</ZeroNativeOutput>
       <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'win-x64'">$(ZeroNativeOutput).exe</ZeroNativeOutput>
       <ZeroNativeArgsFile>$(IntermediateOutputPath)zero-native.args</ZeroNativeArgsFile>
       <ZeroNativeArgsFile Condition="'$(ZeroTargetFolder)' != ''">$(IntermediateOutputPath)zero-native.$(ZeroTarget).args</ZeroNativeArgsFile>
+      <!-- macOS: bflat's object, then ld64.lld's command line. -->
+      <ZeroNativeObject>$(IntermediateOutputPath)zero-native.$(ZeroTarget).o</ZeroNativeObject>
+      <ZeroLinkArgsFile>$(IntermediateOutputPath)zero-link.$(ZeroTarget).args</ZeroLinkArgsFile>
     </PropertyGroup>
     <ItemGroup>
       <!-- Zero libraries: every resolved reference that isn't zerocore or lib/
@@ -105,26 +114,53 @@
       <_ZeroArg Include="@(_ZeroDllImport->'-i %(Identity)', ' ')" />
       <!-- bflat's default operating system is the host's: named, so a Windows
            host builds Linux programs too. -->
-      <_ZeroArg Include="--os linux" Condition="'$(ZeroTarget)' != 'win-x64'" />
-      <_ZeroArg Include="--arch x64" Condition="'$(ZeroTarget)' != 'linux-arm64'" />
-      <_ZeroArg Include="--arch arm64" Condition="'$(ZeroTarget)' == 'linux-arm64'" />
-      <_ZeroArg Include="--ldflags &quot;$(ZeroNativeDir)zerocore.o&quot; --ldflags &quot;-z nostart-stop-gc&quot;" Condition="'$(ZeroTarget)' != 'win-x64'" />
+      <_ZeroArg Include="--os linux" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'" />
+      <_ZeroArg Include="--os macos -c" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <_ZeroArg Include="--arch x64" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'win-x64'" />
+      <_ZeroArg Include="--arch arm64" Condition="'$(ZeroTarget)' == 'linux-arm64' or '$(ZeroTarget)' == 'osx-arm64'" />
+      <_ZeroArg Include="--ldflags &quot;$(ZeroNativeDir)zerocore.o&quot; --ldflags &quot;-z nostart-stop-gc&quot;" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'" />
       <_ZeroArg Include="--ldflags &quot;-z max-page-size=4096&quot;" Condition="'$(ZeroTarget)' == 'linux-arm64'" />
       <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64'" />
       <_ZeroArg Include="-Os" Condition="'$(ZeroOptimizeFor)' == 'Size'" />
       <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != ''" />
-      <_ZeroArg Include="-o &quot;$(ZeroNativeOutput)&quot;" />
+      <_ZeroArg Include="-o &quot;$(ZeroNativeOutput)&quot;" Condition="'$(ZeroTarget)' != 'osx-arm64'" />
+      <_ZeroArg Include="-o &quot;$(ZeroNativeObject)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <!-- ld64.lld (macOS 11 or newer, arm64). zerocore finds the compiler's
+           module list between __start___modules and __stop___modules, GNU
+           ld's names; -alias gives them to the section's bounds. Chained
+           fixups: the classic lazy binding needs dyld_stub_binder's library.
+           lld reads response files the GNU way, where a backslash escapes,
+           so paths get forward slashes (which Windows takes too). -->
+      <_ZeroLinkArg Include="-arch arm64 -platform_version macos 11.0 11.0 -fixup_chains -dead_strip" />
+      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$(ZeroNativeObject)'))').Replace('\', '/'))&quot;" />
+      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)runtime.o').Replace('\', '/'))&quot;" />
+      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)zerocore.o').Replace('\', '/'))&quot;" />
+      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)libSystem.tbd').Replace('\', '/'))&quot;" />
+      <!-- A project's own .tbd or .dylib (ZeroNativeInput), for libraries
+           beyond libSystem. -->
+      <_ZeroMacLibrary Include="@(ZeroNativeInput->WithMetadataValue('Extension', '.tbd'));@(ZeroNativeInput->WithMetadataValue('Extension', '.dylib'))" />
+      <_ZeroMacLibrary Remove="$(ZeroNativeDir)libSystem.tbd" />
+      <_ZeroMacLibrary>
+        <Forward>$([System.String]::Copy('%(FullPath)').Replace('\', '/'))</Forward>
+      </_ZeroMacLibrary>
+      <_ZeroLinkArg Include="@(_ZeroMacLibrary->'&quot;%(Forward)&quot;')" />
+      <_ZeroLinkArg Include="-alias section$start$__DATA$__modules ___start___modules -alias section$end$__DATA$__modules ___stop___modules" />
+      <_ZeroLinkArg Include="-o &quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$(ZeroNativeOutput)'))').Replace('\', '/'))&quot;" />
     </ItemGroup>
     <PropertyGroup>
       <ZeroNativeArgs>@(_ZeroArg->'%(Prefix)%(Identity)', ' ')</ZeroNativeArgs>
+      <ZeroLinkArgs>@(_ZeroLinkArg, ' ')</ZeroLinkArgs>
     </PropertyGroup>
     <!-- The command line is an input too: changing a flag rebuilds. -->
     <WriteLinesToFile File="$(ZeroNativeArgsFile)" Lines="$(ZeroNativeArgs)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <WriteLinesToFile File="$(ZeroLinkArgsFile)" Lines="$([MSBuild]::Escape('$(ZeroLinkArgs)'))" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Condition="'$(ZeroTarget)' == 'osx-arm64'" />
     <!-- This build's program and command line, and the other targets' ones
          already there: IncrementalClean removes what earlier builds wrote and
          this one doesn't list, so programs for several targets stay. -->
     <ItemGroup>
       <FileWrites Include="$(ZeroNativeOutput);$(ZeroNativeArgsFile)" />
+      <FileWrites Include="$(ZeroNativeObject);$(ZeroLinkArgsFile)" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
       <FileWrites Include="@(ZeroNativeFile)" Condition="Exists('%(FullPath)')" />
     </ItemGroup>
   </Target>
@@ -132,7 +168,7 @@
   <!-- Every target's program and command line that a build may have made. -->
   <Target Name="ZeroNativeFiles">
     <ItemGroup>
-      <_ZeroAnyTarget Include="linux-x64;linux-arm64;win-x64" />
+      <_ZeroAnyTarget Include="linux-x64;linux-arm64;win-x64;osx-arm64" />
       <ZeroNativeFile Include="$(OutDir)$(AssemblyName);$(OutDir)$(AssemblyName).exe" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName)')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName).exe')" />

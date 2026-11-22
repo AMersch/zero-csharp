@@ -89,13 +89,22 @@ programs for several targets sit side by side:
 dotnet build -p:ZeroTarget=win-x64        # bin/Debug/zero03/win-x64/Hello.exe
 dotnet build -p:ZeroTarget=linux-arm64    # bin/Debug/zero03/linux-arm64/Hello
 dotnet build -p:ZeroTarget=linux-x64      # from Windows: bin\Debug\zero03\linux-x64\Hello
+dotnet build -p:ZeroTarget=osx-arm64      # bin/Debug/zero03/osx-arm64/Hello, for Apple Silicon Macs
 ```
 
 `dotnet clean` removes all of them.
 
+A macOS program needs no Mac and no Xcode to build: bflat compiles it, and the package's lld links it
+against a list of macOS's C functions that the SDK carries (`libSystem.tbd`). It runs on macOS 11 or
+newer on Apple Silicon, with an ad-hoc signature, which is what a Mac needs to run a program built
+there or copied over without a quarantine flag (a browser download gets one: `xattr -d
+com.apple.quarantine Hello` clears it). It can call macOS's C library (libc, libm, pthreads); a
+C function the list lacks fails the link with `undefined symbol: _name`, and other libraries need
+their own `.tbd` or `.dylib` added to the link with `ZeroNativeInput`.
+
 | Property | Values | Default |
 |---|---|---|
-| `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64` | the build machine's |
+| `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64`, `osx-arm64` | the build machine's |
 | `ZeroOptimizeFor` | `Speed`, or `Size` (bflat's `-Os`) | `Speed` |
 | `ZeroInstructionSet` | passed to bflat as `-m`, e.g. `x86-64-v3` or `dotprod` (see [Use SIMD](../how-to/use-simd.html)) | none |
 | `ZeroDllImports` | more libraries whose `[DllImport]`s are bound when linking, besides `libc` and `libm.so.6`, which always are | none |

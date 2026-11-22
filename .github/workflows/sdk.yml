@@ -208,8 +208,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: ubuntu-24.04 x64, runner: ubuntu-24.04, dotnet: '10.0.x' }
-          - { name: ubuntu-24.04 arm64, runner: ubuntu-24.04-arm, dotnet: '10.0.x' }
+          - { name: ubuntu-24.04 x64, runner: ubuntu-24.04, dotnet: '10.0.x', macbuilt: linux-x64 }
+          - { name: ubuntu-24.04 arm64, runner: ubuntu-24.04-arm, dotnet: '10.0.x', macbuilt: linux-arm64 }
           - { name: newest .NET SDK, runner: ubuntu-24.04, dotnet: '11.0.x', quality: preview }
           - { name: ubuntu-22.04 container, runner: ubuntu-24.04, container: 'ubuntu:22.04' }
           - { name: debian-12 container, runner: ubuntu-24.04, container: 'debian:12' }
@@ -246,6 +246,13 @@ jobs:
         env:
           ZERO_NO_PACK: '1'
         run: dotnet --version && sdk/test/run.sh
+      # The macOS programs this machine built, for mac-programs to run.
+      - uses: actions/upload-artifact@v4
+        if: matrix.macbuilt != ''
+        with:
+          name: mac-built-${{ matrix.macbuilt }}
+          path: sdk/test/work/mac-built/${{ matrix.macbuilt }}
+          if-no-files-found: error
 
   # Git Bash, as the runner has it: the tests build and run Windows programs
   # for real, and build Linux ones.
@@ -277,6 +284,11 @@ jobs:
           name: windows-built-linux
           path: sdk/test/work/windows-built
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-built-win-x64
+          path: sdk/test/work/mac-built/win-x64
+          if-no-files-found: error
 
   # The Linux programs the Windows job built, run on Linux.
   windows-built-linux:
@@ -298,6 +310,28 @@ jobs:
           out=$(built/${{ matrix.rid }}/native)
           echo "$out"
           [ "$out" = hi ]
+
+  # The macOS programs built on Linux and Windows (sdk/test/run.sh, mac_target*),
+  # run on a Mac: signed ad hoc, and printing what they should.
+  mac-programs:
+    needs: [test, windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        built-on: [linux-x64, linux-arm64, win-x64]
+    name: mac-programs (built on ${{ matrix.built-on }})
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-built-${{ matrix.built-on }}
+          path: built
+      - name: Run them
+        run: |
+          chmod +x built/native built/threads
+          codesign -v built/native built/threads
+          out=$(built/native); echo "$out"; [ "$out" = hi ]
+          out=$(built/threads); echo "$out"; [ "$out" = "$(printf '499500\n1')" ]
 
   macos:
     needs: pack
@@ -327,7 +361,7 @@ jobs:
   # nuget.org user name (a repository variable, not a secret).
   publish:
     if: startsWith(github.ref, 'refs/tags/sdk-v')
-    needs: [test, windows, windows-built-linux, macos]
+    needs: [test, windows, windows-built-linux, mac-programs, macos]
     runs-on: ubuntu-24.04
     permissions:
       id-token: write

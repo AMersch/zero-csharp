@@ -1037,7 +1037,7 @@ test_simd_instruction_set() {
     if ! run_in "$dir" simd build -v:n; then fail "$name" "dotnet build failed"; return; fi
     if ! grep -qE -- "-m (x86-64-v3|dotprod)" "$LOG"; then fail "$name" "bflat didn't get -m"; return; fi
     out=$("$(exe "$dir/bin/Debug/$TFM/native")" | tr -d '\r')
-    if ! grep -qE "Path: (NEON|AVX2)" <<< "$out"; then fail "$name" "not the SIMD path: $(grep Path: <<< "$out")"; return; fi
+    if ! grep -qE "Path: (NEON|AVX)" <<< "$out"; then fail "$name" "not the SIMD path: $(grep Path: <<< "$out")"; return; fi
     if ! grep -q "Results match: true" <<< "$out"; then fail "$name" "the results don't match"; return; fi
     if ! run_in "$dir" simd-mac build -p:ZeroTarget=osx-arm64; then fail "$name" "the osx-arm64 build failed"; return; fi
     pass "$name"

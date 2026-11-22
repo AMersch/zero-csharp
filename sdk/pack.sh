@@ -14,9 +14,8 @@
 #                        (the bflat packages name it; see build.sh --sdk-payload)
 #         ZERO_PAYLOAD_PREBUILT=1   use sdk/ZeroCSharp.Sdk/payload as it is (CI builds it
 #                        in another job, like sdk/trimmed/)
-# Trimmed layouts are kept in sdk/trimmed/<rid> and redone only when the
-# layout's bflat or lld, or the trimming script, differ from the ones they were
-# made from (by checksum: copies and checkouts don't keep times in order).
+# Trimmed layouts are kept in sdk/trimmed/<rid> and redone only when a file
+# they copied, or the trimming script, changed (sdk/trim-host.sh).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 hosts=${ZERO_HOSTS:-linux-x64 linux-arm64 win-x64}
@@ -35,30 +34,7 @@ fi
 
 for rid in $hosts; do
     trimmed=sdk/trimmed/$rid
-    if [ "$rid" = win-x64 ]; then
-        layout=$layouts/windows-x64
-        exe=bflat.exe
-        trim() { sdk/trim-windows-layout.sh "$layout" sdk/trimmed/linux-x64 "$trimmed"; }
-        # The Windows list is the linux-x64 one, mapped: it changes with it.
-        source_files() { cat "$layout/bflat.exe" "$layout/bin/lld.exe" sdk/trim-windows-layout.sh; (cd sdk/trimmed/linux-x64 && find . -type f | sort); }
-    else
-        layout=$layouts/linux-glibc-${rid#linux-}
-        exe=bflat
-        trim() { sdk/trim-layout.sh "$layout" "$trimmed"; }
-        source_files() { cat "$layout/bflat" "$layout/bin/lld" sdk/trim-layout.sh; }
-    fi
-    # Without the full layout (CI downloads the trimmed one), use what's there.
-    if [ -f "$layout/$exe" ]; then
-        source_sum=$(source_files | cksum)
-        if [ ! -f "$trimmed/$exe" ] || [ "$(cat "sdk/trimmed/$rid.source" 2>/dev/null)" != "$source_sum" ]; then
-            echo "[trim]  $layout -> $trimmed"
-            trim
-            echo "$source_sum" > "sdk/trimmed/$rid.source"
-        fi
-    elif [ ! -f "$trimmed/$exe" ]; then
-        echo "Error: no layout in $layout and no trimmed one in $trimmed." >&2
-        exit 1
-    fi
+    sdk/trim-host.sh "$rid" "$layouts" sdk/trimmed
     dotnet pack sdk/ZeroCSharp.Bflat/ZeroCSharp.Bflat.csproj -o sdk/feed -v:q -nologo \
         -p:HostRid="$rid" -p:LayoutDir="$PWD/$trimmed" -p:BflatCommit="$bflat_commit"
 done

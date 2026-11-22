@@ -27,16 +27,26 @@ map() {
         *)                echo "$1" ;;
     esac
 }
-imports() { objdump -p "$1" 2>/dev/null | sed -n 's/.*DLL Name: *//p' | tr -d '\r' || true; }
+# The DLL names an exe imports. An objdump that can't read it is an error:
+# going on would leave its DLLs out of the package.
+imports() {
+    local dump
+    dump=$(objdump -p "$1") || { echo "Error: objdump couldn't read $1 (needs one that reads PE files)." >&2; return 1; }
+    sed -n 's/.*DLL Name: *//p' <<< "$dump" | tr -d '\r'
+}
+# The layout's file for an imported DLL, at the top or in bin/. Windows
+# matches DLL names in any case, so this does too.
+find_dll() { (cd "$layout" && find . bin -maxdepth 1 -type f -iname "$1" 2>/dev/null | sed 's|^\./||' | sort -u); }
 
 rm -rf "$out"
 mkdir -p "$out"
 missing=0
 list=$( (cd "$linux" && find . -type f | sed 's|^\./||') | while read -r f; do map "$f"; done)
 for exe in bflat.exe bin/lld.exe; do
-    for dll in $(imports "$layout/$exe"); do
-        [ -f "$layout/$dll" ] && list="$list"$'\n'"$dll"
-        [ -f "$layout/bin/$dll" ] && list="$list"$'\n'"bin/$dll"
+    dlls=$(imports "$layout/$exe") || exit 1
+    for dll in $dlls; do
+        found=$(find_dll "$dll")
+        [ -n "$found" ] && list="$list"$'\n'"$found"
     done
 done
 while read -r f; do

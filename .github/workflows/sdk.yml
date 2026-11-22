@@ -21,7 +21,7 @@ on:
 
 # The fork's branch whose bflat the packages carry. master for a release.
 env:
-  BFLAT_REF: master
+  BFLAT_REF: macos-host
 
 permissions:
   contents: read
@@ -171,8 +171,82 @@ jobs:
           name: trimmed-win-x64
           path: zero-csharp/sdk/trimmed/win-x64
 
+  # bflat can't build itself for macOS: the fork's tools/build-macos-layout.sh
+  # makes the layout on a Mac (NativeAOT, Microsoft's osx-arm64 JITs, LLVM's
+  # lld), from the linux-glibc-arm64 layout's lib/ and ref/.
+  bflat-macos:
+    needs: bflat
+    runs-on: macos-latest
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      - id: key
+        run: echo "key=bflat-macos-layout-${{ needs.bflat.outputs.commit }}" >> "$GITHUB_OUTPUT"
+      - name: Restore the macOS layout from the cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: bflat/layouts/osx-arm64
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+      - uses: actions/checkout@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          repository: OnurGumus/bflat
+          ref: ${{ needs.bflat.outputs.commit }}
+          path: bflat
+      - uses: actions/cache/restore@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            bflat/layouts/linux-glibc-x64
+            bflat/layouts/linux-glibc-arm64
+            bflat/layouts/windows-x64
+          key: ${{ needs.bflat.outputs.key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-dotnet@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build the macOS layout
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bflat/tools/build-macos-layout.sh bflat/layouts/linux-glibc-arm64 bflat/layouts/osx-arm64
+      - name: Save the macOS layout to the cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: bflat/layouts/osx-arm64
+          key: ${{ steps.key.outputs.key }}
+
+  # The macOS list is linux-arm64's, mapped (otool needs a Mac).
+  trim-macos:
+    needs: [bflat-macos, trim]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zero-csharp
+      - uses: actions/cache/restore@v4
+        with:
+          path: bflat/layouts/osx-arm64
+          key: ${{ needs.bflat-macos.outputs.key }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: trimmed-linux-arm64
+          path: zero-csharp/sdk/trimmed/linux-arm64
+      - name: Trim the layout
+        working-directory: zero-csharp
+        run: sdk/trim-macos-layout.sh ../bflat/layouts/osx-arm64 sdk/trimmed/linux-arm64 sdk/trimmed/osx-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trimmed-osx-arm64
+          path: zero-csharp/sdk/trimmed/osx-arm64
+
   pack:
-    needs: [trim, trim-windows]
+    needs: [trim, trim-windows, trim-macos]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -349,10 +423,41 @@ jobs:
         with:
           name: feed
           path: sdk/feed
-      - name: Test (no native step on macOS)
+      - name: Test
         env:
           ZERO_NO_PACK: '1'
-        run: sdk/test/run.sh
+        run: dotnet --version && sdk/test/run.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-built
+          path: sdk/test/work/macos-built
+          if-no-files-found: error
+
+  # The Linux and Windows programs the macos job built, run on their systems.
+  macos-built:
+    needs: macos
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: linux-x64, runner: ubuntu-24.04, exe: '' }
+          - { rid: linux-arm64, runner: ubuntu-24.04-arm, exe: '' }
+          - { rid: win-x64, runner: windows-latest, exe: '.exe' }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-built
+          path: built
+      - name: Run the program built on a Mac
+        run: |
+          chmod +x built/${{ matrix.rid }}/native${{ matrix.exe }}
+          out=$(built/${{ matrix.rid }}/native${{ matrix.exe }} | tr -d '\r')
+          echo "$out"
+          [ "$out" = hi ]
 
   # Trusted publishing: nuget.org trusts this workflow (a policy on the
   # package owner's account: owner OnurGumus, repository zero-csharp,
@@ -361,7 +466,7 @@ jobs:
   # nuget.org user name (a repository variable, not a secret).
   publish:
     if: startsWith(github.ref, 'refs/tags/sdk-v')
-    needs: [test, windows, windows-built-linux, mac-programs, macos]
+    needs: [test, windows, windows-built-linux, mac-programs, macos, macos-built]
     runs-on: ubuntu-24.04
     permissions:
       id-token: write

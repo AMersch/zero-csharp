@@ -1,0 +1,6 @@
+PASS Half (21 checks)
+PASS BitOperations (7 checks)
+PASS BitArray (12 checks)
+PASS BitConverter (3 checks)
+
+All checks passed.

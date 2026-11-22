@@ -31,6 +31,7 @@ namespace System.Runtime.Intrinsics.Arm
         public static Vector128<sbyte> LoadVector128(sbyte* address) => LoadVector128(address);
         public static void Store(float* address, Vector128<float> source) => Store(address, source);
         public static void Store(int* address, Vector128<int> source) => Store(address, source);
+        public static Vector64<byte> PopCount(Vector64<byte> value) => PopCount(value);
 
         [Intrinsic]
         public abstract class Arm64
@@ -41,6 +42,7 @@ namespace System.Runtime.Intrinsics.Arm
             public static Vector128<float> AddPairwise(Vector128<float> left, Vector128<float> right) => AddPairwise(left, right);
             public static Vector64<int> AddAcross(Vector128<int> value) => AddAcross(value);
             public static Vector64<float> MaxAcross(Vector128<float> value) => MaxAcross(value);
+            public static Vector64<ushort> AddAcross(Vector64<byte> value) => AddAcross(value);
         }
     }
 
@@ -51,5 +53,24 @@ namespace System.Runtime.Intrinsics.Arm
         public static bool IsSupported => false;
 
         public static Vector128<int> DotProduct(Vector128<int> addend, Vector128<sbyte> left, Vector128<sbyte> right) => DotProduct(addend, left, right);
+    }
+
+    // clz and rbit, in every arm64 processor; BitOperations uses them.
+    [Intrinsic]
+    public abstract class ArmBase
+    {
+        public static bool IsSupported => false;
+
+        public static int LeadingZeroCount(uint value) => LeadingZeroCount(value);
+        public static uint ReverseElementBits(uint value) => ReverseElementBits(value);
+
+        [Intrinsic]
+        public abstract class Arm64
+        {
+            public static bool IsSupported => false;
+
+            public static int LeadingZeroCount(ulong value) => LeadingZeroCount(value);
+            public static ulong ReverseElementBits(ulong value) => ReverseElementBits(value);
+        }
     }
 }

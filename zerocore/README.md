@@ -44,12 +44,15 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `Runtime/TypeCast.cs` | `is`, `as` and casts to classes and interfaces; type-checked stores into arrays |
 | `Runtime/InterfaceDispatch.cs` | Calling an interface method on an object whose class isn't known at build time, with a small cache per call site |
 | `System/Math.cs` | `Math` and `MathF`: the processor's instruction where there is one, the C math library otherwise |
+| `System/Half.cs` | `Half` (IEEE half precision, as in .NET: conversions round to nearest even, `ToString` gives the shortest text that reads back) and `BitConverter`'s bit conversions for `Half`, `float` and `double` |
+| `System/Numerics/BitOperations.cs` | `BitOperations`: `PopCount`, `LeadingZeroCount`, `TrailingZeroCount`, `Log2`, rotates, `IsPow2`. clz, rbit and cnt on arm64; bsr and bsf on x64, lzcnt, tzcnt and popcnt with `-m x86-64-v3`; portable code on WebAssembly and DOS |
+| `System/Collections/BitArray.cs` | `BitArray`, with .NET's members (`And`, `Or`, `Xor`, `Not`, shifts, `HasAllSet`, `CopyTo`, ...) |
 | `System/Threading.cs` | `Interlocked` (atomic instructions) and `Volatile` |
 | `Runtime/Startup.cs` | What runs before `Main`: storage for static fields that hold references, `string[] args`. Also static constructors |
 | `Runtime/MethodTable.cs` | The layout of the type descriptions the compiler emits |
 | `Runtime/Unsafe.cs` | `Unsafe`, `RuntimeHelpers`, `MemoryMarshal` |
 | `Runtime/Platform.cs` | Everything used from outside: `calloc`, `write`, `abort` |
-| `Intrinsics/*.cs` | `Vector64/128/256<T>` and the NEON, AVX, AVX2 and FMA operations `../lib/Kernels.cs` uses |
+| `Intrinsics/*.cs` | `Vector64/128/256<T>` and the NEON, AVX, AVX2 and FMA operations `../lib/Kernels.cs` uses; the bit instructions `BitOperations` uses |
 | `native/arm64.S`, `native/x64.S` | Three routines per architecture that need a calling convention C# can't express: two for storing object references, one for interface calls |
 | `native/mac-arm64.S` | `arm64.S` as a Mach-O object, for macOS |
 | `native/win-x64.S` | The same for Windows x64's calling convention, plus the stack probe Windows code calls for frames larger than a page. With `../win/start.c` and `../win/runtime.c` (entry point, `write`, `read`) it is all a Windows build adds |

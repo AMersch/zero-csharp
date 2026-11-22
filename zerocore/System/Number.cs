@@ -30,8 +30,12 @@ namespace System
             return FromChars(digits + start, 21 - start);
         }
 
-        internal static string FormatDouble(double value, int precision = 15)
+        // scientificFrom: the decimal exponent from which the text switches to
+        // 1.5E+20 form; by default precision.
+        internal static string FormatDouble(double value, int precision = 15, int scientificFrom = 0)
         {
+            if (scientificFrom == 0)
+                scientificFrom = precision;
             if (value != value)
                 return "NaN";
             if (value == 1.0 / 0.0)
@@ -77,9 +81,9 @@ namespace System
             while (count > 1 && d[count - 1] == '0')
                 count--;
 
-            if (exponent >= precision || exponent < -5)
+            if (exponent >= scientificFrom || exponent < -4)
             {
-                // 1.5E+20, 2E-07: .NET's scientific form.
+                // 1.5E+20, 1E-05: .NET's scientific form.
                 text[length++] = d[0];
                 if (count > 1)
                 {

@@ -107,14 +107,13 @@
       </_ZeroArg>
       <_ZeroDllImport Include="libc;libm.so.6;$(ZeroDllImports)" KeepDuplicates="false" />
       <_ZeroArg Include="@(_ZeroDllImport->'-i %(Identity)', ' ')" />
+      <!-- bflat's default operating system is the host's: named, so a Windows
+           host builds Linux programs too. -->
+      <_ZeroArg Include="--os linux" Condition="'$(ZeroTarget)' != 'win-x64'" />
       <_ZeroArg Include="--arch x64" Condition="'$(ZeroTarget)' != 'linux-arm64'" />
       <_ZeroArg Include="--arch arm64" Condition="'$(ZeroTarget)' == 'linux-arm64'" />
       <_ZeroArg Include="--ldflags &quot;$(ZeroNativeObjDir)zerocore.o&quot; --ldflags &quot;-z nostart-stop-gc&quot;" Condition="'$(ZeroTarget)' != 'win-x64'" />
       <_ZeroArg Include="--ldflags &quot;-z max-page-size=4096&quot;" Condition="'$(ZeroTarget)' == 'linux-arm64'" />
-      <!-- The ELF emulation, named: on a Windows host, lld's GNU driver
-           otherwise links for MinGW (Windows). -->
-      <_ZeroArg Include="--ldflags &quot;-m elf_x86_64&quot;" Condition="'$(ZeroTarget)' == 'linux-x64'" />
-      <_ZeroArg Include="--ldflags &quot;-m aarch64linux&quot;" Condition="'$(ZeroTarget)' == 'linux-arm64'" />
       <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags &quot;$(ZeroNativeObjDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeObjDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64'" />
       <_ZeroArg Include="-Os" Condition="'$(ZeroOptimizeFor)' == 'Size'" />
       <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != ''" />

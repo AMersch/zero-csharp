@@ -1,0 +1,223 @@
+---
+title: Coming from .NET
+index: 7
+---
+
+# Coming from .NET
+
+If you write C# for .NET, the language here is the one you know: classes, structs, generics,
+interfaces, records, pattern matching, spans, lambdas, C# 15. What's gone is the runtime under it
+and nearly all of the base class library. This page maps what you reach for in .NET to what you use
+instead, and lists what compiles as usual but behaves differently.
+
+## What to use instead
+
+| In .NET | Here | More |
+|---|---|---|
+| `Console.Write`, `Console.WriteLine` | `Out.Write`, `Out.Line`, with `$"..."` written straight to stdout | [Format text](../how-to/format-text.html) |
+| `Console.ReadLine()` | `In.ReadLine(buffer)` into a `Span<char>` you provide | [Read input](../how-to/read-input.html) |
+| `int.Parse`, `double.TryParse` | `Str.TryParse(span, out value)` | [Read input](../how-to/read-input.html) |
+| `string.Format`, `$"..."` kept as a string | `Str.Format(arena, $"...")`, `StrBuilder` | [Keep a string](../how-to/keep-a-string.html) |
+| `List<T>`, `Dictionary<TKey, TValue>` | `List<T>`, `Dict<TKey, TValue>`, `StrDict<TValue>`, `RefList<T>`, `RefDict<TKey, TValue>`, each created in an arena | [Choose a collection](../how-to/choose-a-collection.html) |
+| LINQ | `lib/Seq.cs`: `Where`, `Select`, `Sum`, query syntax, without allocating | [Query data](../how-to/query-data.html) |
+| The garbage collector | Arenas, freed all at once | [Memory without a GC](../concepts/memory.html) |
+| `try`/`catch` | A union or a status in the return value | [Limits](../concepts/limits.html) |
+| `Thread`, `Task`, `async`/`await` | `Parallel.For` | [Run a loop in parallel](../how-to/run-in-parallel.html) |
+| `Stopwatch`, `DateTime.Now` | The C library's `clock_gettime`, through `[DllImport]` | [Use SIMD](../how-to/use-simd.html) |
+| `Environment.Exit(code)` | Return the code from `Main` | |
+| `Vector128.IsHardwareAccelerated`, `Avx2.IsSupported` at run time | Decided when building, by `ZeroInstructionSet` (`-m`) | [Use SIMD](../how-to/use-simd.html) |
+| NuGet packages | Zero libraries, packed for `zero03`; ordinary .NET packages are refused | [Create a library](../how-to/create-a-library.html) |
+| `[DllImport]` | Works, bound when linking; `ZeroDllImports` names libraries besides `libc` and `libm.so.6` | [Install with dotnet](install-with-dotnet.html) |
+| `[UnmanagedCallersOnly]` exports, NativeAOT's `NativeLib=Shared` | The same | [Build a native library](../how-to/build-a-native-library.html) |
+
+There is no `System.IO`, `Random`, `DateTime`, reflection or `System.Text.Json`. A program that needs
+files, the time of day or random numbers calls the C library itself with `[DllImport]`, or, on DOS and
+UEFI, uses the file members of [`Dos`](../reference/dos.html) and [`Uefi`](../reference/uefi.html).
+
+## Output and input
+
+`Out` buffers what you write and encodes it as UTF-8. `In.ReadLine` reads into a buffer you own, so
+reading a line allocates nothing; it returns the length, or a negative number at the end of input:
+
+<!-- sample: samples/QuizStep2.cs ask -->
+```csharp
+// In.ReadLine flushes Out first, so the prompt shows before the
+// program waits for the answer.
+Out.Write($"Q{i}: {a} + {b} = ");
+int length = In.ReadLine(buffer);
+if (length < 0)
+{
+    Out.Line();
+    Out.Line("(end of input)");
+    break;
+}
+asked++;
+```
+
+`Console` itself doesn't exist, so `Console.WriteLine` is a compile error, not a surprise at run time.
+
+## Memory
+
+`new` still works, and so do boxing, `+` on strings and lambdas that capture. But each of them calls
+`calloc`, and nothing frees it: there is no garbage collector. That is fine for what lives as long as
+the program. Anything short-lived goes in an arena, which hands out memory by moving a pointer and
+frees everything in it at once.
+
+An arena can also take over ordinary `new`. Inside an object scope, arrays, strings and closures are
+allocated in the arena and freed when the `using` block ends:
+
+<!-- sample: samples/Arena.cs object-scope-free -->
+```csharp
+// OpenObjectScope also frees what the block created when it closes,
+// so objects live exactly as long as the using block. The arena can
+// hold longer-lived data too: only what came after the scope opened
+// is freed.
+Arena scoped = Arena.Create(4096);
+int* kept = scoped.Alloc<int>();       // lives past every scope
+unsafe { *kept = 42; } // SAFETY: kept points at an int in scoped.
+nuint usedOutside = scoped.Used;
+long heapBeforeFrames = System.GC.GetTotalAllocatedBytes();
+int frameTotal = 0;
+for (int round = 0; round < 1000; round++)
+{
+    Arena.ObjectScope objects;
+    // SAFETY: nothing created inside is used after the block.
+    unsafe { objects = scoped.OpenObjectScope(); }
+    using (objects)
+    {
+        int[] cells = new int[16];
+        string text = Echo("ab") + Echo("cd");
+        frameTotal += cells.Length + text.Length;
+    }   // cells and text are freed here
+}
+long frameHeapGrowth = System.GC.GetTotalAllocatedBytes() - heapBeforeFrames;
+```
+
+Freeing is `unsafe`, because it is what can leave a reference pointing at freed memory: the `SAFETY`
+comment says why it can't here. [Memory without a GC](../concepts/memory.html) explains arenas, and
+[The memory safety rules](../concepts/safety-rules.html) explains `unsafe`.
+
+## Collections
+
+`lib/`'s collections are structs holding one pointer, created in an arena and freed with it. `List<T>`
+and `Dict<TKey, TValue>` hold unmanaged values (numbers, structs of numbers); `RefList`, `StrDict` and
+`RefDict` hold references and strings:
+
+<!-- sample: samples/Collections.cs dict -->
+```csharp
+var scores = Dict<int, int>.Create(arena);
+scores.Set(1, 100);
+scores.Set(2, 250);
+scores.Set(3, 175);
+scores.Set(-42, 999);
+```
+
+The names are .NET's, but the API is smaller and shaped by arenas: `Create(arena)` instead of `new`,
+`Get` and `Set` instead of an indexer, `TryGet` returning `false` for a missing key instead of throwing.
+`new List<int>()` compiles, because `List` is a struct, but gives a list that was never created: its
+`Add` returns `false`.
+
+## LINQ
+
+`lib/Seq.cs` has LINQ's operators over arrays, spans and lists, with the same names, and
+`from ... where ... select` works too. Each query is a chain of structs, so it allocates nothing:
+
+<!-- sample: samples/Queries.cs operators -->
+```csharp
+// Operators chain like LINQ's. `static` lambdas are allocated once,
+// the first time they run, and reused after that.
+int evenSquares = numbers.Where(static x => x % 2 == 0)
+                         .Select(static x => x * x)
+                         .Sum();
+int big = numbers.Where(static x => x > 4).Count();
+```
+
+A `static` lambda is allocated once and reused. One that captures a local allocates a closure each
+time it is created, which in a loop is memory never given back;
+[Query data](../how-to/query-data.html) shows how to pass state instead.
+
+## Errors
+
+`throw` compiles, and so does `catch`. But nothing unwinds: a `throw` prints the exception's message
+and ends the program, like Rust's `panic!`. No `catch` block ever runs, and neither do the `finally`
+blocks between the `throw` and `Main`. A failed cast, an index out of range or an overflow in `checked`
+code ends the program the same way; a null dereference is a segmentation fault.
+
+So an error the caller should handle is a return value. A C# 15 union says which outcomes there are,
+and a `switch` on it must handle each:
+
+<!-- sample: samples/Core.cs union-declaration -->
+```csharp
+public struct Parsed { public int Value; }
+public struct BadChar { public int Position; }
+
+// A ParseResult holds either a Parsed or a BadChar, and a switch on it must
+// handle both.
+public union ParseResult(Parsed, BadChar);
+```
+
+<!-- sample: samples/Core.cs union-function -->
+```csharp
+static ParseResult ParseNumber(string text)
+{
+    int value = 0;
+    for (int i = 0; i < text.Length; i++)
+    {
+        char c = text[i];
+        if (c < '0' || c > '9')
+            return new BadChar { Position = i };
+        value = value * 10 + (c - '0');
+    }
+    return new Parsed { Value = value };
+}
+
+static int ValueOrMinusOne(string text) => ParseNumber(text) switch
+{
+    Parsed p => p.Value,
+    BadChar => -1,
+};
+```
+
+## Threads
+
+There is no `Thread`, `Task`, `lock` or `async`. `Parallel.For` runs a loop on every processor and
+returns when it is done, with `Interlocked` and `Volatile` for shared state:
+
+<!-- sample: samples/Threads.cs parallel-for -->
+```csharp
+// Each iteration writes its own element, so no two threads touch the
+// same memory. The lambda is static: what it needs comes as state.
+var squares = new Squares { Results = new long[2000] };
+Parallel.For(0, 2000, squares,
+    static (s, i) => s.Results[i] = SlowSquare(i));
+```
+
+Arenas and `lib/`'s collections aren't thread-safe, so give each thread its own;
+[Run a loop in parallel](../how-to/run-in-parallel.html) shows how.
+
+## What compiles but behaves differently
+
+- **A `catch` block never runs**, and a `throw` skips the `finally` blocks on its way out (above).
+- **Nothing you `new` is freed**, nor boxed values, concatenated strings or closures, unless an object
+  scope is open.
+- **A struct's default `Equals` compares bytes.** A reference field compares by reference, where .NET
+  calls its `Equals`. Records and `IEquatable<T>` compare field by field.
+- **A `Type` has no name.** `typeof` and `GetType()` work for comparing types, and a class without its
+  own `ToString` prints `object`.
+- **Variance aborts.** Using an `IEnumerable<string>` as an `IEnumerable<object>`, or a `string[]` as
+  an `object[]`, ends the program with a message instead of working.
+- **`[ModuleInitializer]` doesn't run.** Use a static constructor, which does, once, even with several
+  threads.
+- **`IsSupported` is a constant.** `Avx2.IsSupported` is `true` only when the build names the
+  instruction set, and the program then assumes the processor has it.
+- **Arrays aren't `IList<T>` or `IEnumerable<T>`.** Pass a span instead.
+
+[Limits](../concepts/limits.html) has the full list and the known issues.
+
+## Next
+
+- [Install with dotnet](install-with-dotnet.html), if you haven't: `dotnet new zero` and
+  `dotnet build`.
+- The [tutorial](../tutorial/index.html) builds a small program step by step with `Out`, `In` and
+  `Str.TryParse`.
+- [Zero mode](../concepts/zero-mode.html) explains what replaced the runtime.

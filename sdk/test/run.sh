@@ -637,6 +637,23 @@ test_unusual_packages_folder() {
     pass "$name"
 }
 
+# Lines piped from PowerShell or cmd end in \r\n: the program reads the name
+# without the \r (the template's program, built for the host).
+test_crlf_input() {
+    local name="crlf input" dir=$WORK/crlf out
+    can_build "$name" || return
+    rm -rf "$dir" && mkdir -p "$dir"
+    fixture hello crlf-config > /dev/null
+    cp "$WORK/crlf-config/nuget.config" "$dir/"
+    dotnet new uninstall ZeroCSharp.Templates > /dev/null 2>&1 || true
+    if ! run_in "$dir" crlf-install new install "$FEED/ZeroCSharp.Templates.$VERSION.nupkg"; then fail "$name" "install failed"; return; fi
+    if ! run_in "$dir" crlf-new new zero -o Hello; then fail "$name" "dotnet new zero failed"; return; fi
+    if ! run_in "$dir/Hello" crlf-build build; then fail "$name" "the program didn't build"; return; fi
+    out=$(printf 'Ann\r\n' | "$(exe "$dir/Hello/bin/Debug/$TFM/Hello")" | od -An -c | tr -s ' ')
+    if [[ "$out" != *"A n n !"* ]]; then fail "$name" "printed:$out"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
@@ -644,7 +661,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
     release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0
-    long_command_line windows_builds_linux unusual_packages_folder)
+    long_command_line windows_builds_linux unusual_packages_folder crlf_input)
 
 # ---- Run ---------------------------------------------------------------------
 

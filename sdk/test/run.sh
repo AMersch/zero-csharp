@@ -77,7 +77,7 @@ native_path() { if [ "$HOST_OS" = Windows ]; then cygpath -w "$1"; else echo "$1
 # zip_list <zip>: the entries' names; zip_dir <dir> <zip>: zips a folder's contents.
 zip_list() {
     if command -v unzip > /dev/null; then unzip -Z1 "$1"
-    else powershell.exe -NoProfile -Command "Add-Type -A System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::OpenRead('$(native_path "$1")').Entries.FullName"; fi
+    else powershell.exe -NoProfile -Command "Add-Type -A System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::OpenRead('$(native_path "$1")').Entries.FullName" | tr -d '\r'; fi
 }
 zip_dir() {
     if command -v zip > /dev/null; then (cd "$1" && zip -qr "$2" .)
@@ -610,15 +610,19 @@ test_long_command_line() {
     sub="$dir/$(printf 'a%.0s' $(seq 1 120))"
     mkdir -p "$sub"
     main='public static class Program { public static int Main() { long n = 0;'
-    for i in $(seq 1 40); do
+    # 80 files of ~160 characters each: past 8191 even on a short checkout path.
+    for i in $(seq 1 80); do
         echo "public static class Part$i { public static long One() => 1; }" > "$sub/Part$i.cs"
         main="$main n += Part$i.One();"
     done
     echo "$main Out.Write(n); Out.Line(); return 0; } }" > "$dir/Program.cs"
     if ! run_in "$dir" manyfiles build -v:n; then fail "$name" "dotnet build failed"; return; fi
     if ! grep -qE 'tools/bflat/bflat(\.exe)?" build @' "$LOG"; then fail "$name" "bflat didn't get a response file"; return; fi
+    # Past cmd.exe's 8191-character limit, or the test proves nothing there.
+    local len; len=$(wc -c < "$dir/obj/Debug/$TFM/zero-native.args" | tr -d ' ')
+    if [ "$len" -le 8191 ]; then fail "$name" "the arguments are only $len characters"; return; fi
     local out; out=$("$(exe "$dir/bin/Debug/$TFM/native")" | tr -d '\r')
-    if [ "$out" != 40 ]; then fail "$name" "printed '$out'"; return; fi
+    if [ "$out" != 80 ]; then fail "$name" "printed '$out'"; return; fi
     pass "$name"
 }
 
@@ -692,7 +696,50 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
     release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0
     long_command_line windows_builds_linux unusual_packages_folder crlf_input
-    artifacts_path_with_spaces)
+    artifacts_path_with_spaces trim_windows_layout trim_stamp)
+
+# sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
+# is found whatever its capitals, and an objdump failure stops the trim
+# instead of leaving the DLLs out.
+test_trim_windows_layout() {
+    local name="trim windows layout" d=$WORK/trimwin
+    rm -rf "$d" && mkdir -p "$d/linux/bin" "$d/linux/lib" "$d/win/bin" "$d/win/lib" "$d/stub"
+    touch "$d/linux/bflat" "$d/linux/bin/lld" "$d/linux/libfoo.so" "$d/linux/lib/zero.txt"
+    touch "$d/win/bflat.exe" "$d/win/bin/lld.exe" "$d/win/foo.dll" "$d/win/lib/zero.txt" "$d/win/bin/Zlib1.dll"
+    cat > "$d/stub/objdump" <<'STUB'
+#!/usr/bin/env bash
+[ -n "${STUB_FAIL:-}" ] && { echo "objdump: file format not recognized" >&2; exit 1; }
+case "$2" in *lld.exe) printf '\tDLL Name: ZLIB1.DLL\r\n\tDLL Name: KERNEL32.dll\r\n' ;; esac
+STUB
+    chmod +x "$d/stub/objdump"
+    LOG=$d/trim.log
+    if ! PATH="$d/stub:$PATH" sdk/trim-windows-layout.sh "$d/win" "$d/linux" "$d/out" > "$LOG" 2>&1; then fail "$name" "the trim failed"; return; fi
+    if [ -z "$(find "$d/out/bin" -name Zlib1.dll)" ]; then fail "$name" "bin/Zlib1.dll (imported as ZLIB1.DLL) is missing"; return; fi
+    if [ ! -f "$d/out/foo.dll" ] || [ ! -f "$d/out/lib/zero.txt" ]; then fail "$name" "the mapped files are missing"; return; fi
+    if STUB_FAIL=1 PATH="$d/stub:$PATH" sdk/trim-windows-layout.sh "$d/win" "$d/linux" "$d/out" > "$LOG" 2>&1; then fail "$name" "an objdump failure was ignored"; return; fi
+    if ! grep -q "objdump" "$LOG"; then fail "$name" "the error doesn't name objdump"; return; fi
+    pass "$name"
+}
+
+# sdk/trim-host.sh redoes a trimmed layout when any file it copied changes in
+# the full layout, and names what's missing instead of failing on a cd.
+test_trim_stamp() {
+    local name="trim stamp" d=$WORK/trimstamp
+    rm -rf "$d" && mkdir -p "$d/layouts/windows-x64/bin" "$d/layouts/windows-x64/lib" "$d/trimmed/linux-x64/bin" "$d/trimmed/linux-x64/lib" "$d/stub"
+    touch "$d/trimmed/linux-x64/bflat" "$d/trimmed/linux-x64/bin/lld" "$d/trimmed/linux-x64/lib/zero.txt"
+    touch "$d/layouts/windows-x64/bflat.exe" "$d/layouts/windows-x64/bin/lld.exe"
+    echo one > "$d/layouts/windows-x64/lib/zero.txt"
+    printf '#!/usr/bin/env bash\ntrue\n' > "$d/stub/objdump" && chmod +x "$d/stub/objdump"
+    LOG=$d/trim.log
+    if ! PATH="$d/stub:$PATH" sdk/trim-host.sh win-x64 "$d/layouts" "$d/trimmed" > "$LOG" 2>&1; then fail "$name" "the first trim failed"; return; fi
+    echo two > "$d/layouts/windows-x64/lib/zero.txt"
+    if ! PATH="$d/stub:$PATH" sdk/trim-host.sh win-x64 "$d/layouts" "$d/trimmed" > "$LOG" 2>&1; then fail "$name" "the second trim failed"; return; fi
+    if [ "$(cat "$d/trimmed/win-x64/lib/zero.txt")" != two ]; then fail "$name" "a changed lib/ file didn't redo the trim"; return; fi
+    rm -rf "$d/trimmed/linux-x64" "$d/trimmed/win-x64"
+    if PATH="$d/stub:$PATH" sdk/trim-host.sh win-x64 "$d/layouts" "$d/trimmed" > "$LOG" 2>&1; then fail "$name" "win-x64 trimmed without a linux-x64 one"; return; fi
+    if ! grep -q "linux-x64" "$LOG"; then fail "$name" "the error doesn't name linux-x64"; return; fi
+    pass "$name"
+}
 
 # ---- Run ---------------------------------------------------------------------
 

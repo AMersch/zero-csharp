@@ -1,6 +1,7 @@
 <!-- Packs dotnet new zero, zerolib and zerollama (content/), with the SDK
      version filled in (obj/content). zerollama's Program.cs is samples/Llama.cs
-     (sdk/pack.sh puts it in obj/zerollama). -->
+     (sdk/pack.sh puts it in obj/zerollama). The program templates also get
+     vscode/ as their .vscode folder, for debugging in VS Code. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <Import Project="../version.props" />
   <PropertyGroup>
@@ -37,6 +38,17 @@
     <Error Condition="!Exists('$(BaseIntermediateOutputPath)zerollama/Program.cs')"
            Text="No $(BaseIntermediateOutputPath)zerollama/Program.cs: pack the templates with sdk/pack.sh." />
     <Copy SourceFiles="$(BaseIntermediateOutputPath)zerollama/Program.cs" DestinationFolder="$(ZeroContent)zerollama" />
+    <!-- VS Code debugging (vscode/) in each program template's .vscode, with
+         the template's project name (dotnet new renames it) and the framework,
+         which names the output folder, filled in. -->
+    <ItemGroup>
+      <_ZeroVsCode Include="vscode/*" Template="zero" Project="ZeroApp1" />
+      <_ZeroVsCode Include="vscode/*" Template="zerollama" Project="ZeroLlama1" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ZeroVsCode)" DestinationFiles="@(_ZeroVsCode->'$(ZeroContent)%(Template)/.vscode/%(Filename)%(Extension)')" />
+    <WriteLinesToFile File="$(ZeroContent)%(_ZeroVsCode.Template)/.vscode/%(_ZeroVsCode.Filename)%(_ZeroVsCode.Extension)"
+                      Lines="$([System.IO.File]::ReadAllText('%(_ZeroVsCode.FullPath)').Replace('@ZERO_PROJECT@', '%(_ZeroVsCode.Project)').Replace('@ZERO_FRAMEWORK@', '$(ZeroFramework)'))"
+                      Overwrite="true" Condition="'%(_ZeroVsCode.Filename)' == 'launch'" />
     <ItemGroup>
       <None Include="$(ZeroContent)**" Pack="true" PackagePath="content/" />
     </ItemGroup>

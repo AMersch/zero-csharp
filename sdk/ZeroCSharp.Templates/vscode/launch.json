@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug @ZERO_PROJECT@",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/Debug/@ZERO_FRAMEWORK@/@ZERO_PROJECT@",
+      "windows": { "program": "${workspaceFolder}/bin/Debug/@ZERO_FRAMEWORK@/@ZERO_PROJECT@.exe" },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build",
+      "initCommands": ["command script import ${workspaceFolder}/.vscode/zero_lldb.py"],
+      "terminal": "integrated"
+    }
+  ]
+}

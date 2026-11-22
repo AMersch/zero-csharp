@@ -755,7 +755,7 @@ test_llama_template() {
     if ! run_in "$dir" llama-new new zerollama -o Story; then fail "$name" "dotnet new zerollama failed"; return; fi
     if ! run_in "$dir/Story" llama-build build; then fail "$name" "the program didn't build"; return; fi
     out=$("$(exe "$dir/Story/bin/Debug/$TFM/Story")" | tr -d '\r')
-    if [ "$out" != "$(head -1 "$ROOT/tests/expected/Llama.txt" | tr -d '\r')" ]; then fail "$name" "printed '$out'"; return; fi
+    if [ "$out" != "$(tr -d '\r' < "$ROOT/tests/expected/Llama.txt")" ]; then fail "$name" "printed '$out'"; return; fi
     out=$(printf 'The dog ran.\n' | "$(exe "$dir/Story/bin/Debug/$TFM/Story")" -c -s 3 | tr -d '\r')
     if [[ "$out" != *"Tell a story together"* ]] || [ "$(wc -l <<< "$out")" -lt 3 ]; then fail "$name" "-c printed '$out'"; return; fi
     case "$HOST_RID" in win-x64) other=linux-x64 ;; *) other=win-x64 ;; esac

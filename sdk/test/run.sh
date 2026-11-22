@@ -924,6 +924,68 @@ test_native_library_dotted_name() {
     pass "$name"
 }
 
+# c_compiler: a C compiler for the host's own target, if there is one.
+c_compiler() {
+    if [ -n "${CC:-}" ]; then echo "$CC"
+    elif command -v cc > /dev/null; then echo cc
+    elif command -v clang > /dev/null; then echo clang
+    elif command -v gcc > /dev/null; then echo gcc
+    else return 1; fi
+}
+
+# A C program loads the library (dlopen, or LoadLibrary on Windows) and prints
+# the first eight lines the .NET caller prints.
+test_native_library_c() {
+    local name="native library c" dir cc caller out ldl=
+    can_build "$name" || return
+    if ! cc=$(c_compiler); then skip "$name" "no C compiler"; return; fi
+    dir=$(fixture nativelib nativelib-c)
+    if ! build_nativelib "$dir" nativelib-c; then fail "$name" "dotnet build failed"; return; fi
+    [ "$HOST_OS" = Linux ] && ldl=-ldl
+    caller=$(exe "$WORK/nativelib-c-caller")
+    LOG=$WORK/nativelib-c-cc.log
+    if ! "$cc" "$(native_path "$ROOT/sdk/test/fixtures/nativelib-c/main.c")" -o "$(native_path "$caller")" $ldl > "$LOG" 2>&1; then
+        fail "$name" "the C caller didn't compile"; return
+    fi
+    out=$("$caller" "$(native_path "$NATIVELIB")" 2>&1 | tr -d '\r')
+    if [ "$out" != "$(head -8 "$ROOT/sdk/test/fixtures/nativelib-caller/expected.txt")" ]; then fail "$name" "printed: $(echo $out)"; return; fi
+    pass "$name"
+}
+
+# A C program linked against the library (the soname / install name, and an
+# rpath to its folder).
+test_native_library_c_linked() {
+    local name="native library c linked" dir cc caller out
+    can_build "$name" || return
+    if [ "$HOST_OS" = Windows ]; then skip "$name" "Linux and macOS"; return; fi
+    if ! cc=$(c_compiler); then skip "$name" "no C compiler"; return; fi
+    dir=$(fixture nativelib nativelib-c-linked)
+    if ! build_nativelib "$dir" nativelib-c-linked; then fail "$name" "dotnet build failed"; return; fi
+    caller=$WORK/nativelib-c-linked-caller
+    LOG=$WORK/nativelib-c-linked-cc.log
+    if ! "$cc" -DLINKED "$ROOT/sdk/test/fixtures/nativelib-c/main.c" "$NATIVELIB" -Wl,-rpath,"$(dirname "$NATIVELIB")" -o "$caller" > "$LOG" 2>&1; then
+        fail "$name" "the C caller didn't link"; return
+    fi
+    out=$("$caller" 2>&1)
+    if [ "$out" != "$(head -8 "$ROOT/sdk/test/fixtures/nativelib-caller/expected.txt")" ]; then fail "$name" "printed: $(echo $out)"; return; fi
+    pass "$name"
+}
+
+# A zero program loads a zero native library with dlopen: each keeps its own
+# zerocore and statics.
+test_native_library_with_zero_exe() {
+    local name="native library with zero exe" dir lib out
+    can_build "$name" || return
+    if [ "$HOST_OS" = Windows ]; then skip "$name" "zero programs import at link time; dlopen is Linux and macOS"; return; fi
+    lib=$(fixture nativelib nativelib-zeroexe-lib)
+    if ! build_nativelib "$lib" nativelib-zeroexe-lib; then fail "$name" "the library's dotnet build failed"; return; fi
+    dir=$(fixture nativelib-zero-caller)
+    if ! run_in "$dir" nativelib-zero-caller build; then fail "$name" "the program's dotnet build failed"; return; fi
+    out=$("$dir/bin/Debug/$TFM/nativelib-zero-caller" "$NATIVELIB" 2>&1)
+    if [ "$out" != $'add 5\nremember 3\nown 1' ]; then fail "$name" "printed: $(echo $out)"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
@@ -939,7 +1001,8 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     tutorial_steps simd_instruction_set static_constructor_threads
     native_library_dotnet native_library_exports native_library_two native_library_errors
     native_library_not_packable native_library_publish native_library_incremental native_library_clean
-    native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name)
+    native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name
+    native_library_c native_library_c_linked native_library_with_zero_exe)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim

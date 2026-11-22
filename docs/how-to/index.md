@@ -54,3 +54,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   how it's built, and how to design its API for zero mode.
 - [Build a native library](build-a-native-library.html): a `.so`, `.dylib` or `.dll` that .NET
   (`[DllImport]`) and C programs call, its exports, and the limits that carry over.
+
+## Debugging
+
+- [Debug a program](debug-a-program.html): breakpoints and variables in VS Code with CodeLLDB or on the
+  command line, unoptimized Debug builds, and strings and spans shown as text.

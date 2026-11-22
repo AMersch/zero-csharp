@@ -123,7 +123,8 @@ relative error below 4e-7.
 ## Build and run
 
 Put [`samples/Simd.cs`](https://github.com/OnurGumus/zero-csharp/blob/master/samples/Simd.cs) in a zero project's `Program.cs`, with the property above,
-then `dotnet build` and run `bin/Debug/zero03/<project>`. In the repository:
+then `dotnet build -c Release` and run `bin/Release/zero03/<project>`: a Debug build isn't optimized,
+which leaves its timings meaningless. In the repository:
 
 ```bash
 ./build.sh Simd Kernels

@@ -31,8 +31,9 @@ cd Hello
 dotnet build
 ```
 
-`dotnet new zero` makes a project and this program, which reads a name into a buffer on the stack
-and greets it:
+`dotnet new zero` makes a project, with a `.vscode` folder for debugging it in VS Code
+([Debug a program](../how-to/debug-a-program.html)), and this program, which reads a name into a
+buffer on the stack and greets it:
 
 <!-- sample: sdk/ZeroCSharp.Templates/content/zero/Program.cs file -->
 ```csharp
@@ -56,7 +57,8 @@ Out.Write(name);
 Out.Line("!");
 ```
 
-`dotnet build` puts the native program in `bin/Debug/zero03/`; `dotnet run` builds and runs it:
+`dotnet build` puts the native program in `bin/Debug/zero03/`, unoptimized for debugging
+(`-c Release` optimizes it); `dotnet run` builds and runs it:
 
 ```bash
 echo Ann | bin/Debug/zero03/Hello
@@ -126,16 +128,18 @@ Other libraries work the same way, with their own `.tbd` or `.dylib`.
 | Property | Values | Default |
 |---|---|---|
 | `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64`, `osx-arm64` | the build machine's |
-| `ZeroOptimizeFor` | `Speed`, or `Size` (bflat's `-Os`) | `Speed` |
+| `ZeroOptimizeFor` | `None` (bflat's `-O0`), `Speed`, or `Size` (bflat's `-Os`) | `None` in Debug, `Speed` otherwise |
 | `ZeroInstructionSet` | passed to bflat as `-m`, e.g. `x86-64-v3` or `dotprod` (see [Use SIMD](../how-to/use-simd.html)) | none |
 | `ZeroDllImports` | more libraries whose `[DllImport]`s are bound when linking, besides `libc` and `libm.so.6`, which always are | none |
 | `NativeLib` | `Shared`, with `OutputType` `Library`: a native library in `native/` instead of a zero library (see [Build a native library](../how-to/build-a-native-library.html)) | none |
 
 The build log shows bflat's arguments on a `bflat arguments:` line (`dotnet build -v:n`).
 
-Set them on the command line with `-p:`, or in the project file. The native program is optimized in
-Debug and Release alike. `dotnet publish` copies it, and only it, to the publish folder: it needs
-nothing next to it.
+Set them on the command line with `-p:`, or in the project file. A Debug build (what `dotnet build`
+and `dotnet run` make) isn't optimized, so a debugger stops on every line and shows every variable
+([Debug a program](../how-to/debug-a-program.html)); `-c Release` builds an optimized program, the one
+to time and ship. `dotnet publish` builds Release, and copies the program, and only it, to the
+publish folder: it needs nothing next to it.
 
 ## What dotnet build does
 

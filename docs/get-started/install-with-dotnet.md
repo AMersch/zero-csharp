@@ -7,20 +7,20 @@ index: 1
 
 With the .NET SDK, you can build zero-mode programs without cloning this repository. Three NuGet
 packages do it: a project SDK (`ZeroCSharp.Sdk`), the bflat compiler for your machine
-(`ZeroCSharp.Bflat.linux-x64`, `linux-arm64` or `win-x64`, downloaded by the SDK), and the project templates
+(`ZeroCSharp.Bflat.linux-x64`, `linux-arm64`, `win-x64` or `osx-arm64`, downloaded by the SDK), and the project templates
 (`ZeroCSharp.Templates`). `dotnet build` then makes a native program, and your editor understands
 the code.
 
 ## What you need
 
 - **The .NET 10 SDK.** Nothing else: the packages bring the compiler and the linker.
-- **Linux (x64 or arm64) or Windows (x64) to build programs.** Each builds for all three targets:
-  Linux x64, Linux arm64 and Windows x64. The packages are tested on GitHub's Windows runner, and on Ubuntu
-  22.04 and 24.04, Debian 12 and Fedora 41 with nothing but the .NET SDK installed.
-- **On macOS,** everything except the last step works: the editor, compiling, libraries and
-  `dotnet pack`. Building a program stops with an error that says so. Build programs on a Linux or
-  Windows machine or in a container, or [install from the repository](install.html), which also covers
-  macOS, WebAssembly and DOS.
+- **Linux (x64 or arm64), Windows (x64) or a Mac with Apple Silicon to build programs.** Each builds
+  for all four targets: Linux x64, Linux arm64, Windows x64 and macOS on Apple Silicon. The packages are
+  tested on GitHub's Windows and macOS runners, and on Ubuntu 22.04 and 24.04, Debian 12 and Fedora 41
+  with nothing but the .NET SDK installed. No Xcode is needed on a Mac.
+- **On an Intel Mac,** everything except the last step works: the editor, compiling, libraries and
+  `dotnet pack`. Building a program stops with an error that says so. For WebAssembly and DOS,
+  [install from the repository](install.html).
 
 ## Make a program
 

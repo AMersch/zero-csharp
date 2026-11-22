@@ -67,9 +67,9 @@
 
   <Target Name="ZeroCheckNativeHost">
     <Error Condition="'$(ZeroHostRid)' == '' and $([MSBuild]::IsOSPlatform('OSX'))"
-           Text="Zero C# can't make native programs on macOS yet; build on Linux or Windows, or use the repository's build.sh." />
+           Text="Zero C# builds on Apple Silicon Macs, not Intel ones; build on an Apple Silicon Mac, Linux (x64 or arm64) or Windows x64." />
     <Error Condition="'$(ZeroHostRid)' == '' and !$([MSBuild]::IsOSPlatform('OSX'))"
-           Text="Zero C# can't make native programs on this machine yet; build on Linux (x64 or arm64) or Windows x64." />
+           Text="Zero C# can't make native programs on this machine yet; build on Linux (x64 or arm64), Windows x64 or an Apple Silicon Mac." />
     <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64' and '$(ZeroTarget)' != 'osx-arm64'"
            Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64, osx-arm64." />
   </Target>

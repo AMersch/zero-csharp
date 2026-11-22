@@ -24,7 +24,7 @@
     <RepositoryCommit>$(BflatCommit)</RepositoryCommit>
   </PropertyGroup>
   <Target Name="CheckInputs" BeforeTargets="Build">
-    <Error Condition="'$(HostRid)' == '' or (!Exists('$(LayoutDir)/bflat') and !Exists('$(LayoutDir)/bflat.exe'))" Text="Pass -p:HostRid=linux-x64|linux-arm64|win-x64 and -p:LayoutDir=(a trimmed layout)." />
+    <Error Condition="'$(HostRid)' == '' or (!Exists('$(LayoutDir)/bflat') and !Exists('$(LayoutDir)/bflat.exe'))" Text="Pass -p:HostRid=linux-x64|linux-arm64|win-x64|osx-arm64 and -p:LayoutDir=(a trimmed layout)." />
   </Target>
   <ItemGroup>
     <None Include="$(LayoutDir)/**" Pack="true" PackagePath="tools/bflat/" />

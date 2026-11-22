@@ -24,13 +24,14 @@ case "$(uname -s)" in
     MINGW* | MSYS* | CYGWIN*) HOST_OS=Windows ;;   # Git Bash
     *)                        HOST_OS=$(uname -s) ;;
 esac
-export ZERO_HOSTS=${ZERO_HOSTS:-linux-x64 linux-arm64 win-x64}
+export ZERO_HOSTS=${ZERO_HOSTS:-linux-x64 linux-arm64 win-x64 osx-arm64}
 case "$(uname -m)" in
     x86_64 | amd64)  HOST_ARCH_NAME=x64;   DOCKER_ARCH=amd64; HOST_ELF_ARCH=x86-64 ;;
     *)               HOST_ARCH_NAME=arm64; DOCKER_ARCH=arm64; HOST_ELF_ARCH=aarch64 ;;
 esac
 case "$HOST_OS" in
     Windows) HOST_RID=win-x64 ;;
+    Darwin)  HOST_RID=osx-$HOST_ARCH_NAME ;;     # osx-arm64; osx-x64 can't build
     *)       HOST_RID=linux-$HOST_ARCH_NAME ;;
 esac
 
@@ -47,10 +48,10 @@ fail() {
 
 skip() { echo "skip $1: $2"; skipped=$((skipped + 1)); }
 # can_build <test name>: true on a host that builds native programs (Linux,
-# Windows); on others, records a skip.
+# Windows, an Apple Silicon Mac); on others, records a skip.
 can_build() {
-    [ "$HOST_OS" = Linux ] || [ "$HOST_OS" = Windows ] && return 0
-    skip "$1" "builds native programs, which needs a Linux or Windows host"
+    [ "$HOST_OS" = Linux ] || [ "$HOST_OS" = Windows ] || [ "$HOST_RID" = osx-arm64 ] && return 0
+    skip "$1" "builds native programs, which needs a Linux, Windows or Apple Silicon host"
     return 1
 }
 # linux_only <test name>: true on Linux; on other hosts, records a skip.
@@ -76,7 +77,9 @@ is_macho_arm64() {
         [ "$(byte_at "$1" 4)" = 12 ] && [ "$(byte_at "$1" 5)" = 0 ] && [ "$(byte_at "$1" 6)" = 0 ] && [ "$(byte_at "$1" 7)" = 1 ]
 }
 # is_host_program <file>: a program for the host's own target.
-is_host_program() { if [ "$HOST_OS" = Windows ]; then is_pe "$1"; else is_elf "$1" "$HOST_ELF_ARCH"; fi; }
+is_host_program() {
+    case "$HOST_OS" in Windows) is_pe "$1" ;; Darwin) is_macho_arm64 "$1" ;; *) is_elf "$1" "$HOST_ELF_ARCH" ;; esac
+}
 # native_path <path>: the path as the dotnet CLI on this host writes it.
 native_path() { if [ "$HOST_OS" = Windows ]; then cygpath -w "$1"; else echo "$1"; fi; }
 # zip_list <zip>: the entries' names; zip_dir <dir> <zip>: zips a folder's contents.
@@ -315,10 +318,10 @@ test_size() {
 
 test_macos_error() {
     local name="macos error" dir
-    if [ "$HOST_OS" != Darwin ]; then skip "$name" "macOS only"; return; fi
+    if [ "$HOST_RID" != osx-x64 ]; then skip "$name" "Intel Macs only"; return; fi
     dir=$(fixture native macos)
     if run_in "$dir" macos build; then fail "$name" "the build succeeded"; return; fi
-    if ! grep -qF "Zero C# can't make native programs on macOS yet; build on Linux or Windows, or use the repository's build.sh." "$LOG"; then
+    if ! grep -qF "Zero C# builds on Apple Silicon Macs, not Intel ones" "$LOG"; then
         fail "$name" "not the macOS message"; return
     fi
     dir=$(fixture hello macos-library)
@@ -716,7 +719,8 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     long_command_line windows_builds_linux unusual_packages_folder crlf_input
     artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template
     framework_from_property newer_sdk_library
-    mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import)
+    mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
+    trim_macos_layout mac_host_builds_all_targets)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim
@@ -882,6 +886,54 @@ public static class Program
 CS
     if run_in "$dir" macundefined build -p:ZeroTarget=osx-arm64; then fail "$name" "the build succeeded"; return; fi
     if ! grep -q "_zero_no_such_function" "$LOG"; then fail "$name" "the error doesn't name _zero_no_such_function"; return; fi
+    pass "$name"
+}
+
+# sdk/trim-macos-layout.sh with a stub otool: the linux-arm64 list mapped to
+# macOS names (.so -> .dylib), plus a dylib bflat loads, found whatever its
+# capitals; an otool failure stops the trim instead of leaving dylibs out.
+test_trim_macos_layout() {
+    local name="trim macos layout" d=$WORK/trimmac
+    rm -rf "$d" && mkdir -p "$d/linux/bin" "$d/linux/lib/linux" "$d/mac/bin" "$d/mac/lib/linux" "$d/stub"
+    touch "$d/linux/bflat" "$d/linux/bin/lld" "$d/linux/libjitinterface_arm64.so" "$d/linux/lib/linux/zero.txt"
+    touch "$d/mac/bflat" "$d/mac/bin/lld" "$d/mac/libjitinterface_arm64.dylib" "$d/mac/lib/linux/zero.txt" "$d/mac/libExtra.dylib" "$d/mac/unused.dylib"
+    cat > "$d/stub/otool" <<'STUB'
+#!/usr/bin/env bash
+[ -n "${STUB_FAIL:-}" ] && { echo "otool: can't open file" >&2; exit 1; }
+echo "$2:"
+case "$2" in *bflat) printf '\t@rpath/LIBEXTRA.dylib (compatibility version 1.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n' ;; esac
+STUB
+    chmod +x "$d/stub/otool"
+    LOG=$d/trim.log
+    if ! PATH="$d/stub:$PATH" sdk/trim-macos-layout.sh "$d/mac" "$d/linux" "$d/out" > "$LOG" 2>&1; then fail "$name" "the trim failed"; return; fi
+    if [ ! -f "$d/out/libjitinterface_arm64.dylib" ] || [ ! -f "$d/out/lib/linux/zero.txt" ] || [ ! -f "$d/out/bin/lld" ]; then fail "$name" "the mapped files are missing"; return; fi
+    if [ -z "$(find "$d/out" -maxdepth 1 -name libExtra.dylib)" ]; then fail "$name" "libExtra.dylib (loaded as LIBEXTRA.dylib) is missing"; return; fi
+    if [ -e "$d/out/unused.dylib" ]; then fail "$name" "unused.dylib was copied"; return; fi
+    if STUB_FAIL=1 PATH="$d/stub:$PATH" sdk/trim-macos-layout.sh "$d/mac" "$d/linux" "$d/out" > "$LOG" 2>&1; then fail "$name" "an otool failure was ignored"; return; fi
+    if ! grep -q "otool" "$LOG"; then fail "$name" "the error doesn't name otool"; return; fi
+    pass "$name"
+}
+
+# On an Apple Silicon Mac: the Mac's own program, signed ad hoc and run, and
+# the other three targets. They're kept in $WORK/macos-built/<rid>/ for CI,
+# which runs them on their own systems (sdk.yml, macos-built-*).
+test_mac_host_builds_all_targets() {
+    local name="mac host builds all targets" dir out t f
+    if [ "$HOST_RID" != osx-arm64 ]; then skip "$name" "Apple Silicon Macs only"; return; fi
+    dir=$(fixture native machost)
+    if ! run_in "$dir" machost build; then fail "$name" "dotnet build failed"; return; fi
+    if ! codesign -v "$dir/bin/Debug/$TFM/native" 2> /dev/null; then fail "$name" "the program isn't signed"; return; fi
+    out=$("$dir/bin/Debug/$TFM/native"); if [ "$out" != hi ]; then fail "$name" "printed '$out'"; return; fi
+    for t in linux-x64 linux-arm64 win-x64; do
+        if ! run_in "$dir" "machost-$t" build -p:ZeroTarget=$t; then fail "$name" "the $t build failed"; return; fi
+        f=$dir/bin/Debug/$TFM/$t/native; [ "$t" = win-x64 ] && f=$f.exe
+        case "$t" in
+            linux-x64)   is_elf "$f" x86-64 ;;
+            linux-arm64) is_elf "$f" aarch64 ;;
+            win-x64)     is_pe "$f" ;;
+        esac || { fail "$name" "$t/native isn't a $t program"; return; }
+        mkdir -p "$WORK/macos-built/$t" && cp "$f" "$WORK/macos-built/$t/"
+    done
     pass "$name"
 }
 

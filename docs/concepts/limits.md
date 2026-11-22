@@ -226,8 +226,8 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
   WebAssembly and DOS. Not on Windows on arm64 or Intel Macs. The repository's `build.sh` builds on
   Linux and macOS; building with it *on* Windows (`build.ps1`) is untested and uses bflat's zerolib.
   The .NET SDK packages ([Install with dotnet](../get-started/install-with-dotnet.html)) build on
-  Linux (x64, arm64) and Windows x64, for Linux x64, Linux arm64, Windows x64 and macOS on Apple
-  Silicon; WebAssembly and DOS need the repository. Their macOS programs can call macOS's C library
+  Linux (x64, arm64), Windows x64 and Apple Silicon Macs, for Linux x64, Linux arm64, Windows x64 and
+  macOS on Apple Silicon; WebAssembly and DOS need the repository. Their macOS programs can call macOS's C library
   only, unless you add another library's `.tbd` or `.dylib` yourself.
 
 `zerocore/README.md` has the full list.

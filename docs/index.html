@@ -3,19 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Zero-mode C#: C# compiled by a bflat fork into small native programs with no .NET runtime, for Linux, macOS, Windows, WebAssembly and DOS on a 386." />
+  <meta name="description" content="Zero-mode C#: C# compiled by a bflat fork into small native programs with no .NET runtime, for Linux, macOS, Windows, WebAssembly, DOS on a 386, and UEFI with no operating system." />
   <title>Zero C# | C# without a runtime, from Linux to a 386</title>
   <link rel="icon" href="img/favicon.svg" type="image/svg+xml" />
   <!-- Link previews. The image is drawn from docs/social/card.html; build-docs.py adds the same to every guide page. -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Zero C#" />
   <meta property="og:title" content="Zero C#: C# with nothing underneath" />
-  <meta property="og:description" content="A bflat fork that compiles C# to small native programs with no .NET runtime and no garbage collector, for Linux, macOS, Windows, WebAssembly and DOS on a 386." />
+  <meta property="og:description" content="A bflat fork that compiles C# to small native programs with no .NET runtime and no garbage collector, for Linux, macOS, Windows, WebAssembly, DOS on a 386, and UEFI with no operating system." />
   <meta property="og:url" content="https://onurgumus.github.io/zero-csharp/" />
-  <meta property="og:image" content="https://onurgumus.github.io/zero-csharp/img/social.png?v=2" />
+  <meta property="og:image" content="https://onurgumus.github.io/zero-csharp/img/social.png?v=3" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="Zero C#, C# with nothing underneath. Kept: C# 15, real generics, interfaces, records and lambdas. Left out: the garbage collector and the .NET runtime. Runs on Linux, macOS, Windows, WebAssembly and DOS." />
+  <meta property="og:image:alt" content="Zero C#, C# with nothing underneath. Kept: C# 15, real generics, interfaces, records and lambdas. Left out: the garbage collector and the .NET runtime. Runs on Linux, macOS, Windows, WebAssembly, DOS and UEFI." />
   <meta name="twitter:card" content="summary_large_image" />
   <style>
     /* Self-hosted Inter (variable, Latin subset), as on the guide pages. SIL OFL 1.1, see fonts/LICENSE. */
@@ -130,13 +130,12 @@
     .gone li span { color: #c5cce0; }
     .ledger code { font: .875em var(--mono); color: #f3c86a; }
 
-    /* Five machines: three desktops on top, WebAssembly and DOS below. */
+    /* Six machines: three desktops on top; UEFI, WebAssembly and DOS below. */
     .machines { padding: 56px 0 64px; }
     h2 { margin: 0 0 10px; color: var(--ink); font-size: 1.75rem; letter-spacing: -0.02em; line-height: 1.2; }
     .section-intro { margin: 0 0 32px; max-width: 40em; }
     .screens { display: grid; grid-template-columns: repeat(6, 1fr); gap: 20px; align-items: stretch; }
     .screen { display: flex; flex-direction: column; grid-column: span 2; }
-    .screen.wasm, .screen.dos { grid-column: span 3; }
     .screen-body {
       flex: 1; margin: 0; padding: 16px 18px; border-radius: 10px; font: .8125rem/1.65 var(--mono);
       white-space: pre; overflow-x: auto; min-height: 150px;
@@ -150,6 +149,11 @@
     .win .prompt { color: #61d6d6; }
     .prompt { color: #7ee2a8; }
     .wasm .prompt { color: #c4a5ff; }
+    .wasm p a { color: var(--amber-ink); font-weight: 600; }
+    /* The UEFI Shell, as the firmware draws it: grey on black, yellow prompts. */
+    .uefi .screen-body { background: #000; color: #c0c0c0; }
+    .uefi .prompt { color: #ffff55; }
+    .uefi .dim { color: #6b7280; }
     /* The memorable one: DOS in 80x25 text mode, CGA colours. */
     .dos .screen-body {
       background: var(--dos-blue); color: var(--dos-grey); border-radius: 4px;
@@ -187,7 +191,7 @@
     @media (max-width: 900px) {
       .hero { grid-template-columns: 1fr; gap: 36px; padding-top: 48px; }
       .screens { grid-template-columns: 1fr; }
-      .screen, .screen.wasm, .screen.dos { grid-column: auto; }
+      .screen { grid-column: auto; }
       .idea-list { grid-template-columns: 1fr; }
       .ledger-grid, .kept ul { grid-template-columns: 1fr; }
       .path { grid-template-columns: 1fr 1fr; }
@@ -219,7 +223,7 @@
       <div>
         <h1>C# with nothing underneath</h1>
         <p class="lede">A fork of bflat compiles C# straight to a small native program: no .NET runtime, no garbage collector, nothing to install where it runs.</p>
-        <p>You keep C#'s syntax, type checking and generics. Memory comes from arenas you free all at once, and a small library gives you strings, collections, input and output on those terms. The same source runs on Linux, macOS and Windows, on WebAssembly, and on DOS on a 386.</p>
+        <p>You keep C#'s syntax, type checking and generics. Memory comes from arenas you free all at once, and a small library gives you strings, collections, input and output on those terms. The same source runs on Linux, macOS and Windows, on WebAssembly, on DOS on a 386, and on a bare PC with no operating system, started by its UEFI firmware.</p>
         <div class="actions">
           <a class="button primary" href="get-started/index.html">Get started</a>
           <a class="button" href="tutorial/index.html">Build the quiz tutorial</a>
@@ -271,44 +275,52 @@ mistakes.Add(<span class="t">Str</span>.Format(keep,
 
     <section class="machines">
       <div class="wrap">
-        <h2>One program, five machines</h2>
-        <p class="section-intro">The hello-world sample, unchanged, built for each target. Each build is checked by the same test suite, which requires the same output everywhere.</p>
+        <h2>One program, six machines</h2>
+        <p class="section-intro">A new project from <code>dotnet new zero</code>, built for each target by setting one property, <code>ZeroTarget</code>. The repository builds WebAssembly and DOS too, and one test suite requires the same output on every target.</p>
         <div class="screens">
           <div class="screen linux">
-<pre class="screen-body"><span class="prompt">$</span> ./build.sh Minimal
-<span class="prompt">$</span> ./run.sh Minimal
-Hello from zero-mode!
-<span class="prompt">$</span> wc -c bin/Minimal
-39848 bin/Minimal</pre>
+<pre class="screen-body"><span class="prompt">$</span> dotnet new zero -n Hello
+<span class="prompt">$</span> cd Hello &amp;&amp; dotnet build -c Release
+<span class="prompt">$</span> bin/Release/zero03/Hello
+What's your name? Ada
+Hello, Ada!</pre>
             <h3>Linux, x64 or arm64</h3>
-            <p>A native program that needs only the C library. On macOS it builds and runs in a container.</p>
+            <p>A native program that needs only the C library: 46 KB.</p>
           </div>
           <div class="screen mac">
-<pre class="screen-body"><span class="prompt">$</span> ./build.sh --mac Minimal
-<span class="prompt">$</span> bin/mac/Minimal
-Hello from zero-mode!
-<span class="prompt">$</span> wc -c bin/mac/Minimal
-64728 bin/mac/Minimal</pre>
+<pre class="screen-body"><span class="prompt">$</span> dotnet new zero -n Hello
+<span class="prompt">$</span> cd Hello &amp;&amp; dotnet build -c Release
+<span class="prompt">$</span> bin/Release/zero03/Hello
+What's your name? Ada
+Hello, Ada!</pre>
             <h3>macOS on Apple Silicon</h3>
-            <p>A native Mac program: bflat compiles it, the Mac's own clang links it. No container to run it.</p>
+            <p>A native Mac program, 66 KB, linked by the package's own linker. No Xcode needed.</p>
           </div>
           <div class="screen win">
-<pre class="screen-body"><span class="prompt">$</span> ./build.sh --win Minimal
-<span class="prompt">$</span> ./run.sh --win Minimal
-Hello from zero-mode!
-<span class="prompt">$</span> wc -c bin/win/Minimal.exe
-10752 bin/win/Minimal.exe</pre>
+<pre class="screen-body"><span class="prompt">&gt;</span> dotnet new zero -n Hello
+<span class="prompt">&gt;</span> cd Hello &amp;&amp; dotnet build -c Release
+<span class="prompt">&gt;</span> bin\Release\zero03\Hello.exe
+What's your name? Ada
+Hello, Ada!</pre>
             <h3>Windows x64</h3>
-            <p>A console program on Windows' own C library, built from Linux or macOS. Tested under Wine.</p>
+            <p>A 14 KB console program on Windows' own C library, built on Windows, Linux or a Mac.</p>
+          </div>
+          <div class="screen uefi">
+<pre class="screen-body"><span class="dim">dotnet build -p:ZeroTarget=uefi-x64</span>
+<span class="prompt">Shell&gt;</span> fs0:
+<span class="prompt">FS0:\&gt;</span> Hello.efi
+What's your name? Ada
+Hello, Ada!</pre>
+            <h3>UEFI, no operating system</h3>
+            <p>A 15 KB program the PC's firmware starts by itself, from a USB stick. x64 or arm64.</p>
           </div>
           <div class="screen wasm">
-<pre class="screen-body"><span class="prompt">$</span> ./build.sh --wasm Minimal
-<span class="prompt">$</span> ./run.sh --wasm Minimal
+<pre class="screen-body"><span class="prompt">$</span> wasmtime Minimal.wasm
 Hello from zero-mode!
-<span class="prompt">$</span> wc -c bin/wasm/Minimal.wasm
-15833 bin/wasm/Minimal.wasm</pre>
+<span class="prompt">$</span> wc -c Minimal.wasm
+15833 Minimal.wasm</pre>
             <h3>WebAssembly</h3>
-            <p>A WASI module, through NativeAOT-LLVM. Runs under wasmtime.</p>
+            <p>A WASI module, through NativeAOT-LLVM. Runs under wasmtime, or <a href="get-started/browser.html">in your browser</a>.</p>
           </div>
           <div class="screen dos">
 <pre class="screen-body">C:\&gt;D:
@@ -360,7 +372,7 @@ D:\&gt;<span class="cursor" aria-hidden="true"></span></pre>
         <h2>Where to start</h2>
         <p class="section-intro">If you're new to it, these four pages take you from nothing to an interactive program.</p>
         <ol class="path">
-          <li><a href="get-started/install-with-dotnet.html">Install</a><p>With dotnet on Linux or Windows, or from the repository for every target.</p></li>
+          <li><a href="get-started/install-with-dotnet.html">Install</a><p>With dotnet on Linux, Windows or a Mac, or from the repository for every target.</p></li>
           <li><a href="get-started/first-program.html">Your first program</a><p>Build it, run it, see how small it is.</p></li>
           <li><a href="get-started/dos.html">Run it on DOS</a><p>The same program under FreeDOS, in an emulator.</p></li>
           <li><a href="tutorial/index.html">The tutorial</a><p>A quiz: output, input, bad input, arenas.</p></li>

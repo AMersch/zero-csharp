@@ -10,13 +10,15 @@ native programs that carry no .NET runtime and no garbage collector. A program h
 type checking and generics, compiled to something the size of a C program: the hello-world sample is
 about 39 KB, the smallest one 16 KB.
 
-The same source builds for five targets:
+The same source builds for six targets:
 
 - **Native Linux**, x64 or arm64. On macOS the compiler runs in a Linux container.
 - **macOS on Apple Silicon**, programs that run on the Mac directly.
 - **Windows x64**, built from Linux or macOS and tested under Wine.
 - **WebAssembly** (WASI), run with wasmtime.
 - **DOS on a 386**, run under FreeDOS in an emulator, or on old hardware.
+- **UEFI**, x64 or arm64: a program the PC's firmware starts with no operating system, run in QEMU
+  or booted from a USB stick ([Build for UEFI](../how-to/build-for-uefi.html)).
 
 Without a runtime, some of C# is missing, and memory works differently: `new` allocates and nothing
 ever frees it, so programs allocate from arenas that they free all at once. The repository's core
@@ -26,7 +28,8 @@ terms.
 ## Where to go
 
 1. [Install with dotnet](install-with-dotnet.html): on Linux, Windows or an Apple Silicon Mac,
-   `dotnet new zero` and `dotnet build` make a native program, with nothing to clone. Or
+   `dotnet new zero` and `dotnet build` make a native program, with nothing to clone, for Linux,
+   macOS, Windows or UEFI. Or
    [install from the repository](install.html), the bflat fork and its prerequisites, which also
    builds for WebAssembly and DOS.
 2. [Build your first program](first-program.html) and run it.

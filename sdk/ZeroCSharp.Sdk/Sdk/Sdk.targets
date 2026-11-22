@@ -160,6 +160,7 @@
            host builds Linux programs too. -->
       <_ZeroArg Include="--os linux" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'" />
       <_ZeroArg Include="--os macos -c" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <_ZeroArg Include="--target Shared" Condition="'$(ZeroTarget)' == 'osx-arm64' and '$(ZeroNativeLibrary)' == 'true'" />
       <_ZeroArg Include="--arch x64" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'win-x64'" />
       <_ZeroArg Include="--arch arm64" Condition="'$(ZeroTarget)' == 'linux-arm64' or '$(ZeroTarget)' == 'osx-arm64'" />
       <_ZeroArg Include="--ldflags &quot;$(ZeroNativeDir)zerocore.o&quot; --ldflags &quot;-z nostart-stop-gc&quot;" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'" />
@@ -186,7 +187,12 @@
            so paths get forward slashes (which Windows takes too). -->
       <_ZeroLinkArg Include="-arch arm64 -platform_version macos 12.0 12.0 -fixup_chains -dead_strip" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$(ZeroNativeObject)'))').Replace('\', '/'))&quot;" />
-      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)start.o').Replace('\', '/'))&quot;" />
+      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)start.o').Replace('\', '/'))&quot;" Condition="'$(ZeroNativeLibrary)' != 'true'" />
+      <!-- A macOS native library: a dylib exporting what bflat's exports file
+           (written beside its object, one _name per line) lists; library.o's
+           constructor sets up zerocore when it loads. -->
+      <_ZeroLinkArg Include="-dylib -install_name &quot;@rpath/$(AssemblyName).dylib&quot; -exported_symbols_list &quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$([System.IO.Path]::ChangeExtension('$(ZeroNativeObject)', '.txt'))'))').Replace('\', '/'))&quot;" Condition="'$(ZeroNativeLibrary)' == 'true'" />
+      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)library.o').Replace('\', '/'))&quot;" Condition="'$(ZeroNativeLibrary)' == 'true'" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)runtime.o').Replace('\', '/'))&quot;" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)zerocore.o').Replace('\', '/'))&quot;" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)libSystem.tbd').Replace('\', '/'))&quot;" />
@@ -214,6 +220,7 @@
     <ItemGroup>
       <FileWrites Include="$(ZeroNativeOutput);$(ZeroNativeArgsFile)" />
       <FileWrites Include="$(ZeroNativeObject);$(ZeroLinkArgsFile)" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <FileWrites Include="$([System.IO.Path]::ChangeExtension('$(ZeroNativeObject)', '.txt'))" Condition="'$(ZeroTarget)' == 'osx-arm64' and '$(ZeroNativeLibrary)' == 'true'" />
       <FileWrites Include="@(ZeroNativeFile)" Condition="Exists('%(FullPath)')" />
     </ItemGroup>
   </Target>

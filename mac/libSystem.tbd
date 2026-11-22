@@ -1,0 +1,37 @@
+--- !tapi-tbd
+# Our own stand-in for macOS's libSystem, which the SDK links osx-arm64
+# programs against (ld64.lld), so no Apple SDK is needed. It lists names
+# only: at run time the programs bind to the real /usr/lib/libSystem.B.dylib,
+# which has all of them (libc, libm and pthreads are one library on macOS).
+#
+# What's here: every C function zerocore/ and lib/ import ([DllImport]s with
+# "*", "libc" and "libm.so.6"), what mac/runtime.c calls, and C functions
+# programs commonly import. A program that imports one that isn't listed
+# fails to link with "undefined symbol: _name": add it below, with its
+# leading underscore, in sorted order.
+tbd-version:     4
+targets:         [ arm64-macos ]
+install-name:    '/usr/lib/libSystem.B.dylib'
+current-version: 1351
+exports:
+  - targets:     [ arm64-macos ]
+    symbols:     [ ___error, ___stack_chk_fail, ___stack_chk_guard, _abort,
+                   _acos, _acosf, _asin, _asinf, _atan, _atan2, _atan2f, _atanf,
+                   _bzero, _calloc, _ceil, _ceilf, _clock_gettime,
+                   _clock_gettime_nsec_np, _close, _cos, _cosf, _cosh, _coshf,
+                   _dyld_stub_binder, _exit, _exp, _exp2, _exp2f, _expf, _fabs,
+                   _fabsf, _fflush, _floor, _floorf, _fmod, _fmodf, _free,
+                   _fstat, _fsync, _getenv, _getpid, _gettimeofday, _isatty,
+                   _log, _log10, _log10f, _log2, _log2f, _logf, _lseek, _malloc,
+                   _memchr, _memcmp, _memcpy, _memmove, _memset, _mmap,
+                   _mprotect, _munmap, _nanosleep, _open, _pow, _powf,
+                   _pthread_create, _pthread_detach, _pthread_getspecific,
+                   _pthread_join, _pthread_key_create, _pthread_key_delete,
+                   _pthread_mutex_destroy, _pthread_mutex_init,
+                   _pthread_mutex_lock, _pthread_mutex_unlock, _pthread_self,
+                   _pthread_setspecific, _puts, _read, _realloc, _rint, _rintf,
+                   _round, _roundf, _sched_yield, _sin, _sinf, _sinh, _sinhf,
+                   _sqrt, _sqrtf, _strcmp, _strlen, _sysconf, _tan, _tanf,
+                   _tanh, _tanhf, _time, _trunc, _truncf, _unlink, _usleep,
+                   _write ]
+...

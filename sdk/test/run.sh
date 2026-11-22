@@ -70,6 +70,11 @@ is_elf() {
 }
 is_pe() { [ "$(head -c 2 "$1" 2>/dev/null)" = MZ ]; }
 is_coff_x64() { [ "$(byte_at "$1" 0)" = 100 ] && [ "$(byte_at "$1" 1)" = 134 ]; }
+# is_macho_arm64 <file>: 64-bit Mach-O (cf fa ed fe) for arm64 (CPU type 0x0100000c).
+is_macho_arm64() {
+    [ "$(byte_at "$1" 0)" = 207 ] && [ "$(byte_at "$1" 1)" = 250 ] && [ "$(byte_at "$1" 2)" = 237 ] && [ "$(byte_at "$1" 3)" = 254 ] &&
+        [ "$(byte_at "$1" 4)" = 12 ] && [ "$(byte_at "$1" 5)" = 0 ] && [ "$(byte_at "$1" 6)" = 0 ] && [ "$(byte_at "$1" 7)" = 1 ]
+}
 # is_host_program <file>: a program for the host's own target.
 is_host_program() { if [ "$HOST_OS" = Windows ]; then is_pe "$1"; else is_elf "$1" "$HOST_ELF_ARCH"; fi; }
 # native_path <path>: the path as the dotnet CLI on this host writes it.
@@ -154,12 +159,20 @@ test_payload_complete() {
     local payload=$ROOT/sdk/ZeroCSharp.Sdk/payload f
     LOG=
     for f in ref/System.Private.CoreLib.dll ref/BflatLib.dll native/linux-x64/zerocore.o \
-             native/linux-arm64/zerocore.o native/win-x64/runtime.obj native/win-x64/zerocore.obj VERSIONS.txt; do
+             native/linux-arm64/zerocore.o native/win-x64/runtime.obj native/win-x64/zerocore.obj \
+             native/osx-arm64/runtime.o native/osx-arm64/zerocore.o native/osx-arm64/libSystem.tbd VERSIONS.txt; do
         if [ ! -s "$payload/$f" ]; then fail "payload complete" "missing $f"; return; fi
     done
     if ! is_elf "$payload/native/linux-x64/zerocore.o" x86-64; then fail "payload complete" "linux-x64 object isn't x86-64"; return; fi
     if ! is_elf "$payload/native/linux-arm64/zerocore.o" aarch64; then fail "payload complete" "linux-arm64 object isn't aarch64"; return; fi
     if ! is_coff_x64 "$payload/native/win-x64/runtime.obj"; then fail "payload complete" "win-x64 object isn't COFF"; return; fi
+    for f in runtime.o zerocore.o; do
+        if ! is_macho_arm64 "$payload/native/osx-arm64/$f"; then fail "payload complete" "osx-arm64/$f isn't arm64 Mach-O"; return; fi
+    done
+    if ! grep -q "install-name: *'/usr/lib/libSystem.B.dylib'" "$payload/native/osx-arm64/libSystem.tbd" ||
+       ! grep -q "arm64-macos" "$payload/native/osx-arm64/libSystem.tbd"; then
+        fail "payload complete" "libSystem.tbd doesn't name /usr/lib/libSystem.B.dylib for arm64-macos"; return
+    fi
     pass "payload complete"
 }
 

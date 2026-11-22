@@ -120,18 +120,19 @@
       <_ZeroArg Include="--arch arm64" Condition="'$(ZeroTarget)' == 'linux-arm64' or '$(ZeroTarget)' == 'osx-arm64'" />
       <_ZeroArg Include="--ldflags &quot;$(ZeroNativeDir)zerocore.o&quot; --ldflags &quot;-z nostart-stop-gc&quot;" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'" />
       <_ZeroArg Include="--ldflags &quot;-z max-page-size=4096&quot;" Condition="'$(ZeroTarget)' == 'linux-arm64'" />
-      <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64'" />
+      <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags &quot;$(ZeroNativeDir)start.obj&quot; --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64'" />
       <_ZeroArg Include="-Os" Condition="'$(ZeroOptimizeFor)' == 'Size'" />
       <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != ''" />
       <_ZeroArg Include="-o &quot;$(ZeroNativeOutput)&quot;" Condition="'$(ZeroTarget)' != 'osx-arm64'" />
       <_ZeroArg Include="-o &quot;$(ZeroNativeObject)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
       <!-- ld64.lld (macOS 12 or newer, arm64: what bflat's objects ask for). zerocore's module list comes
-           from the payload's objects (mac/runtime.c, mac-arm64.S). Chained
+           from the payload's objects (mac/start.c or mac/library.c, mac-arm64.S). Chained
            fixups: the classic lazy binding needs dyld_stub_binder's library.
            lld reads response files the GNU way, where a backslash escapes,
            so paths get forward slashes (which Windows takes too). -->
       <_ZeroLinkArg Include="-arch arm64 -platform_version macos 12.0 12.0 -fixup_chains -dead_strip" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$(ZeroNativeObject)'))').Replace('\', '/'))&quot;" />
+      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)start.o').Replace('\', '/'))&quot;" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)runtime.o').Replace('\', '/'))&quot;" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)zerocore.o').Replace('\', '/'))&quot;" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)libSystem.tbd').Replace('\', '/'))&quot;" />

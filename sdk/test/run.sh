@@ -181,15 +181,23 @@ test_plain_packages_refused() {
 test_payload_complete() {
     local payload=$ROOT/sdk/ZeroCSharp.Sdk/payload f
     LOG=
-    for f in ref/System.Private.CoreLib.dll ref/BflatLib.dll native/linux-x64/zerocore.o \
-             native/linux-arm64/zerocore.o native/win-x64/runtime.obj native/win-x64/zerocore.obj \
-             native/osx-arm64/runtime.o native/osx-arm64/zerocore.o native/osx-arm64/libSystem.tbd VERSIONS.txt; do
+    # start: a program's entry point; library: a native library's startup
+    # (NativeLib=Shared); runtime: what both share.
+    for f in ref/System.Private.CoreLib.dll ref/BflatLib.dll native/linux-x64/zerocore.o native/linux-x64/library.o \
+             native/linux-arm64/zerocore.o native/linux-arm64/library.o \
+             native/win-x64/start.obj native/win-x64/runtime.obj native/win-x64/library.obj native/win-x64/zerocore.obj \
+             native/osx-arm64/start.o native/osx-arm64/runtime.o native/osx-arm64/library.o native/osx-arm64/zerocore.o \
+             native/osx-arm64/libSystem.tbd VERSIONS.txt; do
         if [ ! -s "$payload/$f" ]; then fail "payload complete" "missing $f"; return; fi
     done
     if ! is_elf "$payload/native/linux-x64/zerocore.o" x86-64; then fail "payload complete" "linux-x64 object isn't x86-64"; return; fi
     if ! is_elf "$payload/native/linux-arm64/zerocore.o" aarch64; then fail "payload complete" "linux-arm64 object isn't aarch64"; return; fi
-    if ! is_coff_x64 "$payload/native/win-x64/runtime.obj"; then fail "payload complete" "win-x64 object isn't COFF"; return; fi
-    for f in runtime.o zerocore.o; do
+    if ! is_elf "$payload/native/linux-x64/library.o" x86-64; then fail "payload complete" "linux-x64 library.o isn't x86-64"; return; fi
+    if ! is_elf "$payload/native/linux-arm64/library.o" aarch64; then fail "payload complete" "linux-arm64 library.o isn't aarch64"; return; fi
+    for f in start.obj runtime.obj library.obj; do
+        if ! is_coff_x64 "$payload/native/win-x64/$f"; then fail "payload complete" "win-x64/$f isn't COFF"; return; fi
+    done
+    for f in start.o runtime.o library.o zerocore.o; do
         if ! is_macho_arm64 "$payload/native/osx-arm64/$f"; then fail "payload complete" "osx-arm64/$f isn't arm64 Mach-O"; return; fi
     done
     if ! grep -q "install-name: *'/usr/lib/libSystem.B.dylib'" "$payload/native/osx-arm64/libSystem.tbd" ||

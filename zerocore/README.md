@@ -52,7 +52,7 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `Intrinsics/*.cs` | `Vector64/128/256<T>` and the NEON, AVX, AVX2 and FMA operations `../lib/Kernels.cs` uses |
 | `native/arm64.S`, `native/x64.S` | Three routines per architecture that need a calling convention C# can't express: two for storing object references, one for interface calls |
 | `native/mac-arm64.S` | `arm64.S` as a Mach-O object, for macOS |
-| `native/win-x64.S` | The same for Windows x64's calling convention, plus the stack probe Windows code calls for frames larger than a page. With `../win/runtime.c` (entry point, `write`, `read`) it is all a Windows build adds |
+| `native/win-x64.S` | The same for Windows x64's calling convention, plus the stack probe Windows code calls for frames larger than a page. With `../win/start.c` and `../win/runtime.c` (entry point, `write`, `read`) it is all a Windows build adds |
 
 Most of the library is a contract with the compiler: it looks types, methods and fields up by name (`System.Runtime.TypeCast.CheckCastClass`, `String._stringLength`, ...) and fails with "Expected type ... not found" when one is missing. Those names can't be changed.
 

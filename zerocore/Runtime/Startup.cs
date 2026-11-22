@@ -60,8 +60,17 @@ namespace Internal.Runtime.CompilerHelpers
 #endif
         }
 
+#if !WASM
+        // A native library (NativeLib=Shared) has no main: the startup object
+        // linked into it (zerocore/native/library-*.S, mac/library.c,
+        // win/library.c) calls this when the library loads, to set up static
+        // fields as a program's entry point does.
+        [RuntimeExport("ZeroInitializeLibrary")]
+        private static void InitializeLibrary() => InitializeCommandLineArgs(0, null);
+#endif
+
         // What the compiler calls instead on Windows, where .NET's arguments
-        // are UTF-16. win/runtime.c's entry point converts them to UTF-8 before
+        // are UTF-16. win/start.c's entry point converts them to UTF-8 before
         // calling Main, so they arrive as on Linux under another type.
         private static void InitializeCommandLineArgsW(int argc, char** argv)
             => InitializeCommandLineArgs(argc, (byte**)argv);

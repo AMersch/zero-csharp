@@ -95,10 +95,10 @@ _RhpInitialDynamicInterfaceDispatch:
 // The compiler's module list. On Linux the linker gives zerocore the bounds of
 // the __modules section as __start___modules and __stop___modules. Mach-O
 // linkers name a section's bounds section$start$... and section$end$..., and
-// lld can't alias other names to them, so this table stands in: mac/runtime.c
+// lld can't alias other names to them, so this table stands in: mac/modules.h
 // copies the section's entries into it before the program starts. zerocore
 // skips null entries. A program has one module per compilation, so 16 is
-// plenty; runtime.c stops with a message if there are more.
+// plenty; modules.h stops with a message if there are more.
 // (No .subsections_via_symbols in this file: the table and its end label stay
 // together, in this order, whatever the linker strips or reorders.)
     .data

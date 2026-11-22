@@ -43,10 +43,13 @@
           Outputs="$(ZeroNativeOutput)">
     <!-- NuGet doesn't keep the executable bit; a packages folder that's
          read-only (shared or mounted) must already have it. -->
-    <Exec Command="test -x &quot;$(ZeroBflatDir)bflat&quot; &amp;&amp; test -x &quot;$(ZeroBflatDir)bin/lld&quot; || chmod +x &quot;$(ZeroBflatDir)bflat&quot; &quot;$(ZeroBflatDir)bin/lld&quot;" />
+    <Exec Condition="'$(OS)' != 'Windows_NT'" Command="test -x &quot;$(ZeroBflatDir)bflat&quot; &amp;&amp; test -x &quot;$(ZeroBflatDir)bin/lld&quot; || chmod +x &quot;$(ZeroBflatDir)bflat&quot; &quot;$(ZeroBflatDir)bin/lld&quot;" />
     <!-- bflat doesn't make the folder (a target's own, for a chosen target). -->
     <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(ZeroNativeOutput)'))" />
-    <Exec Command="&quot;$(ZeroBflatDir)bflat&quot; build $(ZeroNativeArgs)" />
+    <!-- The arguments as a response file: cmd.exe (Exec on Windows) stops at
+         8191 characters, which a project's full source paths can pass. -->
+    <Message Text="bflat arguments: $(ZeroNativeArgs)" />
+    <Exec Command="&quot;$(ZeroBflatExe)&quot; build @&quot;$(ZeroNativeArgsFile)&quot;" />
     <Message Importance="high" Text="$(MSBuildProjectName) -> $(ZeroNativeOutput)" />
   </Target>
 
@@ -62,7 +65,7 @@
     <Error Condition="'$(ZeroHostRid)' == '' and $([MSBuild]::IsOSPlatform('OSX'))"
            Text="Zero C# can't make native programs on macOS yet; build on Linux or Windows, or use the repository's build.sh." />
     <Error Condition="'$(ZeroHostRid)' == '' and !$([MSBuild]::IsOSPlatform('OSX'))"
-           Text="Zero C# can't make native programs on this machine yet; build on Linux (x64 or arm64)." />
+           Text="Zero C# can't make native programs on this machine yet; build on Linux (x64 or arm64) or Windows x64." />
     <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64'"
            Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64." />
   </Target>
@@ -72,6 +75,8 @@
       <!-- NuGetPackageRoot is the folder as configured, maybe without a trailing
            slash; package folders are lower-case. -->
       <ZeroBflatDir>$([MSBuild]::EnsureTrailingSlash('$(NuGetPackageRoot)'))zerocsharp.bflat.$(ZeroHostRid)/$(ZeroSdkVersion.ToLowerInvariant())/tools/bflat/</ZeroBflatDir>
+      <ZeroBflatExe>$(ZeroBflatDir)bflat</ZeroBflatExe>
+      <ZeroBflatExe Condition="'$(OS)' == 'Windows_NT'">$(ZeroBflatDir)bflat.exe</ZeroBflatExe>
       <ZeroNativeDir>$(ZeroSdkRoot)payload/native/$(ZeroTarget)/</ZeroNativeDir>
       <ZeroNativeOutput>$(OutDir)$(ZeroTargetFolder)$(AssemblyName)</ZeroNativeOutput>
       <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'win-x64'">$(ZeroNativeOutput).exe</ZeroNativeOutput>
@@ -98,6 +103,9 @@
       </_ZeroArg>
       <_ZeroDllImport Include="libc;libm.so.6;$(ZeroDllImports)" KeepDuplicates="false" />
       <_ZeroArg Include="@(_ZeroDllImport->'-i %(Identity)', ' ')" />
+      <!-- bflat's default operating system is the host's: named, so a Windows
+           host builds Linux programs too. -->
+      <_ZeroArg Include="--os linux" Condition="'$(ZeroTarget)' != 'win-x64'" />
       <_ZeroArg Include="--arch x64" Condition="'$(ZeroTarget)' != 'linux-arm64'" />
       <_ZeroArg Include="--arch arm64" Condition="'$(ZeroTarget)' == 'linux-arm64'" />
       <_ZeroArg Include="--ldflags &quot;$(ZeroNativeDir)zerocore.o&quot; --ldflags &quot;-z nostart-stop-gc&quot;" Condition="'$(ZeroTarget)' != 'win-x64'" />
@@ -140,6 +148,7 @@
   <!-- dotnet run runs the native program, when it's for this machine. -->
   <PropertyGroup Condition="'$(OutputType)' != 'Library' and '$(ZeroTarget)' == '$(ZeroHostRid)' and '$(ZeroHostRid)' != ''">
     <RunCommand>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(OutDir)$(ZeroTargetFolder)', '$(AssemblyName)'))</RunCommand>
+    <RunCommand Condition="'$(ZeroTarget)' == 'win-x64'">$(RunCommand).exe</RunCommand>
     <RunArguments>$(StartArguments)</RunArguments>
     <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
   </PropertyGroup>

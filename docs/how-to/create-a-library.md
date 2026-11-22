@@ -21,7 +21,7 @@ dotnet new zerolib -o Geometry
 The project file names the SDK and says it's a library:
 
 ```xml
-<Project Sdk="ZeroCSharp.Sdk/0.1.0">
+<Project Sdk="ZeroCSharp.Sdk/0.2.0">
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <Version>1.0.0</Version>
@@ -64,7 +64,7 @@ programs compile from its IL, so the SDK always optimizes a library, in Debug to
 Reference the library's project:
 
 ```xml
-<Project Sdk="ZeroCSharp.Sdk/0.1.0">
+<Project Sdk="ZeroCSharp.Sdk/0.2.0">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
   </PropertyGroup>
@@ -119,7 +119,7 @@ every `ZeroTarget`.
 dotnet pack Geometry -o feed
 ```
 
-The package holds `lib/zero01/Geometry.dll`. Publish it to nuget.org, or to a folder that a
+The package holds `lib/zero02/Geometry.dll`. Publish it to nuget.org, or to a folder that a
 `nuget.config` lists, and programs reference it like any package:
 
 ```xml
@@ -128,23 +128,24 @@ The package holds `lib/zero01/Geometry.dll`. Publish it to nuget.org, or to a fo
 </ItemGroup>
 ```
 
-`zero01` is the target framework of every project made with version 0.1 of the SDK. It does two
+`zero02` is the target framework of every project made with version 0.2 of the SDK. It does two
 things. NuGet won't add an ordinary .NET package to a zero project, because such a package is built for
 .NET's libraries, which a zero program doesn't have:
 
 ```text
-error NU1202: Package Newtonsoft.Json 13.0.3 is not compatible with zero01 (zero01,Version=v0.0).
+error NU1202: Package Newtonsoft.Json 13.0.3 is not compatible with zero02 (zero02,Version=v0.0).
 ```
 
 And a zero library built with another version of the SDK (whose zerocore may differ) is refused the
 same way, naming both versions:
 
 ```text
-error NU1202: Package Acme.Geometry 1.0.0 is not compatible with zero01 (zero01,Version=v0.0).
-Package Acme.Geometry 1.0.0 supports: zero02 (zero02,Version=v0.0)
+error NU1202: Package Acme.Geometry 1.0.0 is not compatible with zero02 (zero02,Version=v0.0).
+Package Acme.Geometry 1.0.0 supports: zero01 (zero01,Version=v0.0)
 ```
 
-Rebuild the library with your SDK version, or build the program with the library's.
+Rebuild the library with your SDK version, or build the program with the library's. Libraries packed
+with version 0.1 (`zero01`) need re-packing for 0.2.
 
 ## How it's built
 

@@ -19,6 +19,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# The fork's branch whose bflat the packages carry. master for a release.
+env:
+  BFLAT_REF: master
+
 permissions:
   contents: read
   packages: read # the fork's build restores packages from GitHub Packages
@@ -33,7 +37,7 @@ jobs:
       - name: Find the fork's current commit
         id: fork
         run: |
-          commit=$(git ls-remote https://github.com/OnurGumus/bflat refs/heads/master | cut -f1)
+          commit=$(git ls-remote https://github.com/OnurGumus/bflat "refs/heads/$BFLAT_REF" | cut -f1)
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
           echo "key=bflat-layouts-$commit" >> "$GITHUB_OUTPUT"
       - name: Restore bflat from the cache
@@ -43,6 +47,7 @@ jobs:
           path: |
             bflat/layouts/linux-glibc-x64
             bflat/layouts/linux-glibc-arm64
+            bflat/layouts/windows-x64
           key: ${{ steps.fork.outputs.key }}
           lookup-only: true
       - name: Check out the fork
@@ -50,7 +55,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: OnurGumus/bflat
-          ref: master
+          ref: ${{ env.BFLAT_REF }}
           path: bflat
       - name: Set up .NET
         if: steps.cache.outputs.cache-hit != 'true'
@@ -75,6 +80,7 @@ jobs:
           path: |
             bflat/layouts/linux-glibc-x64
             bflat/layouts/linux-glibc-arm64
+            bflat/layouts/windows-x64
           key: ${{ steps.fork.outputs.key }}
 
   payload:
@@ -89,6 +95,7 @@ jobs:
           path: |
             bflat/layouts/linux-glibc-x64
             bflat/layouts/linux-glibc-arm64
+            bflat/layouts/windows-x64
           key: ${{ needs.bflat.outputs.key }}
           fail-on-cache-miss: true
       - name: Install the assemblers and clang
@@ -121,6 +128,7 @@ jobs:
           path: |
             bflat/layouts/linux-glibc-x64
             bflat/layouts/linux-glibc-arm64
+            bflat/layouts/windows-x64
           key: ${{ needs.bflat.outputs.key }}
           fail-on-cache-miss: true
       - uses: actions/download-artifact@v4
@@ -135,8 +143,36 @@ jobs:
           name: trimmed-${{ matrix.rid }}
           path: zero-csharp/sdk/trimmed/${{ matrix.rid }}
 
+  # Windows can't be traced like Linux: its list is linux-x64's, mapped.
+  trim-windows:
+    needs: [bflat, trim]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zero-csharp
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            bflat/layouts/linux-glibc-x64
+            bflat/layouts/linux-glibc-arm64
+            bflat/layouts/windows-x64
+          key: ${{ needs.bflat.outputs.key }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: trimmed-linux-x64
+          path: zero-csharp/sdk/trimmed/linux-x64
+      - name: Trim the layout
+        working-directory: zero-csharp
+        run: sdk/trim-windows-layout.sh ../bflat/layouts/windows-x64 sdk/trimmed/linux-x64 sdk/trimmed/win-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trimmed-win-x64
+          path: zero-csharp/sdk/trimmed/win-x64
+
   pack:
-    needs: trim
+    needs: [trim, trim-windows]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -211,6 +247,58 @@ jobs:
           ZERO_NO_PACK: '1'
         run: dotnet --version && sdk/test/run.sh
 
+  # Git Bash, as the runner has it: the tests build and run Windows programs
+  # for real, and build Linux ones.
+  windows:
+    needs: pack
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/download-artifact@v4
+        with:
+          name: payload
+          path: sdk/ZeroCSharp.Sdk/payload
+      - uses: actions/download-artifact@v4
+        with:
+          name: feed
+          path: sdk/feed
+      - name: Test
+        env:
+          ZERO_NO_PACK: '1'
+        run: dotnet --version && sdk/test/run.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-built-linux
+          path: sdk/test/work/windows-built
+          if-no-files-found: error
+
+  # The Linux programs the Windows job built, run on Linux.
+  windows-built-linux:
+    needs: windows
+    strategy:
+      matrix:
+        include:
+          - { rid: linux-x64, runner: ubuntu-24.04 }
+          - { rid: linux-arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-built-linux
+          path: built
+      - name: Run the program built on Windows
+        run: |
+          chmod +x built/${{ matrix.rid }}/native
+          out=$(built/${{ matrix.rid }}/native)
+          echo "$out"
+          [ "$out" = hi ]
+
   macos:
     needs: pack
     runs-on: macos-latest
@@ -239,7 +327,7 @@ jobs:
   # nuget.org user name (a repository variable, not a secret).
   publish:
     if: startsWith(github.ref, 'refs/tags/sdk-v')
-    needs: [test, macos]
+    needs: [test, windows, windows-built-linux, macos]
     runs-on: ubuntu-24.04
     permissions:
       id-token: write

@@ -51,7 +51,8 @@ files() { (cd "$1" && find . -type f | sed 's|^\./||' | LC_ALL=C sort); }
 stamp() {
     cat "$script"
     [ -n "$from" ] && files "$root/$from"
-    files "$trimmed" | while read -r f; do echo "$f"; cat "$layout/$f"; done
+    # (A lib/uefi file the layout lacks came from the Linux trimmed one.)
+    files "$trimmed" | while read -r f; do echo "$f"; cat "$layout/$f" 2>/dev/null || cat "$root/$from/$f"; done
 }
 
 if [ -f "$trimmed/$exe" ] && [ "$(cat "$root/$rid.source" 2>/dev/null)" = "$(stamp | cksum)" ]; then

@@ -51,6 +51,13 @@ for exe in bflat.exe bin/lld.exe; do
 done
 while read -r f; do
     [ -n "$f" ] || continue
+    # lib/uefi only has to exist (see trim-layout.sh): from the Linux one if
+    # this layout has none.
+    if [ ! -f "$layout/$f" ] && [[ "$f" == lib/uefi/* ]] && [ -f "$linux/$f" ]; then
+        mkdir -p "$out/$(dirname "$f")"
+        cp "$linux/$f" "$out/$f"
+        continue
+    fi
     if [ ! -f "$layout/$f" ]; then echo "Error: the Windows layout has no $f" >&2; missing=1; continue; fi
     mkdir -p "$out/$(dirname "$f")"
     cp "$layout/$f" "$out/$f"

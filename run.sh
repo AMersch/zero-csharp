@@ -6,7 +6,9 @@
 # With --win, runs bin/win/<Sample>.exe under Wine, in a container (see
 # docker/wine). On Windows itself, run the .exe directly.
 # With --mac, runs bin/mac/<Sample>, directly (it's a macOS program).
-# Usage: ./run.sh [--wasm | --dos [--window] | --win | --mac] Arena
+# With --uefi, runs bin/uefi/<Sample>.efi in QEMU on UEFI firmware, x64 or
+# arm64; --uefi --window shows the screen. See efi/run.sh.
+# Usage: ./run.sh [--wasm | --dos [--window] | --win | --mac | --uefi [--window]] Arena
 # Standard input reaches the program on every target (on DOS, from a file or a pipe).
 # Env:   BFLAT_ARCH (see env.sh): on macOS, runs a cross-compiled binary under emulation
 set -euo pipefail
@@ -16,6 +18,11 @@ source ./env.sh
 if [ "${1:-}" = --dos ]; then
     shift
     exec dos/run.sh "$@"
+fi
+
+if [ "${1:-}" = --uefi ]; then
+    shift
+    exec efi/run.sh "$@"
 fi
 
 if [ "${1:-}" = --mac ]; then
@@ -47,7 +54,7 @@ if [ "${1:-}" = --wasm ]; then
     shift
 fi
 if [ $# -lt 1 ]; then
-    echo "Usage: ./run.sh [--wasm | --dos [--window] | --win | --mac] <Sample> [args...]" >&2
+    echo "Usage: ./run.sh [--wasm | --dos [--window] | --win | --mac | --uefi [--window]] <Sample> [args...]" >&2
     exit 1
 fi
 name=$1

@@ -4,7 +4,8 @@
 
 C# compiled to small native programs with no .NET runtime and no garbage collector. On Linux a hello
 world is 16 to 39 KB. It builds on [bflat](https://flattened.net/)'s zero mode, uses C# 15 with the updated
-memory safety rules, and runs on Linux, macOS, Windows, WebAssembly and DOS on a 386.
+memory safety rules, and runs on Linux, macOS, Windows, WebAssembly, DOS on a 386, and UEFI with no
+operating system at all.
 
 You keep C#'s syntax, generics, spans, interfaces and lambdas. You lose the garbage collector,
 catchable exceptions, reflection and almost all of the base class library. Memory you want back goes in
@@ -58,11 +59,14 @@ More: [Install with dotnet](https://onurgumus.github.io/zero-csharp/get-started/
 | Windows x64 | `./build.sh --win`, from Linux or macOS | 9 KB to 68 KB |
 | WebAssembly (WASI) | `./build.sh --wasm` | 16 KB to 80 KB |
 | DOS, 386 with a 387 | `./build.sh --dos` | 16 KB to 93 KB |
+| UEFI x64 and arm64, no OS | `./build.sh --uefi` | 10 KB to 72 KB |
 
 The sizes leave out Llama, which carries its model and is about 1.1 MB everywhere. WebAssembly and
 DOS go through [NativeAOT-LLVM](https://github.com/dotnet/runtimelab/tree/feature/NativeAOT-LLVM)
 instead of bflat's own code generator. The DOS build runs under the HX DOS extender and is tested on
-an emulated 386 with 4 MB. [Targets](https://onurgumus.github.io/zero-csharp/concepts/targets.html)
+an emulated 386 with 4 MB. A UEFI program is started by the PC's firmware, from a USB stick or in QEMU,
+and has no operating system or C library under it.
+[Build for UEFI](https://onurgumus.github.io/zero-csharp/how-to/build-for-uefi.html) shows how. [Targets](https://onurgumus.github.io/zero-csharp/concepts/targets.html)
 explains how each one is built.
 
 ## What works
@@ -109,11 +113,11 @@ was freed. See [Memory without a GC](https://onurgumus.github.io/zero-csharp/con
 | Folder | What |
 |---|---|
 | [`zerocore/`](zerocore/README.md) | The core library: `object`, `string`, casts, allocation. About 2,400 lines of C#, MIT licensed |
-| [`lib/`](lib/) | Arenas, collections, strings, input and output, SIMD kernels, `Parallel.For`, DOS graphics ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
+| [`lib/`](lib/) | Arenas, collections, strings, input and output, SIMD kernels, `Parallel.For`, DOS and UEFI graphics ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
 | [`samples/`](samples/) | The programs below |
 | [`sdk/`](sdk/) | The `ZeroCSharp.*` NuGet packages |
 | [`docs/`](docs/) | The documentation site |
-| `mac/`, `win/`, `wasm/`, `dos/` | Each target's entry point and the C functions it needs |
+| `mac/`, `win/`, `wasm/`, `dos/`, `efi/` | Each target's entry point and the C functions it needs (`efi/libm/` is from musl, MIT) |
 
 The programs don't use bflat's own zero-mode library, zerolib, which is AGPL. zerocore replaces it, so
 nothing AGPL is linked into them.
@@ -138,8 +142,8 @@ nothing AGPL is linked into them.
 | `Threads` | `Parallel.For` with one arena per thread | 88 KB |
 | `Records` | `record struct` and `record class`, `with`, `ToString`, `typeof`, anonymous types | 108 KB |
 | `Refs` | Structs in an arena passed and returned by `ref` | 75 KB |
-| `Llama` | Karpathy's stories260K language model, compiled into the program; it tells the same story on every target, DOS included | 1.1 MB |
-| `Vga` | DOS only: a small game in 320x200 with 256 colors | 36 KB |
+| `Llama` | Karpathy's stories260K language model, compiled into the program; it tells the same story on every target, DOS and UEFI included | 1.1 MB |
+| `Vga` | DOS and UEFI only: a small game in 320x200 with 256 colors | 36 KB |
 
 Sizes are for Linux arm64 and include debug information (only Tiny is stripped).
 

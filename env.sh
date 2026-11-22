@@ -116,3 +116,33 @@ find_dos_emulator() {
         return 1
     fi
 }
+
+# UEFI (./build.sh --uefi, ./run.sh --uefi): programs the firmware starts,
+# run in QEMU with OVMF, the UEFI firmware from the EDK II project. QEMU ships
+# it (Homebrew: share/qemu/edk2-*-code.fd); Linux distributions package it
+# separately (Debian/Ubuntu: ovmf for x64, qemu-efi-aarch64 for arm64).
+#
+# UEFI_FIRMWARE  the firmware file to use. Default: the first one found below.
+
+# $1: x64 or arm64. Prints the firmware's path.
+find_uefi_firmware() {
+    local candidate prefix=
+    if [ -n "${UEFI_FIRMWARE:-}" ]; then
+        echo "$UEFI_FIRMWARE"
+        return 0
+    fi
+    command -v brew >/dev/null 2>&1 && prefix=$(brew --prefix 2>/dev/null)
+    case "$1" in
+        x64)
+            for candidate in "$prefix/share/qemu/edk2-x86_64-code.fd" /usr/share/qemu/edk2-x86_64-code.fd \
+                /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd /usr/share/ovmf/OVMF.fd; do
+                if [ -f "$candidate" ]; then echo "$candidate"; return 0; fi
+            done ;;
+        arm64)
+            for candidate in "$prefix/share/qemu/edk2-aarch64-code.fd" /usr/share/qemu/edk2-aarch64-code.fd \
+                /usr/share/qemu-efi-aarch64/QEMU_EFI.fd /usr/share/AAVMF/AAVMF_CODE.fd; do
+                if [ -f "$candidate" ]; then echo "$candidate"; return 0; fi
+            done ;;
+    esac
+    return 1
+}

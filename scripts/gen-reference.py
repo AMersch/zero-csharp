@@ -32,6 +32,7 @@ PAGES = [
     ('In.cs', ['In'], 'in', 'Reading lines from standard input.'),
     ('Kernels.cs', ['Kernels'], 'kernels', 'SIMD math for inference: dot products, softmax, norms.'),
     ('Dos.cs', ['Dos'], 'dos', 'DOS only: VGA graphics, keyboard, mouse, speaker, files, clock.'),
+    ('Uefi.cs', ['Uefi'], 'uefi', 'UEFI only: the same members as Dos, plus Shutdown and Reboot.'),
 ]
 # Public nested types that are compiler plumbing: readers never name them.
 PLUMBING = {'Enumerator', 'InterpolatedHandler'}

@@ -1,24 +1,34 @@
-// Example: a small game for DOS, in the VGA's 320x200, 256-color mode (lib/Dos.cs).
+// Example: a small game for DOS, in the VGA's 320x200, 256-color mode (lib/Dos.cs),
+// that also runs under UEFI with no operating system (lib/Uefi.cs).
 // Steer the ship with the left and right arrow keys, or the mouse if a mouse
 // driver is loaded, and stay clear of the falling rocks; Esc quits. The numbers
 // at the top are the score and the best score, which is kept in VGA.DAT. A
 // crash sounds on the PC speaker.
 // Build: ./build.sh --dos Vga    Run: ./run.sh --dos --window Vga
+//        ./build.sh --uefi Vga   Run: ./run.sh --uefi --window Vga
 //
 // "Vga test" plays 300 frames by itself and prints what it saw, so test.sh
 // can check the graphics mode, the keyboard and the clock without anyone
 // watching.
 //
 // The picture is drawn into a buffer and copied to the screen once per frame,
-// right after Dos.WaitFrame, which keeps a half-drawn frame from showing.
+// right after WaitFrame, which keeps a half-drawn frame from showing.
 
 using System;
+
+// The same game runs under UEFI, where lib/Uefi.cs has the members lib/Dos.cs
+// has. (bflat defines UEFI when it builds for UEFI.)
+#if UEFI
+using Machine = Uefi;
+#else
+using Machine = Dos;
+#endif
 
 namespace VgaSample;
 
 public static class Program
 {
-    const int W = Dos.Width, H = Dos.Height;
+    const int W = Machine.Width, H = Machine.Height;
 
     // Color numbers; SetPalette gives them their colors.
     const byte Black = 0, DimStar = 1, BrightStar = 2, Hull = 3, Cockpit = 4, Rock0 = 5, Red = 13, Green = 14, White = 15;
@@ -40,26 +50,26 @@ public static class Program
     // The best score, as four bytes, lowest first.
     static int LoadBest()
     {
-        nint file = Dos.FileOpen(BestFile, Dos.ForReading);
+        nint file = Machine.FileOpen(BestFile, Machine.ForReading);
         if (file == 0)
             return 0;
         Span<byte> bytes = stackalloc byte[4];
-        int read = Dos.FileRead(file, bytes);
-        Dos.FileClose(file);
+        int read = Machine.FileRead(file, bytes);
+        Machine.FileClose(file);
         int value = bytes[0] | bytes[1] << 8 | bytes[2] << 16 | bytes[3] << 24;
         return read == 4 && value > 0 ? value : 0;
     }
 
     static void SaveBest(int value)
     {
-        nint file = Dos.FileOpen(BestFile, Dos.ForWriting);
+        nint file = Machine.FileOpen(BestFile, Machine.ForWriting);
         if (file == 0)
             return;
         Span<byte> bytes = stackalloc byte[4];
         for (int i = 0; i < 4; i++)
             bytes[i] = (byte)(value >> (i * 8));
-        Dos.FileWrite(file, bytes);
-        Dos.FileClose(file);
+        Machine.FileWrite(file, bytes);
+        Machine.FileClose(file);
     }
 
     // A falling tone, about a second in all.
@@ -67,11 +77,11 @@ public static class Program
     {
         for (uint pitch = 400; pitch >= 80; pitch -= 40)
         {
-            Dos.Sound(pitch);
-            Dos.Sleep(60);
+            Machine.Sound(pitch);
+            Machine.Sleep(60);
         }
-        Dos.Sound(0);
-        Dos.Sleep(600);
+        Machine.Sound(0);
+        Machine.Sleep(600);
     }
 
     // Each digit is 3 pixels wide and 5 high: 15 bits, top row first.
@@ -86,17 +96,17 @@ public static class Program
     static void SetPalette()
     {
         // docs:palette
-        Dos.SetColor(Black, 0, 0, 4);
-        Dos.SetColor(DimStar, 20, 20, 28);
-        Dos.SetColor(BrightStar, 50, 50, 63);
-        Dos.SetColor(Hull, 10, 50, 60);
-        Dos.SetColor(Cockpit, 63, 55, 10);
+        Machine.SetColor(Black, 0, 0, 4);
+        Machine.SetColor(DimStar, 20, 20, 28);
+        Machine.SetColor(BrightStar, 50, 50, 63);
+        Machine.SetColor(Hull, 10, 50, 60);
+        Machine.SetColor(Cockpit, 63, 55, 10);
         // docs:end
         for (int i = 0; i < 8; i++)                     // rocks: eight browns, light to dark
-            Dos.SetColor(Rock0 + i, 48 - i * 4, 36 - i * 3, 24 - i * 2);
-        Dos.SetColor(Red, 63, 8, 8);
-        Dos.SetColor(Green, 10, 60, 20);
-        Dos.SetColor(White, 63, 63, 63);
+            Machine.SetColor(Rock0 + i, 48 - i * 4, 36 - i * 3, 24 - i * 2);
+        Machine.SetColor(Red, 63, 8, 8);
+        Machine.SetColor(Green, 10, 60, 20);
+        Machine.SetColor(White, 63, 63, 63);
     }
 
     static void Reset()
@@ -116,7 +126,7 @@ public static class Program
         if (left >= right)
             return;
         for (int row = top; row < bottom; row++)
-            Dos.Fill(picture.Slice(row * W + left, right - left), color);
+            Machine.Fill(picture.Slice(row * W + left, right - left), color);
         // docs:end
     }
 
@@ -212,7 +222,7 @@ public static class Program
 
     static void Draw(Span<byte> picture, bool hit)
     {
-        Dos.Fill(picture, Black);
+        Machine.Fill(picture, Black);
         for (int i = 0; i < s_stars.Length; i++)
             picture[s_stars[i].Y * W + s_stars[i].X] = s_stars[i].Speed > 1 ? BrightStar : DimStar;
         for (int i = 0; i < s_rocks.Length; i++)
@@ -229,7 +239,7 @@ public static class Program
     static void Play(Span<byte> picture)
     {
         Reset();
-        uint start = Dos.Ticks;
+        uint start = Machine.Ticks;
         int steps = 0;
         while (true)
         {
@@ -237,24 +247,25 @@ public static class Program
             // Esc is taken from the key presses, not from what is held down
             // right now: pressed and released during the pause after a crash,
             // it would otherwise go unnoticed.
-            Dos.PollKeys();
-            for (int key = Dos.ReadKey(); key != 0; key = Dos.ReadKey())
-                if (key >> 8 == Dos.Esc)
+            Machine.PollKeys();
+            for (int key = Machine.ReadKey(); key != 0; key = Machine.ReadKey())
+                if (key >> 8 == Machine.Esc)
                     return;
-            int steer = (Dos.KeyDown(Dos.Right) ? 1 : 0) - (Dos.KeyDown(Dos.Left) ? 1 : 0);
+            int steer = (Machine.KeyDown(Machine.Right) ? 1 : 0)
+                        - (Machine.KeyDown(Machine.Left) ? 1 : 0);
             // docs:end
 
             // The mouse takes over while it moves: the ship goes where it points.
             if (s_mouse)
             {
-                Dos.Mouse(out int mouseX, out _);
+                Machine.Mouse(out int mouseX, out _);
                 if (mouseX != s_mouseX && steer == 0)
                     s_shipX = Math.Clamp(mouseX - ShipW / 2, 0, W - ShipW);
                 s_mouseX = mouseX;
             }
 
             // At least one step, and at most eight if the machine fell far behind.
-            int due = (int)((Dos.Ticks - start) * 7 / 100);
+            int due = (int)((Machine.Ticks - start) * 7 / 100);
             bool farBehind = due > steps + 8;
             if (farBehind)
                 due = steps + 8;
@@ -266,7 +277,7 @@ public static class Program
             } while (!hit && steps < due);
             if (farBehind || steps > due)
             {
-                start = Dos.Ticks;      // far behind, or ahead of the clock: count from here
+                start = Machine.Ticks;      // far behind, or ahead of the clock: count from here
                 steps = 0;
             }
 
@@ -274,15 +285,15 @@ public static class Program
                 s_best = s_score;
             // docs:frame
             Draw(picture, hit);
-            Dos.WaitFrame();
-            Dos.Show(picture);
+            Machine.WaitFrame();
+            Machine.Show(picture);
             // docs:end
 
             if (hit)
             {
                 CrashSound();
                 Reset();
-                start = Dos.Ticks;
+                start = Machine.Ticks;
                 steps = 0;
             }
         }
@@ -312,9 +323,9 @@ public static class Program
         }
 
         // The screen has to show the picture: write it, then read it back.
-        Dos.WaitFrame();
-        Dos.Show(picture);
-        Span<byte> screen = Dos.Screen;
+        Machine.WaitFrame();
+        Machine.Show(picture);
+        Span<byte> screen = Machine.Screen;
         int different = 0;
         uint checksum = 2166136261;
         for (int i = 0; i < picture.Length; i++)
@@ -325,20 +336,25 @@ public static class Program
         }
 
         // 20 frames at 70 a second are 286 ms; allow for a coarse clock.
-        uint start = Dos.Ticks;
+        uint start = Machine.Ticks;
         for (int i = 0; i < 20; i++)
-            Dos.WaitFrame();
-        uint frames = Dos.Ticks - start;
-        start = Dos.Ticks;
-        Dos.Sleep(200);
-        uint slept = Dos.Ticks - start;
-        int keys = Dos.PollKeys();
+            Machine.WaitFrame();
+        uint frames = Machine.Ticks - start;
+        start = Machine.Ticks;
+        Machine.Sleep(200);
+        uint slept = Machine.Ticks - start;
+        int keys = Machine.PollKeys();
 
         // The speaker: bits 0 and 1 of port 0x61 connect it; nobody is listening here.
-        Dos.Sound(440);
-        bool speakerOn = (Dos.In(0x61) & 3) == 3;
-        Dos.Sound(0);
-        bool speakerOff = (Dos.In(0x61) & 3) == 0;
+        Machine.Sound(440);
+        bool speakerOn = (Machine.In(0x61) & 3) == 3;
+        Machine.Sound(0);
+        bool speakerOff = (Machine.In(0x61) & 3) == 0;
+#if UEFI
+        // An arm64 machine has no PC speaker to check, so the check passes there.
+        if (!Machine.HasSpeaker)
+            speakerOn = speakerOff = true;
+#endif
 
         // A file: write it, add to it, read it back, delete it.
         const string name = "VGATEST.TMP";
@@ -346,27 +362,27 @@ public static class Program
         for (int i = 0; i < data.Length; i++)
             data[i] = (byte)(i * 7);
         bool files = true;
-        nint file = Dos.FileOpen(name, Dos.ForWriting);
-        files &= file != 0 && Dos.FileWrite(file, data) == 1000;
-        Dos.FileClose(file);
-        file = Dos.FileOpen(name, Dos.ForAppending);
-        files &= file != 0 && Dos.FileWrite(file, data.Slice(0, 24)) == 24 && Dos.FileSize(file) == 1024;
-        Dos.FileClose(file);
-        file = Dos.FileOpen(name, Dos.ForReading);
+        nint file = Machine.FileOpen(name, Machine.ForWriting);
+        files &= file != 0 && Machine.FileWrite(file, data) == 1000;
+        Machine.FileClose(file);
+        file = Machine.FileOpen(name, Machine.ForAppending);
+        files &= file != 0 && Machine.FileWrite(file, data.Slice(0, 24)) == 24 && Machine.FileSize(file) == 1024;
+        Machine.FileClose(file);
+        file = Machine.FileOpen(name, Machine.ForReading);
         Span<byte> back = stackalloc byte[1100];
-        int read = file != 0 ? Dos.FileRead(file, back) : -1;
+        int read = file != 0 ? Machine.FileRead(file, back) : -1;
         files &= read == 1024 && Same(back.Slice(0, 1000), data) && back[1023] == data[23];
-        files &= Dos.FileSeek(file, -24, Dos.FromEnd) == 1000 && Dos.FileRead(file, back.Slice(0, 8)) == 8 && back[7] == data[7];
-        files &= Dos.FileRead(file, back) == 16 && Dos.FileRead(file, back) == 0;
-        Dos.FileClose(file);
-        files &= Dos.FileDelete(name) && Dos.FileOpen(name, Dos.ForReading) == 0 && !Dos.FileDelete(name);
+        files &= Machine.FileSeek(file, -24, Machine.FromEnd) == 1000 && Machine.FileRead(file, back.Slice(0, 8)) == 8 && back[7] == data[7];
+        files &= Machine.FileRead(file, back) == 16 && Machine.FileRead(file, back) == 0;
+        Machine.FileClose(file);
+        files &= Machine.FileDelete(name) && Machine.FileOpen(name, Machine.ForReading) == 0 && !Machine.FileDelete(name);
 
         // The mouse: there may or may not be a driver; asking must be safe either way.
-        int buttons = Dos.MouseStart();
+        int buttons = Machine.MouseStart();
         if (buttons > 0)
-            Dos.Mouse(out _, out _);
+            Machine.Mouse(out _, out _);
 
-        Dos.Text();
+        Machine.Text();
         Out.Line("frames played: ", s_frame);
         Out.Line("score: ", s_score);
         Out.Line("frames with a rock on the ship: ", s_hits);
@@ -394,7 +410,7 @@ public static class Program
         // docs:setup
         Span<byte> picture = new byte[W * H];
 
-        Dos.Graphics();
+        Machine.Graphics();
         SetPalette();
         // docs:end
         if (args.Length > 0 && args[0] == "test")
@@ -402,14 +418,14 @@ public static class Program
 
         s_best = LoadBest();
         int bestBefore = s_best;
-        s_mouse = Dos.MouseStart() > 0;
+        s_mouse = Machine.MouseStart() > 0;
         if (s_mouse)
-            Dos.Mouse(out s_mouseX, out _);
+            Machine.Mouse(out s_mouseX, out _);
 
         // docs:back-to-text
         Play(picture);
-        Dos.Sound(0);
-        Dos.Text();
+        Machine.Sound(0);
+        Machine.Text();
         if (s_best > bestBefore)
             SaveBest(s_best);
         Out.Line("Best score: ", s_best);

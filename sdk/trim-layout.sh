@@ -41,6 +41,7 @@ P='"$payload"'
 F="--stdlib:none --langversion preview --compiler-feature updated-memory-safety-rules --no-reflection -i libc -i libm.so.6"
 R="-r $P/ref/BflatLib.dll -r $P/ref/System.Private.CoreLib.dll"
 WIN="--os windows --arch x64 --ldflags /entry:zero_start --ldflags $P/native/win-x64/start.obj --ldflags $P/native/win-x64/runtime.obj --ldflags $P/native/win-x64/zerocore.obj"
+uefi() { local d=$P/native/uefi-$1; echo "--os uefi --arch $1 --ldflags $d/start.obj --ldflags $d/runtime.obj --ldflags $d/machine.obj --ldflags $d/stack.obj --ldflags $d/zerocore.obj --ldflags $d/libm.lib"; }
 n=0
 trace() {
     n=$((n + 1))
@@ -55,10 +56,16 @@ done
 trace samples/Minimal.cs --arch arm64 -m dotprod --ldflags $P/native/linux-arm64/zerocore.o --ldflags "-z nostart-stop-gc"
 trace samples/Minimal.cs --arch x64 -m x86-64-v3 --ldflags $P/native/linux-x64/zerocore.o --ldflags "-z nostart-stop-gc"
 trace samples/Minimal.cs --arch x64 -Os --ldflags $P/native/linux-x64/zerocore.o --ldflags "-z nostart-stop-gc"
+for a in x64 arm64; do
+    trace samples/Strings.cs $(uefi $a)
+done
+trace samples/Minimal.cs $(uefi x64) -m x86-64-v3
 # Every layout file opened, plus the license notices.
 cat /tmp/trace.* | grep -v ENOENT | grep -o "\"/bflat/[^\"]*\"" | tr -d "\"" | sed "s|^/bflat/||" | sort -u > /tmp/opened
 cd /bflat
-{ cat /tmp/opened; ls | grep -iE "license|notice"; } | sort -u | while read -r f; do
+# bflat --os uefi refuses to run without lib/uefi/<arch>, though zero-mode
+# builds open nothing in it; one file keeps each folder in the package.
+{ cat /tmp/opened; ls | grep -iE "license|notice"; ls lib/uefi/*/zerolib.dll; } | sort -u | while read -r f; do
     [ -f "$f" ] && echo "$f"
 done > /tmp/files
 tar cf - -T /tmp/files | tar xf - -C /out

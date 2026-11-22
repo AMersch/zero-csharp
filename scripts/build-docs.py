@@ -30,10 +30,10 @@ SECTIONS = {
 SITE_URL = 'https://onurgumus.github.io/zero-csharp/'
 # The link-preview image, drawn from docs/social/card.html.
 # The ?v= changes with the image, so sites that cached the old one fetch it again.
-SOCIAL_IMAGE = 'img/social.png?v=2'
+SOCIAL_IMAGE = 'img/social.png?v=3'
 SOCIAL_IMAGE_ALT = ('Zero C#, C# with nothing underneath. Kept: C# 15, real generics, interfaces, '
                     'records and lambdas. Left out: the garbage collector and the .NET runtime. '
-                    'Runs on Linux, macOS, Windows, WebAssembly and DOS.')
+                    'Runs on Linux, macOS, Windows, WebAssembly, DOS and UEFI.')
 # Files and folders copied into the site as they are.
 ASSETS = ['index.html', 'content', 'fonts', 'img']
 
@@ -148,6 +148,10 @@ def finish(pages):
             title = ' '.join(title[1].split()).replace('"', '&quot;') if title else CONFIG['siteName']
             address = SITE_URL + page.relative_to(OUTPUT).as_posix()
             text = text.replace('</head>', social_tags(title, address) + '</head>', 1)
+        # The site's icon, as the landing page has it: FsLiveDocs adds none.
+        if 'rel="icon"' not in text:
+            text = text.replace('</head>', f'<link rel="icon" href="{up}img/favicon.svg" type="image/svg+xml">'
+                                           '</head>', 1)
         # Search indexes page content only, not navigation.
         if 'data-pagefind-body' not in text:
             text, found = re.subn(r'<main(?=[\s>])', '<main data-pagefind-body', text, count=1)

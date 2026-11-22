@@ -38,6 +38,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   running a program on a real machine.
 - [Draw on the VGA screen](draw-on-vga.html): graphics mode, colors, drawing a frame without flicker,
   and reading the keyboard under DOS.
+- [Build for UEFI](build-for-uefi.html): programs the firmware starts with no operating system, running
+  them in QEMU, and booting a real PC from a USB stick.
 
 ## Speed
 
@@ -46,7 +48,7 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
 - [Run a loop in parallel](run-in-parallel.html): `Parallel.For` over every processor, sharing a total
   with `Interlocked`, and one arena per thread.
 - [Run a language model](run-a-language-model.html): a small Llama-style model, compiled into the
-  program, telling stories on every target, DOS included.
+  program, telling stories on every target, DOS and UEFI included.
 
 ## Organizing code
 

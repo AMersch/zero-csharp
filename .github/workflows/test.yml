@@ -1,6 +1,6 @@
 # Builds the samples and runs ./test.sh on every target CI can run:
-# Linux x64 and arm64, macOS on Apple Silicon, Windows x64 (under Wine) and
-# WebAssembly. DOS isn't here: it runs under an emulated 386 for 15 minutes
+# Linux x64 and arm64, macOS on Apple Silicon, Windows x64 (under Wine),
+# WebAssembly, and UEFI x64 and arm64 (in QEMU, on OVMF). DOS isn't here: it runs under an emulated 386 for 15 minutes
 # and more, so run ./test.sh --dos locally.
 #
 # bflat comes from the fork (see README, "Getting bflat"). It has no release to
@@ -125,6 +125,46 @@ jobs:
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: ./test.sh --win
+
+  uefi:
+    needs: bflat
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+            qemu: qemu-system-x86 ovmf
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            qemu: qemu-system-arm qemu-efi-aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zero-csharp
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            bflat/layouts/linux-glibc-x64
+            bflat/layouts/linux-glibc-arm64
+          key: ${{ needs.bflat.outputs.key }}
+          fail-on-cache-miss: true
+      - name: Install what bflat, the build and QEMU need
+        # clang compiles efi/*.c for UEFI; OVMF is the UEFI firmware.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends binutils clang ${{ matrix.qemu }}
+      - name: Let QEMU use KVM
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+            sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          fi
+      - name: Test in QEMU
+        working-directory: zero-csharp
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-${{ matrix.arch }}
+          BFLAT_ARCH: ${{ matrix.arch }}
+        run: ./test.sh --uefi
 
   # macOS runners have no Docker to run bflat in, so bflat compiles the
   # samples to Mach-O object files here, and the macos job links and runs them.

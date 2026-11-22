@@ -10,6 +10,11 @@ clock, the mouse and the PC speaker. This guide draws frames the way `samples/Vg
 does. It works only in programs built with `./build.sh --dos`: the functions behind `Dos` are in
 `dos/runtime.c`, and a program for another target that calls them won't link.
 
+The sample calls them through the name `Machine`, which is `Dos` in a DOS build and `Uefi` in a UEFI
+one: `lib/Uefi.cs` has the same members, so the game also runs with no operating system (see
+[Build for UEFI](build-for-uefi.html)). In your own DOS program, write `Dos` where the excerpts say
+`Machine`.
+
 ## Switch to graphics mode
 
 Make a buffer for the picture, switch the screen to graphics mode, and set the colors you use:
@@ -18,7 +23,7 @@ Make a buffer for the picture, switch the screen to graphics mode, and set the c
 ```csharp
 Span<byte> picture = new byte[W * H];
 
-Dos.Graphics();
+Machine.Graphics();
 SetPalette();
 ```
 
@@ -33,11 +38,11 @@ component from 0 to 63 (the VGA has 6 bits each):
 
 <!-- sample: samples/Vga.cs palette -->
 ```csharp
-Dos.SetColor(Black, 0, 0, 4);
-Dos.SetColor(DimStar, 20, 20, 28);
-Dos.SetColor(BrightStar, 50, 50, 63);
-Dos.SetColor(Hull, 10, 50, 60);
-Dos.SetColor(Cockpit, 63, 55, 10);
+Machine.SetColor(Black, 0, 0, 4);
+Machine.SetColor(DimStar, 20, 20, 28);
+Machine.SetColor(BrightStar, 50, 50, 63);
+Machine.SetColor(Hull, 10, 50, 60);
+Machine.SetColor(Cockpit, 63, 55, 10);
 ```
 
 The sample names its color numbers as `byte` constants (`Black`, `Hull` and so on), so drawing code
@@ -56,7 +61,7 @@ int top = Math.Max(y, 0), bottom = Math.Min(y + height, H);
 if (left >= right)
     return;
 for (int row = top; row < bottom; row++)
-    Dos.Fill(picture.Slice(row * W + left, right - left), color);
+    Machine.Fill(picture.Slice(row * W + left, right - left), color);
 ```
 
 `Dos.Fill(picture, Black)` clears the whole picture the same way.
@@ -68,8 +73,8 @@ When the frame is finished, wait for the screen refresh and copy the picture to 
 <!-- sample: samples/Vga.cs frame -->
 ```csharp
 Draw(picture, hit);
-Dos.WaitFrame();
-Dos.Show(picture);
+Machine.WaitFrame();
+Machine.Show(picture);
 ```
 
 `Dos.WaitFrame()` returns when the monitor's beam starts back to the top, 70 times a second in this
@@ -93,11 +98,12 @@ at a time:
 // Esc is taken from the key presses, not from what is held down
 // right now: pressed and released during the pause after a crash,
 // it would otherwise go unnoticed.
-Dos.PollKeys();
-for (int key = Dos.ReadKey(); key != 0; key = Dos.ReadKey())
-    if (key >> 8 == Dos.Esc)
+Machine.PollKeys();
+for (int key = Machine.ReadKey(); key != 0; key = Machine.ReadKey())
+    if (key >> 8 == Machine.Esc)
         return;
-int steer = (Dos.KeyDown(Dos.Right) ? 1 : 0) - (Dos.KeyDown(Dos.Left) ? 1 : 0);
+int steer = (Machine.KeyDown(Machine.Right) ? 1 : 0)
+            - (Machine.KeyDown(Machine.Left) ? 1 : 0);
 ```
 
 - **Scan codes** identify a key by its position, whatever is printed on it. `Dos` names the common
@@ -115,8 +121,8 @@ score:
 <!-- sample: samples/Vga.cs back-to-text -->
 ```csharp
 Play(picture);
-Dos.Sound(0);
-Dos.Text();
+Machine.Sound(0);
+Machine.Text();
 if (s_best > bestBefore)
     SaveBest(s_best);
 Out.Line("Best score: ", s_best);

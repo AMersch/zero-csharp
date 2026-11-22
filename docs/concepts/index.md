@@ -33,7 +33,8 @@ Most of what follows comes from three facts about zero mode:
 - A **mark** remembers an arena's position, and a **scope** frees back to it when a `using` block ends.
 - A **span** is a view of characters or elements that someone else owns. Reading through one allocates
   nothing.
-- A **target** is where the program runs: native Linux, macOS or Windows, WebAssembly, or DOS.
+- A **target** is where the program runs: native Linux, macOS or Windows, WebAssembly, DOS, or UEFI
+  with no operating system.
 
 ## The pages
 
@@ -45,8 +46,8 @@ Most of what follows comes from three facts about zero mode:
   avoid allocating, and where strings that must be kept come from.
 - [The memory safety rules](safety-rules.html): C# 15's updated memory safety rules, and how `lib/`
   uses `unsafe` to mark the operations that can leave pointers dangling.
-- [Targets](targets.html): how one source becomes a native Linux program, a WebAssembly module and a
-  DOS program for a 386.
+- [Targets](targets.html): how one source becomes a native Linux program, a WebAssembly module, a
+  DOS program for a 386 and a UEFI program.
 - [Limits](limits.html): what zero mode supports, what it doesn't, and the known issues with their
   workarounds.
 

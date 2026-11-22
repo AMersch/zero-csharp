@@ -16,6 +16,7 @@
 #         ./test.sh --dos      DOS, on an emulated 386 with 4 MB (needs ./setup.sh --dos)
 #         ./test.sh --win      Windows x64, under Wine in a container
 #         ./test.sh --mac      macOS, natively (on a Mac with Apple Silicon)
+#         ./test.sh --uefi     UEFI, in QEMU on OVMF, for BFLAT_ARCH (x64 or arm64)
 #         ./test.sh --all      native, the other architecture (macOS only, run
 #                              under emulation), Windows, macOS (on Apple
 #                              Silicon), and WebAssembly and DOS if set up
@@ -34,7 +35,7 @@ TIMED=" Simd Kernels "
 POINTER_SIZED=" Arena Collections "
 # Simd and Kernels aren't built for DOS: they benchmark SIMD instructions,
 # which a 386 doesn't have.
-# Vga is a game for DOS only; "Vga test" plays by itself and reports.
+# Vga is a game for DOS and UEFI; "Vga test" plays by itself and reports.
 DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama Vga)
 
 EXPECTED=tests/expected
@@ -49,6 +50,10 @@ run_all() {
     [ "$target" = wasm ] && run+=(--wasm)
     [ "$target" = win ] && run+=(--win)
     [ "$target" = mac ] && run+=(--mac)
+    if [ "$target" = uefi ]; then
+        run+=(--uefi)
+        samples=("${SAMPLES[@]}" Vga)
+    fi
     if [ "$target" = dos ]; then
         run+=(--dos)
         samples=("${DOS_SAMPLES[@]}")
@@ -136,6 +141,11 @@ test_win() {
     run_all "Windows x64 (Wine)" win check
 }
 
+test_uefi() {
+    ./build.sh --uefi > /dev/null
+    run_all "UEFI $BFLAT_ARCH (QEMU, OVMF)" uefi check
+}
+
 # build.sh --dos also checks every program for instructions newer than a 386.
 test_dos() {
     ./build.sh --dos > /dev/null
@@ -152,6 +162,7 @@ case "${1:-}" in
     --dos)    test_dos ;;
     --win)    test_win ;;
     --mac)    test_mac ;;
+    --uefi)   test_uefi ;;
     --all)
         test_native
         if [ "$(uname -s)" = Darwin ]; then
@@ -188,7 +199,7 @@ case "${1:-}" in
             echo "(skipping DOS: run ./setup.sh --dos first)"
         fi
         ;;
-    *) echo "Usage: ./test.sh [--wasm | --dos | --win | --mac | --all | --update]" >&2; exit 2 ;;
+    *) echo "Usage: ./test.sh [--wasm | --dos | --win | --mac | --uefi | --all | --update]" >&2; exit 2 ;;
 esac
 
 echo

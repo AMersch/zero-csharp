@@ -73,7 +73,7 @@ public static class Program
 
         // docs:create
         Arena arena = Arena.Create(64 * 1024, "llama", stopOnOutOfMemory: true);
-        Llama llama = Llama.Create(LlamaModel.Model, LlamaModel.Tokenizer, arena);
+        Llama llama = Llama.Create(Stories260K.Model, Stories260K.Tokenizer, arena);
         // docs:end
         if (!llama.IsCreated)
         {

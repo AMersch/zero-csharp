@@ -1,0 +1,14 @@
+// A small language model telling a story: stories260K (about 260,000
+// parameters, trained on children's stories) and its 512-token tokenizer,
+// compiled into the program from the ZeroCSharp.Stories260K package. The
+// engine is Llama and LlamaSampler, in the SDK's library.
+//
+// dotnet run, or dotnet run -- <options>:
+//   (none)                         continues "Once upon a time" with the likeliest words
+//   -t 0.8 -s 7 -i "The dragon"    a different start, words picked by chance
+//   -c                             take turns: type a line, and the model continues the story
+//   -h                             all the options
+// dotnet build puts the program in bin/Debug/<framework>/; it needs no files.
+//
+// Guide: https://onurgumus.github.io/zero-csharp/how-to/run-a-language-model.html
+

@@ -6,5 +6,5 @@ formats, from https://huggingface.co/karpathy/tinyllamas (`stories260K/`),
 under the MIT license.
 
 `samples/Llama.cs` compiles both into the program: `build.sh` turns them
-into byte literals (`bin/gen/LlamaModel.cs`), so the program needs no files
+into byte literals (`bin/gen/Stories260K.cs`, by `scripts/llama-model-cs.sh`), so the program needs no files
 when it runs, on any target.

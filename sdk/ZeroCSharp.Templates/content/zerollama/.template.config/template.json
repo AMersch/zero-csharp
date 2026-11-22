@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Zero C# contributors",
+  "classifications": ["Console", "Native", "AI"],
+  "identity": "ZeroCSharp.Templates.Llama",
+  "name": "Zero C# storyteller (small language model)",
+  "description": "A native program that tells stories with stories260K, a 260,000-parameter language model compiled into it. No .NET runtime, no files, no garbage collector.",
+  "shortName": "zerollama",
+  "sourceName": "ZeroLlama1",
+  "preferNameDirectory": true,
+  "tags": { "language": "C#", "type": "project" }
+}

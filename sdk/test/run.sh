@@ -696,7 +696,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
     release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0
     long_command_line windows_builds_linux unusual_packages_folder crlf_input
-    artifacts_path_with_spaces trim_windows_layout trim_stamp)
+    artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim
@@ -738,6 +738,28 @@ test_trim_stamp() {
     rm -rf "$d/trimmed/linux-x64" "$d/trimmed/win-x64"
     if PATH="$d/stub:$PATH" sdk/trim-host.sh win-x64 "$d/layouts" "$d/trimmed" > "$LOG" 2>&1; then fail "$name" "win-x64 trimmed without a linux-x64 one"; return; fi
     if ! grep -q "linux-x64" "$LOG"; then fail "$name" "the error doesn't name linux-x64"; return; fi
+    pass "$name"
+}
+
+# dotnet new zerollama: the Llama sample as a project, with the model from the
+# ZeroCSharp.Stories260K package. It tells the repo sample's story, word for
+# word, and builds for another target too.
+test_llama_template() {
+    local name="llama template" dir=$WORK/llamatemplate out other
+    can_build "$name" || return
+    rm -rf "$dir" && mkdir -p "$dir"
+    fixture hello llamatemplate-config > /dev/null    # just for its nuget.config
+    cp "$WORK/llamatemplate-config/nuget.config" "$dir/"
+    dotnet new uninstall ZeroCSharp.Templates > /dev/null 2>&1 || true
+    if ! run_in "$dir" llama-install new install "$FEED/ZeroCSharp.Templates.$VERSION.nupkg"; then fail "$name" "install failed"; return; fi
+    if ! run_in "$dir" llama-new new zerollama -o Story; then fail "$name" "dotnet new zerollama failed"; return; fi
+    if ! run_in "$dir/Story" llama-build build; then fail "$name" "the program didn't build"; return; fi
+    out=$("$(exe "$dir/Story/bin/Debug/$TFM/Story")" | tr -d '\r')
+    if [ "$out" != "$(tr -d '\r' < "$ROOT/tests/expected/Llama.txt")" ]; then fail "$name" "printed '$out'"; return; fi
+    out=$(printf 'The dog ran.\n' | "$(exe "$dir/Story/bin/Debug/$TFM/Story")" -c -s 3 | tr -d '\r')
+    if [[ "$out" != *"Tell a story together"* ]] || [ "$(wc -l <<< "$out")" -lt 3 ]; then fail "$name" "-c printed '$out'"; return; fi
+    case "$HOST_RID" in win-x64) other=linux-x64 ;; *) other=win-x64 ;; esac
+    if ! run_in "$dir/Story" llama-other build -p:ZeroTarget=$other; then fail "$name" "the $other build failed"; return; fi
     pass "$name"
 }
 

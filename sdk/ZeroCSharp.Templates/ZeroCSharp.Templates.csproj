@@ -1,5 +1,6 @@
-<!-- Packs dotnet new zero and zerolib (content/). pack.sh fills in the SDK
-     version first (obj/content). No code. -->
+<!-- Packs dotnet new zero, zerolib and zerollama (content/), with the SDK
+     version filled in (obj/content). zerollama's Program.cs is samples/Llama.cs
+     (sdk/pack.sh puts it in obj/zerollama). -->
 <Project Sdk="Microsoft.NET.Sdk">
   <Import Project="../version.props" />
   <PropertyGroup>
@@ -13,7 +14,7 @@
     <Version>$(ZeroSdkVersion)</Version>
     <PackageType>Template</PackageType>
     <Authors>Zero C# contributors</Authors>
-    <Description>dotnet new zero (a native program) and dotnet new zerolib (a library) for zero-mode C#: C# compiled to small native programs with no .NET runtime.</Description>
+    <Description>dotnet new zero (a native program), zerolib (a library) and zerollama (a storyteller with a small language model) for zero-mode C#: C# compiled to small native programs with no .NET runtime.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://onurgumus.github.io/zero-csharp/</PackageProjectUrl>
     <RepositoryUrl>https://github.com/OnurGumus/zero-csharp</RepositoryUrl>
@@ -30,6 +31,12 @@
     <WriteLinesToFile File="$(ZeroContent)%(_ZeroTemplateFile.RecursiveDir)%(_ZeroTemplateFile.Filename)%(_ZeroTemplateFile.Extension)"
                       Lines="$([System.IO.File]::ReadAllText('%(_ZeroTemplateFile.FullPath)').Replace('@ZERO_SDK_VERSION@', '$(ZeroSdkVersion)'))"
                       Overwrite="true" Condition="'%(_ZeroTemplateFile.Extension)' == '.csproj'" />
+    <!-- dotnet new zerollama's Program.cs: samples/Llama.cs with a header for
+         a project, made by pack.sh (in MSBuild, the text's backslashes would
+         turn into slashes). -->
+    <Error Condition="!Exists('$(BaseIntermediateOutputPath)zerollama/Program.cs')"
+           Text="No $(BaseIntermediateOutputPath)zerollama/Program.cs: pack the templates with sdk/pack.sh." />
+    <Copy SourceFiles="$(BaseIntermediateOutputPath)zerollama/Program.cs" DestinationFolder="$(ZeroContent)zerollama" />
     <ItemGroup>
       <None Include="$(ZeroContent)**" Pack="true" PackagePath="content/" />
     </ItemGroup>

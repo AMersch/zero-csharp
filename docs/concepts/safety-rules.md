@@ -88,12 +88,18 @@ repository's convention is to write that down: an `unsafe` block that relies on 
 // Temporary strings: free them with Restore and keep the rest.
 nuint usedBefore = s_arena.Used;
 Arena.Mark mark = s_arena.Save();
-string temporary = Str.Format(s_arena, $"{name} has {name.Length} letters");
-bool temporaryOk = temporary.EndsWith("3 letters");
-unsafe { s_arena.Restore(mark); } // SAFETY: temporary is not used below.
+bool temporaryOk;
+{   // temporary can't be named after this block, so not after the Restore
+    string temporary = Str.Format(s_arena, $"{name} has {name.Length} letters");
+    temporaryOk = temporary.EndsWith("3 letters");
+}
+unsafe { s_arena.Restore(mark); } // SAFETY: nothing from the block was kept.
 ```
 
-The comment states what the caller promises, here that `temporary` isn't used after the restore. A
+The comment states what the caller promises, here that nothing made inside the block outlives the
+restore. Part of that promise the compiler checks: `temporary` is declared in a plain block that ends
+before `Restore`, so naming it afterwards is a compile error. What it can't check is a copy kept
+elsewhere, such as `temporary` stored in a field from inside the block, and the comment covers that. A
 reviewer checks the comment against the code below it instead of reasoning about the whole function.
 `lib/` does the same inside its own implementation ("a live header", "CheckIndex validated header and
 index"), and where one argument covers many blocks, a single comment says so once.

@@ -152,17 +152,34 @@ public static unsafe class Native
 }
 ```
 
-.NET looks for `nativelib.so` (or `libnativelib.so`, `.dylib`, `.dll`) next to the application.
-The simplest way to put it there is to copy it in the application's project file:
+.NET looks for the library by name next to the application: `nativelib.so` or `libnativelib.so`
+(`.dylib` on macOS, `.dll` on Windows). To build the library before the application and copy it
+there, give the application's project file a reference that only orders the builds, and a step that
+copies the library after building:
 
 ```xml
 <ItemGroup>
-  <None Include="../MathLib/bin/$(Configuration)/zero03/native/*"
-        CopyToOutputDirectory="PreserveNewest" />
+  <ProjectReference Include="../MathLib/MathLib.csproj"
+                    ReferenceOutputAssembly="false"
+                    SkipGetTargetFrameworkProperties="true" />
 </ItemGroup>
+
+<Target Name="CopyMathLib" AfterTargets="Build">
+  <ItemGroup>
+    <MathLibNative
+      Include="../MathLib/bin/$(Configuration)/zero03/native/MathLib.*" />
+  </ItemGroup>
+  <Copy SourceFiles="@(MathLibNative)" DestinationFolder="$(OutDir)" />
+</Target>
 ```
 
-To load it from elsewhere, give .NET the path with `NativeLibrary.SetDllImportResolver`.
+`ReferenceOutputAssembly="false"` keeps the library's IL out of the application, and
+`SkipGetTargetFrameworkProperties="true"` lets a `net10.0` project reference a `zero03` one. The
+library's files are listed inside the target, when it runs, so a clean build finds them. A zero
+project can't reference a native library any other way: a reference that would compile its IL in
+is an error.
+
+To load the library from elsewhere, give .NET its path with `NativeLibrary.SetDllImportResolver`.
 
 ## Call it from C
 

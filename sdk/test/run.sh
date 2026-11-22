@@ -963,7 +963,7 @@ test_native_library_c() {
         fail "$name" "the C caller didn't compile"; return
     fi
     out=$("$caller" "$(native_path "$NATIVELIB")" 2>&1 | tr -d '\r')
-    if [ "$out" != "$(head -8 "$ROOT/sdk/test/fixtures/nativelib-caller/expected.txt")" ]; then fail "$name" "printed: $(echo $out)"; return; fi
+    if [ "$out" != "$(head -8 "$ROOT/sdk/test/fixtures/nativelib-caller/expected.txt" | tr -d '\r')" ]; then fail "$name" "printed: $(echo $out)"; return; fi
     pass "$name"
 }
 
@@ -982,7 +982,7 @@ test_native_library_c_linked() {
         fail "$name" "the C caller didn't link"; return
     fi
     out=$("$caller" 2>&1)
-    if [ "$out" != "$(head -8 "$ROOT/sdk/test/fixtures/nativelib-caller/expected.txt")" ]; then fail "$name" "printed: $(echo $out)"; return; fi
+    if [ "$out" != "$(head -8 "$ROOT/sdk/test/fixtures/nativelib-caller/expected.txt" | tr -d '\r')" ]; then fail "$name" "printed: $(echo $out)"; return; fi
     pass "$name"
 }
 
@@ -1024,6 +1024,52 @@ test_native_library_cross() {
     pass "$name"
 }
 
+# A name with a space: the output, the soname (Linux) and the install name
+# (macOS) carry it whole.
+test_native_library_name_with_spaces() {
+    local name="native library name with spaces" dir lib
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-spacename)
+    if ! run_in "$dir" nativelib-spacename build "-p:AssemblyName=My Lib"; then fail "$name" "dotnet build failed"; return; fi
+    lib="$dir/bin/Debug/$TFM/native/My Lib$HOST_LIB_EXT"
+    if [ ! -f "$lib" ]; then fail "$name" "no native/My Lib$HOST_LIB_EXT"; return; fi
+    if ! call_native "$lib"; then fail "$name" "the .NET caller didn't get what it should"; return; fi
+    pass "$name"
+}
+
+# References the native-library check must let through: one only for build
+# order (ReferenceOutputAssembly=false), and one to a project that doesn't
+# exist (MSBuild warns about that one; the check mustn't make it an error).
+test_native_library_reference_kinds() {
+    local name="native library reference kinds" dir
+    can_build "$name" || return
+    dir=$(fixture native nativelib-order/App)
+    fixture nativelib nativelib-order/nativelib > /dev/null
+    sed -i.bak 's|</Project>|  <ItemGroup><ProjectReference Include="../nativelib/nativelib.csproj" ReferenceOutputAssembly="false" /></ItemGroup>\n</Project>|' "$dir/native.csproj" && rm -f "$dir/native.csproj.bak"
+    if ! run_in "$dir" nativelib-order build; then fail "$name" "a build-order reference to a native library was refused"; return; fi
+    if [ ! -f "$WORK/nativelib-order/nativelib/bin/Debug/$TFM/native/nativelib$HOST_LIB_EXT" ]; then fail "$name" "the build-order reference didn't build the library"; return; fi
+    dir=$(fixture native nativelib-missing)
+    sed -i.bak 's|</Project>|  <ItemGroup><ProjectReference Include="../nowhere/nowhere.csproj" /></ItemGroup>\n</Project>|' "$dir/native.csproj" && rm -f "$dir/native.csproj.bak"
+    if run_in "$dir" nativelib-missing build; then :; fi
+    if grep -q "MSB3202" "$LOG"; then fail "$name" "a missing project reference became an error (MSB3202)"; return; fi
+    pass "$name"
+}
+
+# The docs' recipe: an ordinary .NET program that builds the library first
+# (a build-order ProjectReference) and copies it next to itself, from a clean
+# folder; .NET then finds it by name ([DllImport("MathLib")]).
+test_native_library_app_recipe() {
+    local name="native library app recipe" dir out
+    can_build "$name" || return
+    dir=$(fixture nativelib-app)
+    fixture nativelib nativelib-app/MathLib > /dev/null
+    mv "$dir/MathLib/nativelib.csproj" "$dir/MathLib/MathLib.csproj"
+    if ! run_in "$dir/App" nativelib-app build; then fail "$name" "dotnet build failed"; return; fi
+    out=$(dotnet "$dir/App/bin/Debug/net10.0/App.dll" 2>&1 | tr -d '\r')
+    if [ "$out" != "add 5" ]; then fail "$name" "printed: $out"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
@@ -1040,7 +1086,8 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_dotnet native_library_exports native_library_two native_library_errors
     native_library_not_packable native_library_publish native_library_incremental native_library_clean
     native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name
-    native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross)
+    native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
+    native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim

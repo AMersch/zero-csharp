@@ -162,9 +162,34 @@
     </ItemGroup>
   </Target>
 
+  <!-- dotnet pack of a library: the dll in lib/<framework>/, and
+       build/<id>.props (buildTransitive/ too) naming the SDK version that
+       built it, which ZeroCheckLibraryVersions reads in the programs using it. -->
   <Target Name="ZeroPackDll" BeforeTargets="_GetPackageFiles" Condition="'$(OutputType)' == 'Library'">
+    <PropertyGroup>
+      <_ZeroBuiltWithProps>$(IntermediateOutputPath)zero-pack/$(PackageId).props</_ZeroBuiltWithProps>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(_ZeroBuiltWithProps)" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Lines="&lt;Project&gt;&lt;ItemGroup&gt;&lt;ZeroLibraryBuiltWith Include=&quot;$(PackageId)&quot; SdkVersion=&quot;$(ZeroSdkVersion)&quot; /&gt;&lt;/ItemGroup&gt;&lt;/Project&gt;" />
     <ItemGroup>
       <None Include="$(TargetPath)" Pack="true" PackagePath="lib/$(ZeroSdkTfm)/" />
+      <None Include="$(_ZeroBuiltWithProps)" Pack="true" PackagePath="build/;buildTransitive/" />
+      <FileWrites Include="$(_ZeroBuiltWithProps)" />
     </ItemGroup>
+  </Target>
+
+  <!-- A library built by a newer SDK may use members this one's zerocore or
+       lib/ lack (the framework only changes when the format breaks). Versions
+       are compared without a prerelease suffix. -->
+  <Target Name="ZeroCheckLibraryVersions" BeforeTargets="CoreCompile" Condition="'@(ZeroLibraryBuiltWith)' != ''">
+    <PropertyGroup>
+      <_ZeroSdkPlainVersion>$(ZeroSdkVersion.Split('-')[0])</_ZeroSdkPlainVersion>
+    </PropertyGroup>
+    <ItemGroup>
+      <_ZeroNewerLibrary Include="@(ZeroLibraryBuiltWith)"
+                         Condition="$([MSBuild]::VersionGreaterThan($([System.String]::Copy('%(ZeroLibraryBuiltWith.SdkVersion)').Split('-')[0]), $(_ZeroSdkPlainVersion)))" />
+    </ItemGroup>
+    <Error Code="ZERO002" Condition="'@(_ZeroNewerLibrary)' != ''"
+           Text="%(_ZeroNewerLibrary.Identity) was built with ZeroCSharp.Sdk %(_ZeroNewerLibrary.SdkVersion), newer than this project's $(ZeroSdkVersion): update ZeroCSharp.Sdk in the project's Sdk attribute." />
   </Target>
 </Project>

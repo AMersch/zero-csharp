@@ -1,8 +1,14 @@
-<!-- The version of the Zero C# packages. All four share it. Projects target
-     zero<major><minor> (0.1 -> zero01): a library package built with another
-     major.minor has another framework name, and NuGet refuses it. -->
+<!-- The version of the Zero C# packages (they all share it), and the
+     framework zero projects target. -->
 <Project>
   <PropertyGroup>
-    <ZeroSdkVersion>0.2.2</ZeroSdkVersion>
+    <ZeroSdkVersion>0.3.0</ZeroSdkVersion>
+    <!-- The framework names the library format, not the SDK version. Change it
+         only when a library built for it can't work with this SDK: when
+         zerocore's or lib/'s types or members are removed or changed, or the
+         native code's ABI changes. Adding members isn't a reason; a library
+         built by a newer SDK is refused by ZERO002 instead. NuGet refuses a
+         library of another framework (NU1202). 0.1 was zero01, 0.2 zero02. -->
+    <ZeroFramework>zero03</ZeroFramework>
   </PropertyGroup>
 </Project>

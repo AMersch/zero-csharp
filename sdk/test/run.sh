@@ -16,8 +16,8 @@ ROOT=$PWD
 WORK=$ROOT/sdk/test/work
 FEED=$ROOT/sdk/feed
 VERSION=$(sed -n 's|.*<ZeroSdkVersion>\(.*\)</ZeroSdkVersion>.*|\1|p' sdk/version.props)
-# The target framework: zero + major and minor, without the dot (0.1 -> zero01).
-TFM=zero$(echo "$VERSION" | cut -d. -f1,2 | tr -d .)
+# The target framework: ZeroFramework (sdk/version.props), not made from the version.
+TFM=$(sed -n 's|.*<ZeroFramework>\(.*\)</ZeroFramework>.*|\1|p' sdk/version.props)
 case "$(uname -s)" in
     Linux)                    HOST_OS=Linux ;;
     Darwin)                   HOST_OS=Darwin ;;
@@ -696,7 +696,8 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
     release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0
     long_command_line windows_builds_linux unusual_packages_folder crlf_input
-    artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template)
+    artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template
+    framework_from_property newer_sdk_library)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim
@@ -760,6 +761,52 @@ test_llama_template() {
     if [[ "$out" != *"Tell a story together"* ]] || [ "$(wc -l <<< "$out")" -lt 3 ]; then fail "$name" "-c printed '$out'"; return; fi
     case "$HOST_RID" in win-x64) other=linux-x64 ;; *) other=win-x64 ;; esac
     if ! run_in "$dir/Story" llama-other build -p:ZeroTarget=$other; then fail "$name" "the $other build failed"; return; fi
+    pass "$name"
+}
+
+# The framework is ZeroFramework's (sdk/version.props), not made from the
+# version: builds go to bin/<config>/<it>/, packed libraries to lib/<it>/
+# with build/<id>.props naming the SDK version that built them.
+test_framework_from_property() {
+    local name="framework from property" framework dir list
+    framework=$(sed -n 's|.*<ZeroFramework>\(.*\)</ZeroFramework>.*|\1|p' sdk/version.props)
+    if [ -z "$framework" ]; then fail "$name" "sdk/version.props has no ZeroFramework"; return; fi
+    if [ "$TFM" != "$framework" ]; then fail "$name" "TFM is $TFM, ZeroFramework $framework"; return; fi
+    dir=$(app_with_lib frameworkprop)
+    if ! run_in "$dir/Geometry" frameworkprop-pack pack -o "$WORK/frameworkfeed"; then fail "$name" "dotnet pack failed"; return; fi
+    if [ ! -f "$dir/Geometry/bin/Release/$framework/Geometry.dll" ]; then fail "$name" "no bin/Release/$framework/Geometry.dll"; return; fi
+    list=$(zip_list "$WORK/frameworkfeed/ZeroTest.Geometry.1.0.0.nupkg")
+    if ! grep -qx "lib/$framework/Geometry.dll" <<< "$list"; then fail "$name" "the package has no lib/$framework/Geometry.dll"; return; fi
+    if ! grep -qx "build/ZeroTest.Geometry.props" <<< "$list"; then fail "$name" "the package has no build/ZeroTest.Geometry.props"; return; fi
+    pass "$name"
+}
+
+# A library built by a newer SDK may use what this one lacks: ZERO002, naming
+# both versions. One from the same SDK, or an older (prerelease) one, builds.
+test_newer_sdk_library() {
+    local name="newer sdk library" dir src v app
+    can_build "$name" || return
+    dir=$(app_with_lib newersdk)
+    rm -rf "$WORK/newersdk-feed" "$WORK/newersdk-src"
+    if ! run_in "$dir/Geometry" newersdk-pack pack -o "$WORK/newersdk-feed"; then fail "$name" "dotnet pack failed"; return; fi
+    for v in 99.0.0 "$VERSION" 0.3.0-preview1; do
+        src=$WORK/newersdk-src/$v
+        mkdir -p "$src" "$WORK/newersdk-feeds/$v"
+        (cd "$src" && unzip -qo "$WORK/newersdk-feed/ZeroTest.Geometry.1.0.0.nupkg")
+        if [ ! -f "$src/build/ZeroTest.Geometry.props" ]; then fail "$name" "the package has no build/ZeroTest.Geometry.props"; return; fi
+        sed -i.bak "s|SdkVersion=\"[^\"]*\"|SdkVersion=\"$v\"|" "$src/build/ZeroTest.Geometry.props" && rm -f "$src/build/ZeroTest.Geometry.props.bak"
+        rm -f "$WORK/newersdk-feeds/$v/ZeroTest.Geometry.1.0.0.nupkg"
+        zip_dir "$src" "$WORK/newersdk-feeds/$v/ZeroTest.Geometry.1.0.0.nupkg"
+        rm -rf "${NUGET_PACKAGES:-$HOME/.nuget/packages}/zerotest.geometry"
+        app=$(fixture app-with-pkg "newersdk-app-$v")/App
+        add_source "$app/../nuget.config" libs "$WORK/newersdk-feeds/$v"
+        if [ "$v" = 99.0.0 ]; then
+            if run_in "$app" "newersdk-$v" build; then fail "$name" "a library from SDK 99.0.0 was accepted"; return; fi
+            if ! grep -q ZERO002 "$LOG" || ! grep -q "99.0.0" "$LOG" || ! grep -q "$VERSION" "$LOG"; then fail "$name" "no ZERO002 naming 99.0.0 and $VERSION"; return; fi
+        elif ! run_in "$app" "newersdk-$v" build; then
+            fail "$name" "a library from SDK $v was refused"; return
+        fi
+    done
     pass "$name"
 }
 

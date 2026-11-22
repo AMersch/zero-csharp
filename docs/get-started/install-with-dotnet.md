@@ -56,26 +56,28 @@ Out.Write(name);
 Out.Line("!");
 ```
 
-`dotnet build` puts the native program in `bin/Debug/zero02/`; `dotnet run` builds and runs it:
+`dotnet build` puts the native program in `bin/Debug/zero03/`; `dotnet run` builds and runs it:
 
 ```bash
-echo Ann | bin/Debug/zero02/Hello
+echo Ann | bin/Debug/zero03/Hello
 echo Ann | dotnet run
 ```
 
 On Windows, in PowerShell:
 
 ```powershell
-echo Ann | .\bin\Debug\zero02\Hello.exe
+echo Ann | .\bin\Debug\zero03\Hello.exe
 ```
 
 ```text
 What's your name? Hello, Ann!
 ```
 
-`zero02` is the project's target framework: zero mode, version 0.2 of the SDK. It keeps ordinary .NET
-packages out, because they need .NET's libraries, which a zero program doesn't have. Libraries packed
-with version 0.1 (`zero01`) need re-packing for 0.2.
+`zero03` is the project's target framework: zero mode, with the library format of SDK 0.3. It keeps
+ordinary .NET packages out, because they need .NET's libraries, which a zero program doesn't have.
+Libraries packed with 0.1 or 0.2 (`zero01`, `zero02`) need re-packing for 0.3. That's the last
+forced one: from 0.3 on, the framework changes only when the library format breaks, not with every
+release.
 
 ## Build for another target
 
@@ -84,9 +86,9 @@ program for a chosen target goes in a folder named after it, as `dotnet build -r
 programs for several targets sit side by side:
 
 ```bash
-dotnet build -p:ZeroTarget=win-x64        # bin/Debug/zero02/win-x64/Hello.exe
-dotnet build -p:ZeroTarget=linux-arm64    # bin/Debug/zero02/linux-arm64/Hello
-dotnet build -p:ZeroTarget=linux-x64      # from Windows: bin\Debug\zero02\linux-x64\Hello
+dotnet build -p:ZeroTarget=win-x64        # bin/Debug/zero03/win-x64/Hello.exe
+dotnet build -p:ZeroTarget=linux-arm64    # bin/Debug/zero03/linux-arm64/Hello
+dotnet build -p:ZeroTarget=linux-x64      # from Windows: bin\Debug\zero03\linux-x64\Hello
 ```
 
 `dotnet clean` removes all of them.

@@ -2,7 +2,7 @@
 //
 // The modules are WASI 0.1 programs. Of WASI they use only what a console
 // program needs: arguments, the clock, reading standard input, writing
-// standard output and error, and exiting. This file is that much of WASI,
+// standard output and error, yielding, and exiting. This file is that much of WASI,
 // written against the page instead of an operating system, so no library is
 // loaded from anywhere.
 //
@@ -99,6 +99,9 @@ export async function runWasm(url, { args = [], stdin = '' } = {}) {
       return 0;
     },
     proc_exit(code) { throw new Exit(code); },
+    // A spin-wait gives up its time slice. The page runs one thread, so
+    // there is nothing to yield to.
+    sched_yield() { return 0; },
   };
 
   const { instance } = await WebAssembly.instantiate(bytes, { wasi_snapshot_preview1: wasi });

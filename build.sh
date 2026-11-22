@@ -23,7 +23,8 @@
 #
 # Usage:  ./build.sh [--wasm | --dos | --win | --mac] [Sample ...]     default: all samples
 #         ./build.sh --sdk-payload <dir>     what the ZeroCSharp.Sdk package carries (sdk/)
-# Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh)
+# Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh),
+#         BFLAT_EXTRA_FLAGS (see bflat_flags)
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
@@ -65,6 +66,9 @@ check_sample() {
 }
 
 bflat_flags() {
+    # BFLAT_EXTRA_FLAGS: more flags for every sample, e.g. -O0 to test the
+    # unoptimized code that the SDK's Debug builds make.
+    echo ${BFLAT_EXTRA_FLAGS:-}
     case "$1" in
         Tiny) echo -Os --no-pie ;;
         # Zero mode has no runtime CPU detection, so SIMD extensions must be part of
@@ -555,7 +559,7 @@ in_container() {
     docker run --rm --platform "$DOCKER_PLATFORM" \
         -v "$PWD:/w" -v "$(cd "$BFLAT_DIR" && pwd):/bflat:ro" -w /w \
         -e BFLAT_DIR=/bflat -e BFLAT_ARCH="$BFLAT_ARCH" -e ARM64_MAX_PAGE_SIZE="$ARM64_MAX_PAGE_SIZE" \
-        -e WASM_TOOLS="$WASM_TOOLS" \
+        -e WASM_TOOLS="$WASM_TOOLS" -e BFLAT_EXTRA_FLAGS="${BFLAT_EXTRA_FLAGS:-}" \
         "$IMAGE" ./build.sh "$@"
 }
 

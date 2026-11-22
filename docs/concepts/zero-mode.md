@@ -86,12 +86,13 @@ passes it to bflat with `--stdlib:none`, so nothing AGPL-licensed ends up in the
   resolve at build time;
 - startup: storage for static fields that hold references, static constructors and
   `Main(string[] args)`;
-- `Math`, `MathF`, `Interlocked`, `Volatile`, and the SIMD types `lib/Kernels.cs` uses.
+- `Math`, `MathF`, `Interlocked`, `Volatile`, and the SIMD types `lib/Kernels.cs` uses;
+- `Half`, `BitOperations`, `BitArray` and `BitConverter`'s bit conversions.
 
 Much of it is a contract with the compiler, which looks types, methods and fields up by name. Those
 names can't be changed. Compared with zerolib, zerocore adds casts to interfaces, interface calls the
-compiler can't resolve at build time, boxing and `Main(string[] args)`, and leaves out `Console` and
-`Half`.
+compiler can't resolve at build time, boxing, `Main(string[] args)`, `BitOperations` and `BitArray`,
+and leaves out `Console`.
 
 **`lib/` is the library programs use.** It is ordinary C# built on top of zerocore, and it is where
 zero mode gets what .NET's base class library would otherwise provide:

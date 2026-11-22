@@ -167,6 +167,21 @@ public static class Program
         Check("Sin, Cos, Tanh", Near(MathF.Sin(Opaque(0f)), 0) && Near(MathF.Cos(Opaque(0f)), 1) && Near(MathF.Tanh(Opaque(0f)), 0));
         Section("MathF");
 
+        double zero = Opaque(0.0);
+        float zeroF = Opaque(0f);
+        Check("NaN", double.IsNaN(zero / zero) && double.IsNaN(double.NaN) && !double.IsNaN(Opaque(1.0)) && float.IsNaN(zeroF / zeroF) && float.IsNaN(float.NaN));
+        Check("infinities", double.IsPositiveInfinity(1 / zero) && double.IsNegativeInfinity(-1 / zero) && double.IsInfinity(Opaque(double.NegativeInfinity)) && float.IsPositiveInfinity(1 / zeroF) && float.IsInfinity(Opaque(float.NegativeInfinity)));
+        Check("IsFinite", double.IsFinite(Opaque(double.MaxValue)) && !double.IsFinite(Opaque(double.NaN)) && !double.IsFinite(1 / zero) && float.IsFinite(Opaque(float.MinValue)) && !float.IsFinite(1 / zeroF));
+        // The outer Opaque stores each result as a double or float: on DOS the
+        // 387 computes with a wider exponent, so MaxValue * 2 only overflows,
+        // and Epsilon / 2 only rounds to 0, once stored.
+        Check("MaxValue overflows to infinity", double.IsPositiveInfinity(Opaque(Opaque(double.MaxValue) * 2)) && float.IsPositiveInfinity(Opaque(Opaque(float.MaxValue) * 2)));
+        Check("Epsilon is the smallest subnormal", Opaque(Opaque(double.Epsilon) / 2) == 0 && double.IsSubnormal(Opaque(double.Epsilon)) && Opaque(Opaque(float.Epsilon) / 2) == 0 && float.IsSubnormal(Opaque(float.Epsilon)));
+        Check("IsNormal, IsSubnormal", double.IsNormal(Opaque(1.0)) && !double.IsNormal(zero) && !double.IsSubnormal(zero) && float.IsNormal(Opaque(1f)) && !float.IsNormal(Opaque(float.Epsilon)));
+        Check("IsNegative sees -0", double.IsNegative(Opaque(double.NegativeZero)) && !double.IsNegative(zero) && float.IsNegative(Opaque(float.NegativeZero)) && float.IsNegative(Opaque(-1f)));
+        Check("Pi, E, Tau", double.Pi == Math.PI && double.E == Math.E && double.Tau == 2 * Math.PI && float.Pi == MathF.PI && float.Tau == 2 * float.Pi);
+        Section("float and double");
+
         int counter = Opaque(10);
         Check("Increment returns the new value", Interlocked.Increment(ref counter) == 11 && counter == 11);
         Check("Decrement", Interlocked.Decrement(ref counter) == 10 && counter == 10);

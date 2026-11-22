@@ -49,4 +49,73 @@ namespace System.Runtime.Intrinsics.X86
 
         public static Vector256<float> MultiplyAdd(Vector256<float> a, Vector256<float> b, Vector256<float> c) => MultiplyAdd(a, b, c);
     }
+
+    // The bit instructions BitOperations uses. X86Base (bsf, bsr) is in every
+    // x64 processor; Lzcnt, Popcnt and Bmi1 (tzcnt) come with -m x86-64-v3.
+    // The bit scans are internal in .NET too.
+    [Intrinsic]
+    public abstract class X86Base
+    {
+        public static bool IsSupported => false;
+
+        internal static uint BitScanForward(uint value) => BitScanForward(value);
+        internal static uint BitScanReverse(uint value) => BitScanReverse(value);
+
+        [Intrinsic]
+        public abstract class X64
+        {
+            public static bool IsSupported => false;
+
+            internal static ulong BitScanForward(ulong value) => BitScanForward(value);
+            internal static ulong BitScanReverse(ulong value) => BitScanReverse(value);
+        }
+    }
+
+    [Intrinsic]
+    public abstract class Lzcnt
+    {
+        public static bool IsSupported => false;
+
+        public static uint LeadingZeroCount(uint value) => LeadingZeroCount(value);
+
+        [Intrinsic]
+        public abstract class X64
+        {
+            public static bool IsSupported => false;
+
+            public static ulong LeadingZeroCount(ulong value) => LeadingZeroCount(value);
+        }
+    }
+
+    [Intrinsic]
+    public abstract class Popcnt
+    {
+        public static bool IsSupported => false;
+
+        public static uint PopCount(uint value) => PopCount(value);
+
+        [Intrinsic]
+        public abstract class X64
+        {
+            public static bool IsSupported => false;
+
+            public static ulong PopCount(ulong value) => PopCount(value);
+        }
+    }
+
+    [Intrinsic]
+    public abstract class Bmi1
+    {
+        public static bool IsSupported => false;
+
+        public static uint TrailingZeroCount(uint value) => TrailingZeroCount(value);
+
+        [Intrinsic]
+        public abstract class X64
+        {
+            public static bool IsSupported => false;
+
+            public static ulong TrailingZeroCount(ulong value) => TrailingZeroCount(value);
+        }
+    }
 }

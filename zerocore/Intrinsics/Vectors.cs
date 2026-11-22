@@ -27,6 +27,18 @@ namespace System.Runtime.Intrinsics
     // As with Unsafe, the compiler replaces each call with one instruction, so
     // the bodies never run. To use an operation that's missing, declare it here
     // with the name and signature it has in .NET.
+    public static class Vector64
+    {
+        [Intrinsic]
+        public static Vector64<byte> AsByte<T>(this Vector64<T> vector) where T : struct => AsByte(vector);
+
+        [Intrinsic]
+        public static Vector64<ulong> CreateScalar(ulong value) => CreateScalar(value);
+
+        [Intrinsic]
+        public static T ToScalar<T>(this Vector64<T> vector) where T : struct => ToScalar(vector);
+    }
+
     public static class Vector128
     {
         [Intrinsic]

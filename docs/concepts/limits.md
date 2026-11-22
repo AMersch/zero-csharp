@@ -34,6 +34,9 @@ With zerocore, as `build.sh` builds it:
 - **Threads**: [`Parallel.For`](../how-to/run-in-parallel.html) runs a loop on every processor, with
   `Interlocked` and `Volatile` for shared state. There is no `Thread` class or `lock`.
 - **`Math` and `MathF`**, and `Main(string[] args)` and top-level statements.
+- **`Half`, `BitOperations` and `BitArray`**, with .NET's names and results: half-precision
+  numbers, bit counts and scans on the processor's own instructions where it has them, and arrays
+  of bits.
 - **Extension methods**, and C# 14 **extension members**: properties, static members and
   `ref` receivers in `extension(...)` blocks.
 
@@ -169,6 +172,44 @@ Check("through the base class", square is IShape && square is IScalable);
 Check("through another interface", circle is INamed && square is INamed);
 ```
 
+`Half`, `BitOperations` and `BitArray` work as in .NET. A `Half` rounds to the nearest value it can
+hold, does its arithmetic in `float`, and prints the shortest text that reads back as the same value:
+
+<!-- sample: samples/Bits.cs half -->
+```csharp
+Half pi = (Half)Opaque(3.14159f);
+Check("float to Half rounds to nearest", (float)pi == 3.140625f);
+Check("shortest text that reads back", pi.ToString() == "3.14");
+Half product = (Half)Opaque(1.5f) * (Half)2.5f;
+Check("arithmetic, rounded to Half", (float)product == 3.75f);
+```
+
+`BitOperations` uses the processor's own instructions where the target has them: clz, rbit and cnt
+on arm64, bsr and bsf on x64, and lzcnt, tzcnt and popcnt with `-m x86-64-v3`. A `BitArray` packs 32
+bits into each `int`; `foreach` over one boxes each `bool`, so index it in a hot loop:
+
+<!-- sample: samples/Bits.cs bitarray -->
+```csharp
+// A sieve of Eratosthenes: bit i says whether i is prime.
+var primes = new BitArray(100, true);
+primes[0] = primes[1] = false;
+for (int i = 2; i * i < 100; i++)
+    if (primes[i])
+        for (int j = i * i; j < 100; j += i)
+            primes[j] = false;
+int count = 0;
+foreach (bool isPrime in primes)
+    if (isPrime)
+        count++;
+Check("25 primes below 100", count == 25 && primes[97] && !primes[91]);
+
+var odd = new BitArray(100);
+for (int i = 1; i < 100; i += 2)
+    odd[i] = true;
+var oddPrimes = new BitArray(primes).And(odd);
+Check("And", !oddPrimes[2] && oddPrimes[3] && !oddPrimes[9]);
+```
+
 ## Choosing how to dispatch
 
 Interfaces and virtual methods both work, but they don't cost the same. An interface call the compiler
@@ -219,7 +260,7 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
   `string[]` as `object[]`) aborts with a message saying so, instead of answering wrongly.
 - **Most of the base class library.** No `Console` (use `Out` and `In`), no .NET collections (use
   [`lib/`'s](../how-to/choose-a-collection.html)), no LINQ (use [`lib/Seq.cs`](../how-to/query-data.html)),
-  no reflection (a `Type` only compares), async, `Thread`, `Half`, or boxing of `Nullable<T>`.
+  no reflection (a `Type` only compares), async, `Thread`, or boxing of `Nullable<T>`.
 - **A struct's default `Equals` compares bytes.** A reference field compares by reference, where .NET
   would call its `Equals`. Records and `IEquatable<T>` compare field by field.
 - **Reflection.** Builds need `--no-reflection`.
@@ -244,7 +285,7 @@ These are the issues you may hit with zerocore, as `build.sh` builds:
 | `[DllImport]` of a library not passed with `-i` fails to compile ("Expected type 'Internal.Runtime.CompilerHelpers.InteropHelpers' not found") | Pass `-i <library>`; `build.sh` passes `-i libc -i libm.so.6` |
 | Building without `--no-reflection` fails ("Failed to load type 'Internal.Metadata.NativeFormat.TypeDefinition'") | Pass `--no-reflection`; `build.sh` does |
 | Non-baseline instruction sets (AVX2, FMA, dotprod) report `IsSupported == false` | Build with `-m x86-64-v3` or `-m dotprod`; `build.sh` does this for Simd and Kernels |
-| No `Console`, `Half`, `Thread` | `lib/Out.cs` for output, `lib/In.cs` for input; `Parallel.For` (`lib/Threads.cs`) for threads |
+| No `Console`, `Thread` | `lib/Out.cs` for output, `lib/In.cs` for input; `Parallel.For` (`lib/Threads.cs`) for threads |
 | `"n=" + 5`, `ToString()` and `string.Format` allocate a string that's never freed | Fine once; in a loop, `Str.Format(arena, $"n={5}")` |
 | Casts and interface calls that need variance abort at run time | Not supported |
 | Windows: x64 only, built from Linux or macOS | `./build.sh --win`; building on Windows (`build.ps1`) is untested |

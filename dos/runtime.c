@@ -3,7 +3,8 @@
 // The program is a 32-bit Windows console executable, which the HX DOS
 // extender loads and runs under DOS; HX supplies a small kernel32. There is no
 // C library, so this file is one: the entry point, the handful of C functions
-// zerocore and lib/ call (calloc, write, the math functions, ...), and the
+// zerocore and lib/ call (calloc, write, clock_gettime, fopen and the other
+// file functions, the math functions, ...), and the
 // routines clang's 386 code calls for 64-bit division. It also gives C# the
 // PC itself: the VGA's 320x200 graphics mode, the keyboard, the mouse, the
 // speaker, a clock and files.
@@ -399,6 +400,48 @@ u32 dos_ticks(void)
     return now;
 }
 
+// clock_gettime, with Linux's clock numbers as lib/Clock.cs passes them. 0 is
+// the wall clock: DOS's date and time, which is usually local time. Anything
+// else is the monotonic clock: dos_ticks, to the millisecond, carried past its
+// 32-bit wrap (49.7 days).
+typedef struct {
+    unsigned short year, month, day_of_week, day, hour, minute, second, milliseconds;
+} SystemTime;
+IMPORT void WINAPI GetSystemTime(SystemTime *time);
+
+// Days from 1970-01-01 to a date (Howard Hinnant's days_from_civil), in int
+// arithmetic for a 386: good from 1970 to past 5000.
+static int days_from_civil(int year, int month, int day)
+{
+    year -= month <= 2;
+    int year_of_era = year % 400;
+    int day_of_year = (153 * (month > 2 ? month - 3 : month + 9) + 2) / 5 + day - 1;
+    int day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    return year / 400 * 146097 + day_of_era - 719468;
+}
+
+int clock_gettime(int clock, i64 *timespec)
+{
+    if (clock == 0) {
+        SystemTime t;
+        GetSystemTime(&t);
+        int seconds_today = t.hour * 3600 + t.minute * 60 + t.second;
+        timespec[0] = (i64)days_from_civil(t.year, t.month, t.day) * 86400 + seconds_today;
+        timespec[1] = (i64)t.milliseconds * 1000000;
+        return 0;
+    }
+    static u32 previous;
+    static u64 wraps;
+    u32 now = dos_ticks();
+    if (now < previous)
+        wraps += (u64)1 << 32;
+    previous = now;
+    u64 ms = wraps + now;
+    timespec[0] = (i64)(ms / 1000);
+    timespec[1] = (i64)(ms % 1000) * 1000000;
+    return 0;
+}
+
 // Returns when the monitor's beam starts its way back to the top: the moment
 // to change the screen without tearing, and a steady 70 times a second in mode
 // 0x13. Bit 3 of the VGA's status port is set during that time.
@@ -575,6 +618,45 @@ int dos_file_seek(void *file, int offset, int origin)
 int dos_file_size(void *file) { return (int)GetFileSize(file, 0); }
 void dos_file_close(void *file) { CloseHandle(file); }
 int dos_file_delete(const char *path) { return DeleteFileA(path) != 0; }
+
+// The C library's file functions, which lib/File.cs calls on every target,
+// over the same kernel32 functions. A FILE * is the kernel32 handle itself:
+// there is no buffering, so each fread or fwrite is one call to DOS.
+void *fopen(const char *path, const char *mode)
+{
+    int how = mode[0] == 'r' ? 0 : mode[0] == 'w' ? 1 : mode[0] == 'a' ? 2 : -1;
+    return dos_file_open(path, how);
+}
+
+size_t fread(void *buffer, size_t size, size_t count, void *file)
+{
+    if (size == 0)
+        return 0;
+    int done = dos_file_read(file, buffer, size * count);
+    return done < 0 ? 0 : (u32)done / size;
+}
+
+size_t fwrite(const void *buffer, size_t size, size_t count, void *file)
+{
+    if (size == 0)
+        return 0;
+    int done = dos_file_write(file, buffer, size * count);
+    return done < 0 ? 0 : (u32)done / size;
+}
+
+// Positions are 64-bit, as POSIX's fseeko and ftello take them, but FAT16
+// files stop at 2 GB, so only the low 32 bits reach DOS.
+int fseeko(void *file, i64 offset, int origin)
+{
+    if (origin < 0 || origin > 2 || offset != (int)offset)
+        return -1;
+    return dos_file_seek(file, (int)offset, origin) == -1 ? -1 : 0;
+}
+
+i64 ftello(void *file) { return dos_file_seek(file, 0, 1); }
+
+int fclose(void *file) { return CloseHandle(file) ? 0 : -1; }
+int remove(const char *path) { return DeleteFileA(path) ? 0 : -1; }
 
 // ---- 64-bit division ----------------------------------------------------------
 

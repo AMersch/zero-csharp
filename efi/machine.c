@@ -3,7 +3,8 @@
 // other. The screen is a 320x200 picture with 256 colors, drawn on the
 // firmware's graphics output, scaled up as far as it fits; keys come with PC
 // scan codes; files are on the volume the program was loaded from. The PC
-// speaker and port I/O exist on x64 only.
+// speaker and port I/O exist on x64 only. It also has the C library's file
+// functions (fopen, fread, ...), which lib/File.cs calls, over the same files.
 //
 // Compiled with clang for x86_64-pc-windows-msvc or aarch64-pc-windows-msvc.
 
@@ -452,6 +453,61 @@ int uefi_file_delete(const u8 *path)
     File *file = open_path(path, FILE_MODE_READ | FILE_MODE_WRITE);
     return file && file->delete(file) == EFI_SUCCESS;
 }
+
+// The C library's file functions, which lib/File.cs calls on every target,
+// over the same protocol. A FILE * is the protocol's File itself: there is no
+// buffering, so each fread or fwrite is one call to the firmware.
+void *fopen(const char *path, const char *mode)
+{
+    int how = mode[0] == 'r' ? ForReading : mode[0] == 'w' ? ForWriting : mode[0] == 'a' ? ForAppending : -1;
+    return uefi_file_open((const u8 *)path, how);
+}
+
+usize fread(void *buffer, usize size, usize count, File *file)
+{
+    usize bytes = size * count;
+    if (size == 0 || EFI_ERROR(file->read(file, &bytes, buffer)))
+        return 0;
+    return bytes / size;
+}
+
+usize fwrite(const void *buffer, usize size, usize count, File *file)
+{
+    usize bytes = size * count;
+    if (size == 0 || EFI_ERROR(file->write(file, &bytes, buffer)))
+        return 0;
+    return bytes / size;
+}
+
+// origin: 0 (SEEK_SET) from the start, 1 from here, 2 from the end.
+int fseeko(File *file, i64 offset, int origin)
+{
+    i64 base = 0;
+    u64 here;
+    if (origin == 1) {
+        if (EFI_ERROR(file->get_position(file, &here)))
+            return -1;
+        base = (i64)here;
+    } else if (origin == 2) {
+        base = file_size(file);
+    } else if (origin != 0) {
+        return -1;
+    }
+    i64 position = base + offset;
+    if (base < 0 || position < 0 || EFI_ERROR(file->set_position(file, (u64)position)))
+        return -1;
+    return 0;
+}
+
+i64 ftello(File *file)
+{
+    u64 here;
+    return EFI_ERROR(file->get_position(file, &here)) ? -1 : (i64)here;
+}
+
+int fclose(File *file) { return EFI_ERROR(file->close(file)) ? -1 : 0; }
+
+int remove(const char *path) { return uefi_file_delete((const u8 *)path) ? 0 : -1; }
 
 // ---- power ------------------------------------------------------------------
 

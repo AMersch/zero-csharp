@@ -14,18 +14,18 @@ int get_nprocs(void)
     return (int)sysconf(SC_NPROCESSORS_ONLN);
 }
 
-// The samples call clock_gettime(1, ...): 1 is CLOCK_MONOTONIC on Linux, but
+// lib/Clock.cs and the samples call clock_gettime with Linux's numbers: 0 for
+// the wall clock, which is 0 on macOS too, and 1 for CLOCK_MONOTONIC, which is
 // no clock at all on macOS. This definition comes before the C library's, so
-// it answers for every clock with the monotonic one: all the samples use it
-// for is measuring durations.
+// it answers 0 with the wall clock and anything else with the monotonic one.
 typedef unsigned long long u64;
 u64 clock_gettime_nsec_np(int clock);
+#define CLOCK_REALTIME 0
 #define CLOCK_UPTIME_RAW 8
 
 int clock_gettime(int clock, long long *timespec)
 {
-    (void)clock;
-    u64 now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+    u64 now = clock_gettime_nsec_np(clock == 0 ? CLOCK_REALTIME : CLOCK_UPTIME_RAW);
     timespec[0] = (long long)(now / 1000000000);
     timespec[1] = (long long)(now % 1000000000);
     return 0;

@@ -61,7 +61,8 @@ name=$1
 shift
 
 if [ "$wasm" = 1 ]; then
-    command=("$WASMTIME" run "bin/wasm/$name.wasm" "$@")
+    # --dir=.: the module may use files in the current directory, and only there.
+    command=("$WASMTIME" run --dir=. "bin/wasm/$name.wasm" "$@")
 else
     command=("./bin/$name" "$@")
 fi

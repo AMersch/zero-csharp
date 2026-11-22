@@ -1,8 +1,9 @@
 // The C side of a 64-bit Windows program or native library: the POSIX
 // functions zerocore and lib/ call that Windows doesn't have under those names
-// (write, read, clock_gettime, the pthreads lib/Threads.cs uses), and where
-// the compiler's module list is. The rest of the C library (calloc, malloc,
-// puts, abort, the math functions) comes from Windows' own, the Universal CRT;
+// (write, read, clock_gettime, fseeko and ftello, the pthreads lib/Threads.cs
+// uses), and where the compiler's module list is. The rest of the C library
+// (calloc, malloc, puts, fopen, abort, the math functions) comes from Windows'
+// own, the Universal CRT;
 // memset and memmove from ntdll. The entry point is start.c's (programs) or
 // library.c's (native libraries).
 //
@@ -136,10 +137,20 @@ int pthread_setspecific(u64 key, void *value) { return TlsSetValue((u32)key, val
 
 int get_nprocs(void) { return (int)GetActiveProcessorCount(0xFFFF); }
 
-// CLOCK_MONOTONIC only, which is all the samples ask for.
+// Linux's clock numbers, as lib/Clock.cs passes them: 0 is the wall clock
+// (CLOCK_REALTIME), anything else the monotonic clock.
 int clock_gettime(int clock, i64 *timespec)
 {
-    (void)clock;
+    if (clock == 0) {
+        // 100-nanosecond intervals since 1601-01-01, which was 11644473600
+        // seconds before 1970-01-01.
+        u64 now;
+        GetSystemTimePreciseAsFileTime(&now);
+        now -= 116444736000000000ull;
+        timespec[0] = (i64)(now / 10000000);
+        timespec[1] = (i64)(now % 10000000) * 100;
+        return 0;
+    }
     i64 count, frequency;
     QueryPerformanceCounter(&count);
     QueryPerformanceFrequency(&frequency);
@@ -147,3 +158,9 @@ int clock_gettime(int clock, i64 *timespec)
     timespec[1] = (count % frequency) * 1000000000 / frequency;
     return 0;
 }
+
+// 64-bit file positions for lib/File.cs. POSIX calls these fseeko and ftello;
+// the Universal CRT has them as _fseeki64 and _ftelli64.
+int fseeko(void *stream, i64 offset, int origin) { return _fseeki64(stream, offset, origin); }
+
+i64 ftello(void *stream) { return _ftelli64(stream); }

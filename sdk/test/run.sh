@@ -720,7 +720,8 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template
     framework_from_property newer_sdk_library
     mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
-    trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd)
+    trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd
+    tutorial_steps simd_instruction_set)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim
@@ -995,6 +996,45 @@ CS
     sed -i.bak 's|</Project>|  <ItemGroup><ZeroNativeInput Include="more-libc.tbd" /></ItemGroup>\n</Project>|' "$dir/native.csproj" && rm -f "$dir/native.csproj.bak"
     if ! run_in "$dir" macusertbd build -p:ZeroTarget=osx-arm64; then fail "$name" "the link failed"; return; fi
     if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/native"; then fail "$name" "no arm64 Mach-O program"; return; fi
+    pass "$name"
+}
+
+# The first program and the tutorial, as docs/ tells them: each step's samples/*.cs is the
+# Program.cs of a zero project, built with dotnet build and run with its input, and prints
+# what the repository's build does (tests/expected/).
+test_tutorial_steps() {
+    local name="tutorial steps" s dir input out
+    can_build "$name" || return
+    for s in Minimal QuizStep1 QuizStep2 QuizStep3 Quiz Refs; do
+        dir=$(fixture native "tutorial-$s")
+        rm -f "$dir/Program.cs"
+        cp "$ROOT/samples/$s.cs" "$dir/Program.cs"
+        input=/dev/null; [ -f "$ROOT/tests/input/$s.txt" ] && input=$ROOT/tests/input/$s.txt
+        if ! run_in "$dir" "tutorial-$s" build; then fail "$name" "$s didn't build"; return; fi
+        out=$("$(exe "$dir/bin/Debug/$TFM/native")" < "$input" | tr -d '\r')
+        echo "size $s: $(wc -c < "$(exe "$dir/bin/Debug/$TFM/native")")" >> "$WORK/tutorial-sizes.txt"
+        if [ "$out" != "$(tr -d '\r' < "$ROOT/tests/expected/$s.txt")" ]; then
+            echo "$out" >> "$LOG"
+            fail "$name" "$s printed something else"; return
+        fi
+    done
+    pass "$name"
+}
+
+# docs/how-to/use-simd.md's ZeroInstructionSet, per target architecture: the
+# Simd sample takes its SIMD path, and the result matches the scalar one.
+test_simd_instruction_set() {
+    local name="simd instruction set" dir out
+    can_build "$name" || return
+    dir=$(fixture native simd)
+    rm -f "$dir/Program.cs" && cp "$ROOT/samples/Simd.cs" "$dir/Program.cs"
+    sed -i.bak 's|</Project>|  <PropertyGroup>\n    <ZeroInstructionSet Condition="'"'"'$(ZeroTarget)'"'"' == '"'"'linux-x64'"'"' or '"'"'$(ZeroTarget)'"'"' == '"'"'win-x64'"'"'">x86-64-v3</ZeroInstructionSet>\n    <ZeroInstructionSet Condition="'"'"'$(ZeroTarget)'"'"' == '"'"'linux-arm64'"'"' or '"'"'$(ZeroTarget)'"'"' == '"'"'osx-arm64'"'"'">dotprod</ZeroInstructionSet>\n  </PropertyGroup>\n</Project>|' "$dir/native.csproj" && rm -f "$dir/native.csproj.bak"
+    if ! run_in "$dir" simd build -v:n; then fail "$name" "dotnet build failed"; return; fi
+    if ! grep -qE -- "-m (x86-64-v3|dotprod)" "$LOG"; then fail "$name" "bflat didn't get -m"; return; fi
+    out=$("$(exe "$dir/bin/Debug/$TFM/native")" | tr -d '\r')
+    if ! grep -qE "Path: (NEON|AVX2)" <<< "$out"; then fail "$name" "not the SIMD path: $(grep Path: <<< "$out")"; return; fi
+    if ! grep -q "Results match: true" <<< "$out"; then fail "$name" "the results don't match"; return; fi
+    if ! run_in "$dir" simd-mac build -p:ZeroTarget=osx-arm64; then fail "$name" "the osx-arm64 build failed"; return; fi
     pass "$name"
 }
 

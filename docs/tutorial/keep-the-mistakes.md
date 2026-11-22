@@ -76,9 +76,12 @@ afterwards ([the memory safety rules](../concepts/safety-rules.html)).
 
 ## Run it
 
+Put [`samples/Quiz.cs`](https://github.com/OnurGumus/zero-csharp/blob/master/samples/Quiz.cs) in `Program.cs`, build, and give it step 3's answers:
+
 ```bash
-./build.sh Quiz
-./run.sh Quiz < tests/input/Quiz.txt
+dotnet build
+printf 'abc\n  46 \n\xc3\xa9\xf0\x9f\x98\x80\n\xff\xc3(\n7\n1234567890123456789012345678901234567890\n17\r\n\n35' \
+  | bin/Debug/zero03/Quiz
 ```
 
 The output ends with the list:

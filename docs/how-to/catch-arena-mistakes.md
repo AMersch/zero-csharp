@@ -90,8 +90,10 @@ in a separate scratch arena and copy the result out.
 
 ## What the library stops the program for
 
-`samples/Guards.cs` makes one mistake per run, and `test.sh` checks the message of each against
-`tests/expected/Guards.fail`. Run one with `./run.sh Guards <case>`:
+[`samples/Guards.cs`](https://github.com/OnurGumus/zero-csharp/blob/master/samples/Guards.cs) makes one mistake per run, and the repository's `test.sh`
+checks the message of each against `tests/expected/Guards.fail`. Run one with the case as its
+argument: `bin/Debug/zero03/Guards <case>` in a zero project, or `./run.sh Guards <case>` in the
+repository:
 
 | Case | The mistake | Needs `DebugChecks` |
 |---|---|---|

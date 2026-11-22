@@ -170,7 +170,11 @@
            the soname lets C programs link against it by path. -->
       <_ZeroArg Include="--target Shared --ldflags &quot;$(ZeroNativeDir)library.o&quot; --ldflags &quot;-z start-stop-visibility=hidden&quot; --ldflags --soname=$(AssemblyName).so"
                 Condition="'$(ZeroNativeLibrary)' == 'true' and ('$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64')" />
-      <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags &quot;$(ZeroNativeDir)start.obj&quot; --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64'" />
+      <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags &quot;$(ZeroNativeDir)start.obj&quot; --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' != 'true'" />
+      <!-- A Windows native library: bflat links it /dll with a .def file of
+           the entry points; zero_dll_start (win/library.c) sets up zerocore
+           when it loads. -->
+      <_ZeroArg Include="--os windows --target Shared --ldflags /entry:zero_dll_start --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)library.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' == 'true'" />
       <_ZeroArg Include="-Os" Condition="'$(ZeroOptimizeFor)' == 'Size'" />
       <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != ''" />
       <_ZeroArg Include="-o &quot;$(ZeroNativeOutput)&quot;" Condition="'$(ZeroTarget)' != 'osx-arm64'" />

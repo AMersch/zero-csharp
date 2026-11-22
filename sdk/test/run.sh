@@ -346,7 +346,8 @@ test_library_change_rebuilds() {
 
 # add_source <nuget.config> <name> <dir>: one more package source.
 add_source() {
-    sed -i.bak "s|<clear />|<clear />\n    <add key=\"$2\" value=\"$3\" />|" "$1" && rm -f "$1.bak"
+    local path; path=$(native_path "$3" | sed 's|\\|\\\\|g')
+    sed -i.bak "s|<clear />|<clear />\n    <add key=\"$2\" value=\"$path\" />|" "$1" && rm -f "$1.bak"
 }
 
 test_pack_and_package_reference() {
@@ -565,11 +566,16 @@ test_payload_folder_guard() {
 # ZeroTarget from Directory.Build.targets, imported after the project: still a
 # chosen target, with a folder of its own.
 test_target_from_directory_targets() {
-    local name="target from Directory.Build.targets" dir
+    # A target other than the host's: Windows from Linux, Linux x64 from Windows.
+    local name="target from Directory.Build.targets" dir target=win-x64 program
     can_build "$name" || return
+    [ "$HOST_OS" = Windows ] && target=linux-x64
     dir=$(fixture dirtargets)
+    sed -i.bak "s|<ZeroTarget>win-x64</ZeroTarget>|<ZeroTarget>$target</ZeroTarget>|" "$dir/Directory.Build.targets" && rm -f "$dir/Directory.Build.targets.bak"
     if ! run_in "$dir" dirtargets build; then fail "$name" "dotnet build failed"; return; fi
-    if ! is_pe "$dir/bin/Debug/$TFM/win-x64/dirtargets.exe"; then fail "$name" "no win-x64/dirtargets.exe"; return; fi
+    program=$dir/bin/Debug/$TFM/$target/dirtargets
+    if [ "$target" = win-x64 ]; then is_pe "$program.exe"; else is_elf "$program" x86-64; fi \
+        || { fail "$name" "no $target program in $target/"; return; }
     pass "$name"
 }
 

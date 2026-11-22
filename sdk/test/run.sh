@@ -388,11 +388,11 @@ test_debug_unoptimized() {
 }
 
 # Windows: the PDB next to a Debug program is the linker's, also after a build
-# that changed nothing, and debuggers stop on a line of Program.cs and read its
-# locals: cdb (Windows SDK), and CodeLLDB's lldb with the templates'
-# zero_lldb.py when ZERO_CODELLDB names an unpacked CodeLLDB .vsix (CI).
+# that changed nothing, and Microsoft's debugger engine (cdb, Windows SDK)
+# stops on a line of Program.cs, reads its locals, and shows a span as text
+# with the templates' zero.natvis, which VS Code's cppvsdbg loads.
 test_windows_debugger() {
-    local name="windows debugger" dir pdb line cdb lldb out
+    local name="windows debugger" dir pdb line cdb natvis
     if [ "$HOST_OS" != Windows ]; then skip "$name" "Windows only"; return; fi
     dir=$(fixture debugme)
     pdb=$dir/bin/Debug/$TFM/debugme.pdb
@@ -403,21 +403,12 @@ test_windows_debugger() {
     if [ "$(head -c 24 "$pdb" 2> /dev/null)" != "Microsoft C/C++ MSF 7.00" ]; then fail "$name" "after a second build, $pdb isn't the linker's PDB"; return; fi
     cdb="/c/Program Files (x86)/Windows Kits/10/Debuggers/x64/cdb.exe"
     if [ ! -x "$cdb" ]; then fail "$name" "no cdb at $cdb"; return; fi
+    natvis=$(native_path "$ROOT/sdk/ZeroCSharp.Templates/vscode/zero.natvis")
     LOG=$WORK/debugme-cdb.log
-    (cd "$dir" && run_limited 300 "$LOG" "$cdb" -lines -c "bp \`debugme!Program.cs:$line\`;g;dv;q" "bin\\Debug\\$TFM\\debugme.exe")
+    (cd "$dir" && run_limited 300 "$LOG" "$cdb" -lines \
+        -c ".nvload $natvis;bp \`debugme!Program.cs:$line\`;g;dv;dx word;q" "bin\\Debug\\$TFM\\debugme.exe")
     if ! grep -qE 'total = (0n)?45' "$LOG"; then fail "$name" "cdb didn't show total = 45 at Program.cs:$line"; return; fi
-    if [ -n "${ZERO_CODELLDB:-}" ]; then
-        lldb=$(find "$ZERO_CODELLDB" -name lldb.exe | head -1)
-        if [ -z "$lldb" ]; then fail "$name" "no lldb.exe in $ZERO_CODELLDB"; return; fi
-        LOG=$WORK/debugme-lldb.log
-        (cd "$dir" && run_limited 300 "$LOG" "$lldb" -b \
-            -o "command script import $(native_path "$ROOT/sdk/ZeroCSharp.Templates/vscode/zero_lldb.py")" \
-            -o "b Program.cs:$line" -o run -o "frame variable total word" -o kill \
-            "bin\\Debug\\$TFM\\debugme.exe")
-        out=$(tr -d '\r' < "$LOG")
-        if [[ "$out" != *"total = 45"* ]]; then fail "$name" "CodeLLDB's lldb didn't show total = 45 at Program.cs:$line"; return; fi
-        if [[ "$out" != *'word = "zero" length=4'* ]]; then fail "$name" "zero_lldb.py didn't show word as \"zero\""; return; fi
-    fi
+    if ! grep -q 'word *: *"zero" length=4' "$LOG"; then fail "$name" "with zero.natvis, cdb didn't show word as \"zero\""; return; fi
     pass "$name"
 }
 
@@ -537,7 +528,7 @@ test_templates() {
     out=$(echo Ann | "$(exe "$dir/Hello/bin/Debug/$TFM/Hello")")
     if [[ "$out" != *"Hello, Ann!"* ]]; then fail "$name" "printed '$out'"; return; fi
     # VS Code debugging: the program's name and folder filled in, and the rest.
-    for file in launch.json tasks.json settings.json extensions.json zero_lldb.py; do
+    for file in launch.json tasks.json settings.json extensions.json zero_lldb.py zero.natvis; do
         if [ ! -f "$dir/Hello/.vscode/$file" ]; then fail "$name" "no .vscode/$file"; return; fi
     done
     if ! grep -q "\"\${workspaceFolder}/bin/Debug/$TFM/Hello\"" "$dir/Hello/.vscode/launch.json"; then fail "$name" "launch.json doesn't start bin/Debug/$TFM/Hello"; return; fi

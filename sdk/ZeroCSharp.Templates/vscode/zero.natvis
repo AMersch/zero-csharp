@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Visual Studio's debugger (cppvsdbg in VS Code, Windows): shows zero-mode
+     C#'s string, Span<char> and ReadOnlySpan<char> as text, like zero_lldb.py
+     does for LLDB. launch.json's Windows configuration loads it. -->
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+  <Type Name="S_P_CoreLib_System_ReadOnlySpan_1&lt;Char&gt;">
+    <DisplayString>{&amp;_reference,[_length]su} length={_length}</DisplayString>
+  </Type>
+  <Type Name="S_P_CoreLib_System_Span_1&lt;Char&gt;">
+    <DisplayString>{&amp;_reference,[_length]su} length={_length}</DisplayString>
+  </Type>
+  <Type Name="String">
+    <DisplayString>{&amp;_firstChar,[_stringLength]su}</DisplayString>
+  </Type>
+</AutoVisualizer>

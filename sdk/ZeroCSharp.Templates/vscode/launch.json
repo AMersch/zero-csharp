@@ -6,12 +6,22 @@
       "type": "lldb",
       "request": "launch",
       "program": "${workspaceFolder}/bin/Debug/@ZERO_FRAMEWORK@/@ZERO_PROJECT@",
-      "windows": { "program": "${workspaceFolder}/bin/Debug/@ZERO_FRAMEWORK@/@ZERO_PROJECT@.exe" },
       "args": [],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "build",
       "initCommands": ["command script import ${workspaceFolder}/.vscode/zero_lldb.py"],
       "terminal": "integrated"
+    },
+    {
+      "name": "Debug @ZERO_PROJECT@ (Windows)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/Debug/@ZERO_FRAMEWORK@/@ZERO_PROJECT@.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build",
+      "visualizerFile": "${workspaceFolder}/.vscode/zero.natvis",
+      "console": "integratedTerminal"
     }
   ]
 }

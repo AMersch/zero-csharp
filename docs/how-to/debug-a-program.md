@@ -5,14 +5,14 @@ index: 16
 
 # Debug a program
 
-A zero-mode program is native code with DWARF debug information, so you debug it with a native
-debugger: LLDB, from VS Code through the CodeLLDB extension or on the command line. The C# debugger
-that comes with VS Code's C# extension can't attach, because there is no .NET runtime in the program
-for it to talk to.
+A zero-mode program is native code with debug information, so you debug it with a native debugger.
+On macOS and Linux that's LLDB, from VS Code through the CodeLLDB extension or on the command line.
+On Windows, where the linker writes a PDB next to the program, it's Microsoft's debugger, through
+VS Code's C/C++ extension. The C# debugger that comes with VS Code's C# extension can't attach,
+because there is no .NET runtime in the program for it to talk to.
 
-This guide covers projects made with the .NET SDK ([Install with dotnet](../get-started/install-with-dotnet.html))
-on macOS and Linux. Windows isn't covered yet: a Windows build writes a PDB, but no debugger setup
-for it has been tried.
+This guide covers projects made with the .NET SDK
+([Install with dotnet](../get-started/install-with-dotnet.html)).
 
 ## Debug builds aren't optimized
 
@@ -40,13 +40,14 @@ everything up:
 
 | File | What it does |
 |---|---|
-| `launch.json` | builds the project, then starts `bin/Debug/zero03/<project>` under CodeLLDB, in the integrated terminal so the program can read what you type |
+| `launch.json` | builds the project, then starts `bin/Debug/zero03/<project>` in the integrated terminal, so the program can read what you type: under CodeLLDB, or under Microsoft's debugger in the configuration named `(Windows)` |
 | `tasks.json` | the `build` task (`dotnet build`), also the default build task (⇧⌘B or Ctrl+Shift+B) |
 | `settings.json` | `debug.allowBreakpointsEverywhere`, which lets you set breakpoints in `.cs` files without the C# debugger |
 | `extensions.json` | recommends CodeLLDB, so VS Code offers to install it |
-| `zero_lldb.py` | shows `string`, `Span<char>` and `ReadOnlySpan<char>` as text (see below) |
+| `zero_lldb.py` | shows `string`, `Span<char>` and `ReadOnlySpan<char>` as text in LLDB (see below) |
+| `zero.natvis` | the same for Microsoft's debugger, on Windows |
 
-To debug:
+To debug on macOS or Linux:
 
 1. Open the project's folder in VS Code (the folder with the `.csproj`, so VS Code finds `.vscode`).
 2. Install CodeLLDB (`vadimcn.vscode-lldb`) when VS Code offers it. The first time it starts, it
@@ -55,6 +56,11 @@ To debug:
 
 If VS Code says `Configured debug type 'lldb' is not supported`, CodeLLDB isn't installed yet. If it
 says to restart before reinstalling CodeLLDB, quit VS Code completely and open it again.
+
+On Windows, install the C/C++ extension (`ms-vscode.cpptools`) instead, choose `Debug <project>
+(Windows)` in the Run and Debug view, and press F5. CodeLLDB on Windows stops on the right line but
+shows no variables: the PDB's functions lack a type record that LLDB needs to read their locals, and
+Microsoft's debugger doesn't.
 
 For a project made before these files existed, copy the `.vscode` folder from a new
 `dotnet new zero` project and change the program's name in `launch.json`. To pass arguments to the
@@ -73,6 +79,17 @@ lldb bin/Debug/zero03/Hello
 (lldb) frame variable
 ```
 
+On Windows, `cdb` from the Windows SDK's Debugging Tools reads the PDB. `.nvload` loads the natvis
+file, `bp` with a file and line in backquotes sets the breakpoint, and `dv` lists the locals:
+
+```text
+cdb -lines bin\Debug\zero03\Hello.exe
+0:000> .nvload .vscode\zero.natvis
+0:000> bp `Hello!Program.cs:17`
+0:000> g
+0:000> dv
+```
+
 ## Strings and spans
 
 LLDB doesn't know C#'s types, so a span of characters would show as a pointer and a length.
@@ -88,6 +105,9 @@ Characters past the end of the text in a buffer show as a count of `\0`s, quotes
 characters are escaped, and text over 1024 characters is cut off with `...`. Expanding a variable
 still shows its fields. Spans of other element types show as LLDB shows any struct: a pointer to
 the first element and a length.
+
+On Windows, `zero.natvis` does the same for Microsoft's debugger, showing a span as its text and
+length (`"Ann" length=3`) and a string as its text.
 
 ## What to expect
 

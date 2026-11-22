@@ -272,6 +272,32 @@ jobs:
         env:
           ZERO_NO_PACK: '1'
         run: dotnet --version && sdk/test/run.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-built-linux
+          path: sdk/test/work/windows-built
+          if-no-files-found: error
+
+  # The Linux programs the Windows job built, run on Linux.
+  windows-built-linux:
+    needs: windows
+    strategy:
+      matrix:
+        include:
+          - { rid: linux-x64, runner: ubuntu-24.04 }
+          - { rid: linux-arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-built-linux
+          path: built
+      - name: Run the program built on Windows
+        run: |
+          chmod +x built/${{ matrix.rid }}/native
+          out=$(built/${{ matrix.rid }}/native)
+          echo "$out"
+          [ "$out" = hi ]
 
   macos:
     needs: pack
@@ -301,7 +327,7 @@ jobs:
   # nuget.org user name (a repository variable, not a secret).
   publish:
     if: startsWith(github.ref, 'refs/tags/sdk-v')
-    needs: [test, windows, macos]
+    needs: [test, windows, windows-built-linux, macos]
     runs-on: ubuntu-24.04
     permissions:
       id-token: write

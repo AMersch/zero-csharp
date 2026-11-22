@@ -548,6 +548,10 @@ test_release_tag_check() {
     if ! sdk/check-tag.sh "sdk-v$VERSION" > "$LOG" 2>&1; then fail "$name" "sdk-v$VERSION was refused"; return; fi
     if sdk/check-tag.sh "sdk-v0.0.9" > "$LOG" 2>&1; then fail "$name" "sdk-v0.0.9 was accepted for $VERSION"; return; fi
     if ! grep -q "$VERSION" "$LOG"; then fail "$name" "the error doesn't name $VERSION"; return; fi
+    # A release carries bflat from the fork's master, never a branch build.
+    if BFLAT_REF=windows-lld sdk/check-tag.sh "sdk-v$VERSION" > "$LOG" 2>&1; then fail "$name" "a release from the fork branch windows-lld was accepted"; return; fi
+    if ! grep -q "BFLAT_REF" "$LOG"; then fail "$name" "the error doesn't name BFLAT_REF"; return; fi
+    if ! BFLAT_REF=master sdk/check-tag.sh "sdk-v$VERSION" > "$LOG" 2>&1; then fail "$name" "BFLAT_REF=master was refused"; return; fi
     pass "$name"
 }
 
@@ -626,6 +630,10 @@ test_windows_builds_linux() {
     if ! run_in "$dir" winlinux-arm64 build -p:ZeroTarget=linux-arm64; then fail "$name" "the linux-arm64 build failed"; return; fi
     if ! is_elf "$dir/bin/Debug/$TFM/linux-x64/native" x86-64; then fail "$name" "linux-x64/native isn't an x86-64 ELF"; return; fi
     if ! is_elf "$dir/bin/Debug/$TFM/linux-arm64/native" aarch64; then fail "$name" "linux-arm64/native isn't an aarch64 ELF"; return; fi
+    # Kept for CI, which runs them on Linux (sdk.yml, windows-built-linux).
+    mkdir -p "$WORK/windows-built/linux-x64" "$WORK/windows-built/linux-arm64"
+    cp "$dir/bin/Debug/$TFM/linux-x64/native" "$WORK/windows-built/linux-x64/"
+    cp "$dir/bin/Debug/$TFM/linux-arm64/native" "$WORK/windows-built/linux-arm64/"
     pass "$name"
 }
 
@@ -660,6 +668,19 @@ test_crlf_input() {
     pass "$name"
 }
 
+# .NET's artifacts layout (UseArtifactsOutput) puts obj/ on an absolute path;
+# in a folder with a space (C:\Users\Zoë Ann\source\repos) the link must work.
+test_artifacts_path_with_spaces() {
+    local name="artifacts path with spaces" dir program out
+    can_build "$name" || return
+    dir=$(fixture native "spaces art/native")
+    if ! run_in "$dir" artifacts build -p:UseArtifactsOutput=true; then fail "$name" "dotnet build failed"; return; fi
+    program=$(find "$dir/artifacts/bin" -type f -name "$(basename "$(exe native)")" 2>/dev/null | head -1)
+    if [ -z "$program" ]; then fail "$name" "no program under artifacts/bin"; return; fi
+    out=$("$program"); if [ "$out" != hi ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
@@ -667,7 +688,8 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
     release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0
-    long_command_line windows_builds_linux unusual_packages_folder crlf_input)
+    long_command_line windows_builds_linux unusual_packages_folder crlf_input
+    artifacts_path_with_spaces)
 
 # ---- Run ---------------------------------------------------------------------
 

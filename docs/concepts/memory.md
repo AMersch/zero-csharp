@@ -188,6 +188,42 @@ for (int i = 0; i < 1000; i++)
 long scoped = GC.GetTotalAllocatedBytes() - before;
 ```
 
+### Freeing objects when the block ends
+
+`OpenObjectScope()` is `AllocateObjectsHere()` and `OpenScope()` in one: objects go into the arena while
+the block runs, and closing it frees them, so they live exactly as long as the `using` block. Nothing
+has to call `Reset`, and the arena can hold longer-lived data from before the scope, which stays:
+
+<!-- sample: samples/Arena.cs object-scope-free -->
+```csharp
+// OpenObjectScope also frees what the block created when it closes,
+// so objects live exactly as long as the using block. The arena can
+// hold longer-lived data too: only what came after the scope opened
+// is freed.
+Arena scoped = Arena.Create(4096);
+int* kept = scoped.Alloc<int>();       // lives past every scope
+unsafe { *kept = 42; } // SAFETY: kept points at an int in scoped.
+nuint usedOutside = scoped.Used;
+long heapBeforeFrames = System.GC.GetTotalAllocatedBytes();
+int frameTotal = 0;
+for (int round = 0; round < 1000; round++)
+{
+    Arena.ObjectScope objects;
+    // SAFETY: nothing created inside is used after the block.
+    unsafe { objects = scoped.OpenObjectScope(); }
+    using (objects)
+    {
+        int[] cells = new int[16];
+        string text = Echo("ab") + Echo("cd");
+        frameTotal += cells.Length + text.Length;
+    }   // cells and text are freed here
+}
+long frameHeapGrowth = System.GC.GetTotalAllocatedBytes() - heapBeforeFrames;
+```
+
+Both sets of rules apply: nothing created inside may be kept past the block, and no collection created
+before the scope may grow inside it.
+
 A scope applies only to the thread that opens it, so each thread of a [parallel loop](../how-to/run-in-parallel.html)
 can send its objects to an arena of its own.
 

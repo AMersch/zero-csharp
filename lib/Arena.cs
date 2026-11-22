@@ -30,6 +30,8 @@
 // - AllocateObjectsHere() sends every ordinary allocation (new, closures,
 //   strings, boxing) to the arena until the scope closes, so code that would
 //   leak frees its objects with the arena. See it for the rules.
+//   OpenObjectScope() also frees them when the scope closes, so objects
+//   live exactly as long as a using block.
 // - Not thread-safe: use one arena per thread.
 // - Arena.DebugChecks = true (set it first thing in Main) makes arenas created
 //   afterwards fill freed memory with 0xDD bytes, and makes List, Dict and
@@ -579,24 +581,84 @@ public struct Arena
         return scope;
     }
 
+    /// <summary>
+    /// AllocateObjectsHere() and OpenScope() in one: until the returned scope
+    /// is disposed, every object the program creates is allocated in this
+    /// arena, and disposing it frees them all, along with anything else
+    /// allocated from the arena inside the block. Objects then live exactly
+    /// as long as the using block, like stack variables:
+    /// <code>
+    /// Arena.ObjectScope objects;
+    /// unsafe { objects = frame.OpenObjectScope(); } // SAFETY: see below
+    /// using (objects)
+    /// {
+    ///     var items = new int[16];
+    ///     string s = a + b;
+    /// }   // items and s are freed here
+    /// </code>
+    /// The arena may hold longer-lived data from before the scope; only what
+    /// was allocated inside it is freed.
+    /// </summary>
+    /// <safety>
+    /// AllocateObjectsHere's rules and OpenScope's together: no reference to
+    /// anything created inside may outlive the block (not in a static field,
+    /// not in an object or closure from outside, not a lambda or static
+    /// constructor run for the first time inside), and no collection created
+    /// before the scope may grow inside it.
+    /// </safety>
+    public unsafe ObjectScope OpenObjectScope()
+    {
+        ObjectScope scope = default;
+        scope.Mark = Save();
+        scope.FreeOnDispose = _state != null;
+        unsafe
+        {
+            // SAFETY: as in AllocateObjectsHere.
+            ObjectScope objects = AllocateObjectsHere();
+            scope.PreviousAllocate = objects.PreviousAllocate;
+            scope.PreviousContext = objects.PreviousContext;
+            scope.State = objects.State;
+        }
+        return scope;
+    }
+
     // ObjectAllocator's function: objects are zeroed and 8-byte aligned (a
     // long or double in an object needs it on 32-bit targets).
     static unsafe void* AllocateObject(void* context, nuint size)
         => new Arena { _state = (State*)context }.Alloc(size, 8, zero: true);
 
-    /// <summary>From AllocateObjectsHere, for a using block: disposing it puts back the allocator that was in effect before.</summary>
+    /// <summary>
+    /// From AllocateObjectsHere or OpenObjectScope, for a using block: disposing
+    /// it puts back the allocator that was in effect before, and for
+    /// OpenObjectScope frees what was allocated inside.
+    /// </summary>
     public ref struct ObjectScope
     {
         internal delegate*<void*, nuint, void*> PreviousAllocate;
         internal void* PreviousContext;
         internal void* State; // the arena's State*
+        internal Mark Mark;
+        internal bool FreeOnDispose; // from OpenObjectScope
 
-        /// <summary>Puts back the previous allocator; with DebugChecks, also checks that no static field points into the arena.</summary>
+        /// <summary>
+        /// Puts back the previous allocator; with DebugChecks, also checks that
+        /// no static field points into the arena. From OpenObjectScope, then
+        /// frees everything allocated inside.
+        /// </summary>
         public void Dispose()
         {
             // SAFETY: puts back what AllocateObjectsHere found.
             unsafe { System.Runtime.ObjectAllocator.Set(PreviousAllocate, PreviousContext); }
+            // Checked before freeing, while the scope's objects are still in
+            // the arena's blocks.
             unsafe { CheckStatics((State*)State); } // SAFETY: State is the scope's live arena.
+            if (FreeOnDispose)
+            {
+                FreeOnDispose = false; // a second Dispose frees nothing
+                // SAFETY: OpenObjectScope's caller promised that nothing created
+                // inside the scope is used after it.
+                unsafe { new Arena { _state = (State*)State }.Restore(Mark); }
+            }
         }
     }
 

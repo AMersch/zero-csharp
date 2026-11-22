@@ -41,6 +41,8 @@ Arena destroyed.
 
 Objects in an arena, 1000 rounds: heap growth 0 bytes, arena blocks 1
 Every round ran: true
+Objects freed with their scope, 1000 rounds: heap growth 0 bytes, arena blocks 1
+Only the scopes' objects freed: true
 
 DebugChecks: pointer is live before Reset: true
 After Reset the stale pointer reads 0xDDDDDDDD, IsLive: false

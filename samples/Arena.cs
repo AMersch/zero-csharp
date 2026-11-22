@@ -226,6 +226,40 @@ public static class Program
         Out.Line();
         unsafe { rounds.Destroy(); } // SAFETY: nothing points into it.
 
+        // docs:object-scope-free
+        // OpenObjectScope also frees what the block created when it closes,
+        // so objects live exactly as long as the using block. The arena can
+        // hold longer-lived data too: only what came after the scope opened
+        // is freed.
+        Arena scoped = Arena.Create(4096);
+        int* kept = scoped.Alloc<int>();       // lives past every scope
+        unsafe { *kept = 42; } // SAFETY: kept points at an int in scoped.
+        nuint usedOutside = scoped.Used;
+        long heapBeforeFrames = System.GC.GetTotalAllocatedBytes();
+        int frameTotal = 0;
+        for (int round = 0; round < 1000; round++)
+        {
+            Arena.ObjectScope objects;
+            // SAFETY: nothing created inside is used after the block.
+            unsafe { objects = scoped.OpenObjectScope(); }
+            using (objects)
+            {
+                int[] cells = new int[16];
+                string text = Echo("ab") + Echo("cd");
+                frameTotal += cells.Length + text.Length;
+            }   // cells and text are freed here
+        }
+        long frameHeapGrowth = System.GC.GetTotalAllocatedBytes() - heapBeforeFrames;
+        // docs:end
+        Out.Line("Objects freed with their scope, 1000 rounds: heap growth ", frameHeapGrowth,
+            " bytes, arena blocks ", scoped.BlockCount);
+        Out.Write("Only the scopes' objects freed: ");
+        bool keptIntact;
+        unsafe { keptIntact = *kept == 42; } // SAFETY: kept is still allocated.
+        Out.Write(frameTotal == 1000 * 20 && scoped.Used == usedOutside && keptIntact);
+        Out.Line();
+        unsafe { scoped.Destroy(); } // SAFETY: nothing points into it.
+
         // docs:debug-checks
         // Debugging aid: arenas created while DebugChecks is on fill freed memory
         // with 0xDD, so a stale pointer reads an obvious pattern instead of the

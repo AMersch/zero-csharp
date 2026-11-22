@@ -354,10 +354,31 @@ static u64 counter_frequency(void)
     return frequency;
 }
 
-// CLOCK_MONOTONIC only, which is all the samples ask for.
+// Days from 1970-01-01 to a date (Howard Hinnant's days_from_civil).
+static i64 days_from_civil(i64 year, i64 month, i64 day)
+{
+    year -= month <= 2;
+    i64 era = (year >= 0 ? year : year - 399) / 400;
+    i64 year_of_era = year - era * 400;
+    i64 day_of_year = (153 * (month > 2 ? month - 3 : month + 9) + 2) / 5 + day - 1;
+    i64 day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    return era * 146097 + day_of_era - 719468;
+}
+
+// Linux's clock numbers, as lib/Clock.cs passes them. 0 is the wall clock: the
+// firmware's calendar clock, read as it is. Its time zone is usually
+// unspecified, and PCs usually keep local time. Anything else is the
+// monotonic clock, the processor's counter.
 int clock_gettime(int clock, i64 *timespec)
 {
-    (void)clock;
+    if (clock == 0) {
+        Time t;
+        if (EFI_ERROR(efi_system->runtime_services->get_time(&t, 0)))
+            return -1;
+        timespec[0] = days_from_civil(t.year, t.month, t.day) * 86400 + t.hour * 3600 + t.minute * 60 + t.second;
+        timespec[1] = t.nanosecond;
+        return 0;
+    }
     u64 frequency = counter_frequency();
     u64 count = counter();
     timespec[0] = (i64)(count / frequency);

@@ -25,6 +25,9 @@ IMPORT u32 GetLastError(void);
 IMPORT int SetConsoleOutputCP(u32 page);
 IMPORT int QueryPerformanceCounter(i64 *count);
 IMPORT int QueryPerformanceFrequency(i64 *frequency);
+IMPORT void GetSystemTimePreciseAsFileTime(u64 *time);
+IMPORT int _fseeki64(void *stream, i64 offset, int origin);
+IMPORT i64 _ftelli64(void *stream);
 IMPORT __declspec(noreturn) void ExitProcess(u32 code);
 IMPORT unsigned int _set_abort_behavior(unsigned int flags, unsigned int mask);
 IMPORT Handle CreateThread(void *security, u64 stackSize, u32 (*start)(void *), void *argument,

@@ -14,12 +14,30 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <wasi/api.h>
 
 // ---- entry ----------------------------------------------------------------
 
 int __managed__Main(int argc, char **argv);
 
 int main(int argc, char **argv) { return __managed__Main(argc, argv); }
+
+// ---- the clock ------------------------------------------------------------
+
+// lib/Clock.cs and the samples call clock_gettime with Linux's clock numbers,
+// 0 for the wall clock and 1 for the monotonic one, and expect two 64-bit
+// numbers back. WASI's C library takes a pointer for the clock and writes a
+// 32-bit tv_nsec, so this definition, linked before it, answers instead. WASI
+// numbers its clocks as Linux does.
+int clock_gettime(int clock, long long *timespec)
+{
+    __wasi_timestamp_t now;
+    if (__wasi_clock_time_get(clock == 0 ? __WASI_CLOCKID_REALTIME : __WASI_CLOCKID_MONOTONIC, 1, &now) != 0)
+        return -1;
+    timespec[0] = (long long)(now / 1000000000);
+    timespec[1] = (long long)(now % 1000000000);
+    return 0;
+}
 
 // zerocore's startup (Runtime/Startup.cs) needs the module header to set up
 // static fields of reference types. C# can't take a data symbol's address on

@@ -1,0 +1,9 @@
+naïve café
+snow ☃ and a clef 𝄞
+PASS whole files (6 checks)
+Wrote 16 bytes
+6 bytes at 0
+6 bytes at 6
+4 bytes at 12
+PASS open files (6 checks)
+PASS missing files (7 checks)

@@ -17,6 +17,10 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   arena string or into a `StrBuilder`.
 - [Keep a string](keep-a-string.html): copy a line or a scratch result into an arena that lives long
   enough, and collect such strings in a list or map.
+- [Read and write files](read-and-write-files.html): whole files in one call, an open file read and
+  written piece by piece, and what differs on each target.
+- [Use the clock and random numbers](use-the-clock-and-random-numbers.html): measure a duration, tell
+  the date and time, and roll dice with numbers that are the same on every target.
 
 ## Memory and collections
 

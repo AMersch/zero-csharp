@@ -81,6 +81,7 @@ explains how each one is built.
 - Lambdas and delegates, `try`/`finally`, `using`
 - Static fields and static constructors, `Main(string[] args)`, top-level statements
 - P/Invoke and `[UnmanagedCallersOnly]` callbacks
+- Files, a monotonic clock and the date, and seeded random numbers, from `lib/`, on every target
 - SIMD intrinsics (NEON, AVX2, FMA), `Interlocked`, `Volatile`, and threads through `Parallel.For`
 
 Every `new` is a `calloc` that is never freed. There is no async/await, no LINQ from .NET (`lib/Seq.cs`
@@ -115,7 +116,7 @@ was freed. See [Memory without a GC](https://onurgumus.github.io/zero-csharp/con
 | Folder | What |
 |---|---|
 | [`zerocore/`](zerocore/README.md) | The core library: `object`, `string`, casts, allocation. About 2,400 lines of C#, MIT licensed |
-| [`lib/`](lib/) | Arenas, collections, strings, input and output, SIMD kernels, `Parallel.For`, DOS and UEFI graphics ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
+| [`lib/`](lib/) | Arenas, collections, strings, input and output, files, the clock, random numbers, SIMD kernels, `Parallel.For`, DOS and UEFI graphics ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
 | [`samples/`](samples/) | The programs below |
 | [`sdk/`](sdk/) | The `ZeroCSharp.*` NuGet packages |
 | [`docs/`](docs/) | The documentation site |
@@ -142,6 +143,8 @@ nothing AGPL is linked into them.
 | `Guards` | One mistake per run that `lib/` stops the program for, such as marks restored out of order | 77 KB |
 | `Queries` | LINQ-style queries with `lib/Seq.cs`, checked to allocate nothing | 144 KB |
 | `Threads` | `Parallel.For` with one arena per thread | 88 KB |
+| `Files` | `lib/File.cs`: whole files, and an open file read, written and moved through | 78 KB |
+| `Dice` | `lib/Random.cs` and `lib/Clock.cs`: seeded dice rolls that match on every target, durations, the date | 80 KB |
 | `Records` | `record struct` and `record class`, `with`, `ToString`, `typeof`, anonymous types | 108 KB |
 | `Refs` | Structs in an arena passed and returned by `ref` | 75 KB |
 | `Llama` | Karpathy's stories260K language model, compiled into the program; it tells the same story on every target, DOS and UEFI included | 1.1 MB |

@@ -148,9 +148,8 @@ Silicon, per the README). `test.sh` checks only their exit codes, since timings 
   The firmware leaves AVX off, so `efi/start.c` turns it on before `Main`; without that, a
   `-m x86-64-v3` program would stop at its first AVX instruction. In QEMU, `run.sh --uefi` passes
   `-cpu max` or `-cpu host` so the emulated processor has AVX2 and FMA.
-- **Time with the C library.** The samples read the clock with libc's `clock_gettime` through
-  P/Invoke. On WebAssembly that call reads the realtime clock instead of the monotonic one (see
-  [Build for WebAssembly](build-for-webassembly.html)), which still measures durations.
+- **Time it with `Clock.Monotonic`.** It counts nanoseconds on a clock that only moves forward, on
+  every target (see [Use the clock and random numbers](use-the-clock-and-random-numbers.html)).
 
 See also: the [`Kernels` reference](../reference/kernels.html),
 [What zero mode is](../concepts/zero-mode.html), and [Limits](../concepts/limits.html).

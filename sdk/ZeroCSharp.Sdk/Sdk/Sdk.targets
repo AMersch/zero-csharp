@@ -5,6 +5,15 @@
          which doesn't exist for this framework. -->
     <_TargetFrameworkDirectories>$(ZeroRefDir)</_TargetFrameworkDirectories>
     <_FullFrameworkReferenceAssemblyPaths>$(ZeroRefDir)</_FullFrameworkReferenceAssemblyPaths>
+
+    <!-- NativeLib=Shared (NativeAOT's name) with OutputType Library: a native
+         shared library (.so, .dylib, .dll) exporting the project's
+         [UnmanagedCallersOnly(EntryPoint = "...")] methods, instead of a zero
+         library (IL that other zero projects compile in, packed for NuGet). -->
+    <ZeroNativeLibrary Condition="'$(NativeLib)' == 'Shared' and '$(OutputType)' == 'Library'">true</ZeroNativeLibrary>
+    <!-- Whether the build makes native code: a program, or a native library. -->
+    <ZeroBuildsNative Condition="'$(OutputType)' != 'Library' or '$(ZeroNativeLibrary)' == 'true'">true</ZeroBuildsNative>
+    <IsPackable Condition="'$(NativeLib)' != ''">false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,7 +24,7 @@
   </ItemGroup>
 
   <!-- bflat for this host, restored with the project. -->
-  <ItemGroup Condition="'$(ZeroHostRid)' != '' and '$(OutputType)' != 'Library'">
+  <ItemGroup Condition="'$(ZeroHostRid)' != '' and '$(ZeroBuildsNative)' == 'true'">
     <PackageDownload Include="ZeroCSharp.Bflat.$(ZeroHostRid)" Version="[$(ZeroSdkVersion)]" />
   </ItemGroup>
 
@@ -37,8 +46,8 @@
   <!-- After the output is copied and before IncrementalClean, which records
        FileWrites: dotnet clean then removes the native program too. -->
   <Target Name="ZeroNativeBuild" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="IncrementalClean"
-          Condition="'$(OutputType)' != 'Library'"
-          DependsOnTargets="ZeroCheckNativeHost;ZeroNativeCommand"
+          Condition="'$(ZeroBuildsNative)' == 'true'"
+          DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand"
           Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);$(ZeroNativeArgsFile)"
           Outputs="$(ZeroNativeOutput)">
     <!-- NuGet doesn't keep the executable bit; a packages folder that's
@@ -65,6 +74,42 @@
            Text="A zero project's target framework is the SDK's ($(ZeroSdkTfm)); remove TargetFramework and TargetFrameworks from the project (TargetFramework is '$(TargetFramework)', TargetFrameworks '$(TargetFrameworks)')." />
   </Target>
 
+  <!-- NativeLib: what it builds, and for which targets. Before the compile,
+       so a mistake doesn't wait for it. -->
+  <Target Name="ZeroCheckNativeLib" BeforeTargets="CoreCompile" Condition="'$(NativeLib)' != ''">
+    <Error Condition="'$(NativeLib)' != 'Shared'"
+           Text="NativeLib '$(NativeLib)' isn't supported: Zero C# builds shared libraries (NativeLib=Shared)." />
+    <Error Condition="'$(OutputType)' != 'Library'"
+           Text="NativeLib=Shared builds a native library: set OutputType to Library (it's '$(OutputType)')." />
+    <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64' and '$(ZeroTarget)' != 'osx-arm64'"
+           Text="A native library (NativeLib=Shared) builds for linux-x64, linux-arm64, win-x64 or osx-arm64; ZeroTarget '$(ZeroTarget)' has no shared libraries." />
+  </Target>
+
+  <!-- A native library is called through its exports, not compiled into
+       another zero project: refuse a ProjectReference to one rather than
+       quietly compiling its IL in. -->
+  <!-- Only references that compile the other project's IL in: one for build
+       order alone (ReferenceOutputAssembly=false) is fine, and a missing
+       project stays MSBuild's warning. -->
+  <Target Name="ZeroCheckProjectReferences" BeforeTargets="ResolveProjectReferences" Condition="'@(ProjectReference)' != ''">
+    <ItemGroup>
+      <_ZeroCompiledInReference Include="@(ProjectReference)" Condition="'%(ProjectReference.ReferenceOutputAssembly)' != 'false'" />
+    </ItemGroup>
+    <MSBuild Projects="@(_ZeroCompiledInReference)" Targets="ZeroNativeLibKind" SkipNonexistentTargets="true" SkipNonexistentProjects="true"
+             Condition="'@(_ZeroCompiledInReference)' != ''">
+      <Output TaskParameter="TargetOutputs" ItemName="_ZeroReferencedNativeLibrary" />
+    </MSBuild>
+    <Error Condition="'@(_ZeroReferencedNativeLibrary)' != ''"
+           Text="This project references a native library (NativeLib=Shared): @(_ZeroReferencedNativeLibrary->'%(Filename)', ', '). Call a native library through its exports ([DllImport]) from the program that loads it; remove the ProjectReference." />
+  </Target>
+
+  <!-- For ZeroCheckProjectReferences in the projects that reference this one. -->
+  <Target Name="ZeroNativeLibKind" Returns="@(_ZeroNativeLibrarySelf)">
+    <ItemGroup>
+      <_ZeroNativeLibrarySelf Include="$(MSBuildProjectFullPath)" Condition="'$(ZeroNativeLibrary)' == 'true'" />
+    </ItemGroup>
+  </Target>
+
   <Target Name="ZeroCheckNativeHost">
     <Error Condition="'$(ZeroHostRid)' == '' and $([MSBuild]::IsOSPlatform('OSX'))"
            Text="Zero C# builds on Apple Silicon Macs, not Intel ones; build on an Apple Silicon Mac, Linux (x64 or arm64) or Windows x64." />
@@ -86,6 +131,12 @@
       <ZeroNativeDir>$(ZeroSdkRoot)payload/native/$(ZeroTarget)/</ZeroNativeDir>
       <ZeroNativeOutput>$(OutDir)$(ZeroTargetFolder)$(AssemblyName)</ZeroNativeOutput>
       <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'win-x64'">$(ZeroNativeOutput).exe</ZeroNativeOutput>
+      <!-- A native library: in native/, as NativeAOT puts it, which keeps a
+           Windows .dll apart from the IL .dll of the same name. -->
+      <ZeroNativeLibraryExtension Condition="'$(ZeroTarget)' == 'win-x64'">.dll</ZeroNativeLibraryExtension>
+      <ZeroNativeLibraryExtension Condition="'$(ZeroTarget)' == 'osx-arm64'">.dylib</ZeroNativeLibraryExtension>
+      <ZeroNativeLibraryExtension Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'">.so</ZeroNativeLibraryExtension>
+      <ZeroNativeOutput Condition="'$(ZeroNativeLibrary)' == 'true'">$(OutDir)$(ZeroTargetFolder)native/$(AssemblyName)$(ZeroNativeLibraryExtension)</ZeroNativeOutput>
       <ZeroNativeArgsFile>$(IntermediateOutputPath)zero-native.args</ZeroNativeArgsFile>
       <ZeroNativeArgsFile Condition="'$(ZeroTargetFolder)' != ''">$(IntermediateOutputPath)zero-native.$(ZeroTarget).args</ZeroNativeArgsFile>
       <!-- macOS: bflat's object, then ld64.lld's command line. -->
@@ -116,22 +167,43 @@
            host builds Linux programs too. -->
       <_ZeroArg Include="--os linux" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'" />
       <_ZeroArg Include="--os macos -c" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <_ZeroArg Include="--target Shared" Condition="'$(ZeroTarget)' == 'osx-arm64' and '$(ZeroNativeLibrary)' == 'true'" />
       <_ZeroArg Include="--arch x64" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'win-x64'" />
       <_ZeroArg Include="--arch arm64" Condition="'$(ZeroTarget)' == 'linux-arm64' or '$(ZeroTarget)' == 'osx-arm64'" />
       <_ZeroArg Include="--ldflags &quot;$(ZeroNativeDir)zerocore.o&quot; --ldflags &quot;-z nostart-stop-gc&quot;" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'" />
       <_ZeroArg Include="--ldflags &quot;-z max-page-size=4096&quot;" Condition="'$(ZeroTarget)' == 'linux-arm64'" />
-      <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64'" />
+      <!-- A Linux native library: bflat links it -shared with a version script
+           exporting the entry points; library.o's .init_array entry sets up
+           zerocore when it loads. The module list's bounds stay hidden, and
+           the soname lets C programs link against it by path (left out for a
+           name with a space: bflat would pass it to lld as two words, and
+           without one, a C program records the path it linked with). -->
+      <_ZeroArg Include="--target Shared --ldflags &quot;$(ZeroNativeDir)library.o&quot; --ldflags &quot;-z start-stop-visibility=hidden&quot;"
+                Condition="'$(ZeroNativeLibrary)' == 'true' and ('$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64')" />
+      <_ZeroArg Include="--ldflags --soname=$(AssemblyName).so"
+                Condition="'$(ZeroNativeLibrary)' == 'true' and ('$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64') and !$(AssemblyName.Contains(' '))" />
+      <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags &quot;$(ZeroNativeDir)start.obj&quot; --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' != 'true'" />
+      <!-- A Windows native library: bflat links it /dll with a .def file of
+           the entry points; zero_dll_start (win/library.c) sets up zerocore
+           when it loads. -->
+      <_ZeroArg Include="--os windows --target Shared --ldflags /entry:zero_dll_start --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)library.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' == 'true'" />
       <_ZeroArg Include="-Os" Condition="'$(ZeroOptimizeFor)' == 'Size'" />
       <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != ''" />
       <_ZeroArg Include="-o &quot;$(ZeroNativeOutput)&quot;" Condition="'$(ZeroTarget)' != 'osx-arm64'" />
       <_ZeroArg Include="-o &quot;$(ZeroNativeObject)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
       <!-- ld64.lld (macOS 12 or newer, arm64: what bflat's objects ask for). zerocore's module list comes
-           from the payload's objects (mac/runtime.c, mac-arm64.S). Chained
+           from the payload's objects (mac/start.c or mac/library.c, mac-arm64.S). Chained
            fixups: the classic lazy binding needs dyld_stub_binder's library.
            lld reads response files the GNU way, where a backslash escapes,
            so paths get forward slashes (which Windows takes too). -->
       <_ZeroLinkArg Include="-arch arm64 -platform_version macos 12.0 12.0 -fixup_chains -dead_strip" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$(ZeroNativeObject)'))').Replace('\', '/'))&quot;" />
+      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)start.o').Replace('\', '/'))&quot;" Condition="'$(ZeroNativeLibrary)' != 'true'" />
+      <!-- A macOS native library: a dylib exporting what bflat's exports file
+           (written beside its object, one _name per line) lists; library.o's
+           constructor sets up zerocore when it loads. -->
+      <_ZeroLinkArg Include="-dylib -install_name &quot;@rpath/$(AssemblyName).dylib&quot; -exported_symbols_list &quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$([System.IO.Path]::ChangeExtension('$(ZeroNativeObject)', '.txt'))'))').Replace('\', '/'))&quot;" Condition="'$(ZeroNativeLibrary)' == 'true'" />
+      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)library.o').Replace('\', '/'))&quot;" Condition="'$(ZeroNativeLibrary)' == 'true'" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)runtime.o').Replace('\', '/'))&quot;" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)zerocore.o').Replace('\', '/'))&quot;" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)libSystem.tbd').Replace('\', '/'))&quot;" />
@@ -159,6 +231,7 @@
     <ItemGroup>
       <FileWrites Include="$(ZeroNativeOutput);$(ZeroNativeArgsFile)" />
       <FileWrites Include="$(ZeroNativeObject);$(ZeroLinkArgsFile)" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <FileWrites Include="$([System.IO.Path]::ChangeExtension('$(ZeroNativeObject)', '.txt'))" Condition="'$(ZeroTarget)' == 'osx-arm64' and '$(ZeroNativeLibrary)' == 'true'" />
       <FileWrites Include="@(ZeroNativeFile)" Condition="Exists('%(FullPath)')" />
     </ItemGroup>
   </Target>
@@ -171,11 +244,17 @@
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName)')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName).exe')" />
       <ZeroNativeFile Include="$(IntermediateOutputPath)zero-native*.args" />
+      <_ZeroNativeLibraryFile Include="$(AssemblyName).so;$(AssemblyName).dylib;$(AssemblyName).dll;$(AssemblyName).lib" />
+      <ZeroNativeFile Include="@(_ZeroNativeLibraryFile->'$(OutDir)native/%(Identity)')" />
+      <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).so')" />
+      <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).dylib')" />
+      <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).dll')" />
+      <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).lib')" />
     </ItemGroup>
   </Target>
 
   <!-- dotnet clean (and Rebuild): every target's program and command line. -->
-  <Target Name="ZeroClean" AfterTargets="CoreClean" DependsOnTargets="ZeroNativeFiles" Condition="'$(OutputType)' != 'Library'">
+  <Target Name="ZeroClean" AfterTargets="CoreClean" DependsOnTargets="ZeroNativeFiles" Condition="'$(ZeroBuildsNative)' == 'true'">
     <Delete Files="@(ZeroNativeFile)" />
   </Target>
 
@@ -189,7 +268,7 @@
 
   <!-- dotnet publish ships the native program, not the IL it was built beside. -->
   <Target Name="ZeroPublishNative" AfterTargets="ComputeResolvedFilesToPublishList"
-          DependsOnTargets="ZeroNativeCommand" Condition="'$(OutputType)' != 'Library'">
+          DependsOnTargets="ZeroNativeCommand" Condition="'$(ZeroBuildsNative)' == 'true'">
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.RelativePath)' == '$(TargetFileName)' or '%(ResolvedFileToPublish.RelativePath)' == '$(TargetName).pdb'" />
       <ResolvedFileToPublish Include="$(ZeroNativeOutput)" RelativePath="$([System.IO.Path]::GetFileName('$(ZeroNativeOutput)'))" CopyToPublishDirectory="PreserveNewest" />
@@ -199,7 +278,7 @@
   <!-- dotnet pack of a library: the dll in lib/<framework>/, and
        build/<id>.props (buildTransitive/ too) naming the SDK version that
        built it, which ZeroCheckLibraryVersions reads in the programs using it. -->
-  <Target Name="ZeroPackDll" BeforeTargets="_GetPackageFiles" Condition="'$(OutputType)' == 'Library'">
+  <Target Name="ZeroPackDll" BeforeTargets="_GetPackageFiles" Condition="'$(OutputType)' == 'Library' and '$(ZeroNativeLibrary)' != 'true'">
     <PropertyGroup>
       <_ZeroBuiltWithProps>$(IntermediateOutputPath)zero-pack/$(PackageId).props</_ZeroBuiltWithProps>
     </PropertyGroup>

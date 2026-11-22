@@ -1,0 +1,6 @@
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <NativeLib>Shared</NativeLib>
+  </PropertyGroup>
+</Project>

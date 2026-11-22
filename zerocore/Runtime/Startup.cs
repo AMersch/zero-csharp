@@ -1,6 +1,7 @@
 using System;
 using System.Runtime;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace Internal.Runtime.CompilerHelpers
 {
@@ -59,8 +60,17 @@ namespace Internal.Runtime.CompilerHelpers
 #endif
         }
 
+#if !WASM
+        // A native library (NativeLib=Shared) has no main: the startup object
+        // linked into it (zerocore/native/library-*.S, mac/library.c,
+        // win/library.c) calls this when the library loads, to set up static
+        // fields as a program's entry point does.
+        [RuntimeExport("ZeroInitializeLibrary")]
+        private static void InitializeLibrary() => InitializeCommandLineArgs(0, null);
+#endif
+
         // What the compiler calls instead on Windows, where .NET's arguments
-        // are UTF-16. win/runtime.c's entry point converts them to UTF-8 before
+        // are UTF-16. win/start.c's entry point converts them to UTF-8 before
         // calling Main, so they arrive as on Linux under another type.
         private static void InitializeCommandLineArgsW(int argc, char** argv)
             => InitializeCommandLineArgs(argc, (byte**)argv);
@@ -289,15 +299,134 @@ namespace System.Runtime.CompilerServices
             return nonGcStaticBase;
         }
 
-        // Single-threaded: clearing the address first also covers a constructor
-        // that touches its own type's statics.
+        // The fast path: the constructor has run (its address is zero).
         private static void CheckStaticClassConstruction(ref StaticClassConstructionContext context)
         {
-            nint constructor = context.cctorMethodAddress;
-            if (constructor != 0)
+            if (Volatile.Read(ref context.cctorMethodAddress) != 0)
+                RunOrWait((StaticClassConstructionContext*)Unsafe.AsPointer(ref context));
+        }
+
+        // Constructors running now, each with the thread running it (its
+        // ObjectAllocator record), under a spin lock. The lock is held only
+        // to look at or change the list, never while a constructor runs.
+        private struct Running
+        {
+            public StaticClassConstructionContext* Context;
+            public void* Owner;
+            public Running* Next;
+        }
+
+        private static int s_lock;
+        private static Running* s_running;
+        private static Running* s_spare;   // finished entries, for reuse
+
+        private static void Lock()
+        {
+            while (Interlocked.CompareExchange(ref s_lock, 1, 0) != 0)
             {
-                context.cctorMethodAddress = 0;
-                ((delegate*<void>)constructor)();
+                // another thread is looking at the list
+            }
+        }
+
+        private static void Unlock() => Volatile.Write(ref s_lock, 0);
+
+        private static Running* Find(StaticClassConstructionContext* context)
+        {
+            for (Running* entry = s_running; entry != null; entry = entry->Next)
+            {
+                if (entry->Context == context)
+                    return entry;
+            }
+            return null;
+        }
+
+        // Whether owner is waiting, directly or through other threads, for a
+        // constructor that me is running: waiting for it would never end.
+        private static bool WaitsFor(void* owner, void* me)
+        {
+            for (int step = 0; step < 64 && owner != null; step++)
+            {
+                StaticClassConstructionContext* awaited = (StaticClassConstructionContext*)ObjectAllocator.WaitingFor(owner);
+                Running* entry = awaited == null ? null : Find(awaited);
+                if (entry == null)
+                    return false;
+                if (entry->Owner == me)
+                    return true;
+                owner = entry->Owner;
+            }
+            return false;
+        }
+
+        // The first thread to get here runs the constructor; the others wait
+        // until it has finished, yielding the processor meanwhile. As in .NET, a thread goes on without waiting
+        // when the constructor is its own (it touched its type's statics
+        // while the constructor runs) or when waiting would close a cycle (two
+        // threads, each in a constructor that needs the other's): it then
+        // sees the type's statics as they are so far.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void RunOrWait(StaticClassConstructionContext* context)
+        {
+            void* me = ObjectAllocator.CurrentThreadRecord();
+            while (true)
+            {
+                Lock();
+                nint constructor = context->cctorMethodAddress;
+                if (constructor == 0)
+                {
+                    ObjectAllocator.SetWaitingFor(me, null);
+                    Unlock();
+                    return;
+                }
+                Running* entry = Find(context);
+                if (entry == null)
+                {
+                    entry = s_spare;
+                    if (entry != null)
+                        s_spare = entry->Next;
+                    else
+                        entry = (Running*)Platform.calloc(1, (nuint)sizeof(Running));
+                    if (entry == null)
+                    {
+                        Unlock();
+                        Environment.FailFast("Static constructor: out of memory");
+                    }
+                    entry->Context = context;
+                    entry->Owner = me;
+                    entry->Next = s_running;
+                    s_running = entry;
+                    ObjectAllocator.SetWaitingFor(me, null);
+                    Unlock();
+
+                    ((delegate*<void>)constructor)();
+
+                    Lock();
+                    Volatile.Write(ref context->cctorMethodAddress, 0);
+                    if (s_running == entry)
+                    {
+                        s_running = entry->Next;
+                    }
+                    else
+                    {
+                        Running* previous = s_running;
+                        while (previous->Next != entry)
+                            previous = previous->Next;
+                        previous->Next = entry->Next;
+                    }
+                    entry->Next = s_spare;
+                    s_spare = entry;
+                    Unlock();
+                    return;
+                }
+                if (entry->Owner == me || WaitsFor(entry->Owner, me))
+                {
+                    ObjectAllocator.SetWaitingFor(me, null);
+                    Unlock();
+                    return;
+                }
+                ObjectAllocator.SetWaitingFor(me, context);
+                Unlock();
+                while (Volatile.Read(ref context->cctorMethodAddress) != 0)
+                    Platform.sched_yield(); // the other thread is still running it
             }
         }
     }

@@ -5,7 +5,7 @@
 # which has all of them (libc, libm and pthreads are one library on macOS).
 #
 # What's here: every C function zerocore/ and lib/ import ([DllImport]s with
-# "*", "libc" and "libm.so.6"), what mac/runtime.c calls, and C functions
+# "*", "libc" and "libm.so.6"), what mac/*.c call, and C functions
 # programs commonly import (stdio, stdlib, string, time, unistd, dlfcn, math).
 # A program that imports one that isn't listed fails to link with
 # "undefined symbol: _name". In this repository, add it below, with its

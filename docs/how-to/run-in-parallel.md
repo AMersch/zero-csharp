@@ -85,8 +85,8 @@ long heapGrowth = GC.GetTotalAllocatedBytes() - heapBefore;
 ## What isn't thread-safe
 
 - **Arenas and collections**: one per thread, as above.
-- **Static constructors**: touch a type's static fields once before the loop, so its static
-  constructor doesn't run on two threads at once.
 - **Output**: `Out` buffers, so write results after the loop rather than from inside it.
 
-Allocation with `new`, interface calls, `Interlocked` and `Volatile` are safe on any thread.
+Allocation with `new`, interface calls, `Interlocked`, `Volatile` and static constructors are safe
+on any thread: the first thread to reach a type runs its static constructor, and the others wait for
+it to finish.

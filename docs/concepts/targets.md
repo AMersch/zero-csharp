@@ -51,9 +51,9 @@ A few things `build.sh` adds matter for what you get:
 
 `./build.sh --mac` builds programs that run on the Mac itself, without the container. bflat still runs
 in the container, but with `--os macos -c` it only compiles: it writes a Mach-O object file, and the
-Mac's own clang links it with two small files:
+Mac's own clang links it with a few small files:
 
-- `mac/runtime.c` holds `main` and a `clock_gettime` that answers the samples' Linux clock number.
+- `mac/start.c` holds `main`, and `mac/runtime.c` a `clock_gettime` that answers the samples' Linux clock number.
   The rest of the C library calls have the same names on macOS.
 - `zerocore/native/mac-arm64.S` is `arm64.S` as a Mach-O object.
 
@@ -69,10 +69,10 @@ zerocore is unchanged. The link maps Apple's names for the module section's boun
 ## Windows x64
 
 `./build.sh --win` uses the same bflat, with `--os windows --arch x64`, and the same zerocore and
-`lib/`. Two small files supply what is Windows-specific:
+`lib/`. A few small files supply what is Windows-specific:
 
-- `win/runtime.c` is the entry point. Windows starts a program with no `argc` or `argv`, so it builds
-  them from the command line, in UTF-8 as on Linux, and calls `Main`. It also provides `write`, `read`
+- `win/start.c` is the entry point. Windows starts a program with no `argc` or `argv`, so it builds
+  them from the command line, in UTF-8 as on Linux, and calls `Main`. `win/runtime.c` provides `write`, `read`
   and `clock_gettime` on top of kernel32. The rest of the C library comes from Windows' Universal CRT.
 - `zerocore/native/win-x64.S` is zerocore's assembly for the Windows calling convention, plus the stack
   probe that Windows needs for frames larger than a page.

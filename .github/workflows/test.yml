@@ -118,7 +118,7 @@ jobs:
           key: ${{ needs.bflat.outputs.key }}
           fail-on-cache-miss: true
       - name: Install what bflat and the build need
-        # clang compiles win/runtime.c and the assembly for Windows.
+        # clang compiles win/*.c and the assembly for Windows.
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends binutils clang
       - name: Test under Wine
         working-directory: zero-csharp

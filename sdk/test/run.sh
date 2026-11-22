@@ -76,6 +76,23 @@ is_macho_arm64() {
     [ "$(byte_at "$1" 0)" = 207 ] && [ "$(byte_at "$1" 1)" = 250 ] && [ "$(byte_at "$1" 2)" = 237 ] && [ "$(byte_at "$1" 3)" = 254 ] &&
         [ "$(byte_at "$1" 4)" = 12 ] && [ "$(byte_at "$1" 5)" = 0 ] && [ "$(byte_at "$1" 6)" = 0 ] && [ "$(byte_at "$1" 7)" = 1 ]
 }
+# The host's own target's native library suffix (NativeLib=Shared).
+case "$HOST_OS" in Windows) HOST_LIB_EXT=.dll ;; Darwin) HOST_LIB_EXT=.dylib ;; *) HOST_LIB_EXT=.so ;; esac
+# is_elf_shared <file>, is_macho_dylib <file>, is_pe_dll <file>: a native
+# library for Linux (ELF type 3, ET_DYN, which a PIE program is too, but with
+# no program interpreter: a program names /lib.../ld-linux...), macOS
+# (Mach-O type 6, MH_DYLIB) or Windows (PE with IMAGE_FILE_DLL, 0x2000, in its
+# characteristics).
+is_elf_shared() {
+    [ "$(head -c 4 "$1" 2>/dev/null | tail -c 3)" = ELF ] && [ "$(byte_at "$1" 16)" = 3 ] && ! LC_ALL=C grep -aq '/ld-linux' "$1"
+}
+is_macho_dylib() { is_macho_arm64 "$1" && [ "$(byte_at "$1" 12)" = 6 ]; }
+is_pe_dll() {
+    local pe
+    is_pe "$1" || return 1
+    pe=$(( $(byte_at "$1" 60) + 256 * $(byte_at "$1" 61) ))
+    [ $(( $(byte_at "$1" $((pe + 23))) & 32 )) -ne 0 ]
+}
 # is_host_program <file>: a program for the host's own target.
 is_host_program() {
     case "$HOST_OS" in Windows) is_pe "$1" ;; Darwin) is_macho_arm64 "$1" ;; *) is_elf "$1" "$HOST_ELF_ARCH" ;; esac
@@ -120,6 +137,26 @@ run_in() {
     (cd "$dir" && dotnet "$@") > "$LOG" 2>&1
 }
 
+# run_limited <seconds> <output file> <program> [args]: runs it, output to the
+# file, killed after <seconds> (exit 124): a deadlock fails a test instead of
+# hanging it. macOS has no timeout command.
+run_limited() {
+    local secs=$1 out=$2 pid i=0
+    shift 2
+    "$@" > "$out" 2>&1 &
+    pid=$!
+    while kill -0 "$pid" 2> /dev/null; do
+        if [ "$i" -ge $((secs * 10)) ]; then
+            kill -9 "$pid" 2> /dev/null
+            wait "$pid" 2> /dev/null
+            return 124
+        fi
+        sleep 0.1
+        i=$((i + 1))
+    done
+    wait "$pid"
+}
+
 # ---- Tests -------------------------------------------------------------------
 
 test_hello_compiles() {
@@ -161,15 +198,23 @@ test_plain_packages_refused() {
 test_payload_complete() {
     local payload=$ROOT/sdk/ZeroCSharp.Sdk/payload f
     LOG=
-    for f in ref/System.Private.CoreLib.dll ref/BflatLib.dll native/linux-x64/zerocore.o \
-             native/linux-arm64/zerocore.o native/win-x64/runtime.obj native/win-x64/zerocore.obj \
-             native/osx-arm64/runtime.o native/osx-arm64/zerocore.o native/osx-arm64/libSystem.tbd VERSIONS.txt; do
+    # start: a program's entry point; library: a native library's startup
+    # (NativeLib=Shared); runtime: what both share.
+    for f in ref/System.Private.CoreLib.dll ref/BflatLib.dll native/linux-x64/zerocore.o native/linux-x64/library.o \
+             native/linux-arm64/zerocore.o native/linux-arm64/library.o \
+             native/win-x64/start.obj native/win-x64/runtime.obj native/win-x64/library.obj native/win-x64/zerocore.obj \
+             native/osx-arm64/start.o native/osx-arm64/runtime.o native/osx-arm64/library.o native/osx-arm64/zerocore.o \
+             native/osx-arm64/libSystem.tbd VERSIONS.txt; do
         if [ ! -s "$payload/$f" ]; then fail "payload complete" "missing $f"; return; fi
     done
     if ! is_elf "$payload/native/linux-x64/zerocore.o" x86-64; then fail "payload complete" "linux-x64 object isn't x86-64"; return; fi
     if ! is_elf "$payload/native/linux-arm64/zerocore.o" aarch64; then fail "payload complete" "linux-arm64 object isn't aarch64"; return; fi
-    if ! is_coff_x64 "$payload/native/win-x64/runtime.obj"; then fail "payload complete" "win-x64 object isn't COFF"; return; fi
-    for f in runtime.o zerocore.o; do
+    if ! is_elf "$payload/native/linux-x64/library.o" x86-64; then fail "payload complete" "linux-x64 library.o isn't x86-64"; return; fi
+    if ! is_elf "$payload/native/linux-arm64/library.o" aarch64; then fail "payload complete" "linux-arm64 library.o isn't aarch64"; return; fi
+    for f in start.obj runtime.obj library.obj; do
+        if ! is_coff_x64 "$payload/native/win-x64/$f"; then fail "payload complete" "win-x64/$f isn't COFF"; return; fi
+    done
+    for f in start.o runtime.o library.o zerocore.o; do
         if ! is_macho_arm64 "$payload/native/osx-arm64/$f"; then fail "payload complete" "osx-arm64/$f isn't arm64 Mach-O"; return; fi
     done
     if ! grep -q "install-name: *'/usr/lib/libSystem.B.dylib'" "$payload/native/osx-arm64/libSystem.tbd" ||
@@ -196,7 +241,7 @@ test_trimmed_layout_builds() {
             B="/bflat/bflat build samples/Strings.cs -r $P/ref/BflatLib.dll -r $P/ref/System.Private.CoreLib.dll $F"
             $B --arch arm64 --ldflags $P/native/linux-arm64/zerocore.o --ldflags "-z nostart-stop-gc" -o /tmp/s-arm64
             $B --arch x64 --ldflags $P/native/linux-x64/zerocore.o --ldflags "-z nostart-stop-gc" -o /tmp/s-x64
-            $B --os windows --arch x64 --ldflags "/entry:zero_start $P/native/win-x64/runtime.obj $P/native/win-x64/zerocore.obj" -o /tmp/s.exe
+            $B --os windows --arch x64 --ldflags "/entry:zero_start $P/native/win-x64/start.obj $P/native/win-x64/runtime.obj $P/native/win-x64/zerocore.obj" -o /tmp/s.exe
             /tmp/s-'"$HOST_ARCH_NAME"' > /dev/null' > "$LOG" 2>&1; then
         fail "trimmed layout builds" "building or running in ubuntu:24.04 failed"; return
     fi
@@ -709,6 +754,322 @@ test_artifacts_path_with_spaces() {
     pass "$name"
 }
 
+# Static constructors reached from eight threads at once: each thread sees the
+# type set up, the constructor runs once, re-entry and a two-thread cycle work.
+# 20 runs, since a race shows up only sometimes.
+test_static_constructor_threads() {
+    local name="static constructor threads" dir out i status expected
+    can_build "$name" || return
+    dir=$(fixture cctor-threads)
+    if ! run_in "$dir" cctor-threads build; then fail "$name" "dotnet build failed"; return; fi
+    expected=$'values 7 7 7 7 7 7 7 7\nruns 1\nself ok\ncycle ok'
+    for i in $(seq 1 20); do
+        run_limited 30 "$WORK/cctor-threads.out" "$(exe "$dir/bin/Debug/$TFM/cctor-threads")"
+        status=$?
+        out=$(tr -d '\r' < "$WORK/cctor-threads.out")
+        if [ "$status" -ne 0 ]; then fail "$name" "run $i: exit $status: $out"; return; fi
+        if [ "$out" != "$expected" ]; then fail "$name" "run $i: $out"; return; fi
+    done
+    pass "$name"
+}
+
+# ---- Native libraries (NativeLib=Shared) --------------------------------------
+
+# call_native <call-native-lib.sh args>: the .NET caller (a fresh copy of its
+# fixture, with the test feed's nuget.config) on a library; output to a log.
+call_native() {
+    local caller
+    caller=$(fixture nativelib-caller)
+    LOG=$WORK/call-native.log
+    ZERO_CALLER_DIR=$caller "$ROOT/sdk/test/call-native-lib.sh" "$@" > "$LOG" 2>&1
+}
+
+# build_nativelib <dir> <log> [dotnet build args]: builds a copy of
+# fixtures/nativelib; NATIVELIB is then the host target's library.
+build_nativelib() {
+    local dir=$1 log=$2
+    shift 2
+    NATIVELIB=$dir/bin/Debug/$TFM/native/nativelib$HOST_LIB_EXT
+    run_in "$dir" "$log" build "$@"
+}
+
+test_native_library_dotnet() {
+    local name="native library dotnet" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib)
+    if ! build_nativelib "$dir" nativelib; then fail "$name" "dotnet build failed"; return; fi
+    if [ ! -f "$NATIVELIB" ]; then fail "$name" "no native/nativelib$HOST_LIB_EXT"; return; fi
+    if ! call_native "$NATIVELIB"; then fail "$name" "the .NET caller didn't get what it should"; return; fi
+    pass "$name"
+}
+
+# Exactly the [UnmanagedCallersOnly(EntryPoint)] methods are exported (on
+# Windows the caller's "hidden ok" line checks zerocore's symbols instead).
+test_native_library_exports() {
+    local name="native library exports" dir exported expected
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-exports)
+    if ! build_nativelib "$dir" nativelib-exports; then fail "$name" "dotnet build failed"; return; fi
+    expected=$(printf '%s\n' nl_add nl_cctor_value nl_mul_long nl_negate nl_offset nl_remember nl_scale nl_slow_runs nl_slow_value nl_sum)
+    case "$HOST_OS" in
+        Linux)  exported=$(nm -D --defined-only "$NATIVELIB" | awk '{print $3}' | sed 's/@.*//' | sort) ;;
+        Darwin) exported=$(nm -gU "$NATIVELIB" | awk '{print $3}' | sed 's/^_//' | sort) ;;
+        *)      skip "$name" "checked by the caller's hidden line on Windows"; return ;;
+    esac
+    if [ "$exported" != "$expected" ]; then fail "$name" "exports: $(echo $exported)"; return; fi
+    pass "$name"
+}
+
+# Two copies of one library in a process keep separate state.
+test_native_library_two() {
+    local name="native library two" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-two)
+    if ! build_nativelib "$dir" nativelib-two; then fail "$name" "dotnet build failed"; return; fi
+    mkdir -p "$WORK/two"
+    cp "$NATIVELIB" "$WORK/two/a$HOST_LIB_EXT"
+    cp "$NATIVELIB" "$WORK/two/b$HOST_LIB_EXT"
+    if ! call_native two "$WORK/two/a$HOST_LIB_EXT" "$WORK/two/b$HOST_LIB_EXT"; then fail "$name" "the copies share state"; return; fi
+    pass "$name"
+}
+
+test_native_library_errors() {
+    local name="native library errors" dir
+    dir=$(fixture native nativelib-exe)
+    if run_in "$dir" nativelib-exe build -p:NativeLib=Shared || ! grep -q "set OutputType to Library" "$LOG"; then
+        fail "$name" "NativeLib with an Exe wasn't refused"; return
+    fi
+    dir=$(fixture nativelib nativelib-static)
+    if run_in "$dir" nativelib-static build -p:NativeLib=Static || ! grep -q "NativeLib 'Static' isn't supported" "$LOG"; then
+        fail "$name" "NativeLib=Static wasn't refused"; return
+    fi
+    dir=$(fixture nativelib nativelib-wasm)
+    if run_in "$dir" nativelib-wasm build -p:ZeroTarget=wasm || ! grep -q "ZeroTarget 'wasm' has no shared libraries" "$LOG"; then
+        fail "$name" "a wasm library wasn't refused"; return
+    fi
+    dir=$(fixture native nativelib-ref/App)
+    fixture nativelib nativelib-ref/nativelib > /dev/null
+    sed -i.bak 's|</Project>|  <ItemGroup><ProjectReference Include="../nativelib/nativelib.csproj" /></ItemGroup>\n</Project>|' "$dir/native.csproj" && rm -f "$dir/native.csproj.bak"
+    if run_in "$dir" nativelib-ref build || ! grep -q "references a native library (NativeLib=Shared): nativelib" "$LOG"; then
+        fail "$name" "a ProjectReference to a native library wasn't refused"; return
+    fi
+    dir=$(fixture nativelib nativelib-run)
+    if run_in "$dir" nativelib-run run || ! grep -qi "library" "$LOG"; then
+        fail "$name" "dotnet run of a native library didn't fail saying it's a library"; return
+    fi
+    pass "$name"
+}
+
+test_native_library_not_packable() {
+    local name="native library not packable" dir
+    dir=$(fixture nativelib nativelib-pack)
+    run_in "$dir" nativelib-pack pack
+    if [ -n "$(find "$dir" -name '*.nupkg')" ]; then fail "$name" "dotnet pack made a package"; return; fi
+    pass "$name"
+}
+
+test_native_library_publish() {
+    local name="native library publish" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-publish)
+    if ! run_in "$dir" nativelib-publish publish -c Release -o "$dir/out"; then fail "$name" "dotnet publish failed"; return; fi
+    if [ ! -f "$dir/out/nativelib$HOST_LIB_EXT" ]; then fail "$name" "no nativelib$HOST_LIB_EXT in the publish folder"; return; fi
+    if ! call_native "$dir/out/nativelib$HOST_LIB_EXT"; then fail "$name" "the published library doesn't work"; return; fi
+    pass "$name"
+}
+
+test_native_library_incremental() {
+    local name="native library incremental" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-incremental)
+    if ! run_in "$dir" nativelib-incremental-1 build -v:n || ! ran_bflat; then fail "$name" "the first build didn't run bflat"; return; fi
+    if ! run_in "$dir" nativelib-incremental-2 build -v:n || ran_bflat; then fail "$name" "an unchanged library ran bflat again"; return; fi
+    sleep 1; touch "$dir/Exports.cs"
+    if ! run_in "$dir" nativelib-incremental-3 build -v:n || ! ran_bflat; then fail "$name" "a changed export didn't run bflat"; return; fi
+    pass "$name"
+}
+
+test_native_library_clean() {
+    local name="native library clean" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-clean)
+    if ! build_nativelib "$dir" nativelib-clean || [ ! -f "$NATIVELIB" ]; then fail "$name" "dotnet build failed"; return; fi
+    if ! run_in "$dir" nativelib-clean-2 clean || [ -e "$NATIVELIB" ]; then fail "$name" "dotnet clean left the library"; return; fi
+    pass "$name"
+}
+
+test_native_library_path_with_spaces() {
+    local name="native library path with spaces" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib "with spaces/native lib")
+    if ! build_nativelib "$dir" nativelib-spaces; then fail "$name" "dotnet build failed"; return; fi
+    if ! call_native "$NATIVELIB"; then fail "$name" "the .NET caller didn't get what it should"; return; fi
+    pass "$name"
+}
+
+# A native library that uses a zero library (a ProjectReference) compiles it in.
+test_native_library_with_zero_reference() {
+    local name="native library with zero reference" dir
+    can_build "$name" || return
+    app_with_lib nativelib-zeroref > /dev/null
+    dir=$(fixture nativelib nativelib-zeroref/nativelib)
+    sed -i.bak 's|</Project>|  <ItemGroup><ProjectReference Include="../Geometry/Geometry.csproj" /></ItemGroup>\n</Project>|' "$dir/nativelib.csproj" && rm -f "$dir/nativelib.csproj.bak"
+    cat > "$dir/Area.cs" <<'CS'
+using System.Runtime.InteropServices;
+
+public static class AreaExport
+{
+    [UnmanagedCallersOnly(EntryPoint = "nl_rect_area")]
+    public static double RectArea(double width, double height) => new Geometry.Rect(width, height).Area;
+}
+CS
+    if ! build_nativelib "$dir" nativelib-zeroref; then fail "$name" "dotnet build failed"; return; fi
+    if ! call_native area "$NATIVELIB"; then fail "$name" "nl_rect_area didn't return 6"; return; fi
+    pass "$name"
+}
+
+test_native_library_dotted_name() {
+    local name="native library dotted name" dir lib
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-dotted)
+    if ! run_in "$dir" nativelib-dotted build -p:AssemblyName=My.Native; then fail "$name" "dotnet build failed"; return; fi
+    lib=$dir/bin/Debug/$TFM/native/My.Native$HOST_LIB_EXT
+    if [ ! -f "$lib" ]; then fail "$name" "no native/My.Native$HOST_LIB_EXT"; return; fi
+    if ! call_native "$lib"; then fail "$name" "the .NET caller didn't get what it should"; return; fi
+    pass "$name"
+}
+
+# c_compiler: a C compiler for the host's own target, if there is one.
+c_compiler() {
+    if [ -n "${CC:-}" ]; then echo "$CC"
+    elif command -v cc > /dev/null; then echo cc
+    elif command -v clang > /dev/null; then echo clang
+    elif command -v gcc > /dev/null; then echo gcc
+    else return 1; fi
+}
+
+# A C program loads the library (dlopen, or LoadLibrary on Windows) and prints
+# the first eight lines the .NET caller prints.
+test_native_library_c() {
+    local name="native library c" dir cc caller out ldl=
+    can_build "$name" || return
+    if ! cc=$(c_compiler); then skip "$name" "no C compiler"; return; fi
+    dir=$(fixture nativelib nativelib-c)
+    if ! build_nativelib "$dir" nativelib-c; then fail "$name" "dotnet build failed"; return; fi
+    [ "$HOST_OS" = Linux ] && ldl=-ldl
+    caller=$(exe "$WORK/nativelib-c-caller")
+    LOG=$WORK/nativelib-c-cc.log
+    if ! "$cc" "$(native_path "$ROOT/sdk/test/fixtures/nativelib-c/main.c")" -o "$(native_path "$caller")" $ldl > "$LOG" 2>&1; then
+        fail "$name" "the C caller didn't compile"; return
+    fi
+    out=$("$caller" "$(native_path "$NATIVELIB")" 2>&1 | tr -d '\r')
+    if [ "$out" != "$(head -8 "$ROOT/sdk/test/fixtures/nativelib-caller/expected.txt" | tr -d '\r')" ]; then fail "$name" "printed: $(echo $out)"; return; fi
+    pass "$name"
+}
+
+# A C program linked against the library (the soname / install name, and an
+# rpath to its folder).
+test_native_library_c_linked() {
+    local name="native library c linked" dir cc caller out
+    can_build "$name" || return
+    if [ "$HOST_OS" = Windows ]; then skip "$name" "Linux and macOS"; return; fi
+    if ! cc=$(c_compiler); then skip "$name" "no C compiler"; return; fi
+    dir=$(fixture nativelib nativelib-c-linked)
+    if ! build_nativelib "$dir" nativelib-c-linked; then fail "$name" "dotnet build failed"; return; fi
+    caller=$WORK/nativelib-c-linked-caller
+    LOG=$WORK/nativelib-c-linked-cc.log
+    if ! "$cc" -DLINKED "$ROOT/sdk/test/fixtures/nativelib-c/main.c" "$NATIVELIB" -Wl,-rpath,"$(dirname "$NATIVELIB")" -o "$caller" > "$LOG" 2>&1; then
+        fail "$name" "the C caller didn't link"; return
+    fi
+    out=$("$caller" 2>&1)
+    if [ "$out" != "$(head -8 "$ROOT/sdk/test/fixtures/nativelib-caller/expected.txt" | tr -d '\r')" ]; then fail "$name" "printed: $(echo $out)"; return; fi
+    pass "$name"
+}
+
+# A zero program loads a zero native library with dlopen: each keeps its own
+# zerocore and statics.
+test_native_library_with_zero_exe() {
+    local name="native library with zero exe" dir lib out
+    can_build "$name" || return
+    if [ "$HOST_OS" = Windows ]; then skip "$name" "zero programs import at link time; dlopen is Linux and macOS"; return; fi
+    lib=$(fixture nativelib nativelib-zeroexe-lib)
+    if ! build_nativelib "$lib" nativelib-zeroexe-lib; then fail "$name" "the library's dotnet build failed"; return; fi
+    dir=$(fixture nativelib-zero-caller)
+    if ! run_in "$dir" nativelib-zero-caller build; then fail "$name" "the program's dotnet build failed"; return; fi
+    out=$("$dir/bin/Debug/$TFM/nativelib-zero-caller" "$NATIVELIB" 2>&1)
+    if [ "$out" != $'add 5\nremember 3\nown 1' ]; then fail "$name" "printed: $(echo $out)"; return; fi
+    pass "$name"
+}
+
+# Every host builds the library for all four targets. CI runs the results on
+# their own systems with sdk/test/call-native-lib.sh (sdk.yml: mac-programs,
+# windows-built-linux, macos-built), from the folders these are copied to.
+test_native_library_cross() {
+    local name="native library cross" dir t f
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-cross)
+    for t in linux-x64 linux-arm64 win-x64 osx-arm64; do
+        if ! run_in "$dir" "nativelib-cross-$t" build -p:ZeroTarget=$t; then fail "$name" "the $t build failed"; return; fi
+        case "$t" in
+            linux-*)   f=$dir/bin/Debug/$TFM/$t/native/nativelib.so; is_elf_shared "$f" ;;
+            win-x64)   f=$dir/bin/Debug/$TFM/$t/native/nativelib.dll; is_pe_dll "$f" ;;
+            osx-arm64) f=$dir/bin/Debug/$TFM/$t/native/nativelib.dylib; is_macho_dylib "$f" ;;
+        esac || { fail "$name" "$t's library isn't a $t shared library"; return; }
+        case "$HOST_OS:$t" in
+            Windows:linux-*)  mkdir -p "$WORK/windows-built/$t" && cp "$f" "$WORK/windows-built/$t/" ;;
+            Darwin:linux-* | Darwin:win-x64) mkdir -p "$WORK/macos-built/$t" && cp "$f" "$WORK/macos-built/$t/" ;;
+            *:osx-arm64)      [ "$HOST_OS" != Darwin ] && mkdir -p "$WORK/mac-built/$HOST_RID" && cp "$f" "$WORK/mac-built/$HOST_RID/" ;;
+        esac
+    done
+    pass "$name"
+}
+
+# A name with a space: the output, the soname (Linux) and the install name
+# (macOS) carry it whole.
+test_native_library_name_with_spaces() {
+    local name="native library name with spaces" dir lib
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-spacename)
+    if ! run_in "$dir" nativelib-spacename build "-p:AssemblyName=My Lib"; then fail "$name" "dotnet build failed"; return; fi
+    lib="$dir/bin/Debug/$TFM/native/My Lib$HOST_LIB_EXT"
+    if [ ! -f "$lib" ]; then fail "$name" "no native/My Lib$HOST_LIB_EXT"; return; fi
+    if ! call_native "$lib"; then fail "$name" "the .NET caller didn't get what it should"; return; fi
+    pass "$name"
+}
+
+# References the native-library check must let through: one only for build
+# order (ReferenceOutputAssembly=false), and one to a project that doesn't
+# exist (MSBuild warns about that one; the check mustn't make it an error).
+test_native_library_reference_kinds() {
+    local name="native library reference kinds" dir
+    can_build "$name" || return
+    dir=$(fixture native nativelib-order/App)
+    fixture nativelib nativelib-order/nativelib > /dev/null
+    sed -i.bak 's|</Project>|  <ItemGroup><ProjectReference Include="../nativelib/nativelib.csproj" ReferenceOutputAssembly="false" /></ItemGroup>\n</Project>|' "$dir/native.csproj" && rm -f "$dir/native.csproj.bak"
+    if ! run_in "$dir" nativelib-order build; then fail "$name" "a build-order reference to a native library was refused"; return; fi
+    if [ ! -f "$WORK/nativelib-order/nativelib/bin/Debug/$TFM/native/nativelib$HOST_LIB_EXT" ]; then fail "$name" "the build-order reference didn't build the library"; return; fi
+    dir=$(fixture native nativelib-missing)
+    sed -i.bak 's|</Project>|  <ItemGroup><ProjectReference Include="../nowhere/nowhere.csproj" /></ItemGroup>\n</Project>|' "$dir/native.csproj" && rm -f "$dir/native.csproj.bak"
+    if run_in "$dir" nativelib-missing build; then :; fi
+    if grep -q "MSB3202" "$LOG"; then fail "$name" "a missing project reference became an error (MSB3202)"; return; fi
+    pass "$name"
+}
+
+# The docs' recipe: an ordinary .NET program that builds the library first
+# (a build-order ProjectReference) and copies it next to itself, from a clean
+# folder; .NET then finds it by name ([DllImport("MathLib")]).
+test_native_library_app_recipe() {
+    local name="native library app recipe" dir out
+    can_build "$name" || return
+    dir=$(fixture nativelib-app)
+    fixture nativelib nativelib-app/MathLib > /dev/null
+    mv "$dir/MathLib/nativelib.csproj" "$dir/MathLib/MathLib.csproj"
+    if ! run_in "$dir/App" nativelib-app build; then fail "$name" "dotnet build failed"; return; fi
+    out=$(dotnet "$dir/App/bin/Debug/net10.0/App.dll" 2>&1 | tr -d '\r')
+    if [ "$out" != "add 5" ]; then fail "$name" "printed: $out"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
@@ -721,7 +1082,12 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     framework_from_property newer_sdk_library
     mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
     trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd
-    tutorial_steps simd_instruction_set)
+    tutorial_steps simd_instruction_set static_constructor_threads
+    native_library_dotnet native_library_exports native_library_two native_library_errors
+    native_library_not_packable native_library_publish native_library_incremental native_library_clean
+    native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name
+    native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
+    native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim

@@ -6,7 +6,7 @@ Exploring [bflat](https://flattened.net/)'s zero mode: C# compiled to tiny nativ
 
 **Zero mode is essentially "C with proper generics"**: C#'s syntax, type safety, and generics with C-like binary sizes (16-160 KB).
 
-**Without cloning:** on Linux, Windows or an Apple Silicon Mac with the .NET 10 SDK, `dotnet new install ZeroCSharp.Templates`, `dotnet new zero -o Hello`, `cd Hello && dotnet build` makes a native program; `-p:ZeroTarget=win-x64` (or `linux-x64`, `linux-arm64`, `osx-arm64`) makes one for another system. The packages are built from [`sdk/`](sdk/); see [Install with dotnet](https://onurgumus.github.io/zero-csharp/get-started/install-with-dotnet.html).
+**Without cloning:** on Linux, Windows or an Apple Silicon Mac with the .NET 10 SDK, `dotnet new install ZeroCSharp.Templates`, `dotnet new zero -o Hello`, `cd Hello && dotnet build` makes a native program; `-p:ZeroTarget=win-x64` (or `linux-x64`, `linux-arm64`, `osx-arm64`) makes one for another system, and `<NativeLib>Shared</NativeLib>` in a library project makes a native library (`.so`, `.dylib`, `.dll`) that .NET and C programs call ([Build a native library](https://onurgumus.github.io/zero-csharp/how-to/build-a-native-library.html)). The packages are built from [`sdk/`](sdk/); see [Install with dotnet](https://onurgumus.github.io/zero-csharp/get-started/install-with-dotnet.html).
 
 **Documentation:** <https://onurgumus.github.io/zero-csharp/>, a guide to installing the fork, a tutorial, concepts, task guides and a reference for `lib/`. Its source is in `docs/`; build it with `dotnet tool restore && python3 scripts/build-docs.py` (needs .NET 10, Python 3 and Node), then `python3 -m http.server -d output`.
 
@@ -143,7 +143,7 @@ On a Mac with Apple Silicon, `./build.sh --mac` builds all fifteen samples as ma
 
 bflat runs in the container as usual, but with `--os macos -c` it only compiles: the compiler writes a Mach-O object file, and the Mac's own clang links it. That option is new in the fork (bflat has no Mach-O linker, so it refuses to build for macOS without `-c`). Two small files are macOS-specific:
 
-- [`mac/runtime.c`](mac/runtime.c): `main`, and `clock_gettime`, because the samples ask for clock 1, which is `CLOCK_MONOTONIC` on Linux and no clock on macOS. Everything else zerocore and `lib/` call (`calloc`, `write`, `read`, `abort`, `puts`, the math functions) is in macOS's C library under the same names.
+- [`mac/start.c`](mac/start.c) and [`mac/runtime.c`](mac/runtime.c): `main`, and `clock_gettime`, because the samples ask for clock 1, which is `CLOCK_MONOTONIC` on Linux and no clock on macOS. Everything else zerocore and `lib/` call (`calloc`, `write`, `read`, `abort`, `puts`, the math functions) is in macOS's C library under the same names.
 - [`zerocore/native/mac-arm64.S`](zerocore/native/mac-arm64.S): `arm64.S` as a Mach-O object. Apple's arm64 calling convention agrees with Linux's for every register these routines use.
 
 zerocore itself is unchanged: it finds the compiler's module list between `__start___modules` and `__stop___modules`, which GNU ld defines on Linux, and the link maps Apple's names for the same bounds onto them with `-alias`.
@@ -154,7 +154,7 @@ The programs are larger than on Linux, 63 KB for Tiny and Minimal, because a mac
 
 `./build.sh --win` compiles all fifteen samples to 64-bit Windows console programs: `bin/win/*.exe`, from 9 KB (Tiny) to 68 KB (Strings). The compiler is the same bflat, against the same zerocore and `lib/`, with `--os windows --arch x64`; only two small files are Windows-specific:
 
-- [`win/runtime.c`](win/runtime.c): the entry point, which builds `argc` and `argv` (in UTF-8) from the Windows command line, and `write`, `read` and `clock_gettime` on top of kernel32. The rest of the C library (`calloc`, `malloc`, `puts`, the math functions) is Windows' own Universal CRT.
+- [`win/start.c`](win/start.c) and [`win/runtime.c`](win/runtime.c): the entry point, which builds `argc` and `argv` (in UTF-8) from the Windows command line, and `write`, `read` and `clock_gettime` on top of kernel32. The rest of the C library (`calloc`, `malloc`, `puts`, the math functions) is Windows' own Universal CRT.
 - [`zerocore/native/win-x64.S`](zerocore/native/win-x64.S): zerocore's assembly routines for the Windows calling convention, plus the stack probe Windows needs for frames larger than a page.
 
 clang compiles both (Xcode's on macOS), as for DOS. `./run.sh --win Core` and `./test.sh --win` run the programs under Wine, in an x64 container (`docker/wine`, emulated on Apple Silicon); every sample exits with 0 and prints what the native build prints. On Windows itself, run the `.exe` directly. Two differences from Linux: `puts` ends lines with `\r\n`, and a program that zerocore stops (a failed cast, an index out of range) exits with code 3, Windows' code for `abort`. Not tried on real Windows yet, or on Windows on arm64.

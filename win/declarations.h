@@ -1,0 +1,47 @@
+// What the Windows C files (runtime.c, start.c, library.c) declare: there
+// are no Windows headers here, so the few types, functions and constants they
+// use are written out.
+
+#pragma once
+
+typedef unsigned short wchar;
+typedef unsigned int u32;
+typedef long long i64;
+typedef unsigned long long u64;
+typedef void *Handle;
+
+#define IMPORT __declspec(dllimport)
+
+IMPORT wchar *GetCommandLineW(void);
+IMPORT wchar **CommandLineToArgvW(const wchar *line, int *count);
+IMPORT int WideCharToMultiByte(u32 page, u32 flags, const wchar *text, int length,
+                               char *out, int size, const char *fallback, int *used);
+IMPORT Handle GetProcessHeap(void);
+IMPORT void *HeapAlloc(Handle heap, u32 flags, u64 size);
+IMPORT Handle GetStdHandle(u32 which);
+IMPORT int WriteFile(Handle file, const void *buffer, u32 count, u32 *written, void *overlapped);
+IMPORT int ReadFile(Handle file, void *buffer, u32 count, u32 *read, void *overlapped);
+IMPORT u32 GetLastError(void);
+IMPORT int SetConsoleOutputCP(u32 page);
+IMPORT int QueryPerformanceCounter(i64 *count);
+IMPORT int QueryPerformanceFrequency(i64 *frequency);
+IMPORT __declspec(noreturn) void ExitProcess(u32 code);
+IMPORT unsigned int _set_abort_behavior(unsigned int flags, unsigned int mask);
+IMPORT Handle CreateThread(void *security, u64 stackSize, u32 (*start)(void *), void *argument,
+                           u32 flags, u32 *id);
+IMPORT u32 WaitForSingleObject(Handle handle, u32 milliseconds);
+IMPORT int CloseHandle(Handle handle);
+IMPORT int HeapFree(Handle heap, u32 flags, void *memory);
+IMPORT u32 TlsAlloc(void);
+IMPORT void *TlsGetValue(u32 index);
+IMPORT int TlsSetValue(u32 index, void *value);
+IMPORT u32 GetActiveProcessorCount(unsigned short group);
+IMPORT int SwitchToThread(void);
+
+#define CP_UTF8 65001
+#define STD_INPUT_HANDLE ((u32)-10)
+#define STD_OUTPUT_HANDLE ((u32)-11)
+#define STD_ERROR_HANDLE ((u32)-12)
+#define ERROR_BROKEN_PIPE 109
+#define _WRITE_ABORT_MSG 1
+#define _CALL_REPORTFAULT 2

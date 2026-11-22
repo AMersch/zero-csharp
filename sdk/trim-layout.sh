@@ -40,7 +40,7 @@ set -euo pipefail
 P='"$payload"'
 F="--stdlib:none --langversion preview --compiler-feature updated-memory-safety-rules --no-reflection -i libc -i libm.so.6"
 R="-r $P/ref/BflatLib.dll -r $P/ref/System.Private.CoreLib.dll"
-WIN="--os windows --arch x64 --ldflags /entry:zero_start --ldflags $P/native/win-x64/runtime.obj --ldflags $P/native/win-x64/zerocore.obj"
+WIN="--os windows --arch x64 --ldflags /entry:zero_start --ldflags $P/native/win-x64/start.obj --ldflags $P/native/win-x64/runtime.obj --ldflags $P/native/win-x64/zerocore.obj"
 n=0
 trace() {
     n=$((n + 1))

@@ -129,6 +129,7 @@ Other libraries work the same way, with their own `.tbd` or `.dylib`.
 | `ZeroOptimizeFor` | `Speed`, or `Size` (bflat's `-Os`) | `Speed` |
 | `ZeroInstructionSet` | passed to bflat as `-m`, e.g. `x86-64-v3` or `dotprod` (see [Use SIMD](../how-to/use-simd.html)) | none |
 | `ZeroDllImports` | more libraries whose `[DllImport]`s are bound when linking, besides `libc` and `libm.so.6`, which always are | none |
+| `NativeLib` | `Shared`, with `OutputType` `Library`: a native library in `native/` instead of a zero library (see [Build a native library](../how-to/build-a-native-library.html)) | none |
 
 The build log shows bflat's arguments on a `bflat arguments:` line (`dotnet build -v:n`).
 

@@ -1,52 +1,14 @@
-// The C side of a 64-bit Windows program: the entry point, and the POSIX
+// The C side of a 64-bit Windows program or native library: the POSIX
 // functions zerocore and lib/ call that Windows doesn't have under those names
-// (write, read, clock_gettime, the pthreads lib/Threads.cs uses). The rest of the C library (calloc, malloc,
+// (write, read, clock_gettime, the pthreads lib/Threads.cs uses), and where
+// the compiler's module list is. The rest of the C library (calloc, malloc,
 // puts, abort, the math functions) comes from Windows' own, the Universal CRT;
-// memset and memmove from ntdll.
+// memset and memmove from ntdll. The entry point is start.c's (programs) or
+// library.c's (native libraries).
 //
-// Compiled with clang for x86_64-pc-windows-msvc. There are no Windows
-// headers here, so the few declarations needed are written out below.
+// Compiled with clang for x86_64-pc-windows-msvc.
 
-typedef unsigned short wchar;
-typedef unsigned int u32;
-typedef long long i64;
-typedef unsigned long long u64;
-typedef void *Handle;
-
-#define IMPORT __declspec(dllimport)
-
-IMPORT wchar *GetCommandLineW(void);
-IMPORT wchar **CommandLineToArgvW(const wchar *line, int *count);
-IMPORT int WideCharToMultiByte(u32 page, u32 flags, const wchar *text, int length,
-                               char *out, int size, const char *fallback, int *used);
-IMPORT Handle GetProcessHeap(void);
-IMPORT void *HeapAlloc(Handle heap, u32 flags, u64 size);
-IMPORT Handle GetStdHandle(u32 which);
-IMPORT int WriteFile(Handle file, const void *buffer, u32 count, u32 *written, void *overlapped);
-IMPORT int ReadFile(Handle file, void *buffer, u32 count, u32 *read, void *overlapped);
-IMPORT u32 GetLastError(void);
-IMPORT int SetConsoleOutputCP(u32 page);
-IMPORT int QueryPerformanceCounter(i64 *count);
-IMPORT int QueryPerformanceFrequency(i64 *frequency);
-IMPORT __declspec(noreturn) void ExitProcess(u32 code);
-IMPORT unsigned int _set_abort_behavior(unsigned int flags, unsigned int mask);
-IMPORT Handle CreateThread(void *security, u64 stackSize, u32 (*start)(void *), void *argument,
-                           u32 flags, u32 *id);
-IMPORT u32 WaitForSingleObject(Handle handle, u32 milliseconds);
-IMPORT int CloseHandle(Handle handle);
-IMPORT int HeapFree(Handle heap, u32 flags, void *memory);
-IMPORT u32 TlsAlloc(void);
-IMPORT void *TlsGetValue(u32 index);
-IMPORT int TlsSetValue(u32 index, void *value);
-IMPORT u32 GetActiveProcessorCount(unsigned short group);
-
-#define CP_UTF8 65001
-#define STD_INPUT_HANDLE ((u32)-10)
-#define STD_OUTPUT_HANDLE ((u32)-11)
-#define STD_ERROR_HANDLE ((u32)-12)
-#define ERROR_BROKEN_PIPE 109
-#define _WRITE_ABORT_MSG 1
-#define _CALL_REPORTFAULT 2
+#include "declarations.h"
 
 // ---- where the compiler's module list is ------------------------------------
 //
@@ -60,36 +22,6 @@ IMPORT u32 GetActiveProcessorCount(unsigned short group);
 #pragma section(".modules$Z", read)
 __declspec(allocate(".modules$A")) void *__start___modules[1] = { 0 };
 __declspec(allocate(".modules$Z")) void *__stop___modules[1] = { 0 };
-
-// ---- entry ------------------------------------------------------------------
-
-int __managed__Main(int argc, char **argv);
-
-// The linker's entry point (/entry:zero_start): Windows calls it with no
-// arguments and no C runtime set up, so this builds argc and argv itself, in
-// UTF-8 as on Linux. The compiler's startup code receives them as
-// InitializeCommandLineArgsW's arguments.
-void zero_start(void)
-{
-    int argc = 0;
-    wchar **wide = CommandLineToArgvW(GetCommandLineW(), &argc);
-    char **argv = HeapAlloc(GetProcessHeap(), 0, (u64)(argc + 1) * sizeof(char *));
-    for (int i = 0; i < argc; i++) {
-        int size = WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, 0, 0, 0, 0);
-        argv[i] = HeapAlloc(GetProcessHeap(), 0, (u64)size);
-        WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, argv[i], size, 0, 0);
-    }
-    argv[argc] = 0;
-
-    // zerocore calls the C library's abort after printing why. Without this,
-    // Windows' abort also offers to report the crash; with it, abort just
-    // exits with code 3.
-    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
-
-    // Out writes UTF-8; without this a console shows it in the OEM code page.
-    SetConsoleOutputCP(CP_UTF8);
-    ExitProcess((u32)__managed__Main(argc, argv));
-}
 
 // ---- POSIX functions --------------------------------------------------------
 
@@ -169,6 +101,13 @@ int pthread_create(Handle *thread, void *attributes, void *(*start)(void *), voi
         HeapFree(GetProcessHeap(), 0, parameter);
         return 11;
     }
+    return 0;
+}
+
+// What a thread waiting for another's static constructor calls between checks.
+int sched_yield(void)
+{
+    SwitchToThread();
     return 0;
 }
 

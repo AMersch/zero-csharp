@@ -134,6 +134,11 @@ build_core_native() {
     fi
     echo "[as]    zerocore/native/$BFLAT_ARCH.S -> $CORE_NATIVE"
     "$as" "zerocore/native/$BFLAT_ARCH.S" -o "$CORE_NATIVE"
+    # A native library's startup (NativeLib=Shared), for the SDK's payload.
+    if [ -n "${LIBRARY_NATIVE:-}" ]; then
+        echo "[as]    zerocore/native/library-$BFLAT_ARCH.S -> $LIBRARY_NATIVE"
+        "$as" "zerocore/native/library-$BFLAT_ARCH.S" -o "$LIBRARY_NATIVE"
+    fi
 }
 
 # Your own libraries: each folder in libs/ is compiled, like lib/, into an IL
@@ -362,7 +367,7 @@ check_386() {
 
 # Windows, x64 only. The same bflat compiles the samples, against the same
 # zerocore, with two Windows object files linked in:
-#   win/runtime.c               the entry point, and write/read/clock_gettime
+#   win/start.c, win/runtime.c  the entry point; write/read/clock_gettime
 #                               on top of kernel32 (the rest of the C library
 #                               is Windows' own Universal CRT)
 #   zerocore/native/win-x64.S   x64.S for the Windows calling convention
@@ -374,8 +379,11 @@ WIN_TARGET=(-target x86_64-pc-windows-msvc)
 build_win_objects() {
     local clang=$1
     mkdir -p "$WIN_OBJ"
-    echo "[clang] win/runtime.c, zerocore/native/win-x64.S -> $WIN_OBJ"
-    "$clang" "${WIN_TARGET[@]}" -O2 -ffreestanding -fno-builtin -Wall -Wextra -c win/runtime.c -o "$WIN_OBJ/runtime.obj"
+    local name
+    echo "[clang] win/{start,runtime,library}.c, zerocore/native/win-x64.S -> $WIN_OBJ"
+    for name in start runtime library; do
+        "$clang" "${WIN_TARGET[@]}" -O2 -ffreestanding -fno-builtin -Wall -Wextra -c "win/$name.c" -o "$WIN_OBJ/$name.obj"
+    done
     "$clang" "${WIN_TARGET[@]}" -c zerocore/native/win-x64.S -o "$WIN_OBJ/zerocore.obj"
 }
 
@@ -387,11 +395,11 @@ build_win() {
     for name in "$@"; do
         echo "[bflat] $name -> bin/win/$name.exe"
         # /entry: bflat names __managed__Main, which expects argc and argv;
-        # zero_start (win/runtime.c) makes them first. The later /entry wins.
+        # zero_start (win/start.c) makes them first. The later /entry wins.
         # shellcheck disable=SC2046
         "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none \
             "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os windows --arch x64 $(BFLAT_ARCH=x64 bflat_flags "$name") \
-            --ldflags "/entry:zero_start $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
+            --ldflags "/entry:zero_start $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
         rm -f "bin/win/$name.pdb"
     done
 }
@@ -399,7 +407,7 @@ build_win() {
 # macOS on Apple Silicon. bflat has no Mach-O linker, so it only compiles
 # (--os macos -c, in the container), and the Mac's own clang and linker do
 # the rest, with two macOS files:
-#   mac/runtime.c               main, and clock_gettime for the samples' clock
+#   mac/start.c, mac/runtime.c  main; clock_gettime for the samples' clock
 #   zerocore/native/mac-arm64.S arm64.S, as a Mach-O object
 MAC_OBJ=bin/mac/obj
 
@@ -422,14 +430,15 @@ build_mac_objects() {
 build_mac_link() {
     local clang=$1 name
     shift
-    echo "[clang] mac/runtime.c, zerocore/native/mac-arm64.S -> $MAC_OBJ"
+    echo "[clang] mac/start.c, mac/runtime.c, zerocore/native/mac-arm64.S -> $MAC_OBJ"
+    "$clang" -arch arm64 -O2 -Wall -Wextra -c mac/start.c -o "$MAC_OBJ/start.o"
     "$clang" -arch arm64 -O2 -Wall -Wextra -c mac/runtime.c -o "$MAC_OBJ/runtime.o"
     "$clang" -arch arm64 -c zerocore/native/mac-arm64.S -o "$MAC_OBJ/zerocore.o"
     for name in "$@"; do
         echo "[ld]    $name -> bin/mac/$name"
-        # zerocore's module list: mac/runtime.c copies the section's entries
+        # zerocore's module list: mac/start.c copies the section's entries
         # into a table in mac-arm64.S (lld, which the SDK uses, can't -alias).
-        "$clang" -arch arm64 -o "bin/mac/$name" "$MAC_OBJ/$name.o" "$MAC_OBJ/runtime.o" "$MAC_OBJ/zerocore.o" \
+        "$clang" -arch arm64 -o "bin/mac/$name" "$MAC_OBJ/$name.o" "$MAC_OBJ/start.o" "$MAC_OBJ/runtime.o" "$MAC_OBJ/zerocore.o" \
             -Wl,-dead_strip
         if [ "$name" = Tiny ]; then strip "bin/mac/$name"; fi
     done
@@ -439,7 +448,8 @@ build_mac_link() {
 #
 # What the ZeroCSharp.Sdk package (sdk/) carries, so that users build without
 # this repository: zerocore and lib/ as IL assemblies, zerocore's assembly
-# routines for each Linux architecture, and win/runtime.c and the Windows
+# routines and a native library's startup (library-*.S) for each Linux
+# architecture, and win/ and mac/'s C files (start, runtime, library) and the Windows
 # routines as COFF objects. $1: the payload directory.
 build_sdk_payload() {
     local dir=$1 arch
@@ -450,7 +460,8 @@ build_sdk_payload() {
     cp "$CORE" "$LIB" "$dir/ref/"
     for arch in x64 arm64; do
         mkdir -p "$dir/native/linux-$arch"
-        BFLAT_ARCH=$arch CORE_NATIVE=$dir/native/linux-$arch/zerocore.o build_core_native
+        BFLAT_ARCH=$arch CORE_NATIVE=$dir/native/linux-$arch/zerocore.o \
+            LIBRARY_NATIVE=$dir/native/linux-$arch/library.o build_core_native
     done
 }
 
@@ -568,12 +579,14 @@ case "$TARGET" in
         mkdir -p "$PAYLOAD_DIR/native/win-x64"
         run sdk-payload "$PAYLOAD_DIR"
         build_win_objects "$WIN_CLANG"
-        cp "$WIN_OBJ/runtime.obj" "$WIN_OBJ/zerocore.obj" "$PAYLOAD_DIR/native/win-x64/"
+        cp "$WIN_OBJ/start.obj" "$WIN_OBJ/runtime.obj" "$WIN_OBJ/library.obj" "$WIN_OBJ/zerocore.obj" "$PAYLOAD_DIR/native/win-x64/"
         # macOS: Mach-O objects from the same clang (no Apple headers needed),
         # and our libSystem stub, for ld64.lld to link osx-arm64 programs.
         mkdir -p "$PAYLOAD_DIR/native/osx-arm64"
-        echo "[clang] mac/runtime.c, zerocore/native/mac-arm64.S -> $PAYLOAD_DIR/native/osx-arm64"
-        "$WIN_CLANG" -target arm64-apple-macos12 -O2 -Wall -Wextra -c mac/runtime.c -o "$PAYLOAD_DIR/native/osx-arm64/runtime.o"
+        echo "[clang] mac/{start,runtime,library}.c, zerocore/native/mac-arm64.S -> $PAYLOAD_DIR/native/osx-arm64"
+        for name in start runtime library; do
+            "$WIN_CLANG" -target arm64-apple-macos12 -O2 -Wall -Wextra -c "mac/$name.c" -o "$PAYLOAD_DIR/native/osx-arm64/$name.o"
+        done
         "$WIN_CLANG" -target arm64-apple-macos12 -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/osx-arm64/zerocore.o"
         cp mac/libSystem.tbd "$PAYLOAD_DIR/native/osx-arm64/"
         {

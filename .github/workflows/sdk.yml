@@ -364,7 +364,7 @@ jobs:
           path: sdk/test/work/mac-built/win-x64
           if-no-files-found: error
 
-  # The Linux programs the Windows job built, run on Linux.
+  # The Linux programs and native library the Windows job built, run on Linux.
   windows-built-linux:
     needs: windows
     strategy:
@@ -374,6 +374,10 @@ jobs:
           - { rid: linux-arm64, runner: ubuntu-24.04-arm }
     runs-on: ${{ matrix.runner }}
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
       - uses: actions/download-artifact@v4
         with:
           name: windows-built-linux
@@ -384,9 +388,12 @@ jobs:
           out=$(built/${{ matrix.rid }}/native)
           echo "$out"
           [ "$out" = hi ]
+      - name: Call the native library built on Windows
+        run: sdk/test/call-native-lib.sh built/${{ matrix.rid }}/nativelib.so
 
-  # The macOS programs built on Linux and Windows (sdk/test/run.sh, mac_target*),
-  # run on a Mac: signed ad hoc, and printing what they should.
+  # The macOS programs and native library built on Linux and Windows
+  # (sdk/test/run.sh, mac_target*, native_library_cross), run on a Mac: signed
+  # ad hoc, and printing (or answering the .NET caller) what they should.
   mac-programs:
     needs: [test, windows]
     strategy:
@@ -396,6 +403,10 @@ jobs:
     name: mac-programs (built on ${{ matrix.built-on }})
     runs-on: macos-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
       - uses: actions/download-artifact@v4
         with:
           name: mac-built-${{ matrix.built-on }}
@@ -406,6 +417,10 @@ jobs:
           codesign -v built/native built/threads
           out=$(built/native); echo "$out"; [ "$out" = hi ]
           out=$(built/threads); echo "$out"; [ "$out" = "$(printf '499500\n1')" ]
+      - name: Call the native library
+        run: |
+          codesign -v built/nativelib.dylib
+          sdk/test/call-native-lib.sh built/nativelib.dylib
 
   macos:
     needs: pack
@@ -433,21 +448,26 @@ jobs:
           path: sdk/test/work/macos-built
           if-no-files-found: error
 
-  # The Linux and Windows programs the macos job built, run on their systems.
+  # The Linux and Windows programs and native libraries the macos job built,
+  # run on their systems.
   macos-built:
     needs: macos
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { rid: linux-x64, runner: ubuntu-24.04, exe: '' }
-          - { rid: linux-arm64, runner: ubuntu-24.04-arm, exe: '' }
-          - { rid: win-x64, runner: windows-latest, exe: '.exe' }
+          - { rid: linux-x64, runner: ubuntu-24.04, exe: '', lib: .so }
+          - { rid: linux-arm64, runner: ubuntu-24.04-arm, exe: '', lib: .so }
+          - { rid: win-x64, runner: windows-latest, exe: '.exe', lib: .dll }
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
         shell: bash
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
       - uses: actions/download-artifact@v4
         with:
           name: macos-built
@@ -458,6 +478,8 @@ jobs:
           out=$(built/${{ matrix.rid }}/native${{ matrix.exe }} | tr -d '\r')
           echo "$out"
           [ "$out" = hi ]
+      - name: Call the native library built on a Mac
+        run: sdk/test/call-native-lib.sh built/${{ matrix.rid }}/nativelib${{ matrix.lib }}
 
   # Trusted publishing: nuget.org trusts this workflow (a policy on the
   # package owner's account: owner OnurGumus, repository zero-csharp,

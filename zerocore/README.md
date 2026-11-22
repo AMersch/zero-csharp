@@ -52,7 +52,7 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `Intrinsics/*.cs` | `Vector64/128/256<T>` and the NEON, AVX, AVX2 and FMA operations `../lib/Kernels.cs` uses |
 | `native/arm64.S`, `native/x64.S` | Three routines per architecture that need a calling convention C# can't express: two for storing object references, one for interface calls |
 | `native/mac-arm64.S` | `arm64.S` as a Mach-O object, for macOS |
-| `native/win-x64.S` | The same for Windows x64's calling convention, plus the stack probe Windows code calls for frames larger than a page. With `../win/runtime.c` (entry point, `write`, `read`) it is all a Windows build adds |
+| `native/win-x64.S` | The same for Windows x64's calling convention, plus the stack probe Windows code calls for frames larger than a page. With `../win/start.c` and `../win/runtime.c` (entry point, `write`, `read`) it is all a Windows build adds |
 
 Most of the library is a contract with the compiler: it looks types, methods and fields up by name (`System.Runtime.TypeCast.CheckCastClass`, `String._stringLength`, ...) and fails with "Expected type ... not found" when one is missing. Those names can't be changed.
 
@@ -82,7 +82,7 @@ A failure that would throw in .NET (a failed cast, an index out of range, an ari
 - **Most of the base class library.** No `Console` (use `../lib/Out.cs`), reflection (a `Type` only compares; a class without its own `ToString` prints `object`), collections, LINQ (see `../lib/Seq.cs`), async, `Thread`, or `Nullable<T>` boxing.
 - **SIMD operations beyond the ones declared.** To add one, declare it in `Intrinsics/` with the name and signature it has in .NET; the compiler does the rest.
 - **UEFI, Windows on arm64, and Intel Macs.** Linux (x64, arm64), macOS on Apple Silicon, Windows x64, WebAssembly (WASI) and 32-bit DOS on a 386 (see the main README; it uses the WebAssembly build of this library) only.
-- **A threading library.** There's no `Thread` or `lock`; `../lib/Threads.cs` has `Parallel.For`, on pthreads. Allocation, interface calls and `Interlocked` are safe to use from several threads (tested with eight on arm64). Static constructors are not: make sure a type's static fields are first touched before other threads start.
+- **A threading library.** There's no `Thread` or `lock`; `../lib/Threads.cs` has `Parallel.For`, on pthreads. Allocation, interface calls and `Interlocked` are safe to use from several threads (tested with eight on arm64). So are static constructors: the first thread to touch a type runs its constructor, and the others wait for it to finish.
 
 ## Where the code comes from, and the license
 

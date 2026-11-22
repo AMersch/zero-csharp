@@ -226,7 +226,7 @@ test_trimmed_layout_builds() {
             B="/bflat/bflat build samples/Strings.cs -r $P/ref/BflatLib.dll -r $P/ref/System.Private.CoreLib.dll $F"
             $B --arch arm64 --ldflags $P/native/linux-arm64/zerocore.o --ldflags "-z nostart-stop-gc" -o /tmp/s-arm64
             $B --arch x64 --ldflags $P/native/linux-x64/zerocore.o --ldflags "-z nostart-stop-gc" -o /tmp/s-x64
-            $B --os windows --arch x64 --ldflags "/entry:zero_start $P/native/win-x64/runtime.obj $P/native/win-x64/zerocore.obj" -o /tmp/s.exe
+            $B --os windows --arch x64 --ldflags "/entry:zero_start $P/native/win-x64/start.obj $P/native/win-x64/runtime.obj $P/native/win-x64/zerocore.obj" -o /tmp/s.exe
             /tmp/s-'"$HOST_ARCH_NAME"' > /dev/null' > "$LOG" 2>&1; then
         fail "trimmed layout builds" "building or running in ubuntu:24.04 failed"; return
     fi

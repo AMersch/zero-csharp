@@ -8,8 +8,9 @@ index: 12
 `Parallel.For` from `lib/Threads.cs` runs a loop's iterations on every processor at once and returns
 when all of them are done. The threads come from the system (pthreads on Linux and macOS, Windows
 threads on Windows). The calling thread works too. On WebAssembly and DOS, which have no threads, the
-same call runs the loop on one thread and gives the same answers. `samples/Threads.cs` runs every
-example below.
+same call runs the loop on one thread and gives the same answers. So does UEFI: a program there runs
+on the one processor the firmware started it on, and `Parallel.ProcessorCount` is 1.
+`samples/Threads.cs` runs every example below.
 
 ## Spread a loop
 

@@ -25,7 +25,7 @@ bflat build Program.cs --stdlib:none -r System.Private.CoreLib.dll \
 - `--no-reflection` is required. bflat assumes a library named `System.Private.CoreLib` is .NET's and would otherwise look for its reflection support ("Failed to load type 'Internal.Metadata.NativeFormat.TypeDefinition'").
 - `-i <library>` is needed for every library you `[DllImport]`, here `libc`. It binds the functions at link time. Without it bflat binds them when first called, which needs runtime support zerocore doesn't have ("Expected type 'Internal.Runtime.CompilerHelpers.InteropHelpers' not found").
 
-For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-d WASM`, and `../wasm/runtime.c` replaces the assembly file. DOS (`build_dos_*` there) uses the same build of the library, with `../dos/runtime.c`.
+For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-d WASM`, and `../wasm/runtime.c` replaces the assembly file. DOS (`build_dos_*` there) uses the same build of the library, with `../dos/runtime.c`. UEFI (`build_uefi` there) uses the ordinary build with `--os uefi`, `native/win-x64.S` or `native/win-arm64.S`, and `../efi/` in place of the C library.
 
 ## What's in it
 
@@ -55,7 +55,8 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `Intrinsics/*.cs` | `Vector64/128/256<T>` and the NEON, AVX, AVX2 and FMA operations `../lib/Kernels.cs` uses; the bit instructions `BitOperations` uses |
 | `native/arm64.S`, `native/x64.S` | Three routines per architecture that need a calling convention C# can't express: two for storing object references, one for interface calls |
 | `native/mac-arm64.S` | `arm64.S` as a Mach-O object, for macOS |
-| `native/win-x64.S` | The same for Windows x64's calling convention, plus the stack probe Windows code calls for frames larger than a page. With `../win/start.c` and `../win/runtime.c` (entry point, `write`, `read`) it is all a Windows build adds |
+| `native/win-x64.S` | The same for Windows x64's calling convention, plus the stack probe Windows code calls for frames larger than a page. With `../win/start.c` and `../win/runtime.c` (entry point, `write`, `read`) it is all a Windows build adds. UEFI x64 uses it too |
+| `native/win-arm64.S` | `arm64.S` as a COFF object, for UEFI on arm64. Windows' arm64 calling convention agrees with Linux's for every register these routines use |
 
 Most of the library is a contract with the compiler: it looks types, methods and fields up by name (`System.Runtime.TypeCast.CheckCastClass`, `String._stringLength`, ...) and fails with "Expected type ... not found" when one is missing. Those names can't be changed.
 
@@ -84,7 +85,7 @@ A failure that would throw in .NET (a failed cast, an index out of range, an ari
 - **Interface calls cost a little more than virtual calls.** When the compiler can't tell which class is behind an interface, the call goes through a cache of the last four classes seen at that call site: about 1.6 ns on an Apple M-series core against 0.9 ns for a virtual call, and 3 to 4 ns when the site alternates between two to four classes. A site that sees more than four pays for a full search (about 5 ns) on each of the extras. In a hot loop, generics with a `struct` constraint or static abstract members are still faster: they're resolved at build time.
 - **Most of the base class library.** No `Console` (use `../lib/Out.cs`), reflection (a `Type` only compares; a class without its own `ToString` prints `object`), collections, LINQ (see `../lib/Seq.cs`), async, `Thread`, or `Nullable<T>` boxing.
 - **SIMD operations beyond the ones declared.** To add one, declare it in `Intrinsics/` with the name and signature it has in .NET; the compiler does the rest.
-- **UEFI, Windows on arm64, and Intel Macs.** Linux (x64, arm64), macOS on Apple Silicon, Windows x64, WebAssembly (WASI) and 32-bit DOS on a 386 (see the main README; it uses the WebAssembly build of this library) only.
+- **Windows on arm64 and Intel Macs.** Linux (x64, arm64), macOS on Apple Silicon, Windows x64, WebAssembly (WASI), 32-bit DOS on a 386 (see the main README; it uses the WebAssembly build of this library) and UEFI (x64, arm64, with no operating system) only.
 - **A threading library.** There's no `Thread` or `lock`; `../lib/Threads.cs` has `Parallel.For`, on pthreads. Allocation, interface calls and `Interlocked` are safe to use from several threads (tested with eight on arm64). So are static constructors: the first thread to touch a type runs its constructor, and the others wait for it to finish.
 
 ## Where the code comes from, and the license

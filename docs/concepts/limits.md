@@ -267,12 +267,13 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
 - **Run-time CPU detection.** Instruction sets beyond the baseline are available only when the build
   names them with `-m`.
 - **Some platforms.** zerocore runs on Linux (x64, arm64), macOS on Apple Silicon, Windows x64,
-  WebAssembly and DOS. Not on Windows on arm64 or Intel Macs. The repository's `build.sh` builds on
-  Linux and macOS; building with it *on* Windows (`build.ps1`) is untested and uses bflat's zerolib.
-  The .NET SDK packages ([Install with dotnet](../get-started/install-with-dotnet.html)) build on
-  Linux (x64, arm64), Windows x64 and Apple Silicon Macs, for Linux x64, Linux arm64, Windows x64 and
-  macOS on Apple Silicon; WebAssembly and DOS need the repository. Their macOS programs can call macOS's C library
-  only, unless you add another library's `.tbd` or `.dylib` yourself.
+  WebAssembly, DOS, and UEFI (x64, arm64). Not on Windows on arm64 or Intel Macs. The repository's
+  `build.sh` builds on Linux and macOS; building with it *on* Windows (`build.ps1`) is untested and
+  uses bflat's zerolib. The .NET SDK packages
+  ([Install with dotnet](../get-started/install-with-dotnet.html)) build on Linux (x64, arm64),
+  Windows x64 and Apple Silicon Macs, for Linux x64, Linux arm64, Windows x64, macOS on Apple
+  Silicon, and UEFI x64 and arm64; WebAssembly and DOS need the repository. Their macOS programs can
+  call macOS's C library only, unless you add another library's `.tbd` or `.dylib` yourself.
 
 `zerocore/README.md` has the full list.
 
@@ -297,7 +298,8 @@ without `-i`, bflat binds a `[DllImport]` function when it is first called, whic
 zerocore doesn't have; with `-i`, it is bound at link time.
 
 The other targets add limits of their own: no SIMD and no callbacks from native code on WebAssembly,
-one thread and a 387 for floating point on DOS. [Targets](targets.html) covers them.
+one thread and a 387 for floating point on DOS, one thread and no C library on UEFI.
+[Targets](targets.html) covers them.
 
 ## Errors from the compiler
 

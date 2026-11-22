@@ -144,6 +144,10 @@ Silicon, per the README). `test.sh` checks only their exit codes, since timings 
   compiler does the rest.
 - **No SIMD on WebAssembly or DOS.** WebAssembly has 128-bit SIMD, but `Kernels.cs` has no path for it
   yet, so the scalar paths run. DOS doesn't build Simd or Kernels: a 386 has no SIMD instructions.
+- **UEFI works like the native targets.** The table above applies to `uefi-x64` and `uefi-arm64`.
+  The firmware leaves AVX off, so `efi/start.c` turns it on before `Main`; without that, a
+  `-m x86-64-v3` program would stop at its first AVX instruction. In QEMU, `run.sh --uefi` passes
+  `-cpu max` or `-cpu host` so the emulated processor has AVX2 and FMA.
 - **Time with the C library.** The samples read the clock with libc's `clock_gettime` through
   P/Invoke. On WebAssembly that call reads the realtime clock instead of the monotonic one (see
   [Build for WebAssembly](build-for-webassembly.html)), which still measures durations.

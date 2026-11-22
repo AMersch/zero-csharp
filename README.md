@@ -41,7 +41,8 @@ Out.Write(name);
 Out.Line("!");
 ```
 
-Add `-p:ZeroTarget=win-x64` (or `linux-x64`, `linux-arm64`, `osx-arm64`) to build for another system.
+Add `-p:ZeroTarget=win-x64` (or `linux-x64`, `linux-arm64`, `osx-arm64`, `uefi-x64`, `uefi-arm64`) to
+build for another system.
 A library project with `<NativeLib>Shared</NativeLib>` builds a `.so`, `.dylib` or `.dll` that .NET and
 C programs can call. The project comes with a VS Code setup for debugging.
 

@@ -6,7 +6,7 @@ Exploring [bflat](https://flattened.net/)'s zero mode: C# compiled to tiny nativ
 
 **Zero mode is essentially "C with proper generics"**: C#'s syntax, type safety, and generics with C-like binary sizes (16-160 KB).
 
-**Without cloning:** on Linux, Windows or an Apple Silicon Mac with the .NET 10 SDK, `dotnet new install ZeroCSharp.Templates`, `dotnet new zero -o Hello`, `cd Hello && dotnet build` makes a native program; `-p:ZeroTarget=win-x64` (or `linux-x64`, `linux-arm64`, `osx-arm64`) makes one for another system. The packages are built from [`sdk/`](sdk/); see [Install with dotnet](https://onurgumus.github.io/zero-csharp/get-started/install-with-dotnet.html).
+**Without cloning:** on Linux, Windows or an Apple Silicon Mac with the .NET 10 SDK, `dotnet new install ZeroCSharp.Templates`, `dotnet new zero -o Hello`, `cd Hello && dotnet build` makes a native program; `-p:ZeroTarget=win-x64` (or `linux-x64`, `linux-arm64`, `osx-arm64`) makes one for another system, and `<NativeLib>Shared</NativeLib>` in a library project makes a native library (`.so`, `.dylib`, `.dll`) that .NET and C programs call ([Build a native library](https://onurgumus.github.io/zero-csharp/how-to/build-a-native-library.html)). The packages are built from [`sdk/`](sdk/); see [Install with dotnet](https://onurgumus.github.io/zero-csharp/get-started/install-with-dotnet.html).
 
 **Documentation:** <https://onurgumus.github.io/zero-csharp/>, a guide to installing the fork, a tutorial, concepts, task guides and a reference for `lib/`. Its source is in `docs/`; build it with `dotnet tool restore && python3 scripts/build-docs.py` (needs .NET 10, Python 3 and Node), then `python3 -m http.server -d output`.
 

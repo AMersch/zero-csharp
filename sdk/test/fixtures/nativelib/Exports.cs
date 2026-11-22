@@ -2,11 +2,13 @@
 // calls each export from .NET, and fixtures/nativelib-c from C.
 using System.Runtime.InteropServices;
 
+// docs:point
 public struct Point
 {
     public int X;
     public int Y;
 }
+// docs:end
 
 public static class Native
 {
@@ -50,6 +52,7 @@ public static class SlowInit
     }
 }
 
+// docs:exports
 public static class Exports
 {
     [UnmanagedCallersOnly(EntryPoint = "nl_add")]
@@ -74,7 +77,9 @@ public static class Exports
     }
 
     [UnmanagedCallersOnly(EntryPoint = "nl_offset")]
-    public static Point Offset(Point p, int d) => new Point { X = p.X + d, Y = p.Y + d };
+    public static Point Offset(Point p, int d)
+        => new Point { X = p.X + d, Y = p.Y + d };
+    // docs:end
 
     [UnmanagedCallersOnly(EntryPoint = "nl_negate")]
     public static unsafe void Negate(Point* p)
@@ -87,6 +92,7 @@ public static class Exports
         }
     }
 
+    // docs:remember
     [UnmanagedCallersOnly(EntryPoint = "nl_remember")]
     public static int Remember(int value)
     {
@@ -98,6 +104,7 @@ public static class Exports
         History.Values = next;
         return next.Length;
     }
+    // docs:end
 
     [UnmanagedCallersOnly(EntryPoint = "nl_cctor_value")]
     public static int CctorValue() => Answer.Value;

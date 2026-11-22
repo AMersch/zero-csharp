@@ -20,14 +20,17 @@ With zerocore, as `build.sh` builds it:
   converted to `object` or to an interface it implements.
 - **Arrays**: `new T[n]`, including arrays of strings, objects and interfaces, array initializers, and
   `Span<T>`.
-- **Static fields of every type**, including strings, objects and arrays, and static constructors.
+- **Static fields of every type**, including strings, objects and arrays, and static constructors,
+  which run once even when several threads reach a type at the same time.
 - **Strings**: `==`, `+` (with numbers too: `"n=" + 5`), `switch`, `ToString()` and `string.Format`,
   plus `lib/` for the rest (see [Strings without a GC](strings.html)).
 - **Records and anonymous types**: value equality, `with`, deconstruction and the generated `ToString`;
   `typeof` and `GetType()` for comparing types. With no reflection, a `Type` has no name, and a class
   without its own `ToString` prints `object`.
 - **Delegates and lambdas** (they allocate), `try`/`finally` and `using`.
-- **Function pointers, P/Invoke and `[UnmanagedCallersOnly]` callbacks.**
+- **Function pointers, P/Invoke and `[UnmanagedCallersOnly]` callbacks**, and native libraries
+  whose `[UnmanagedCallersOnly]` methods .NET and C programs call
+  ([Build a native library](../how-to/build-a-native-library.html)).
 - **Threads**: [`Parallel.For`](../how-to/run-in-parallel.html) runs a loop on every processor, with
   `Interlocked` and `Volatile` for shared state. There is no `Thread` class or `lock`.
 - **`Math` and `MathF`**, and `Main(string[] args)` and top-level statements.

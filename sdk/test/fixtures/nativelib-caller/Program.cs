@@ -10,6 +10,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Threading;
 
+// docs:imports
 [StructLayout(LayoutKind.Sequential)]
 public struct Point
 {
@@ -32,6 +33,7 @@ public static unsafe class Native
     [DllImport(Lib)] public static extern int nl_slow_value();
     [DllImport(Lib)] public static extern int nl_slow_runs();
 }
+// docs:end
 
 public static unsafe class Program
 {

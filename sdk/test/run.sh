@@ -78,6 +78,21 @@ is_macho_arm64() {
 }
 # The host's own target's native library suffix (NativeLib=Shared).
 case "$HOST_OS" in Windows) HOST_LIB_EXT=.dll ;; Darwin) HOST_LIB_EXT=.dylib ;; *) HOST_LIB_EXT=.so ;; esac
+# is_elf_shared <file>, is_macho_dylib <file>, is_pe_dll <file>: a native
+# library for Linux (ELF type 3, ET_DYN, which a PIE program is too, but with
+# no program interpreter: a program names /lib.../ld-linux...), macOS
+# (Mach-O type 6, MH_DYLIB) or Windows (PE with IMAGE_FILE_DLL, 0x2000, in its
+# characteristics).
+is_elf_shared() {
+    [ "$(head -c 4 "$1" 2>/dev/null | tail -c 3)" = ELF ] && [ "$(byte_at "$1" 16)" = 3 ] && ! LC_ALL=C grep -aq '/ld-linux' "$1"
+}
+is_macho_dylib() { is_macho_arm64 "$1" && [ "$(byte_at "$1" 12)" = 6 ]; }
+is_pe_dll() {
+    local pe
+    is_pe "$1" || return 1
+    pe=$(( $(byte_at "$1" 60) + 256 * $(byte_at "$1" 61) ))
+    [ $(( $(byte_at "$1" $((pe + 23))) & 32 )) -ne 0 ]
+}
 # is_host_program <file>: a program for the host's own target.
 is_host_program() {
     case "$HOST_OS" in Windows) is_pe "$1" ;; Darwin) is_macho_arm64 "$1" ;; *) is_elf "$1" "$HOST_ELF_ARCH" ;; esac
@@ -986,6 +1001,29 @@ test_native_library_with_zero_exe() {
     pass "$name"
 }
 
+# Every host builds the library for all four targets. CI runs the results on
+# their own systems with sdk/test/call-native-lib.sh (sdk.yml: mac-programs,
+# windows-built-linux, macos-built), from the folders these are copied to.
+test_native_library_cross() {
+    local name="native library cross" dir t f
+    can_build "$name" || return
+    dir=$(fixture nativelib nativelib-cross)
+    for t in linux-x64 linux-arm64 win-x64 osx-arm64; do
+        if ! run_in "$dir" "nativelib-cross-$t" build -p:ZeroTarget=$t; then fail "$name" "the $t build failed"; return; fi
+        case "$t" in
+            linux-*)   f=$dir/bin/Debug/$TFM/$t/native/nativelib.so; is_elf_shared "$f" ;;
+            win-x64)   f=$dir/bin/Debug/$TFM/$t/native/nativelib.dll; is_pe_dll "$f" ;;
+            osx-arm64) f=$dir/bin/Debug/$TFM/$t/native/nativelib.dylib; is_macho_dylib "$f" ;;
+        esac || { fail "$name" "$t's library isn't a $t shared library"; return; }
+        case "$HOST_OS:$t" in
+            Windows:linux-*)  mkdir -p "$WORK/windows-built/$t" && cp "$f" "$WORK/windows-built/$t/" ;;
+            Darwin:linux-* | Darwin:win-x64) mkdir -p "$WORK/macos-built/$t" && cp "$f" "$WORK/macos-built/$t/" ;;
+            *:osx-arm64)      [ "$HOST_OS" != Darwin ] && mkdir -p "$WORK/mac-built/$HOST_RID" && cp "$f" "$WORK/mac-built/$HOST_RID/" ;;
+        esac
+    done
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
@@ -1002,7 +1040,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_dotnet native_library_exports native_library_two native_library_errors
     native_library_not_packable native_library_publish native_library_incremental native_library_clean
     native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name
-    native_library_c native_library_c_linked native_library_with_zero_exe)
+    native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim

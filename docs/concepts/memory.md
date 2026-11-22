@@ -77,9 +77,12 @@ work in an arena that also holds data to keep:
 // Temporary strings: free them with Restore and keep the rest.
 nuint usedBefore = s_arena.Used;
 Arena.Mark mark = s_arena.Save();
-string temporary = Str.Format(s_arena, $"{name} has {name.Length} letters");
-bool temporaryOk = temporary.EndsWith("3 letters");
-unsafe { s_arena.Restore(mark); } // SAFETY: temporary is not used below.
+bool temporaryOk;
+{   // temporary can't be named after this block, so not after the Restore
+    string temporary = Str.Format(s_arena, $"{name} has {name.Length} letters");
+    temporaryOk = temporary.EndsWith("3 letters");
+}
+unsafe { s_arena.Restore(mark); } // SAFETY: nothing from the block was kept.
 ```
 
 Marks must be restored newest first. Restoring a mark from another arena, or from before a `Reset()`,

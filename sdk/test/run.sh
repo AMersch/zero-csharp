@@ -720,7 +720,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template
     framework_from_property newer_sdk_library
     mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
-    trim_macos_layout mac_host_builds_all_targets)
+    trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim
@@ -934,6 +934,67 @@ test_mac_host_builds_all_targets() {
         esac || { fail "$name" "$t/native isn't a $t program"; return; }
         mkdir -p "$WORK/macos-built/$t" && cp "$f" "$WORK/macos-built/$t/"
     done
+    pass "$name"
+}
+
+# C functions programs commonly import link for macOS without extra steps:
+# libSystem.tbd lists them. (Called only when there are 100 arguments, so the
+# link needs them and running needs nothing.)
+test_mac_target_common_libc() {
+    local name="mac target common libc" dir
+    can_build "$name" || return
+    dir=$(fixture native maclibc)
+    cat > "$dir/Program.cs" <<'CS'
+using System.Runtime.InteropServices;
+public static class Program
+{
+    [DllImport("libc")] static safe extern int snprintf(nint buffer, nint size, nint format);
+    [DllImport("libc")] static safe extern nint fopen(nint path, nint mode);
+    [DllImport("libc")] static safe extern nint fread(nint buffer, nint size, nint count, nint file);
+    [DllImport("libc")] static safe extern int fclose(nint file);
+    [DllImport("libc")] static safe extern void qsort(nint items, nint count, nint size, nint compare);
+    [DllImport("libc")] static safe extern nint strerror(int error);
+    [DllImport("libc")] static safe extern int getchar();
+    [DllImport("libc")] static safe extern nint dlopen(nint path, int mode);
+    [DllImport("libc")] static safe extern int atoi(nint text);
+    [DllImport("libc")] static safe extern nint strtol(nint text, nint end, int radix);
+    public static int Main(string[] args)
+    {
+        if (args.Length == 100)
+        {
+            snprintf(0, 0, 0); fclose(fopen(0, 0)); fread(0, 0, 0, 0); qsort(0, 0, 0, 0);
+            strerror(0); getchar(); dlopen(0, 0); atoi(0); strtol(0, 0, 0);
+        }
+        Out.Line("hi");
+        return 0;
+    }
+}
+CS
+    if ! run_in "$dir" maclibc build -p:ZeroTarget=osx-arm64; then fail "$name" "the link failed"; return; fi
+    if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/native"; then fail "$name" "no arm64 Mach-O program"; return; fi
+    pass "$name"
+}
+
+# A C function libSystem.tbd doesn't list: the project's own .tbd, with
+# libSystem's install name, in ZeroNativeInput (install-with-dotnet.md).
+test_mac_target_user_tbd() {
+    local name="mac target user tbd" dir
+    can_build "$name" || return
+    dir=$(fixture native macusertbd)
+    cat > "$dir/Program.cs" <<'CS'
+using System.Runtime.InteropServices;
+public static class Program
+{
+    [DllImport("libc")] static safe extern int zero_only_in_my_tbd();
+    public static int Main(string[] args) => args.Length == 100 ? zero_only_in_my_tbd() : 0;
+}
+CS
+    printf '%s\n' '--- !tapi-tbd' 'tbd-version:     4' 'targets:         [ arm64-macos ]' \
+        "install-name:    '/usr/lib/libSystem.B.dylib'" 'exports:' '  - targets:     [ arm64-macos ]' \
+        '    symbols:     [ _zero_only_in_my_tbd ]' '...' > "$dir/more-libc.tbd"
+    sed -i.bak 's|</Project>|  <ItemGroup><ZeroNativeInput Include="more-libc.tbd" /></ItemGroup>\n</Project>|' "$dir/native.csproj" && rm -f "$dir/native.csproj.bak"
+    if ! run_in "$dir" macusertbd build -p:ZeroTarget=osx-arm64; then fail "$name" "the link failed"; return; fi
+    if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/native"; then fail "$name" "no arm64 Mach-O program"; return; fi
     pass "$name"
 }
 

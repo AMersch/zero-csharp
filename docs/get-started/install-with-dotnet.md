@@ -98,9 +98,30 @@ A macOS program needs no Mac and no Xcode to build: bflat compiles it, and the p
 against a list of macOS's C functions that the SDK carries (`libSystem.tbd`). It runs on macOS 11 or
 newer on Apple Silicon, with an ad-hoc signature, which is what a Mac needs to run a program built
 there or copied over without a quarantine flag (a browser download gets one: `xattr -d
-com.apple.quarantine Hello` clears it). It can call macOS's C library (libc, libm, pthreads); a
-C function the list lacks fails the link with `undefined symbol: _name`, and other libraries need
-their own `.tbd` or `.dylib` added to the link with `ZeroNativeInput`.
+com.apple.quarantine Hello` clears it). It can call macOS's C library (libc, libm, pthreads): the
+list has what zerocore and `lib/` use and the C functions programs commonly import (stdio, stdlib,
+string, time, unistd, dlfcn, math). A C function it lacks fails the link with
+`undefined symbol: _name`. List it in a `.tbd` of your own, with libSystem's name, and add that to the
+link with `ZeroNativeInput`:
+
+```yaml
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ arm64-macos ]
+install-name:    '/usr/lib/libSystem.B.dylib'
+exports:
+  - targets:     [ arm64-macos ]
+    symbols:     [ _getline, _wcslen ]
+...
+```
+
+```xml
+<ItemGroup>
+  <ZeroNativeInput Include="more-libc.tbd" />
+</ItemGroup>
+```
+
+Other libraries work the same way, with their own `.tbd` or `.dylib`.
 
 | Property | Values | Default |
 |---|---|---|

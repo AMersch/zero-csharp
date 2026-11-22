@@ -5,10 +5,10 @@ index: 5
 
 # Targets
 
-The same C# source builds for five targets: a native Linux program, a macOS program for Apple
-Silicon, a 64-bit Windows program, a WebAssembly module, and a DOS program for a 386. WebAssembly and
-DOS need a different compiler for their last step, but all five share the same first step and the
-same core library. This page explains how each path works and what changes
+The same C# source builds for six targets: a native Linux program, a macOS program for Apple
+Silicon, a 64-bit Windows program, a WebAssembly module, a DOS program for a 386, and a UEFI program
+that the firmware starts with no operating system. WebAssembly and DOS need a different compiler for
+their last step, but all six share the same first step and the same core library. This page explains how each path works and what changes
 along it.
 
 ## The shared first step
@@ -19,7 +19,7 @@ place of a header file. Because it holds IL rather than native code, the last st
 compiles only what that program uses: generics are instantiated for its types, calls are inlined across
 the library boundary, and code is generated for its target and its `-m` flags.
 
-`lib/` is the same assembly for all five targets. zerocore is built a second time with `-d WASM` for
+`lib/` is the same assembly for all six targets. zerocore is built a second time with `-d WASM` for
 WebAssembly and DOS, because that build finds static fields differently.
 
 ## Native Linux
@@ -162,3 +162,29 @@ What the DOS target needs, and how it stays honest:
 
 [Run on DOS](../get-started/dos.html), [Build for DOS](../how-to/build-for-dos.html) and
 [Draw on VGA](../how-to/draw-on-vga.html) go further.
+
+## UEFI, with no operating system
+
+A UEFI program is a PE file with the Windows calling convention, which bflat already makes for
+Windows, so `./build.sh --uefi` is bflat again (`--os uefi`), for x64 or arm64. The firmware loads the
+file and calls its entry point with a table of its services. There is no operating system and no C
+library, so `efi/` supplies the few C functions zerocore and `lib/` call, on top of those services:
+
+- **`efi/start.c`**: the entry point. It takes the arguments from the UEFI Shell as UTF-8, switches to
+  an 8 MB stack (the firmware only promises 128 KB), turns off the firmware's 5-minute watchdog, turns
+  on AVX on x64 (the firmware leaves it off, and `-m x86-64-v3` code needs it), and returns `Main`'s
+  result as the program's status.
+- **`efi/runtime.c`**: memory from the firmware's pool, `write` and `read` (files when the shell
+  redirects them, the console otherwise), the clock from the processor's counter, and threads that
+  run to their end when they're created.
+- **`efi/machine.c`**: what [`Uefi`](../reference/uefi.html) wraps: graphics, keyboard, files, the
+  PC speaker, power. It has the same members as `Dos`, so the Vga game runs on both.
+- **`efi/libm/`**: the math functions, from musl. On Windows they come from the system's C library;
+  here nothing else would provide them.
+
+```bash
+./run.sh --uefi Casts          # in QEMU, on OVMF, the UEFI firmware
+./run.sh --uefi --window Vga   # shows the screen
+```
+
+[Build for UEFI](../how-to/build-for-uefi.html) covers running it and booting a real PC.

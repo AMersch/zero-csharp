@@ -166,6 +166,10 @@ int pthread_create(void *thread, void *attributes, void *(*start)(void *), void 
     return 38; // ENOSYS
 }
 
+// zerocore calls this while waiting for another thread's static constructor,
+// which with one thread never happens.
+int sched_yield(void) { return 0; }
+
 int pthread_join(void *thread, void **result)
 {
     (void)thread; (void)result;

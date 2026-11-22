@@ -16,6 +16,12 @@ namespace System.Runtime
         [DllImport("*"), SuppressGCTransition]
         internal static extern void abort();
 
+        // Gives the processor to another thread: a thread waiting for another
+        // one's static constructor (ClassConstructorRunner) calls it between
+        // checks. Windows and DOS get it from their runtime.c.
+        [DllImport("*"), SuppressGCTransition]
+        internal static extern int sched_yield();
+
         // Thread-local storage, for ObjectAllocator. pthread_key_t is an int
         // on Linux and a long on macOS: nuint holds either. Windows, DOS and
         // WebAssembly get these from their runtime.c or C library.

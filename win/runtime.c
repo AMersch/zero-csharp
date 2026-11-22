@@ -104,6 +104,13 @@ int pthread_create(Handle *thread, void *attributes, void *(*start)(void *), voi
     return 0;
 }
 
+// What a thread waiting for another's static constructor calls between checks.
+int sched_yield(void)
+{
+    SwitchToThread();
+    return 0;
+}
+
 int pthread_join(Handle thread, void **result)
 {
     WaitForSingleObject(thread, 0xFFFFFFFF);

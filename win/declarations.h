@@ -36,6 +36,7 @@ IMPORT u32 TlsAlloc(void);
 IMPORT void *TlsGetValue(u32 index);
 IMPORT int TlsSetValue(u32 index, void *value);
 IMPORT u32 GetActiveProcessorCount(unsigned short group);
+IMPORT int SwitchToThread(void);
 
 #define CP_UTF8 65001
 #define STD_INPUT_HANDLE ((u32)-10)

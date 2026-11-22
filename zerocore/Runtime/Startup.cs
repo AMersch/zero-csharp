@@ -358,7 +358,7 @@ namespace System.Runtime.CompilerServices
         }
 
         // The first thread to get here runs the constructor; the others wait
-        // until it has finished. As in .NET, a thread goes on without waiting
+        // until it has finished, yielding the processor meanwhile. As in .NET, a thread goes on without waiting
         // when the constructor is its own (it touched its type's statics
         // while the constructor runs) or when waiting would close a cycle (two
         // threads, each in a constructor that needs the other's): it then
@@ -426,9 +426,7 @@ namespace System.Runtime.CompilerServices
                 ObjectAllocator.SetWaitingFor(me, context);
                 Unlock();
                 while (Volatile.Read(ref context->cctorMethodAddress) != 0)
-                {
-                    // the other thread is still running it
-                }
+                    Platform.sched_yield(); // the other thread is still running it
             }
         }
     }

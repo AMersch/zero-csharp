@@ -7,19 +7,20 @@ index: 1
 
 With the .NET SDK, you can build zero-mode programs without cloning this repository. Three NuGet
 packages do it: a project SDK (`ZeroCSharp.Sdk`), the bflat compiler for your machine
-(`ZeroCSharp.Bflat.linux-x64` or `linux-arm64`, downloaded by the SDK), and the project templates
+(`ZeroCSharp.Bflat.linux-x64`, `linux-arm64` or `win-x64`, downloaded by the SDK), and the project templates
 (`ZeroCSharp.Templates`). `dotnet build` then makes a native program, and your editor understands
 the code.
 
 ## What you need
 
 - **The .NET 10 SDK.** Nothing else: the packages bring the compiler and the linker.
-- **Linux, x64 or arm64, to build programs.** The packages are tested on Ubuntu 22.04 and 24.04,
-  Debian 12 and Fedora 41, each with nothing but the .NET SDK installed.
+- **Linux (x64 or arm64) or Windows (x64) to build programs.** Each builds for all three targets:
+  Linux x64, Linux arm64 and Windows x64. The packages are tested on GitHub's Windows runner, and on Ubuntu
+  22.04 and 24.04, Debian 12 and Fedora 41 with nothing but the .NET SDK installed.
 - **On macOS,** everything except the last step works: the editor, compiling, libraries and
-  `dotnet pack`. Building a program stops with an error that says so. Build programs on a Linux
-  machine or in a container, or [install from the repository](install.html), which also covers macOS,
-  WebAssembly and DOS. Windows as a build machine comes in the next version.
+  `dotnet pack`. Building a program stops with an error that says so. Build programs on a Linux or
+  Windows machine or in a container, or [install from the repository](install.html), which also covers
+  macOS, WebAssembly and DOS.
 
 ## Make a program
 
@@ -62,6 +63,12 @@ echo Ann | bin/Debug/zero02/Hello
 echo Ann | dotnet run
 ```
 
+On Windows, in PowerShell:
+
+```powershell
+echo Ann | .\bin\Debug\zero02\Hello.exe
+```
+
 ```text
 What's your name? Hello, Ann!
 ```
@@ -79,6 +86,7 @@ programs for several targets sit side by side:
 ```bash
 dotnet build -p:ZeroTarget=win-x64        # bin/Debug/zero02/win-x64/Hello.exe
 dotnet build -p:ZeroTarget=linux-arm64    # bin/Debug/zero02/linux-arm64/Hello
+dotnet build -p:ZeroTarget=linux-x64      # from Windows: bin\Debug\zero02\linux-x64\Hello
 ```
 
 `dotnet clean` removes all of them.
@@ -89,6 +97,8 @@ dotnet build -p:ZeroTarget=linux-arm64    # bin/Debug/zero02/linux-arm64/Hello
 | `ZeroOptimizeFor` | `Speed`, or `Size` (bflat's `-Os`) | `Speed` |
 | `ZeroInstructionSet` | passed to bflat as `-m`, e.g. `x86-64-v3` or `dotprod` (see [Use SIMD](../how-to/use-simd.html)) | none |
 | `ZeroDllImports` | more libraries whose `[DllImport]`s are bound when linking, besides `libc` and `libm.so.6`, which always are | none |
+
+The build log shows bflat's arguments on a `bflat arguments:` line (`dotnet build -v:n`).
 
 Set them on the command line with `-p:`, or in the project file. The native program is optimized in
 Debug and Release alike. `dotnet publish` copies it, and only it, to the publish folder: it needs

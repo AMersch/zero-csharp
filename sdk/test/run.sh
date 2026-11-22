@@ -505,8 +505,13 @@ test_targets_side_by_side() {
     if [ "$out" != hi ]; then fail "$name" "no $host/native"; return; fi
     if [ "$other" = win-x64 ]; then is_pe "$other_file"; else is_elf "$other_file" x86-64; fi \
         || { fail "$name" "no $other program"; return; }
+    if ! run_in "$dir" sidebyside-mac build -p:ZeroTarget=osx-arm64; then fail "$name" "the osx-arm64 build failed"; return; fi
+    if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/native"; then fail "$name" "no osx-arm64 program"; return; fi
+    out=$("$(exe "$dir/bin/Debug/$TFM/$host/native")" 2>/dev/null)
+    if [ "$out" != hi ]; then fail "$name" "$host/native is gone after building for osx-arm64"; return; fi
     if ! run_in "$dir" sidebyside-4 clean; then fail "$name" "dotnet clean failed"; return; fi
-    if [ -e "$(exe "$dir/bin/Debug/$TFM/native")" ] || [ -e "$(exe "$dir/bin/Debug/$TFM/$host/native")" ] || [ -e "$other_file" ]; then
+    if [ -e "$(exe "$dir/bin/Debug/$TFM/native")" ] || [ -e "$(exe "$dir/bin/Debug/$TFM/$host/native")" ] || [ -e "$other_file" ] ||
+       [ -e "$dir/bin/Debug/$TFM/osx-arm64/native" ]; then
         fail "$name" "dotnet clean left a native program"; return
     fi
     pass "$name"
@@ -710,7 +715,8 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0
     long_command_line windows_builds_linux unusual_packages_folder crlf_input
     artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template
-    framework_from_property newer_sdk_library)
+    framework_from_property newer_sdk_library
+    mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim
@@ -820,6 +826,59 @@ test_newer_sdk_library() {
             fail "$name" "a library from SDK $v was refused"; return
         fi
     done
+    pass "$name"
+}
+
+# osx-arm64 from any build machine: bflat compiles, ld64.lld links against the
+# payload's libSystem.tbd. The programs are kept in $WORK/mac-built/<host>/
+# for CI, which runs them on a Mac (sdk.yml, *-built-macos).
+test_mac_target() {
+    local name="mac target" dir
+    can_build "$name" || return
+    dir=$(fixture native mactarget)
+    if ! run_in "$dir" mactarget build -p:ZeroTarget=osx-arm64; then fail "$name" "dotnet build failed"; return; fi
+    if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/native"; then fail "$name" "osx-arm64/native isn't an arm64 Mach-O program"; return; fi
+    mkdir -p "$WORK/mac-built/$HOST_RID"
+    cp "$dir/bin/Debug/$TFM/osx-arm64/native" "$WORK/mac-built/$HOST_RID/native"
+    pass "$name"
+}
+
+# Threads and libm on macOS come from libSystem: the link must find them all.
+test_mac_target_links_libm_and_threads() {
+    local name="mac target links libm and threads" dir
+    can_build "$name" || return
+    dir=$(fixture threads macthreads)
+    if ! run_in "$dir" macthreads build -p:ZeroTarget=osx-arm64; then fail "$name" "dotnet build failed"; return; fi
+    if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/threads"; then fail "$name" "osx-arm64/threads isn't an arm64 Mach-O program"; return; fi
+    mkdir -p "$WORK/mac-built/$HOST_RID"
+    cp "$dir/bin/Debug/$TFM/osx-arm64/threads" "$WORK/mac-built/$HOST_RID/threads"
+    pass "$name"
+}
+
+test_mac_target_path_with_spaces() {
+    local name="mac target path with spaces" dir
+    can_build "$name" || return
+    dir=$(fixture native "mac space/Zoë Ann")
+    if ! run_in "$dir" macspaces build -p:ZeroTarget=osx-arm64; then fail "$name" "dotnet build failed"; return; fi
+    if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/native"; then fail "$name" "no arm64 Mach-O program"; return; fi
+    pass "$name"
+}
+
+# A C function libSystem.tbd doesn't list: the link fails, naming it.
+test_mac_target_undefined_import() {
+    local name="mac target undefined import" dir
+    can_build "$name" || return
+    dir=$(fixture native macundefined)
+    cat > "$dir/Program.cs" <<'CS'
+using System.Runtime.InteropServices;
+public static class Program
+{
+    [DllImport("libc")] static extern int zero_no_such_function();
+    public static int Main() => zero_no_such_function();
+}
+CS
+    if run_in "$dir" macundefined build -p:ZeroTarget=osx-arm64; then fail "$name" "the build succeeded"; return; fi
+    if ! grep -q "_zero_no_such_function" "$LOG"; then fail "$name" "the error doesn't name _zero_no_such_function"; return; fi
     pass "$name"
 }
 

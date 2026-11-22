@@ -1,5 +1,5 @@
 <!--
-  ZeroCSharp.Sdk: zero-mode C# projects. <Project Sdk="ZeroCSharp.Sdk/0.4.0">.
+  ZeroCSharp.Sdk: zero-mode C# projects. <Project Sdk="ZeroCSharp.Sdk/0.5.0">.
 
   A project gets a target framework of its own, ZeroFramework (zero03, in
   version.props), and compiles against zerocore (the core library,

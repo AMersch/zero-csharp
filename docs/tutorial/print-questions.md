@@ -58,9 +58,11 @@ format (`{x:D4}`, `{x:X}`, `{price:F2}`). [Format text](../how-to/format-text.ht
 
 ## Run it
 
+Put [`samples/QuizStep1.cs`](https://github.com/OnurGumus/zero-csharp/blob/master/samples/QuizStep1.cs) in `Program.cs`, then:
+
 ```bash
-./build.sh QuizStep1
-./run.sh QuizStep1
+dotnet build
+bin/Debug/zero03/Quiz
 ```
 
 ```text
@@ -74,6 +76,7 @@ Q6: 38 + 36 =  74
 ```
 
 The program uses `Out` but declares no `using` for it: `lib/` puts its types in the global namespace,
-and `build.sh` compiles every program against it.
+and every zero project compiles against it (the SDK carries it, and `build.sh` uses it in the
+repository).
 
 Next: [read the answers](read-answers.html).

@@ -75,10 +75,17 @@ The test suite feeds this step a file with every kind of bad input: letters, cha
 bytes that aren't valid UTF-8, a 40-character line, a Windows line ending, an empty line, and a last
 line without a line ending.
 
+Put [`samples/QuizStep3.cs`](https://github.com/OnurGumus/zero-csharp/blob/master/samples/QuizStep3.cs) in `Program.cs`, build, and give it the awkward
+answers: spaces around a number, an emoji, bytes that aren't UTF-8, a 40-character line, a Windows
+line ending and an empty line:
+
 ```bash
-./build.sh QuizStep3
-./run.sh QuizStep3 < tests/input/QuizStep3.txt
+dotnet build
+printf 'abc\n  46 \n\xc3\xa9\xf0\x9f\x98\x80\n\xff\xc3(\n7\n1234567890123456789012345678901234567890\n17\r\n\n35' \
+  | bin/Debug/zero03/Quiz
 ```
+
+In PowerShell, use the answers file instead ([Before you start](index.html#before-you-start)).
 
 ```text
 6 questions. An empty answer skips one.

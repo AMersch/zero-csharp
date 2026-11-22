@@ -129,9 +129,10 @@ malformed input or overflow they return `false` and set the value to 0.
   the length.
 - **Line endings.** Both `\n` and `\r\n` end a line, and neither is stored. A file written on Windows
   reads the same as one written on Linux.
-- **Input from a file.** Every target passes standard input through: `./run.sh Quiz < answers.txt`,
-  `./run.sh --wasm Quiz < answers.txt`, and on DOS `./run.sh --dos Quiz < answers.txt` (see
-  [Build for DOS](build-for-dos.html)).
+- **Input from a file.** Every target passes standard input through. A program built with the SDK
+  reads it like any other: `bin/Debug/zero03/Quiz < answers.txt`. In the repository:
+  `./run.sh Quiz < answers.txt`, `./run.sh --wasm Quiz < answers.txt`, and on DOS
+  `./run.sh --dos Quiz < answers.txt` (see [Build for DOS](build-for-dos.html)).
 
 `test.sh` feeds Quiz `tests/input/Quiz.txt`, which holds a word, bad UTF-8, an over-long line, a CRLF
 line, an empty line and a last line without a newline:

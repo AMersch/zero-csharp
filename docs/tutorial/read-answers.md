@@ -70,9 +70,11 @@ line's full length, and only its start is in the buffer. Step 3 handles it prope
 
 Type the answers, or give a file of them:
 
+Put [`samples/QuizStep2.cs`](https://github.com/OnurGumus/zero-csharp/blob/master/samples/QuizStep2.cs) in `Program.cs`, build, and give it four answers:
+
 ```bash
-./build.sh QuizStep2
-printf '46\n5\nseventeen\n45\n' | ./run.sh QuizStep2
+dotnet build
+printf '46\n5\nseventeen\n45\n' | bin/Debug/zero03/Quiz
 ```
 
 ```text

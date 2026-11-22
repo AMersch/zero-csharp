@@ -28,8 +28,19 @@ the CPU, so run it only on machines that have them.
 
 ## Pass the `-m` flag
 
-`build.sh` passes the flag only to Simd and Kernels, in its `bflat_flags` function: `-m x86-64-v3` on
-x64 and `-m dotprod` on arm64. To give your own program SIMD, add its name to that line:
+With the .NET SDK, the project's `ZeroInstructionSet` property is passed as `-m`. The instruction set
+depends on the target's architecture, so set it per target:
+
+```xml
+<PropertyGroup>
+  <ZeroInstructionSet Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'win-x64'">x86-64-v3</ZeroInstructionSet>
+  <ZeroInstructionSet Condition="'$(ZeroTarget)' == 'linux-arm64' or '$(ZeroTarget)' == 'osx-arm64'">dotprod</ZeroInstructionSet>
+</PropertyGroup>
+```
+
+In the repository, `build.sh` passes the flag only to Simd and Kernels, in its `bflat_flags` function:
+`-m x86-64-v3` on x64 and `-m dotprod` on arm64. To give your own sample SIMD, add its name to that
+line:
 
 ```bash
 Simd | Kernels)
@@ -110,6 +121,9 @@ subnormal or 0. The Kernels sample checks it against libm over 2 million values 
 relative error below 4e-7.
 
 ## Build and run
+
+Put [`samples/Simd.cs`](https://github.com/OnurGumus/zero-csharp/blob/master/samples/Simd.cs) in a zero project's `Program.cs`, with the property above,
+then `dotnet build` and run `bin/Debug/zero03/<project>`. In the repository:
 
 ```bash
 ./build.sh Simd Kernels

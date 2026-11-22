@@ -11,8 +11,8 @@ instead, so the method works on the caller's struct, wherever it lives: on the s
 in an arena. This guide allocates a struct in an arena, passes it with `ref` and `in`, returns it by
 reference, and shows the two ways such a ref can outlive its memory.
 
-The code comes from `samples/Refs.cs`, which you can build and run with `./build.sh Refs` and
-`./run.sh Refs`.
+The code comes from [`samples/Refs.cs`](https://github.com/OnurGumus/zero-csharp/blob/master/samples/Refs.cs). Put it in a zero project's `Program.cs`
+and `dotnet build`, or in the repository, `./build.sh Refs` and `./run.sh Refs`.
 
 ## Why `ref` when nothing moves
 

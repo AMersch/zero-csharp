@@ -6,7 +6,7 @@ index: 3
 # Your first program
 
 The repository's programs live in `samples/`, one file each. `Minimal` is the smallest one that prints
-something. This is all of it:
+something, and you don't need the repository to build it. This is all of it:
 
 <!-- sample: samples/Minimal.cs file -->
 ```csharp
@@ -47,29 +47,38 @@ That is C# 15's [updated memory safety rules](../concepts/safety-rules.html) at 
 
 ## Build and run it
 
+With the .NET 10 SDK and the templates ([Install with dotnet](install-with-dotnet.html)), make a
+project and put the program above in its `Program.cs`, in place of what's there:
+
 ```bash
-./build.sh Minimal
-./run.sh Minimal
+dotnet new zero -o Minimal
+cd Minimal
+# Program.cs: the program above
+dotnet build
+bin/Debug/zero03/Minimal
 ```
 
 ```text
 Hello from zero-mode!
 ```
 
-`build.sh` first compiles the core library (`zerocore/`) and the library (`lib/`), then the program,
-into `bin/Minimal`. On Linux, `bin/Minimal` is an ordinary executable. On macOS it is a Linux
-executable, and `run.sh` runs it in the container. On a Mac with Apple Silicon,
-`./build.sh --mac Minimal` builds `bin/mac/Minimal` instead, a macOS program you can run directly.
+`dotnet build` compiles the program for the machine you're on, on Linux, Windows (where it's
+`bin\Debug\zero03\Minimal.exe`) or a Mac with Apple Silicon. `-p:ZeroTarget=` builds for another
+one: `linux-x64`, `linux-arm64`, `win-x64` or `osx-arm64`.
+
+With the [repository](install.html) instead, `./build.sh Minimal` and `./run.sh Minimal` do the same.
+`build.sh` compiles the core library (`zerocore/`) and the library (`lib/`) from source first, and it
+also builds for WebAssembly and DOS (next page).
 
 ## What you built
 
 ```bash
-ls -l bin/Minimal
+ls -l bin/Debug/zero03/Minimal
 ```
 
-About 39 KB, debug information included. It needs nothing installed to run: no .NET, no runtime,
-only the C library every Linux system has. `./build.sh Tiny` builds the smallest sample, stripped and
-optimized for size: 16 KB.
+Under 40 KB, debug information included. It needs nothing installed to run: no .NET, no runtime,
+only the C library every system has. In the repository, `./build.sh Tiny` builds the smallest sample,
+stripped and optimized for size: 16 KB.
 
 ## Without puts
 

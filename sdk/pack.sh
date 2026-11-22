@@ -7,10 +7,10 @@
 #   ZeroCSharp.Templates         dotnet new zero, zerolib and zerollama
 #
 # Usage:  sdk/pack.sh
-# Env:    ZERO_HOSTS     the hosts to pack bflat for (default "linux-x64 linux-arm64 win-x64";
-#                        win-x64 needs sdk/trimmed/linux-x64)
+# Env:    ZERO_HOSTS     the hosts to pack bflat for (default "linux-x64 linux-arm64 win-x64
+#                        osx-arm64"; win-x64 needs sdk/trimmed/linux-x64, osx-arm64 linux-arm64)
 #         ZERO_LAYOUTS   where the full layouts are (default ../bflat/layouts):
-#                        linux-glibc-x64, linux-glibc-arm64, windows-x64
+#                        linux-glibc-x64, linux-glibc-arm64, windows-x64, osx-arm64
 #         BFLAT_FORK, BFLAT_COMMIT   where the fork is checked out, or its commit
 #                        (the bflat packages name it; see build.sh --sdk-payload)
 #         ZERO_PAYLOAD_PREBUILT=1   use sdk/ZeroCSharp.Sdk/payload as it is (CI builds it
@@ -19,7 +19,7 @@
 # they copied, or the trimming script, changed (sdk/trim-host.sh).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-hosts=${ZERO_HOSTS:-linux-x64 linux-arm64 win-x64}
+hosts=${ZERO_HOSTS:-linux-x64 linux-arm64 win-x64 osx-arm64}
 layouts=${ZERO_LAYOUTS:-../bflat/layouts}
 payload=sdk/ZeroCSharp.Sdk/payload
 version=$(sed -n 's|.*<ZeroSdkVersion>\(.*\)</ZeroSdkVersion>.*|\1|p' sdk/version.props)

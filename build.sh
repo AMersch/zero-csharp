@@ -427,13 +427,10 @@ build_mac_link() {
     "$clang" -arch arm64 -c zerocore/native/mac-arm64.S -o "$MAC_OBJ/zerocore.o"
     for name in "$@"; do
         echo "[ld]    $name -> bin/mac/$name"
-        # zerocore finds the compiler's module list between __start___modules
-        # and __stop___modules, which GNU ld defines on Linux. Apple's linker
-        # has its own names for a section's bounds; -alias maps them.
+        # zerocore's module list: mac/runtime.c copies the section's entries
+        # into a table in mac-arm64.S (lld, which the SDK uses, can't -alias).
         "$clang" -arch arm64 -o "bin/mac/$name" "$MAC_OBJ/$name.o" "$MAC_OBJ/runtime.o" "$MAC_OBJ/zerocore.o" \
-            -Wl,-dead_strip \
-            '-Wl,-alias,section$start$__DATA$__modules,___start___modules' \
-            '-Wl,-alias,section$end$__DATA$__modules,___stop___modules'
+            -Wl,-dead_strip
         if [ "$name" = Tiny ]; then strip "bin/mac/$name"; fi
     done
 }
@@ -572,6 +569,13 @@ case "$TARGET" in
         run sdk-payload "$PAYLOAD_DIR"
         build_win_objects "$WIN_CLANG"
         cp "$WIN_OBJ/runtime.obj" "$WIN_OBJ/zerocore.obj" "$PAYLOAD_DIR/native/win-x64/"
+        # macOS: Mach-O objects from the same clang (no Apple headers needed),
+        # and our libSystem stub, for ld64.lld to link osx-arm64 programs.
+        mkdir -p "$PAYLOAD_DIR/native/osx-arm64"
+        echo "[clang] mac/runtime.c, zerocore/native/mac-arm64.S -> $PAYLOAD_DIR/native/osx-arm64"
+        "$WIN_CLANG" -target arm64-apple-macos12 -O2 -Wall -Wextra -c mac/runtime.c -o "$PAYLOAD_DIR/native/osx-arm64/runtime.o"
+        "$WIN_CLANG" -target arm64-apple-macos12 -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/osx-arm64/zerocore.o"
+        cp mac/libSystem.tbd "$PAYLOAD_DIR/native/osx-arm64/"
         {
             echo "zero-csharp $(git rev-parse HEAD)"
             # BFLAT_COMMIT when the layouts came without their checkout (CI's cache).

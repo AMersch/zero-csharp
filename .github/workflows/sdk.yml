@@ -171,8 +171,82 @@ jobs:
           name: trimmed-win-x64
           path: zero-csharp/sdk/trimmed/win-x64
 
+  # bflat can't build itself for macOS: the fork's tools/build-macos-layout.sh
+  # makes the layout on a Mac (NativeAOT, Microsoft's osx-arm64 JITs, LLVM's
+  # lld), from the linux-glibc-arm64 layout's lib/ and ref/.
+  bflat-macos:
+    needs: bflat
+    runs-on: macos-latest
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      - id: key
+        run: echo "key=bflat-macos-layout-${{ needs.bflat.outputs.commit }}" >> "$GITHUB_OUTPUT"
+      - name: Restore the macOS layout from the cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: bflat/layouts/osx-arm64
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+      - uses: actions/checkout@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          repository: OnurGumus/bflat
+          ref: ${{ needs.bflat.outputs.commit }}
+          path: bflat
+      - uses: actions/cache/restore@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            bflat/layouts/linux-glibc-x64
+            bflat/layouts/linux-glibc-arm64
+            bflat/layouts/windows-x64
+          key: ${{ needs.bflat.outputs.key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-dotnet@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build the macOS layout
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bflat/tools/build-macos-layout.sh bflat/layouts/linux-glibc-arm64 bflat/layouts/osx-arm64
+      - name: Save the macOS layout to the cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: bflat/layouts/osx-arm64
+          key: ${{ steps.key.outputs.key }}
+
+  # The macOS list is linux-arm64's, mapped (otool needs a Mac).
+  trim-macos:
+    needs: [bflat-macos, trim]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zero-csharp
+      - uses: actions/cache/restore@v4
+        with:
+          path: bflat/layouts/osx-arm64
+          key: ${{ needs.bflat-macos.outputs.key }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: trimmed-linux-arm64
+          path: zero-csharp/sdk/trimmed/linux-arm64
+      - name: Trim the layout
+        working-directory: zero-csharp
+        run: sdk/trim-macos-layout.sh ../bflat/layouts/osx-arm64 sdk/trimmed/linux-arm64 sdk/trimmed/osx-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trimmed-osx-arm64
+          path: zero-csharp/sdk/trimmed/osx-arm64
+
   pack:
-    needs: [trim, trim-windows]
+    needs: [trim, trim-windows, trim-macos]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -208,8 +282,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: ubuntu-24.04 x64, runner: ubuntu-24.04, dotnet: '10.0.x' }
-          - { name: ubuntu-24.04 arm64, runner: ubuntu-24.04-arm, dotnet: '10.0.x' }
+          - { name: ubuntu-24.04 x64, runner: ubuntu-24.04, dotnet: '10.0.x', macbuilt: linux-x64 }
+          - { name: ubuntu-24.04 arm64, runner: ubuntu-24.04-arm, dotnet: '10.0.x', macbuilt: linux-arm64 }
           - { name: newest .NET SDK, runner: ubuntu-24.04, dotnet: '11.0.x', quality: preview }
           - { name: ubuntu-22.04 container, runner: ubuntu-24.04, container: 'ubuntu:22.04' }
           - { name: debian-12 container, runner: ubuntu-24.04, container: 'debian:12' }
@@ -246,6 +320,13 @@ jobs:
         env:
           ZERO_NO_PACK: '1'
         run: dotnet --version && sdk/test/run.sh
+      # The macOS programs this machine built, for mac-programs to run.
+      - uses: actions/upload-artifact@v4
+        if: matrix.macbuilt != ''
+        with:
+          name: mac-built-${{ matrix.macbuilt }}
+          path: sdk/test/work/mac-built/${{ matrix.macbuilt }}
+          if-no-files-found: error
 
   # Git Bash, as the runner has it: the tests build and run Windows programs
   # for real, and build Linux ones.
@@ -277,6 +358,11 @@ jobs:
           name: windows-built-linux
           path: sdk/test/work/windows-built
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-built-win-x64
+          path: sdk/test/work/mac-built/win-x64
+          if-no-files-found: error
 
   # The Linux programs the Windows job built, run on Linux.
   windows-built-linux:
@@ -299,6 +385,28 @@ jobs:
           echo "$out"
           [ "$out" = hi ]
 
+  # The macOS programs built on Linux and Windows (sdk/test/run.sh, mac_target*),
+  # run on a Mac: signed ad hoc, and printing what they should.
+  mac-programs:
+    needs: [test, windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        built-on: [linux-x64, linux-arm64, win-x64]
+    name: mac-programs (built on ${{ matrix.built-on }})
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-built-${{ matrix.built-on }}
+          path: built
+      - name: Run them
+        run: |
+          chmod +x built/native built/threads
+          codesign -v built/native built/threads
+          out=$(built/native); echo "$out"; [ "$out" = hi ]
+          out=$(built/threads); echo "$out"; [ "$out" = "$(printf '499500\n1')" ]
+
   macos:
     needs: pack
     runs-on: macos-latest
@@ -315,10 +423,41 @@ jobs:
         with:
           name: feed
           path: sdk/feed
-      - name: Test (no native step on macOS)
+      - name: Test
         env:
           ZERO_NO_PACK: '1'
-        run: sdk/test/run.sh
+        run: dotnet --version && sdk/test/run.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-built
+          path: sdk/test/work/macos-built
+          if-no-files-found: error
+
+  # The Linux and Windows programs the macos job built, run on their systems.
+  macos-built:
+    needs: macos
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: linux-x64, runner: ubuntu-24.04, exe: '' }
+          - { rid: linux-arm64, runner: ubuntu-24.04-arm, exe: '' }
+          - { rid: win-x64, runner: windows-latest, exe: '.exe' }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-built
+          path: built
+      - name: Run the program built on a Mac
+        run: |
+          chmod +x built/${{ matrix.rid }}/native${{ matrix.exe }}
+          out=$(built/${{ matrix.rid }}/native${{ matrix.exe }} | tr -d '\r')
+          echo "$out"
+          [ "$out" = hi ]
 
   # Trusted publishing: nuget.org trusts this workflow (a policy on the
   # package owner's account: owner OnurGumus, repository zero-csharp,
@@ -327,7 +466,7 @@ jobs:
   # nuget.org user name (a repository variable, not a secret).
   publish:
     if: startsWith(github.ref, 'refs/tags/sdk-v')
-    needs: [test, windows, windows-built-linux, macos]
+    needs: [test, windows, windows-built-linux, mac-programs, macos, macos-built]
     runs-on: ubuntu-24.04
     permissions:
       id-token: write

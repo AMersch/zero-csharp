@@ -7,20 +7,20 @@ index: 1
 
 With the .NET SDK, you can build zero-mode programs without cloning this repository. Three NuGet
 packages do it: a project SDK (`ZeroCSharp.Sdk`), the bflat compiler for your machine
-(`ZeroCSharp.Bflat.linux-x64`, `linux-arm64` or `win-x64`, downloaded by the SDK), and the project templates
+(`ZeroCSharp.Bflat.linux-x64`, `linux-arm64`, `win-x64` or `osx-arm64`, downloaded by the SDK), and the project templates
 (`ZeroCSharp.Templates`). `dotnet build` then makes a native program, and your editor understands
 the code.
 
 ## What you need
 
 - **The .NET 10 SDK.** Nothing else: the packages bring the compiler and the linker.
-- **Linux (x64 or arm64) or Windows (x64) to build programs.** Each builds for all three targets:
-  Linux x64, Linux arm64 and Windows x64. The packages are tested on GitHub's Windows runner, and on Ubuntu
-  22.04 and 24.04, Debian 12 and Fedora 41 with nothing but the .NET SDK installed.
-- **On macOS,** everything except the last step works: the editor, compiling, libraries and
-  `dotnet pack`. Building a program stops with an error that says so. Build programs on a Linux or
-  Windows machine or in a container, or [install from the repository](install.html), which also covers
-  macOS, WebAssembly and DOS.
+- **Linux (x64 or arm64), Windows (x64) or a Mac with Apple Silicon to build programs.** Each builds
+  for all four targets: Linux x64, Linux arm64, Windows x64 and macOS on Apple Silicon. The packages are
+  tested on GitHub's Windows and macOS runners, and on Ubuntu 22.04 and 24.04, Debian 12 and Fedora 41
+  with nothing but the .NET SDK installed. No Xcode is needed on a Mac.
+- **On an Intel Mac,** everything except the last step works: the editor, compiling, libraries and
+  `dotnet pack`. Building a program stops with an error that says so. For WebAssembly and DOS,
+  [install from the repository](install.html).
 
 ## Make a program
 
@@ -56,26 +56,28 @@ Out.Write(name);
 Out.Line("!");
 ```
 
-`dotnet build` puts the native program in `bin/Debug/zero02/`; `dotnet run` builds and runs it:
+`dotnet build` puts the native program in `bin/Debug/zero03/`; `dotnet run` builds and runs it:
 
 ```bash
-echo Ann | bin/Debug/zero02/Hello
+echo Ann | bin/Debug/zero03/Hello
 echo Ann | dotnet run
 ```
 
 On Windows, in PowerShell:
 
 ```powershell
-echo Ann | .\bin\Debug\zero02\Hello.exe
+echo Ann | .\bin\Debug\zero03\Hello.exe
 ```
 
 ```text
 What's your name? Hello, Ann!
 ```
 
-`zero02` is the project's target framework: zero mode, version 0.2 of the SDK. It keeps ordinary .NET
-packages out, because they need .NET's libraries, which a zero program doesn't have. Libraries packed
-with version 0.1 (`zero01`) need re-packing for 0.2.
+`zero03` is the project's target framework: zero mode, with the library format of SDK 0.3. It keeps
+ordinary .NET packages out, because they need .NET's libraries, which a zero program doesn't have.
+Libraries packed with 0.1 or 0.2 (`zero01`, `zero02`) need re-packing for 0.3. That's the last
+forced one: from 0.3 on, the framework changes only when the library format breaks, not with every
+release.
 
 ## Build for another target
 
@@ -84,16 +86,46 @@ program for a chosen target goes in a folder named after it, as `dotnet build -r
 programs for several targets sit side by side:
 
 ```bash
-dotnet build -p:ZeroTarget=win-x64        # bin/Debug/zero02/win-x64/Hello.exe
-dotnet build -p:ZeroTarget=linux-arm64    # bin/Debug/zero02/linux-arm64/Hello
-dotnet build -p:ZeroTarget=linux-x64      # from Windows: bin\Debug\zero02\linux-x64\Hello
+dotnet build -p:ZeroTarget=win-x64        # bin/Debug/zero03/win-x64/Hello.exe
+dotnet build -p:ZeroTarget=linux-arm64    # bin/Debug/zero03/linux-arm64/Hello
+dotnet build -p:ZeroTarget=linux-x64      # from Windows: bin\Debug\zero03\linux-x64\Hello
+dotnet build -p:ZeroTarget=osx-arm64      # bin/Debug/zero03/osx-arm64/Hello, for Apple Silicon Macs
 ```
 
 `dotnet clean` removes all of them.
 
+A macOS program needs no Mac and no Xcode to build: bflat compiles it, and the package's lld links it
+against a list of macOS's C functions that the SDK carries (`libSystem.tbd`). It runs on macOS 12 or
+newer on Apple Silicon, with an ad-hoc signature, which is what a Mac needs to run a program built
+there or copied over without a quarantine flag (a browser download gets one: `xattr -d
+com.apple.quarantine Hello` clears it). It can call macOS's C library (libc, libm, pthreads): the
+list has what zerocore and `lib/` use and the C functions programs commonly import (stdio, stdlib,
+string, time, unistd, dlfcn, math). A C function it lacks fails the link with
+`undefined symbol: _name`. List it in a `.tbd` of your own, with libSystem's name, and add that to the
+link with `ZeroNativeInput`:
+
+```yaml
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ arm64-macos ]
+install-name:    '/usr/lib/libSystem.B.dylib'
+exports:
+  - targets:     [ arm64-macos ]
+    symbols:     [ _getline, _wcslen ]
+...
+```
+
+```xml
+<ItemGroup>
+  <ZeroNativeInput Include="more-libc.tbd" />
+</ItemGroup>
+```
+
+Other libraries work the same way, with their own `.tbd` or `.dylib`.
+
 | Property | Values | Default |
 |---|---|---|
-| `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64` | the build machine's |
+| `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64`, `osx-arm64` | the build machine's |
 | `ZeroOptimizeFor` | `Speed`, or `Size` (bflat's `-Os`) | `Speed` |
 | `ZeroInstructionSet` | passed to bflat as `-m`, e.g. `x86-64-v3` or `dotprod` (see [Use SIMD](../how-to/use-simd.html)) | none |
 | `ZeroDllImports` | more libraries whose `[DllImport]`s are bound when linking, besides `libc` and `libm.so.6`, which always are | none |

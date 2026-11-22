@@ -19,10 +19,18 @@ layouts=${2:?layouts}
 root=${3:?trimmed root}
 trimmed=$root/$rid
 
+# Windows and macOS are mapped from a Linux list (they can't be traced).
+from=
 if [ "$rid" = win-x64 ]; then
     layout=$layouts/windows-x64
     exe=bflat.exe
     script=sdk/trim-windows-layout.sh
+    from=linux-x64
+elif [ "$rid" = osx-arm64 ]; then
+    layout=$layouts/osx-arm64
+    exe=bflat
+    script=sdk/trim-macos-layout.sh
+    from=linux-arm64
 else
     layout=$layouts/linux-glibc-${rid#linux-}
     exe=bflat
@@ -34,15 +42,15 @@ if [ ! -f "$layout/$exe" ]; then
     echo "Error: no layout in $layout and no trimmed one in $trimmed." >&2
     exit 1
 fi
-if [ "$rid" = win-x64 ] && [ ! -f "$root/linux-x64/bflat" ]; then
-    echo "Error: win-x64 is trimmed from the linux-x64 trimmed layout, and $root/linux-x64 has none. Trim linux-x64 first." >&2
+if [ -n "$from" ] && [ ! -f "$root/$from/bflat" ]; then
+    echo "Error: $rid is trimmed from the $from trimmed layout, and $root/$from has none. Trim $from first." >&2
     exit 1
 fi
 
 files() { (cd "$1" && find . -type f | sed 's|^\./||' | LC_ALL=C sort); }
 stamp() {
     cat "$script"
-    [ "$rid" = win-x64 ] && files "$root/linux-x64"
+    [ -n "$from" ] && files "$root/$from"
     files "$trimmed" | while read -r f; do echo "$f"; cat "$layout/$f"; done
 }
 
@@ -50,8 +58,8 @@ if [ -f "$trimmed/$exe" ] && [ "$(cat "$root/$rid.source" 2>/dev/null)" = "$(sta
     exit 0
 fi
 echo "[trim]  $layout -> $trimmed"
-if [ "$rid" = win-x64 ]; then
-    "$script" "$layout" "$root/linux-x64" "$trimmed"
+if [ -n "$from" ]; then
+    "$script" "$layout" "$root/$from" "$trimmed"
 else
     "$script" "$layout" "$trimmed"
 fi

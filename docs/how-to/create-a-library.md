@@ -21,7 +21,7 @@ dotnet new zerolib -o Geometry
 The project file names the SDK and says it's a library:
 
 ```xml
-<Project Sdk="ZeroCSharp.Sdk/0.2.2">
+<Project Sdk="ZeroCSharp.Sdk/0.3.0">
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <Version>1.0.0</Version>
@@ -64,7 +64,7 @@ programs compile from its IL, so the SDK always optimizes a library, in Debug to
 Reference the library's project:
 
 ```xml
-<Project Sdk="ZeroCSharp.Sdk/0.2.2">
+<Project Sdk="ZeroCSharp.Sdk/0.3.0">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
   </PropertyGroup>
@@ -119,7 +119,7 @@ every `ZeroTarget`.
 dotnet pack Geometry -o feed
 ```
 
-The package holds `lib/zero02/Geometry.dll`. Publish it to nuget.org, or to a folder that a
+The package holds `lib/zero03/Geometry.dll`. Publish it to nuget.org, or to a folder that a
 `nuget.config` lists, and programs reference it like any package:
 
 ```xml
@@ -128,24 +128,33 @@ The package holds `lib/zero02/Geometry.dll`. Publish it to nuget.org, or to a fo
 </ItemGroup>
 ```
 
-`zero02` is the target framework of every project made with version 0.2 of the SDK. It does two
-things. NuGet won't add an ordinary .NET package to a zero project, because such a package is built for
+`zero03` is the target framework of every project made with SDK 0.3 and later, until the library
+format changes (what zerocore and `lib/` offer, and how programs call them). It does two things. NuGet won't add an ordinary .NET package to a zero project, because such a package is built for
 .NET's libraries, which a zero program doesn't have:
 
 ```text
-error NU1202: Package Newtonsoft.Json 13.0.3 is not compatible with zero02 (zero02,Version=v0.0).
+error NU1202: Package Newtonsoft.Json 13.0.3 is not compatible with zero03 (zero03,Version=v0.0).
 ```
 
-And a zero library built with another version of the SDK (whose zerocore may differ) is refused the
-same way, naming both versions:
+And a zero library built for another library format (whose zerocore may differ) is refused the same
+way, naming both:
 
 ```text
-error NU1202: Package Acme.Geometry 1.0.0 is not compatible with zero02 (zero02,Version=v0.0).
-Package Acme.Geometry 1.0.0 supports: zero01 (zero01,Version=v0.0)
+error NU1202: Package Acme.Geometry 1.0.0 is not compatible with zero03 (zero03,Version=v0.0).
+Package Acme.Geometry 1.0.0 supports: zero02 (zero02,Version=v0.0)
 ```
 
-Rebuild the library with your SDK version, or build the program with the library's. Libraries packed
-with version 0.1 (`zero01`) need re-packing for 0.2.
+Libraries packed with 0.1 or 0.2 (`zero01`, `zero02`) need re-packing for 0.3.
+
+Within one framework, a newer SDK may add to zerocore and `lib/`, so a library records the SDK version
+that packed it, and a program built with an older SDK refuses it:
+
+```text
+error ZERO002: Acme.Geometry was built with ZeroCSharp.Sdk 0.3.4, newer than this project's 0.3.0:
+update ZeroCSharp.Sdk in the project's Sdk attribute.
+```
+
+Libraries from the same SDK version or an older one are fine.
 
 ## How it's built
 

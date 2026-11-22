@@ -16,21 +16,22 @@ ROOT=$PWD
 WORK=$ROOT/sdk/test/work
 FEED=$ROOT/sdk/feed
 VERSION=$(sed -n 's|.*<ZeroSdkVersion>\(.*\)</ZeroSdkVersion>.*|\1|p' sdk/version.props)
-# The target framework: zero + major and minor, without the dot (0.1 -> zero01).
-TFM=zero$(echo "$VERSION" | cut -d. -f1,2 | tr -d .)
+# The target framework: ZeroFramework (sdk/version.props), not made from the version.
+TFM=$(sed -n 's|.*<ZeroFramework>\(.*\)</ZeroFramework>.*|\1|p' sdk/version.props)
 case "$(uname -s)" in
     Linux)                    HOST_OS=Linux ;;
     Darwin)                   HOST_OS=Darwin ;;
     MINGW* | MSYS* | CYGWIN*) HOST_OS=Windows ;;   # Git Bash
     *)                        HOST_OS=$(uname -s) ;;
 esac
-export ZERO_HOSTS=${ZERO_HOSTS:-linux-x64 linux-arm64 win-x64}
+export ZERO_HOSTS=${ZERO_HOSTS:-linux-x64 linux-arm64 win-x64 osx-arm64}
 case "$(uname -m)" in
     x86_64 | amd64)  HOST_ARCH_NAME=x64;   DOCKER_ARCH=amd64; HOST_ELF_ARCH=x86-64 ;;
     *)               HOST_ARCH_NAME=arm64; DOCKER_ARCH=arm64; HOST_ELF_ARCH=aarch64 ;;
 esac
 case "$HOST_OS" in
     Windows) HOST_RID=win-x64 ;;
+    Darwin)  HOST_RID=osx-$HOST_ARCH_NAME ;;     # osx-arm64; osx-x64 can't build
     *)       HOST_RID=linux-$HOST_ARCH_NAME ;;
 esac
 
@@ -47,10 +48,10 @@ fail() {
 
 skip() { echo "skip $1: $2"; skipped=$((skipped + 1)); }
 # can_build <test name>: true on a host that builds native programs (Linux,
-# Windows); on others, records a skip.
+# Windows, an Apple Silicon Mac); on others, records a skip.
 can_build() {
-    [ "$HOST_OS" = Linux ] || [ "$HOST_OS" = Windows ] && return 0
-    skip "$1" "builds native programs, which needs a Linux or Windows host"
+    [ "$HOST_OS" = Linux ] || [ "$HOST_OS" = Windows ] || [ "$HOST_RID" = osx-arm64 ] && return 0
+    skip "$1" "builds native programs, which needs a Linux, Windows or Apple Silicon host"
     return 1
 }
 # linux_only <test name>: true on Linux; on other hosts, records a skip.
@@ -70,8 +71,15 @@ is_elf() {
 }
 is_pe() { [ "$(head -c 2 "$1" 2>/dev/null)" = MZ ]; }
 is_coff_x64() { [ "$(byte_at "$1" 0)" = 100 ] && [ "$(byte_at "$1" 1)" = 134 ]; }
+# is_macho_arm64 <file>: 64-bit Mach-O (cf fa ed fe) for arm64 (CPU type 0x0100000c).
+is_macho_arm64() {
+    [ "$(byte_at "$1" 0)" = 207 ] && [ "$(byte_at "$1" 1)" = 250 ] && [ "$(byte_at "$1" 2)" = 237 ] && [ "$(byte_at "$1" 3)" = 254 ] &&
+        [ "$(byte_at "$1" 4)" = 12 ] && [ "$(byte_at "$1" 5)" = 0 ] && [ "$(byte_at "$1" 6)" = 0 ] && [ "$(byte_at "$1" 7)" = 1 ]
+}
 # is_host_program <file>: a program for the host's own target.
-is_host_program() { if [ "$HOST_OS" = Windows ]; then is_pe "$1"; else is_elf "$1" "$HOST_ELF_ARCH"; fi; }
+is_host_program() {
+    case "$HOST_OS" in Windows) is_pe "$1" ;; Darwin) is_macho_arm64 "$1" ;; *) is_elf "$1" "$HOST_ELF_ARCH" ;; esac
+}
 # native_path <path>: the path as the dotnet CLI on this host writes it.
 native_path() { if [ "$HOST_OS" = Windows ]; then cygpath -w "$1"; else echo "$1"; fi; }
 # zip_list <zip>: the entries' names; zip_dir <dir> <zip>: zips a folder's contents.
@@ -154,12 +162,20 @@ test_payload_complete() {
     local payload=$ROOT/sdk/ZeroCSharp.Sdk/payload f
     LOG=
     for f in ref/System.Private.CoreLib.dll ref/BflatLib.dll native/linux-x64/zerocore.o \
-             native/linux-arm64/zerocore.o native/win-x64/runtime.obj native/win-x64/zerocore.obj VERSIONS.txt; do
+             native/linux-arm64/zerocore.o native/win-x64/runtime.obj native/win-x64/zerocore.obj \
+             native/osx-arm64/runtime.o native/osx-arm64/zerocore.o native/osx-arm64/libSystem.tbd VERSIONS.txt; do
         if [ ! -s "$payload/$f" ]; then fail "payload complete" "missing $f"; return; fi
     done
     if ! is_elf "$payload/native/linux-x64/zerocore.o" x86-64; then fail "payload complete" "linux-x64 object isn't x86-64"; return; fi
     if ! is_elf "$payload/native/linux-arm64/zerocore.o" aarch64; then fail "payload complete" "linux-arm64 object isn't aarch64"; return; fi
     if ! is_coff_x64 "$payload/native/win-x64/runtime.obj"; then fail "payload complete" "win-x64 object isn't COFF"; return; fi
+    for f in runtime.o zerocore.o; do
+        if ! is_macho_arm64 "$payload/native/osx-arm64/$f"; then fail "payload complete" "osx-arm64/$f isn't arm64 Mach-O"; return; fi
+    done
+    if ! grep -q "install-name: *'/usr/lib/libSystem.B.dylib'" "$payload/native/osx-arm64/libSystem.tbd" ||
+       ! grep -q "arm64-macos" "$payload/native/osx-arm64/libSystem.tbd"; then
+        fail "payload complete" "libSystem.tbd doesn't name /usr/lib/libSystem.B.dylib for arm64-macos"; return
+    fi
     pass "payload complete"
 }
 
@@ -302,10 +318,10 @@ test_size() {
 
 test_macos_error() {
     local name="macos error" dir
-    if [ "$HOST_OS" != Darwin ]; then skip "$name" "macOS only"; return; fi
+    if [ "$HOST_RID" != osx-x64 ]; then skip "$name" "Intel Macs only"; return; fi
     dir=$(fixture native macos)
     if run_in "$dir" macos build; then fail "$name" "the build succeeded"; return; fi
-    if ! grep -qF "Zero C# can't make native programs on macOS yet; build on Linux or Windows, or use the repository's build.sh." "$LOG"; then
+    if ! grep -qF "Zero C# builds on Apple Silicon Macs, not Intel ones" "$LOG"; then
         fail "$name" "not the macOS message"; return
     fi
     dir=$(fixture hello macos-library)
@@ -492,8 +508,13 @@ test_targets_side_by_side() {
     if [ "$out" != hi ]; then fail "$name" "no $host/native"; return; fi
     if [ "$other" = win-x64 ]; then is_pe "$other_file"; else is_elf "$other_file" x86-64; fi \
         || { fail "$name" "no $other program"; return; }
+    if ! run_in "$dir" sidebyside-mac build -p:ZeroTarget=osx-arm64; then fail "$name" "the osx-arm64 build failed"; return; fi
+    if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/native"; then fail "$name" "no osx-arm64 program"; return; fi
+    out=$("$(exe "$dir/bin/Debug/$TFM/$host/native")" 2>/dev/null)
+    if [ "$out" != hi ]; then fail "$name" "$host/native is gone after building for osx-arm64"; return; fi
     if ! run_in "$dir" sidebyside-4 clean; then fail "$name" "dotnet clean failed"; return; fi
-    if [ -e "$(exe "$dir/bin/Debug/$TFM/native")" ] || [ -e "$(exe "$dir/bin/Debug/$TFM/$host/native")" ] || [ -e "$other_file" ]; then
+    if [ -e "$(exe "$dir/bin/Debug/$TFM/native")" ] || [ -e "$(exe "$dir/bin/Debug/$TFM/$host/native")" ] || [ -e "$other_file" ] ||
+       [ -e "$dir/bin/Debug/$TFM/osx-arm64/native" ]; then
         fail "$name" "dotnet clean left a native program"; return
     fi
     pass "$name"
@@ -696,7 +717,10 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
     release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0
     long_command_line windows_builds_linux unusual_packages_folder crlf_input
-    artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template)
+    artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template
+    framework_from_property newer_sdk_library
+    mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
+    trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim
@@ -760,6 +784,217 @@ test_llama_template() {
     if [[ "$out" != *"Tell a story together"* ]] || [ "$(wc -l <<< "$out")" -lt 3 ]; then fail "$name" "-c printed '$out'"; return; fi
     case "$HOST_RID" in win-x64) other=linux-x64 ;; *) other=win-x64 ;; esac
     if ! run_in "$dir/Story" llama-other build -p:ZeroTarget=$other; then fail "$name" "the $other build failed"; return; fi
+    pass "$name"
+}
+
+# The framework is ZeroFramework's (sdk/version.props), not made from the
+# version: builds go to bin/<config>/<it>/, packed libraries to lib/<it>/
+# with build/<id>.props naming the SDK version that built them.
+test_framework_from_property() {
+    local name="framework from property" framework dir list
+    framework=$(sed -n 's|.*<ZeroFramework>\(.*\)</ZeroFramework>.*|\1|p' sdk/version.props)
+    if [ -z "$framework" ]; then fail "$name" "sdk/version.props has no ZeroFramework"; return; fi
+    if [ "$TFM" != "$framework" ]; then fail "$name" "TFM is $TFM, ZeroFramework $framework"; return; fi
+    dir=$(app_with_lib frameworkprop)
+    if ! run_in "$dir/Geometry" frameworkprop-pack pack -o "$WORK/frameworkfeed"; then fail "$name" "dotnet pack failed"; return; fi
+    if [ ! -f "$dir/Geometry/bin/Release/$framework/Geometry.dll" ]; then fail "$name" "no bin/Release/$framework/Geometry.dll"; return; fi
+    list=$(zip_list "$WORK/frameworkfeed/ZeroTest.Geometry.1.0.0.nupkg")
+    if ! grep -qx "lib/$framework/Geometry.dll" <<< "$list"; then fail "$name" "the package has no lib/$framework/Geometry.dll"; return; fi
+    if ! grep -qx "build/ZeroTest.Geometry.props" <<< "$list"; then fail "$name" "the package has no build/ZeroTest.Geometry.props"; return; fi
+    pass "$name"
+}
+
+# A library built by a newer SDK may use what this one lacks: ZERO002, naming
+# both versions. One from the same SDK, or an older (prerelease) one, builds.
+test_newer_sdk_library() {
+    local name="newer sdk library" dir src v app
+    can_build "$name" || return
+    dir=$(app_with_lib newersdk)
+    rm -rf "$WORK/newersdk-feed" "$WORK/newersdk-src"
+    if ! run_in "$dir/Geometry" newersdk-pack pack -o "$WORK/newersdk-feed"; then fail "$name" "dotnet pack failed"; return; fi
+    for v in 99.0.0 "$VERSION" 0.3.0-preview1; do
+        src=$WORK/newersdk-src/$v
+        mkdir -p "$src" "$WORK/newersdk-feeds/$v"
+        (cd "$src" && unzip -qo "$WORK/newersdk-feed/ZeroTest.Geometry.1.0.0.nupkg")
+        if [ ! -f "$src/build/ZeroTest.Geometry.props" ]; then fail "$name" "the package has no build/ZeroTest.Geometry.props"; return; fi
+        # NuGet imports buildTransitive/'s copy when there is one: change both.
+        for f in "$src/build/ZeroTest.Geometry.props" "$src/buildTransitive/ZeroTest.Geometry.props"; do
+            sed -i.bak "s|SdkVersion=\"[^\"]*\"|SdkVersion=\"$v\"|" "$f" && rm -f "$f.bak"
+        done
+        rm -f "$WORK/newersdk-feeds/$v/ZeroTest.Geometry.1.0.0.nupkg"
+        zip_dir "$src" "$WORK/newersdk-feeds/$v/ZeroTest.Geometry.1.0.0.nupkg"
+        rm -rf "${NUGET_PACKAGES:-$HOME/.nuget/packages}/zerotest.geometry"
+        app=$(fixture app-with-pkg "newersdk-app-$v")/App
+        add_source "$app/../nuget.config" libs "$WORK/newersdk-feeds/$v"
+        if [ "$v" = 99.0.0 ]; then
+            if run_in "$app" "newersdk-$v" build; then fail "$name" "a library from SDK 99.0.0 was accepted"; return; fi
+            if ! grep -q ZERO002 "$LOG" || ! grep -q "99.0.0" "$LOG" || ! grep -q "$VERSION" "$LOG"; then fail "$name" "no ZERO002 naming 99.0.0 and $VERSION"; return; fi
+        elif ! run_in "$app" "newersdk-$v" build; then
+            fail "$name" "a library from SDK $v was refused"; return
+        fi
+    done
+    pass "$name"
+}
+
+# osx-arm64 from any build machine: bflat compiles, ld64.lld links against the
+# payload's libSystem.tbd. The programs are kept in $WORK/mac-built/<host>/
+# for CI, which runs them on a Mac (sdk.yml, *-built-macos).
+test_mac_target() {
+    local name="mac target" dir
+    can_build "$name" || return
+    dir=$(fixture native mactarget)
+    if ! run_in "$dir" mactarget build -p:ZeroTarget=osx-arm64; then fail "$name" "dotnet build failed"; return; fi
+    if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/native"; then fail "$name" "osx-arm64/native isn't an arm64 Mach-O program"; return; fi
+    mkdir -p "$WORK/mac-built/$HOST_RID"
+    cp "$dir/bin/Debug/$TFM/osx-arm64/native" "$WORK/mac-built/$HOST_RID/native"
+    pass "$name"
+}
+
+# Threads and libm on macOS come from libSystem: the link must find them all.
+test_mac_target_links_libm_and_threads() {
+    local name="mac target links libm and threads" dir
+    can_build "$name" || return
+    dir=$(fixture threads macthreads)
+    if ! run_in "$dir" macthreads build -p:ZeroTarget=osx-arm64; then fail "$name" "dotnet build failed"; return; fi
+    if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/threads"; then fail "$name" "osx-arm64/threads isn't an arm64 Mach-O program"; return; fi
+    mkdir -p "$WORK/mac-built/$HOST_RID"
+    cp "$dir/bin/Debug/$TFM/osx-arm64/threads" "$WORK/mac-built/$HOST_RID/threads"
+    pass "$name"
+}
+
+test_mac_target_path_with_spaces() {
+    local name="mac target path with spaces" dir
+    can_build "$name" || return
+    dir=$(fixture native "mac space/Zoë Ann")
+    if ! run_in "$dir" macspaces build -p:ZeroTarget=osx-arm64; then fail "$name" "dotnet build failed"; return; fi
+    if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/native"; then fail "$name" "no arm64 Mach-O program"; return; fi
+    pass "$name"
+}
+
+# A C function libSystem.tbd doesn't list: the link fails, naming it.
+test_mac_target_undefined_import() {
+    local name="mac target undefined import" dir
+    can_build "$name" || return
+    dir=$(fixture native macundefined)
+    cat > "$dir/Program.cs" <<'CS'
+using System.Runtime.InteropServices;
+public static class Program
+{
+    [DllImport("libc")] static safe extern int zero_no_such_function();
+    public static int Main() => zero_no_such_function();
+}
+CS
+    if run_in "$dir" macundefined build -p:ZeroTarget=osx-arm64; then fail "$name" "the build succeeded"; return; fi
+    if ! grep -q "_zero_no_such_function" "$LOG"; then fail "$name" "the error doesn't name _zero_no_such_function"; return; fi
+    pass "$name"
+}
+
+# sdk/trim-macos-layout.sh with a stub otool: the linux-arm64 list mapped to
+# macOS names (.so -> .dylib), plus a dylib bflat loads, found whatever its
+# capitals; an otool failure stops the trim instead of leaving dylibs out.
+test_trim_macos_layout() {
+    local name="trim macos layout" d=$WORK/trimmac
+    rm -rf "$d" && mkdir -p "$d/linux/bin" "$d/linux/lib/linux" "$d/mac/bin" "$d/mac/lib/linux" "$d/stub"
+    touch "$d/linux/bflat" "$d/linux/bin/lld" "$d/linux/libjitinterface_arm64.so" "$d/linux/lib/linux/zero.txt"
+    touch "$d/mac/bflat" "$d/mac/bin/lld" "$d/mac/libjitinterface_arm64.dylib" "$d/mac/lib/linux/zero.txt" "$d/mac/libExtra.dylib" "$d/mac/unused.dylib"
+    cat > "$d/stub/otool" <<'STUB'
+#!/usr/bin/env bash
+[ -n "${STUB_FAIL:-}" ] && { echo "otool: can't open file" >&2; exit 1; }
+echo "$2:"
+case "$2" in *bflat) printf '\t@rpath/LIBEXTRA.dylib (compatibility version 1.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n' ;; esac
+STUB
+    chmod +x "$d/stub/otool"
+    LOG=$d/trim.log
+    if ! PATH="$d/stub:$PATH" sdk/trim-macos-layout.sh "$d/mac" "$d/linux" "$d/out" > "$LOG" 2>&1; then fail "$name" "the trim failed"; return; fi
+    if [ ! -f "$d/out/libjitinterface_arm64.dylib" ] || [ ! -f "$d/out/lib/linux/zero.txt" ] || [ ! -f "$d/out/bin/lld" ]; then fail "$name" "the mapped files are missing"; return; fi
+    if [ -z "$(find "$d/out" -maxdepth 1 -name libExtra.dylib)" ]; then fail "$name" "libExtra.dylib (loaded as LIBEXTRA.dylib) is missing"; return; fi
+    if [ -e "$d/out/unused.dylib" ]; then fail "$name" "unused.dylib was copied"; return; fi
+    if STUB_FAIL=1 PATH="$d/stub:$PATH" sdk/trim-macos-layout.sh "$d/mac" "$d/linux" "$d/out" > "$LOG" 2>&1; then fail "$name" "an otool failure was ignored"; return; fi
+    if ! grep -q "otool" "$LOG"; then fail "$name" "the error doesn't name otool"; return; fi
+    pass "$name"
+}
+
+# On an Apple Silicon Mac: the Mac's own program, signed ad hoc and run, and
+# the other three targets. They're kept in $WORK/macos-built/<rid>/ for CI,
+# which runs them on their own systems (sdk.yml, macos-built-*).
+test_mac_host_builds_all_targets() {
+    local name="mac host builds all targets" dir out t f
+    if [ "$HOST_RID" != osx-arm64 ]; then skip "$name" "Apple Silicon Macs only"; return; fi
+    dir=$(fixture native machost)
+    if ! run_in "$dir" machost build; then fail "$name" "dotnet build failed"; return; fi
+    if ! codesign -v "$dir/bin/Debug/$TFM/native" 2> /dev/null; then fail "$name" "the program isn't signed"; return; fi
+    out=$("$dir/bin/Debug/$TFM/native"); if [ "$out" != hi ]; then fail "$name" "printed '$out'"; return; fi
+    for t in linux-x64 linux-arm64 win-x64; do
+        if ! run_in "$dir" "machost-$t" build -p:ZeroTarget=$t; then fail "$name" "the $t build failed"; return; fi
+        f=$dir/bin/Debug/$TFM/$t/native; [ "$t" = win-x64 ] && f=$f.exe
+        case "$t" in
+            linux-x64)   is_elf "$f" x86-64 ;;
+            linux-arm64) is_elf "$f" aarch64 ;;
+            win-x64)     is_pe "$f" ;;
+        esac || { fail "$name" "$t/native isn't a $t program"; return; }
+        mkdir -p "$WORK/macos-built/$t" && cp "$f" "$WORK/macos-built/$t/"
+    done
+    pass "$name"
+}
+
+# C functions programs commonly import link for macOS without extra steps:
+# libSystem.tbd lists them. (Called only when there are 100 arguments, so the
+# link needs them and running needs nothing.)
+test_mac_target_common_libc() {
+    local name="mac target common libc" dir
+    can_build "$name" || return
+    dir=$(fixture native maclibc)
+    cat > "$dir/Program.cs" <<'CS'
+using System.Runtime.InteropServices;
+public static class Program
+{
+    [DllImport("libc")] static safe extern int snprintf(nint buffer, nint size, nint format);
+    [DllImport("libc")] static safe extern nint fopen(nint path, nint mode);
+    [DllImport("libc")] static safe extern nint fread(nint buffer, nint size, nint count, nint file);
+    [DllImport("libc")] static safe extern int fclose(nint file);
+    [DllImport("libc")] static safe extern void qsort(nint items, nint count, nint size, nint compare);
+    [DllImport("libc")] static safe extern nint strerror(int error);
+    [DllImport("libc")] static safe extern int getchar();
+    [DllImport("libc")] static safe extern nint dlopen(nint path, int mode);
+    [DllImport("libc")] static safe extern int atoi(nint text);
+    [DllImport("libc")] static safe extern nint strtol(nint text, nint end, int radix);
+    public static int Main(string[] args)
+    {
+        if (args.Length == 100)
+        {
+            snprintf(0, 0, 0); fclose(fopen(0, 0)); fread(0, 0, 0, 0); qsort(0, 0, 0, 0);
+            strerror(0); getchar(); dlopen(0, 0); atoi(0); strtol(0, 0, 0);
+        }
+        Out.Line("hi");
+        return 0;
+    }
+}
+CS
+    if ! run_in "$dir" maclibc build -p:ZeroTarget=osx-arm64; then fail "$name" "the link failed"; return; fi
+    if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/native"; then fail "$name" "no arm64 Mach-O program"; return; fi
+    pass "$name"
+}
+
+# A C function libSystem.tbd doesn't list: the project's own .tbd, with
+# libSystem's install name, in ZeroNativeInput (install-with-dotnet.md).
+test_mac_target_user_tbd() {
+    local name="mac target user tbd" dir
+    can_build "$name" || return
+    dir=$(fixture native macusertbd)
+    cat > "$dir/Program.cs" <<'CS'
+using System.Runtime.InteropServices;
+public static class Program
+{
+    [DllImport("libc")] static safe extern int zero_only_in_my_tbd();
+    public static int Main(string[] args) => args.Length == 100 ? zero_only_in_my_tbd() : 0;
+}
+CS
+    printf '%s\n' '--- !tapi-tbd' 'tbd-version:     4' 'targets:         [ arm64-macos ]' \
+        "install-name:    '/usr/lib/libSystem.B.dylib'" 'exports:' '  - targets:     [ arm64-macos ]' \
+        '    symbols:     [ _zero_only_in_my_tbd ]' '...' > "$dir/more-libc.tbd"
+    sed -i.bak 's|</Project>|  <ItemGroup><ZeroNativeInput Include="more-libc.tbd" /></ItemGroup>\n</Project>|' "$dir/native.csproj" && rm -f "$dir/native.csproj.bak"
+    if ! run_in "$dir" macusertbd build -p:ZeroTarget=osx-arm64; then fail "$name" "the link failed"; return; fi
+    if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/native"; then fail "$name" "no arm64 Mach-O program"; return; fi
     pass "$name"
 }
 

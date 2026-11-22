@@ -668,15 +668,17 @@ test_crlf_input() {
     pass "$name"
 }
 
-# .NET's artifacts layout (UseArtifactsOutput) puts obj/ on an absolute path;
-# in a folder with a space (C:\Users\Zoë Ann\source\repos) the link must work.
+# Build output in a folder with a space between the project and it (artifacts
+# at the repository's root, in "art out"): bflat must hand the linker the
+# runtime objects' paths whole. Same for the packages folder (above).
 test_artifacts_path_with_spaces() {
     local name="artifacts path with spaces" dir program out
     can_build "$name" || return
-    dir=$(fixture native "spaces art/native")
-    if ! run_in "$dir" artifacts build -p:UseArtifactsOutput=true; then fail "$name" "dotnet build failed"; return; fi
-    program=$(find "$dir/artifacts/bin" -type f -name "$(basename "$(exe native)")" 2>/dev/null | head -1)
-    if [ -z "$program" ]; then fail "$name" "no program under artifacts/bin"; return; fi
+    dir=$(fixture native artspace/native)
+    rm -rf "$WORK/artspace/art out"
+    if ! run_in "$dir" artifacts build -p:UseArtifactsOutput=true "-p:ArtifactsPath=$(native_path "$WORK/artspace/art out")"; then fail "$name" "dotnet build failed"; return; fi
+    program=$(find "$WORK/artspace/art out/bin" -type f -name "$(basename "$(exe native)")" 2>/dev/null | head -1)
+    if [ -z "$program" ]; then fail "$name" "no program under art out/bin"; return; fi
     out=$("$program"); if [ "$out" != hi ]; then fail "$name" "printed '$out'"; return; fi
     pass "$name"
 }

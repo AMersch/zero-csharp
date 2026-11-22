@@ -145,10 +145,35 @@ namespace System
         public override string ToString() => Number.FormatUInt64((nuint)this);
     }
 
+    // float and double have .NET's constants (NaN, PositiveInfinity, MaxValue,
+    // Epsilon, ...) and checks (IsNaN, IsFinite, IsSubnormal, ...).
+    //
     // Equals here is bit equality, so NaN equals NaN, as .NET's Equals has
     // it (unlike ==); 0.0 and -0.0 are equal, as in .NET.
     public unsafe struct Single : IEquatable<float>
     {
+        public const float MinValue = -3.40282347E+38f;
+        public const float MaxValue = 3.40282347E+38f;
+        public const float Epsilon = 1.401298E-45f;
+        public const float NaN = 0.0f / 0.0f;
+        public const float PositiveInfinity = 1.0f / 0.0f;
+        public const float NegativeInfinity = -1.0f / 0.0f;
+        public const float NegativeZero = -0.0f;
+        public const float E = 2.71828183f;
+        public const float Pi = 3.14159265f;
+        public const float Tau = 6.28318531f;
+
+        public static bool IsNaN(float f) => f != f;
+        public static bool IsInfinity(float f) => (Bits(f) & 0x7FFFFFFF) == 0x7F800000;
+        public static bool IsPositiveInfinity(float f) => f == PositiveInfinity;
+        public static bool IsNegativeInfinity(float f) => f == NegativeInfinity;
+        public static bool IsFinite(float f) => (Bits(f) & 0x7FFFFFFF) < 0x7F800000;
+        public static bool IsNegative(float f) => (int)Bits(f) < 0;
+        public static bool IsNormal(float f) => (Bits(f) & 0x7FFFFFFF) - 0x00800000 < 0x7F000000;
+        public static bool IsSubnormal(float f) => (Bits(f) & 0x7FFFFFFF) - 1 < 0x007FFFFF;
+
+        private static uint Bits(float f) => *(uint*)&f;
+
         public bool Equals(float other) => (float)this == other || ((float)this != (float)this && other != other);
         public override bool Equals(object obj) => obj is float other && Equals(other);
         public override int GetHashCode()
@@ -161,6 +186,28 @@ namespace System
 
     public unsafe struct Double : IEquatable<double>
     {
+        public const double MinValue = -1.7976931348623157E+308;
+        public const double MaxValue = 1.7976931348623157E+308;
+        public const double Epsilon = 4.9406564584124654E-324;
+        public const double NaN = 0.0 / 0.0;
+        public const double PositiveInfinity = 1.0 / 0.0;
+        public const double NegativeInfinity = -1.0 / 0.0;
+        public const double NegativeZero = -0.0;
+        public const double E = 2.7182818284590452354;
+        public const double Pi = 3.14159265358979323846;
+        public const double Tau = 6.283185307179586476925;
+
+        public static bool IsNaN(double d) => d != d;
+        public static bool IsInfinity(double d) => (Bits(d) & 0x7FFFFFFFFFFFFFFF) == 0x7FF0000000000000;
+        public static bool IsPositiveInfinity(double d) => d == PositiveInfinity;
+        public static bool IsNegativeInfinity(double d) => d == NegativeInfinity;
+        public static bool IsFinite(double d) => (Bits(d) & 0x7FFFFFFFFFFFFFFF) < 0x7FF0000000000000;
+        public static bool IsNegative(double d) => (long)Bits(d) < 0;
+        public static bool IsNormal(double d) => (Bits(d) & 0x7FFFFFFFFFFFFFFF) - 0x0010000000000000 < 0x7FE0000000000000;
+        public static bool IsSubnormal(double d) => (Bits(d) & 0x7FFFFFFFFFFFFFFF) - 1 < 0x000FFFFFFFFFFFFF;
+
+        private static ulong Bits(double d) => *(ulong*)&d;
+
         public bool Equals(double other) => (double)this == other || ((double)this != (double)this && other != other);
         public override bool Equals(object obj) => obj is double other && Equals(other);
         public override int GetHashCode()

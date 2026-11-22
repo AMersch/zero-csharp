@@ -114,7 +114,7 @@ public static class Program
         Check("subnormals", Half.IsSubnormal(Half.Epsilon) && (float)Half.Epsilon == 5.9604645E-08f && !Half.IsNormal(Half.Epsilon));
         Check("half of Epsilon rounds to 0, a bit more to Epsilon", Bits((Half)Opaque(2.9802322E-08f)) == 0 && (Half)Opaque(2.9802326E-08f) == Half.Epsilon && (Half)Opaque(2.98023224e-8 * 1.0000001) == Half.Epsilon);
         Half nan = (Half)(Opaque(0f) / Opaque(0f));
-        Check("NaN", Half.IsNaN(nan) && nan != nan && !(nan < Half.One) && nan.Equals(Half.NaN) && Half.IsNaN((Half)(Opaque(0.0) / Opaque(0.0))));
+        Check("NaN", Half.IsNaN(nan) && nan != nan && !(nan < Half.One) && nan.Equals(Half.NaN) && Half.IsNaN((Half)Opaque(double.NaN)));
         Check("NaN sorts first", nan.CompareTo(Half.MinValue) < 0 && Half.One.CompareTo(nan) > 0 && pi.CompareTo(Half.Pi) == 0);
         Check("zeros", Half.Zero == Half.NegativeZero && Half.Zero.Equals(Half.NegativeZero) && Half.IsNegative(Half.NegativeZero) && Half.Zero.GetHashCode() == Half.NegativeZero.GetHashCode());
         Check("integers", (int)(Half)Opaque(-300) == -300 && (Half)(byte)200 == (Half)200 && (long)(Half)Opaque(1000.7f) == 1000);

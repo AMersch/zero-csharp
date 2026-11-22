@@ -120,6 +120,26 @@ run_in() {
     (cd "$dir" && dotnet "$@") > "$LOG" 2>&1
 }
 
+# run_limited <seconds> <output file> <program> [args]: runs it, output to the
+# file, killed after <seconds> (exit 124): a deadlock fails a test instead of
+# hanging it. macOS has no timeout command.
+run_limited() {
+    local secs=$1 out=$2 pid i=0
+    shift 2
+    "$@" > "$out" 2>&1 &
+    pid=$!
+    while kill -0 "$pid" 2> /dev/null; do
+        if [ "$i" -ge $((secs * 10)) ]; then
+            kill -9 "$pid" 2> /dev/null
+            wait "$pid" 2> /dev/null
+            return 124
+        fi
+        sleep 0.1
+        i=$((i + 1))
+    done
+    wait "$pid"
+}
+
 # ---- Tests -------------------------------------------------------------------
 
 test_hello_compiles() {
@@ -709,6 +729,25 @@ test_artifacts_path_with_spaces() {
     pass "$name"
 }
 
+# Static constructors reached from eight threads at once: each thread sees the
+# type set up, the constructor runs once, re-entry and a two-thread cycle work.
+# 20 runs, since a race shows up only sometimes.
+test_static_constructor_threads() {
+    local name="static constructor threads" dir out i status expected
+    can_build "$name" || return
+    dir=$(fixture cctor-threads)
+    if ! run_in "$dir" cctor-threads build; then fail "$name" "dotnet build failed"; return; fi
+    expected=$'values 7 7 7 7 7 7 7 7\nruns 1\nself ok\ncycle ok'
+    for i in $(seq 1 20); do
+        run_limited 30 "$WORK/cctor-threads.out" "$(exe "$dir/bin/Debug/$TFM/cctor-threads")"
+        status=$?
+        out=$(tr -d '\r' < "$WORK/cctor-threads.out")
+        if [ "$status" -ne 0 ]; then fail "$name" "run $i: exit $status: $out"; return; fi
+        if [ "$out" != "$expected" ]; then fail "$name" "run $i: $out"; return; fi
+    done
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size macos_error
@@ -721,7 +760,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     framework_from_property newer_sdk_library
     mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
     trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd
-    tutorial_steps simd_instruction_set)
+    tutorial_steps simd_instruction_set static_constructor_threads)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim

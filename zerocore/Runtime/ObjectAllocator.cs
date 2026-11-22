@@ -15,10 +15,14 @@ namespace System.Runtime
     // that never sets one pays a single check per allocation.
     public static unsafe class ObjectAllocator
     {
+        // One record per thread that ever needs one: its allocator setting,
+        // and, for static constructors (ClassConstructorRunner), the
+        // constructor it's waiting for. Its address identifies the thread.
         private struct Setting
         {
             public delegate*<void*, nuint, void*> Allocate;
             public void* Context;
+            public void* WaitingFor;
         }
 
         private static nuint s_key;      // pthread_key_t, once s_keyState is Ready
@@ -59,18 +63,29 @@ namespace System.Runtime
             }
         }
 
+        // This thread's record, made on first use. Making one doesn't set an
+        // allocator: Allocate stays null.
+        internal static void* CurrentThreadRecord()
+        {
+            CreateKey();
+            Setting* record = (Setting*)Platform.pthread_getspecific(s_key);
+            if (record == null)
+            {
+                record = (Setting*)Platform.calloc(1, (nuint)sizeof(Setting));
+                if (record == null || Platform.pthread_setspecific(s_key, record) != 0)
+                    Environment.FailFast("ObjectAllocator: out of memory");
+            }
+            return record;
+        }
+
+        internal static void* WaitingFor(void* record) => ((Setting*)record)->WaitingFor;
+
+        internal static void SetWaitingFor(void* record, void* context) => ((Setting*)record)->WaitingFor = context;
+
         /// <summary>Sends this thread's allocations to <paramref name="allocate"/> (null: back to calloc). Get gives the previous setting.</summary>
         public static void Set(delegate*<void*, nuint, void*> allocate, void* context)
         {
-            CreateKey();
-            Setting* setting = (Setting*)Platform.pthread_getspecific(s_key);
-            if (setting == null)
-            {
-                // One small record per thread that ever sets an allocator.
-                setting = (Setting*)Platform.calloc(1, (nuint)sizeof(Setting));
-                if (setting == null || Platform.pthread_setspecific(s_key, setting) != 0)
-                    Environment.FailFast("ObjectAllocator: out of memory");
-            }
+            Setting* setting = (Setting*)CurrentThreadRecord();
             bool had = setting->Allocate != null;
             setting->Allocate = allocate;
             setting->Context = context;

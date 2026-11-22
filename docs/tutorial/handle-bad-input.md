@@ -85,6 +85,8 @@ printf 'abc\n  46 \n\xc3\xa9\xf0\x9f\x98\x80\n\xff\xc3(\n7\n12345678901234567890
   | bin/Debug/zero03/Quiz
 ```
 
+In PowerShell, use the answers file instead ([Before you start](index.html#before-you-start)).
+
 ```text
 6 questions. An empty answer skips one.
 Q1: 38 + 8 = "abc" isn't a number

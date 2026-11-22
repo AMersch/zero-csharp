@@ -1013,6 +1013,11 @@ test_tutorial_steps() {
         if ! run_in "$dir" "tutorial-$s" build; then fail "$name" "$s didn't build"; return; fi
         out=$("$(exe "$dir/bin/Debug/$TFM/native")" < "$input" | tr -d '\r')
         echo "size $s: $(wc -c < "$(exe "$dir/bin/Debug/$TFM/native")")" >> "$WORK/tutorial-sizes.txt"
+        # Windows readers in PowerShell: cmd redirects the answers file unchanged.
+        if [ "$HOST_OS" = Windows ] && [ "$input" != /dev/null ]; then
+            out=$(cmd //c "$(native_path "$(exe "$dir/bin/Debug/$TFM/native")") < $(native_path "$input")" | tr -d '\r')
+            if [ "$out" != "$(tr -d '\r' < "$ROOT/tests/expected/$s.txt")" ]; then fail "$name" "$s through cmd's < printed something else"; return; fi
+        fi
         if [ "$out" != "$(tr -d '\r' < "$ROOT/tests/expected/$s.txt")" ]; then
             echo "$out" >> "$LOG"
             fail "$name" "$s printed something else"; return

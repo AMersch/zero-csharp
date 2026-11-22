@@ -39,6 +39,16 @@ bin/Debug/zero03/Quiz
 On Windows the program is `bin\Debug\zero03\Quiz.exe`. `dotnet run` works too, but the first
 time it also prints what it restored, which gets in the way when you pipe answers in.
 
+The steps that read answers pipe them in with `printf`, a bash command. On Windows, run them in Git
+Bash, which comes with Git for Windows. PowerShell has no such `printf`, and its pipe re-encodes
+text, so step 3's deliberately broken bytes wouldn't arrive as written; there, download
+[the answers file](https://raw.githubusercontent.com/OnurGumus/zero-csharp/master/tests/input/Quiz.txt) and let `cmd` pass it through unchanged:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/OnurGumus/zero-csharp/master/tests/input/Quiz.txt -OutFile answers.txt
+cmd /c "bin\Debug\zero03\Quiz.exe < answers.txt"
+```
+
 With the [repository](../get-started/install.html) instead, each step is a sample: `./build.sh
 QuizStep1` and `./run.sh QuizStep1`. There every step also runs on WebAssembly and on DOS: add
 `--wasm` or `--dos` to both.

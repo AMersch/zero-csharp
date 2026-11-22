@@ -166,8 +166,12 @@ compiler is.
 Editors check code with the compiler they bundle, not the pinned one, so an editor whose compiler is
 older than Roslyn 5.12 can mark C# 15 features as errors that `dotnet build` accepts, and a newer one
 may treat preview features a little differently. For example, the C# extension for VS Code, version
-11.9.41, bundles Roslyn 5.14. How editors handle these projects hasn't been checked yet: if yours
-disagrees with `dotnet build`, `dotnet build` is right.
+11.9.41, bundles Roslyn 5.14.
+
+VS Code with the C# extension has been checked on a Mac and works with these projects, including the
+[debugging setup](../how-to/debug-a-program.html) the templates bring. Other editors,
+and VS Code on Linux and Windows, haven't been checked yet. If yours disagrees with `dotnet build`,
+`dotnet build` is right.
 
 ## Next
 

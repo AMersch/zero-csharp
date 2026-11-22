@@ -241,5 +241,6 @@ These come from zero mode itself:
 - **No unloading.** `dlclose` or `FreeLibrary` doesn't give back the memory the library allocated.
 - **No `[ModuleInitializer]`.** It doesn't run in zero mode, in libraries or programs.
 
-WebAssembly and DOS have no shared libraries of this kind: `NativeLib` works for `linux-x64`,
-`linux-arm64`, `win-x64` and `osx-arm64`.
+WebAssembly, DOS and UEFI have no shared libraries of this kind: `NativeLib` works for `linux-x64`,
+`linux-arm64`, `win-x64` and `osx-arm64`, and the build stops with an error for `uefi-x64` and
+`uefi-arm64`.

@@ -8,7 +8,7 @@
 // finishes early takes more. Starting the workers allocates nothing: the job
 // lives on the caller's stack, which outlives them because For waits.
 //
-// Where there are no threads (WebAssembly, DOS) or only one processor, or
+// Where there are no threads (WebAssembly, DOS), only one processor (UEFI), or
 // a thread can't be started, the loop simply runs on the calling thread.
 //
 // What runs in parallel must be safe to: iterations may only write what no

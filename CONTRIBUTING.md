@@ -22,6 +22,9 @@ built next to this repository. It has no release to download; the
 - **DOS:** `./setup.sh --dos` downloads FreeDOS and the HX DOS extender into `tools/` and checks for
   clang, Python 3 and an emulator. Use Bochs (`brew install bochs`): its `i386` processor refuses
   instructions a 386 doesn't have, and QEMU's `486` doesn't.
+- **UEFI:** QEMU with the OVMF firmware (`brew install qemu` includes it; on Ubuntu
+  `qemu-system-x86 ovmf`, or `qemu-system-arm qemu-efi-aarch64` for arm64), a clang with the Windows
+  targets (as for `--win`), and Python 3. `UEFI_FIRMWARE` points at another firmware file.
 
 ```bash
 ./build.sh                    # every sample, for this machine, into bin/
@@ -33,6 +36,8 @@ built next to this repository. It has no release to download; the
 ./build.sh --wasm             # bin/wasm/; ./run.sh --wasm runs them with wasmtime
 ./build.sh --dos              # bin/dos/; ./run.sh --dos runs them under FreeDOS in an emulator
 ./run.sh --dos --window Vga   # the DOS game, on screen: arrow keys steer, Esc quits
+./build.sh --uefi             # bin/uefi/*.efi; ./run.sh --uefi runs them in QEMU on OVMF
+./run.sh --uefi --window Vga  # the same game, started by the firmware
 ```
 
 `BFLAT_ARCH=x64` or `arm64` cross-compiles the Linux build. `build.ps1` and `setup.ps1` (building on
@@ -94,7 +99,8 @@ exit with their number of failed checks), and those whose output doesn't vary mu
 ./test.sh --dos      # DOS, on an emulated 386 with 4 MB
 ./test.sh --mac      # macOS
 ./test.sh --win      # Windows, under Wine
-./test.sh --all      # all of them, plus the other Linux architecture under emulation
+./test.sh --uefi     # UEFI, in QEMU on OVMF, for BFLAT_ARCH (x64 or arm64)
+./test.sh --all      # all but UEFI, plus the other Linux architecture under emulation
 ./test.sh --update   # rewrite tests/expected after an intended change in output
 ```
 
@@ -109,8 +115,10 @@ new guard needs a case in the sample and a line in that file.
 The docs have their own checks: `scripts/check-doc-snippets.py` compares the excerpts in `docs/` with
 the regions they quote from `samples/`, and `scripts/build-docs.py` builds the site into `output/`.
 
-CI runs `./test.sh` on Linux x64 for pushes to `master` and for pull requests (`.github/workflows/test.yml`),
-and the SDK's tests on every host (`sdk.yml`).
+For pushes to `master` and for pull requests, CI (`.github/workflows/test.yml`) runs `./test.sh` on
+Linux x64 and arm64, Windows under Wine, UEFI x64 and arm64 in QEMU, macOS (compiled on Linux, linked
+and run on an Apple Silicon runner) and WebAssembly. It runs the SDK's tests on every host
+(`sdk.yml`).
 
 ## Editor setup
 

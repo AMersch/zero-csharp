@@ -46,7 +46,8 @@ build for another system.
 A library project with `<NativeLib>Shared</NativeLib>` builds a `.so`, `.dylib` or `.dll` that .NET and
 C programs can call. The project comes with a VS Code setup for debugging.
 
-More: [Install with dotnet](https://onurgumus.github.io/zero-csharp/get-started/install-with-dotnet.html),
+More: [Coming from .NET](https://onurgumus.github.io/zero-csharp/get-started/coming-from-dotnet.html),
+[Install with dotnet](https://onurgumus.github.io/zero-csharp/get-started/install-with-dotnet.html),
 [the tutorial](https://onurgumus.github.io/zero-csharp/tutorial/index.html),
 [Build a native library](https://onurgumus.github.io/zero-csharp/how-to/build-a-native-library.html),
 [Debug a program](https://onurgumus.github.io/zero-csharp/how-to/debug-a-program.html).

@@ -38,6 +38,9 @@ terms.
 Or skip the installing: [run the samples in your browser](browser.html), compiled to WebAssembly from
 this site's version of the code.
 
+If you know C# from .NET, [Coming from .NET](coming-from-dotnet.html) maps what you use there to what
+you use here.
+
 Then the [tutorial](../tutorial/index.html) builds a small interactive program step by step, the
 [concepts](../concepts/index.html) explain how zero mode works and why, and the
 [task guides](../how-to/index.html) answer specific questions.

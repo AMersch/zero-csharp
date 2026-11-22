@@ -133,3 +133,5 @@ disagrees with `dotnet build`, `dotnet build` is right.
   with the repository's build.
 - [Create a reusable library](../how-to/create-a-library.html): `dotnet new zerolib`, references and
   packages.
+- [Run a language model](../how-to/run-a-language-model.html): `dotnet new zerollama` makes a
+  program that tells stories with a small language model compiled into it.

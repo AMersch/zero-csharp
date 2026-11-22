@@ -21,6 +21,25 @@ The program is about 1.1 MB, of which the model is 1 MB, and it needs no files: 
 DOS on a 386 included (64 tokens in a few seconds of an emulated 386), and
 [in your browser](../get-started/browser.html).
 
+## With the .NET SDK
+
+Without the repository, `dotnet new zerollama` makes the same program as a project. The model comes
+from the `ZeroCSharp.Stories260K` package, compiled in the same way, and the engine (`Llama`,
+`LlamaSampler`) is in the SDK's library:
+
+```bash
+dotnet new install ZeroCSharp.Templates
+dotnet new zerollama -o Story
+cd Story
+dotnet run                     # "Once upon a time", the likeliest word each time
+dotnet run -- -c               # take turns telling a story with it
+dotnet build -p:ZeroTarget=win-x64
+```
+
+Its `Program.cs` is `samples/Llama.cs`. To use another model of llama2.c's format, pass its bytes
+to `Llama.Create` instead of `Stories260K.Model` and `Stories260K.Tokenizer`.
+[Install with dotnet](../get-started/install-with-dotnet.html) covers the SDK itself.
+
 ## Load the model
 
 `Llama.Create` takes the model and tokenizer as byte spans and reads them in place. The weights are
@@ -29,7 +48,7 @@ never copied, and the run state (activations and the key/value cache) comes from
 <!-- sample: samples/Llama.cs create -->
 ```csharp
 Arena arena = Arena.Create(64 * 1024, "llama", stopOnOutOfMemory: true);
-Llama llama = Llama.Create(LlamaModel.Model, LlamaModel.Tokenizer, arena);
+Llama llama = Llama.Create(Stories260K.Model, Stories260K.Tokenizer, arena);
 ```
 
 The spans can be anything that stays put while the model is used. Here they are literals compiled

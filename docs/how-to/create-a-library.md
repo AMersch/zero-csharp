@@ -21,7 +21,7 @@ dotnet new zerolib -o Geometry
 The project file names the SDK and says it's a library:
 
 ```xml
-<Project Sdk="ZeroCSharp.Sdk/0.2.1">
+<Project Sdk="ZeroCSharp.Sdk/0.2.2">
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <Version>1.0.0</Version>
@@ -64,7 +64,7 @@ programs compile from its IL, so the SDK always optimizes a library, in Debug to
 Reference the library's project:
 
 ```xml
-<Project Sdk="ZeroCSharp.Sdk/0.2.1">
+<Project Sdk="ZeroCSharp.Sdk/0.2.2">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
   </PropertyGroup>

@@ -1,0 +1,13 @@
+<!-- dotnet build makes ZeroLlama1 in bin/Debug/, a native program that tells
+     stories with stories260K, a small language model compiled into it.
+     Run it as is, with -t 0.8 for words picked by chance, or with -c to take
+     turns writing a story with it.
+     Guide: https://onurgumus.github.io/zero-csharp/how-to/run-a-language-model.html -->
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ZeroCSharp.Stories260K" Version="@ZERO_SDK_VERSION@" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,19 @@
+<!-- ZeroCSharp.Stories260K: Karpathy's stories260K model and its tokenizer,
+     compiled into a zero library as byte literals (scripts/llama-model-cs.sh),
+     for Llama.Create(Stories260K.Model, Stories260K.Tokenizer, arena).
+     Not built from here: sdk/pack.sh stages it in obj/stage with the SDK
+     version filled in and Stories260K.cs generated next to it. -->
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AssemblyName>Stories260K</AssemblyName>
+    <PackageId>ZeroCSharp.Stories260K</PackageId>
+    <Version>@ZERO_SDK_VERSION@</Version>
+    <Authors>Zero C# contributors</Authors>
+    <Description>Andrej Karpathy's stories260K, a 260,000-parameter language model trained on children's stories, and its 512-token tokenizer, compiled in for zero-mode C# programs: Llama.Create(Stories260K.Model, Stories260K.Tokenizer, arena). dotnet new zerollama makes a program that tells stories with it.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://onurgumus.github.io/zero-csharp/how-to/run-a-language-model.html</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/OnurGumus/zero-csharp</RepositoryUrl>
+    <PackageTags>llama;language-model;tinystories;native;zero</PackageTags>
+  </PropertyGroup>
+</Project>

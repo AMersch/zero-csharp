@@ -56,3 +56,15 @@ jobs:
             x=; [ "$t" = win-x64 ] && x=.exe
             ls -la "bin/Debug/$(ls bin/Debug)/$t/Hello$x"
           done
+      # The storyteller: ZeroCSharp.Stories260K from nuget.org, and the story
+      # the repository's Llama sample tells.
+      - name: Make and run the storyteller
+        env:
+          EXE: ${{ matrix.exe }}
+        run: |
+          dotnet new zerollama -o Story
+          cd Story
+          dotnet build
+          out=$("bin/Debug/$(ls bin/Debug)/Story$EXE" | tr -d '\r')
+          echo "$out"
+          [[ "$out" == "Once upon a time, there was a little girl named Lily."* ]]

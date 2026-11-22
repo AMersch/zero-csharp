@@ -6,8 +6,8 @@
 # Usage:  sdk/test/run.sh                 pack (sdk/pack.sh), then run every test
 #         sdk/test/run.sh name...         only these tests (names as in the list below)
 # Env:    ZERO_NO_PACK=1                  use sdk/feed as it is (CI downloads it)
-#         ZERO_HOSTS                      the host packages to expect (default: both,
-#                                         "linux-x64 linux-arm64"); also passed to pack.sh
+#         ZERO_HOSTS                      the host packages to expect (default: all,
+#                                         "linux-x64 linux-arm64 win-x64"); also passed to pack.sh
 #
 # Exit code: the number of failed tests.
 set -uo pipefail
@@ -24,7 +24,7 @@ case "$(uname -s)" in
     MINGW* | MSYS* | CYGWIN*) HOST_OS=Windows ;;   # Git Bash
     *)                        HOST_OS=$(uname -s) ;;
 esac
-export ZERO_HOSTS=${ZERO_HOSTS:-linux-x64 linux-arm64}
+export ZERO_HOSTS=${ZERO_HOSTS:-linux-x64 linux-arm64 win-x64}
 case "$(uname -m)" in
     x86_64 | amd64)  HOST_ARCH_NAME=x64;   DOCKER_ARCH=amd64; HOST_ELF_ARCH=x86-64 ;;
     *)               HOST_ARCH_NAME=arm64; DOCKER_ARCH=arm64; HOST_ELF_ARCH=aarch64 ;;
@@ -200,8 +200,9 @@ test_host_packages() {
         if [ "$size" -ge 100 ]; then fail "host packages" "$(basename "$pkg") is $size MB, not under 100"; return; fi
         # Listed once: grep -q stops reading early, which pipefail counts as a failure.
         listing=$(zip_list "$pkg" | sed 's/^/ /')
-        if ! grep -q ' tools/bflat/bflat$' <<< "$listing"; then fail "host packages" "$rid: no tools/bflat/bflat"; return; fi
-        if ! grep -q ' tools/bflat/bin/lld$' <<< "$listing"; then fail "host packages" "$rid: no tools/bflat/bin/lld"; return; fi
+        local x=; [ "$rid" = win-x64 ] && x=.exe
+        if ! grep -q " tools/bflat/bflat$x\$" <<< "$listing"; then fail "host packages" "$rid: no tools/bflat/bflat$x"; return; fi
+        if ! grep -q " tools/bflat/bin/lld$x\$" <<< "$listing"; then fail "host packages" "$rid: no tools/bflat/bin/lld$x"; return; fi
         # The AGPL package must point to its exact source.
         if ! unzip -p "$pkg" "ZeroCSharp.Bflat.$rid.nuspec" | grep -qE 'commit="[0-9a-f]{40}"'; then
             fail "host packages" "$rid: the nuspec doesn't name the fork's commit"; return

@@ -35,6 +35,7 @@ public static class Program
             Out.Line("  union-no-case        a switch on a union that holds none of its cases");
             Out.Line("  debug-assert         a Debug.Assert whose condition is false");
             Out.Line("  debug-fail           a Debug.Fail");
+            Out.Line("  range-too-long       an array range that ends past the array");
             return 0;
         }
 
@@ -55,6 +56,7 @@ public static class Program
             case "union-no-case": UnionNoCase(); break;
             case "debug-assert": DebugAssert(Opaque(0)); break;
             case "debug-fail": DebugFail(); break;
+            case "range-too-long": RangeTooLong(Opaque(10)); break;
             default:
                 Out.Line("Unknown case");
                 return 0;
@@ -242,6 +244,12 @@ public static class Program
     static void DebugFail()
     {
         System.Diagnostics.Debug.Fail("unreachable state");
+    }
+
+    static int RangeTooLong(int end)
+    {
+        int[] numbers = { 1, 2, 3 };
+        return numbers[1..end].Length;
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]

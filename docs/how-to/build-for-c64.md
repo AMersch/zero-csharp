@@ -17,10 +17,16 @@ classes, interfaces, generics, lambdas, arenas and strings. What changes is how 
 
 This downloads NativeAOT-LLVM (shared with `--wasm` and `--dos`) and
 [llvm-mos](https://llvm-mos.org/), an LLVM with a 6502 code generator and a C library for the C64,
-into `tools/`: a 190 MB download, 750 MB unpacked. It also checks for what it can't download:
+into `tools/`: a 190 MB download, 750 MB unpacked. llvm-mos has builds for macOS and for x64 Linux.
+`setup.sh` also checks for what it can't download:
 
 - **Python 3**, for the tools in `c64/`.
-- **VICE**, the Commodore emulator (`x64sc`). `brew install vice` on macOS.
+- **VICE**, the Commodore emulator (`x64sc`). `brew install vice` on macOS, `sudo apt install vice` on
+  Debian or Ubuntu.
+
+Linux distributions ship VICE without the C64's ROMs (its BASIC, its KERNAL and its character set),
+which are copyrighted. On Linux, `setup.sh` takes them from VICE's own source release into
+`tools/c64/vice-roms`, and `run.sh` points VICE at them. Homebrew's VICE has them already.
 
 ## Build
 
@@ -53,7 +59,8 @@ a program prints goes through one function in `c64/runtime.c`, and VICE's monito
 registers each time that function starts: the character is in register A. The runtime writes the exit
 code to an address that VICE's "debug cartridge" watches, and VICE quits with it. The machine runs as
 fast as the host allows, so a run takes a second or two. VICE has no mode without a window; one opens,
-minimized, for the run. A run that hasn't finished after `C64_TIMEOUT` seconds of C64 time (default
+minimized, for the run. On a Linux machine without a screen, such as a server or CI, give it a virtual
+one: `xvfb-run -a ./test.sh --c64` (`sudo apt install xvfb xauth`). A run that hasn't finished after `C64_TIMEOUT` seconds of C64 time (default
 600) is stopped and exits with 124.
 
 With `--window` you get the machine itself: its screen, sound and keyboard, at 1 MHz. Close the window
@@ -218,6 +225,13 @@ cycles, of the 20,000 in a frame, because it passes 32-bit numbers through an 8-
 `Paddles` is a paddle-and-ball game: you against the computer, first to 7 points, with W and S or
 a joystick in port 2. It plays a tune on the SID's second and third voices (M turns it off) and its
 sound effects on the first.
+
+<video controls preload="none" poster="../img/c64-paddles.jpg" style="width:100%;max-width:720px;border-radius:8px" aria-label="Paddles running in VICE, with its music">
+  <source src="../img/c64-paddles.mp4" type="video/mp4" />
+</video>
+
+The title screen, the computer playing itself, and a point scored, recorded in VICE with the C64's own
+sound.
 
 ```bash
 ./build.sh --c64 Paddles
@@ -412,8 +426,9 @@ that `c64/runtime.c` defines with 32-bit parameters: C#'s `calloc` is `cs_calloc
 
 ## Watch out for
 
-- **Tested in VICE 3.10 on macOS only.** Nothing has run on a real C64, on Linux, or in CI. The disk
-  image route was checked in VICE with its drive emulation.
+- **Tested in VICE only:** 3.10 on macOS, and 3.7.1 on Ubuntu 24.04 x64, where CI runs
+  `./test.sh --c64` on every change. Nothing has run on a real C64 yet. The disk image route was
+  checked in VICE with its drive emulation.
 - **Programs that fit can still run out of memory.** `SmallFloats` runs with 0.6 KB to spare.
 - **A long method can be too much for llvm-mos:** the 6502 has three registers, and the error is
   "ran out of registers". `build.sh` then compiles that method's module separately and tries again; if

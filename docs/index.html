@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Zero-mode C#: C# compiled by a bflat fork into small native programs with no .NET runtime, for Linux, macOS, Windows, WebAssembly, DOS on a 386, and UEFI with no operating system." />
+  <meta name="description" content="Zero-mode C#: C# compiled by a bflat fork into small native programs with no .NET runtime, for Linux, macOS, Windows, WebAssembly, DOS on a 386, UEFI with no operating system, and the Commodore 64." />
   <title>Zero C# | C# without a runtime, from Linux to a 386</title>
   <link rel="icon" href="img/favicon.svg" type="image/svg+xml" />
   <!-- Link previews. The image is drawn from docs/social/card.html; build-docs.py adds the same to every guide page. -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Zero C#" />
   <meta property="og:title" content="Zero C#: C# with nothing underneath" />
-  <meta property="og:description" content="A bflat fork that compiles C# to small native programs with no .NET runtime and no garbage collector, for Linux, macOS, Windows, WebAssembly, DOS on a 386, and UEFI with no operating system." />
+  <meta property="og:description" content="A bflat fork that compiles C# to small native programs with no .NET runtime and no garbage collector, for Linux, macOS, Windows, WebAssembly, DOS on a 386, UEFI with no operating system, and the Commodore 64." />
   <meta property="og:url" content="https://onurgumus.github.io/zero-csharp/" />
   <meta property="og:image" content="https://onurgumus.github.io/zero-csharp/img/social.png?v=3" />
   <meta property="og:image:width" content="1200" />
@@ -172,6 +172,16 @@
     @keyframes blink { 50% { opacity: 0; } }
     @media (prefers-reduced-motion: reduce) { .dos .cursor { animation: none; } .button:hover { transform: none; } }
 
+    /* The Commodore 64: the machine's own blues, and the promo video. */
+    .c64 { background: #352879; color: #c3bcf0; padding: 56px 0 60px; }
+    .c64 h2 { color: #fff; }
+    .c64-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 32px 48px; align-items: center; }
+    .c64 video { display: block; width: 100%; height: auto; border-radius: 10px; border: 6px solid #6c5eb5; background: #000; }
+    .c64 p { margin: 0 0 14px; }
+    .c64 code { font: .875em var(--mono); color: #fff; }
+    .c64 a { color: #f3c86a; font-weight: 600; }
+    .c64 .note { font-size: .875rem; color: #9d94d6; }
+
     /* Ideas */
     .ideas { padding: 56px 0 64px; border-top: 1px solid var(--line); }
     .idea-list { display: grid; grid-template-columns: 1fr 1fr; gap: 34px 56px; margin: 0; padding: 0; list-style: none; }
@@ -200,6 +210,7 @@
       .screen:not(.desktop) .screen-body { height: auto; }
       .screen, .screen.desktop, .desktops { grid-column: auto; }
       .idea-list { grid-template-columns: 1fr; }
+      .c64-grid { grid-template-columns: 1fr; }
       .ledger-grid, .kept ul { grid-template-columns: 1fr; }
       .path { grid-template-columns: 1fr 1fr; }
       .nav-links { gap: 16px; }
@@ -230,7 +241,7 @@
       <div>
         <h1>C# with nothing underneath</h1>
         <p class="lede">A fork of bflat compiles C# straight to a small native program: no .NET runtime, no garbage collector, nothing to install where it runs.</p>
-        <p>You keep C#'s syntax, type checking and generics. Memory comes from arenas you free all at once, and a small library gives you strings, collections, input and output on those terms. The same source runs on Linux, macOS and Windows, on WebAssembly, on DOS on a 386, and on a bare PC with no operating system, started by its UEFI firmware.</p>
+        <p>You keep C#'s syntax, type checking and generics. Memory comes from arenas you free all at once, and a small library gives you strings, collections, input and output on those terms. The same source runs on Linux, macOS and Windows, on WebAssembly, on DOS on a 386, on a bare PC with no operating system, started by its UEFI firmware, and on a Commodore 64.</p>
         <div class="actions">
           <a class="button primary" href="get-started/index.html">Get started</a>
           <a class="button" href="tutorial/index.html">Build the quiz tutorial</a>
@@ -326,6 +337,21 @@ D:\&gt;<span class="cursor" aria-hidden="true"></span></pre>
             <h3>DOS on a 386</h3>
             <p>The same bitcode compiled for a 386, run by the HX DOS extender. Tested on Bochs's i386 model.</p>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="c64" aria-labelledby="c64-title">
+      <div class="wrap c64-grid">
+        <video controls preload="none" poster="img/c64-paddles.jpg" aria-label="A paddle-and-ball game written in C#, running on a Commodore 64, with its music">
+          <source src="img/c64-paddles.mp4" type="video/mp4" />
+        </video>
+        <div>
+          <h2 id="c64-title">And a Commodore 64</h2>
+          <p>The repository also builds for the home computer from 1982: a 1 MHz 6502 with 64 KB of memory. The same bitcode as for WebAssembly is rewritten for 16-bit addresses and compiled by llvm-mos.</p>
+          <p>Nineteen of the test programs run there, and so does this game: records, a union and pattern matching, sprites, the keyboard, and music on the SID chip, in 37 KB, with nothing allocated while it plays.</p>
+          <p><a href="how-to/build-for-c64.html">Build for the Commodore 64</a></p>
+          <p class="note">Recorded in the VICE emulator. Built with <code>./build.sh --c64</code> from the repository; <code>dotnet build</code> doesn't target the C64 yet.</p>
         </div>
       </div>
     </section>

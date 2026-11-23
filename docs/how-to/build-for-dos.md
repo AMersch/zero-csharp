@@ -22,7 +22,9 @@ the HX DOS extender 2.23 into `tools/`, about 75 MB. It also checks for what it 
 
 - **A clang with the x86 target.** The WASI SDK's clang doesn't have it. On macOS, Xcode's is used; on
   Linux, the system's. Set `DOS_CLANG` to choose another.
-- **Python 3**, for the tools in `dos/`.
+- **The .NET SDK** (10 or newer), to build `zero-bitcode` (`sdk/ZeroCSharp.Bitcode`), which turns
+  the compiler's output into 386 sources.
+- **Python 3**, for `dos/run.sh`, which makes the disk image the emulator starts.
 - **An emulator:** Bochs or QEMU (`qemu-system-i386`). `brew install bochs` on macOS,
   `sudo apt install bochs` (or `qemu-system-x86`) on Ubuntu.
 

@@ -20,10 +20,10 @@ built next to this repository. It has no release to download; the
 - **WebAssembly:** `./setup.sh --wasm` downloads NativeAOT-LLVM, the WASI SDK and wasmtime into
   `tools/wasm` (about 900 MB). Their versions are pinned in `env.sh` and only work as a set.
 - **DOS:** `./setup.sh --dos` downloads FreeDOS and the HX DOS extender into `tools/` and checks for
-  clang, Python 3 and an emulator. Use Bochs (`brew install bochs`): its `i386` processor refuses
+  clang, the .NET SDK, Python 3 and an emulator. Use Bochs (`brew install bochs`): its `i386` processor refuses
   instructions a 386 doesn't have, and QEMU's `486` doesn't.
 - **Commodore 64:** `./setup.sh --c64` downloads llvm-mos, a compiler for the 6502, into `tools/c64`
-  (about 750 MB) and checks for Python 3 and VICE, the emulator (`brew install vice`).
+  (about 750 MB) and checks for the .NET SDK, Python 3 and VICE, the emulator (`brew install vice`).
 - **UEFI:** QEMU with the OVMF firmware (`brew install qemu` includes it; on Ubuntu
   `qemu-system-x86 ovmf`, or `qemu-system-arm qemu-efi-aarch64` for arm64), a clang with the Windows
   targets (as for `--win`), and Python 3. `UEFI_FIRMWARE` points at another firmware file.

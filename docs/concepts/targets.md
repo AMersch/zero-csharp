@@ -129,9 +129,9 @@ output isn't tied to a processor until the last step. So `./build.sh --dos` reus
 
 1. **bflat and NativeAOT-LLVM** compile each sample to LLVM bitcode, exactly as for WebAssembly, against
    zerocore's WebAssembly build, which is its single-threaded 32-bit build.
-2. **`dos/wasm2i386.py`** rewrites the one WebAssembly-specific part. NativeAOT-LLVM writes the
-   program's data (type descriptions, string literals, static fields) as a WebAssembly object file. The
-   script turns it into assembly with the same bytes and translates its few tiny functions to C.
+2. **`zero-bitcode wasm2i386`** rewrites the one WebAssembly-specific part. NativeAOT-LLVM writes the
+   program's data (type descriptions, string literals, static fields) as a WebAssembly object file.
+   The tool, a small .NET program in `sdk/ZeroCSharp.Bitcode`, turns it into assembly with the same bytes and translates its few tiny functions to C.
 3. **clang with `-march=i386`** compiles the bitcode and those files to 386 code.
 4. **bflat's linker** links it all with `dos/runtime.c` into a 32-bit Windows console program.
 
@@ -175,13 +175,13 @@ object layout in its output assumes 4-byte pointers. But its output is bitcode, 
 
 1. **bflat and NativeAOT-LLVM** compile each sample to bitcode as for DOS, but optimizing for size
    (`--Os`), which among other things keeps one copy of each loop where `-O` makes two.
-2. **`c64/ll2mos.py`** rewrites the bitcode, as text, for 2-byte pointers. Memory keeps the 32-bit
+2. **`zero-bitcode ll2mos`** rewrites the bitcode, as text, for 2-byte pointers. Memory keeps the 32-bit
    layout: a pointer in memory stays a 4-byte slot, holding the 16-bit address and two zero bytes, so
    every offset the compiler worked out still holds. Only pointers in registers shrink. A store of a
    pointer becomes a store of the address widened to 32 bits; a load reads the low half; pointers inside
    struct types become integers. NativeAOT-LLVM only uses packed structs, so nothing else in a layout
    depends on the processor.
-3. **`c64/wasm2mos.py`** does for the 6502 what `dos/wasm2i386.py` does for the 386, with the same
+3. **`zero-bitcode wasm2mos`** does for the 6502 what `wasm2i386` does for the 386, with the same
    reader: the program's data becomes assembly, each address in it a 2-byte address and two zero bytes.
 4. **llvm-mos** compiles it all with `c64/runtime.c` and optimizes the whole program at link time, into
    a `.prg` file that BASIC loads and starts.
@@ -189,7 +189,7 @@ object layout in its output assumes 4-byte pointers. But its output is bitcode, 
 Three things that are harmless on a 32-bit processor matter here:
 
 - **A pointer and a 32-bit integer travel in different registers.** A function declared as returning
-  one and defined as returning the other works on a 386 and returns garbage on a 6502. `ll2mos.py`
+  one and defined as returning the other works on a 386 and returns garbage on a 6502. `ll2mos`
   refuses a program with such a pair, and the few functions NativeAOT-LLVM writes as WebAssembly get
   their real types from the bitcode that calls them.
 - **C's `int` is 16 bits.** Every function C# imports is bound to a `cs_` name, which `c64/runtime.c`
@@ -199,7 +199,7 @@ Three things that are harmless on a 32-bit processor matter here:
   llvm-mos's `malloc` aligns to nothing, so `runtime.c` aligns what it hands out.
 
 The exception flag that compiled code checks after every call is never set in zero mode (a `throw`
-ends the program), so `ll2mos.py` replaces each read of it with zero and the checks disappear. The
+ends the program), so `ll2mos` replaces each read of it with zero and the checks disappear. The
 flag isn't defined anywhere: a program for which that were wrong wouldn't link.
 
 What the C64 target needs, and how it stays honest:

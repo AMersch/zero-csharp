@@ -1,0 +1,16 @@
+<!-- zero-bitcode: turns NativeAOT-LLVM's output (LLVM IR for a 32-bit machine,
+     and a WebAssembly object file with the data) into sources for another
+     processor. Used by ./build.sh for the C64 and DOS, and by the SDK. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>zero-bitcode</AssemblyName>
+    <RootNamespace>ZeroBitcode</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Runs on whichever .NET is installed, 10 or newer. -->
+    <RollForward>Major</RollForward>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+</Project>

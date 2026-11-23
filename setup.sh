@@ -174,7 +174,12 @@ fetch_c64_tools() {
 }
 
 if ! command -v python3 >/dev/null 2>&1 && { [ "$want_dos" = 1 ] || [ "$want_c64" = 1 ]; }; then
-    echo "Missing: python3, for the tools in dos/ and c64/"
+    echo "Missing: python3, which dos/run.sh and c64/run.sh use to run programs in the emulator"
+    ok=0
+fi
+
+if ! command -v dotnet >/dev/null 2>&1 && { [ "$want_dos" = 1 ] || [ "$want_c64" = 1 ]; }; then
+    echo "Missing: the .NET SDK (10 or newer), to build zero-bitcode (sdk/ZeroCSharp.Bitcode) for DOS and the C64"
     ok=0
     want_dos=0
     want_c64=0

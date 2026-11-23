@@ -23,7 +23,7 @@ dotnet new zerolib -o MathLib
 ```
 
 ```xml
-<Project Sdk="ZeroCSharp.Sdk/0.8.0">
+<Project Sdk="ZeroCSharp.Sdk/0.9.0">
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <NativeLib>Shared</NativeLib>

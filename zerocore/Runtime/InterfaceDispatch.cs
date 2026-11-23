@@ -120,9 +120,11 @@ namespace System.Runtime
 #if WASM
         // WebAssembly has no way to jump to a method with the caller's
         // arguments still in place, so compiled code there asks for the
-        // method's address and calls it itself.
+        // method's address and calls it itself. It expects a pointer back, not
+        // an integer: the same thing on a 32-bit processor, but on the 6502
+        // (./build.sh --c64) the two come back in different registers.
         [RuntimeExport("RhpResolveInterfaceDispatch")]
-        internal static nint ResolveForCall(object obj, nint* cell) => Resolve(obj, cell);
+        internal static void* ResolveForCall(object obj, nint* cell) => (void*)Resolve(obj, cell);
 #endif
 
         private static MethodTable* InterfaceOf(nint* cell, nint value)

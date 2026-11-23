@@ -156,6 +156,7 @@ namespace System
 
         // Zero mode has no exceptions: anything that would throw ends the
         // process here, after printing the reason to stderr.
+        [DoesNotReturn]
         public static void FailFast(string message)
         {
             if (message != null)

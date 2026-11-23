@@ -67,6 +67,14 @@ namespace System.Diagnostics
 namespace System.Diagnostics.CodeAnalysis
 {
     public sealed class DoesNotReturnAttribute : Attribute { }
+
+    // On a bool parameter: the method doesn't return when the argument has
+    // this value, so the compiler's null analysis trusts what it asserts.
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public sealed class DoesNotReturnIfAttribute : Attribute
+    {
+        public DoesNotReturnIfAttribute(bool parameterValue) { }
+    }
 }
 
 namespace System.Runtime
@@ -88,6 +96,26 @@ namespace System.Runtime
 
 namespace System.Runtime.CompilerServices
 {
+    // Caller information: on an optional parameter, the compiler passes a
+    // constant from the call site in place of the default (the source file's
+    // path, the line, the calling member's name, or the text of another
+    // argument). Nothing happens at run time.
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public sealed class CallerFilePathAttribute : Attribute { }
+
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public sealed class CallerLineNumberAttribute : Attribute { }
+
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public sealed class CallerMemberNameAttribute : Attribute { }
+
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public sealed class CallerArgumentExpressionAttribute : Attribute
+    {
+        public CallerArgumentExpressionAttribute(string parameterName) { ParameterName = parameterName; }
+        public string ParameterName { get; }
+    }
+
     public enum MethodImplOptions
     {
         Unmanaged = 0x4,

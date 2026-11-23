@@ -151,9 +151,26 @@ fetch_c64_tools() {
     if emulator=$(find_c64_emulator); then
         echo "vice:   $emulator"
     else
-        echo "Missing: VICE, the emulator run.sh --c64 uses (x64sc). macOS: brew install vice"
+        echo "Missing: VICE, the emulator run.sh --c64 uses (x64sc). macOS: brew install vice. Linux: apt install vice"
         ok=0
     fi
+
+    # Homebrew's VICE has the ROMs; Debian's and Ubuntu's don't.
+    if [ "$(uname -s)" != Darwin ] && [ ! -f "$C64_ROMS/C64/kernal-901227-03.bin" ]; then
+        local archive=$C64_TOOLS/vice.tar.gz
+        echo "Downloading the C64's ROMs from VICE $VICE_ROMS_VERSION's source release (13 MB)..."
+        curl -fsSL -o "$archive" \
+            "https://sourceforge.net/projects/vice-emu/files/releases/vice-$VICE_ROMS_VERSION.tar.gz/download"
+        rm -rf "$C64_ROMS"
+        mkdir -p "$C64_ROMS"
+        tar -xzf "$archive" -C "$C64_ROMS" --strip-components=2 \
+            "vice-$VICE_ROMS_VERSION/data/C64/kernal-901227-03.bin" \
+            "vice-$VICE_ROMS_VERSION/data/C64/basic-901226-01.bin" \
+            "vice-$VICE_ROMS_VERSION/data/C64/chargen-901225-01.bin" \
+            "vice-$VICE_ROMS_VERSION/data/DRIVES"
+        rm "$archive"
+    fi
+    [ -d "$C64_ROMS" ] && echo "roms:   $C64_ROMS"
 }
 
 if ! command -v python3 >/dev/null 2>&1 && { [ "$want_dos" = 1 ] || [ "$want_c64" = 1 ]; }; then

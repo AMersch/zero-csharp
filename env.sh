@@ -125,11 +125,17 @@ find_dos_emulator() {
 # links it. llvm-mos runs on this machine, not in the build container.
 # The programs run in VICE, a Commodore emulator (macOS: brew install vice).
 #
-# C64_TOOLS     where llvm-mos is stored. Default: tools/c64
+# Linux distributions ship VICE without the C64's ROMs (they are copyrighted),
+# so on Linux ./setup.sh --c64 takes them from VICE's own source release and
+# c64/run.sh points VICE at them.
+#
+# C64_TOOLS     where llvm-mos (and, on Linux, the ROMs) are stored. Default: tools/c64
 # C64_EMULATOR  VICE's C64 emulator. Default: x64sc, or x64 if that's all there is
 LLVM_MOS_VERSION=v23.4.0
 C64_TOOLS=${C64_TOOLS:-tools/c64}
 LLVM_MOS=$C64_TOOLS/llvm-mos-$LLVM_MOS_VERSION
+VICE_ROMS_VERSION=3.7.1
+C64_ROMS=$C64_TOOLS/vice-roms
 
 find_c64_emulator() {
     local candidate

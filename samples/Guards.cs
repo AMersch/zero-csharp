@@ -6,6 +6,10 @@
 // on stderr and a non-zero exit code. Each case below makes one such mistake
 // on purpose. test.sh runs them all and checks the message of each against
 // tests/expected/Guards.fail, so a guard that stops working is noticed.
+//
+// Debug.Assert and Debug.Fail only exist where DEBUG is defined (the SDK
+// defines it in Debug builds); build.sh doesn't, so this file does.
+#define DEBUG
 
 namespace GuardsSample;
 
@@ -29,6 +33,8 @@ public static class Program
             Out.Line("  throw                a throw, inside a try with a matching catch");
             Out.Line("  throw-null           throw null");
             Out.Line("  union-no-case        a switch on a union that holds none of its cases");
+            Out.Line("  debug-assert         a Debug.Assert whose condition is false");
+            Out.Line("  debug-fail           a Debug.Fail");
             return 0;
         }
 
@@ -47,6 +53,8 @@ public static class Program
             case "throw": Throw(); break;
             case "throw-null": ThrowNull(); break;
             case "union-no-case": UnionNoCase(); break;
+            case "debug-assert": DebugAssert(Opaque(0)); break;
+            case "debug-fail": DebugFail(); break;
             default:
                 Out.Line("Unknown case");
                 return 0;
@@ -222,6 +230,22 @@ public static class Program
         };
         // docs:end
     }
+
+    // docs:debug-assert
+    static int DebugAssert(int count)
+    {
+        System.Diagnostics.Debug.Assert(count > 0, "the queue is empty");
+        return count - 1;
+    }
+    // docs:end
+
+    static void DebugFail()
+    {
+        System.Diagnostics.Debug.Fail("unreachable state");
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static int Opaque(int value) => value;
 }
 
 public struct Left { public int Value; }

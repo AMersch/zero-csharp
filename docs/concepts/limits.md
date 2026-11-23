@@ -39,6 +39,8 @@ With zerocore, as `build.sh` builds it:
   of bits.
 - **Extension methods**, and C# 14 **extension members**: properties, static members and
   `ref` receivers in `extension(...)` blocks.
+- **Caller information** (`[CallerMemberName]`, `[CallerLineNumber]`, `[CallerFilePath]`,
+  `[CallerArgumentExpression]`) and **`Debug.Assert`/`Debug.Fail`** in Debug builds.
 
 Records work as in .NET, including the generated `ToString`:
 
@@ -209,6 +211,45 @@ for (int i = 1; i < 100; i += 2)
 var oddPrimes = new BitArray(primes).And(odd);
 Check("And", !oddPrimes[2] && oddPrimes[3] && !oddPrimes[9]);
 ```
+
+### Caller information and Debug.Assert
+
+The caller-info attributes work as in .NET. The compiler passes constants from the call site, so
+they cost nothing at run time:
+
+<!-- sample: samples/Core.cs caller-info -->
+```csharp
+// The compiler fills in caller-info parameters with constants.
+string member = CallerMember();
+int first = CallerLine();
+int second = CallerLine();
+Check("CallerMemberName", member == "Main");
+Check("CallerLineNumber", first > 0 && second == first + 1);
+Check("CallerFilePath", CallerFile().EndsWith("Core.cs"));
+Check("CallerArgumentExpression", ArgumentText(first + 1) == "first + 1");
+```
+
+`Debug.Assert` and `Debug.Fail` are built on them. Where `DEBUG` is defined (the SDK defines it in
+Debug builds), a failed assert ends the program with its condition and where it is:
+
+<!-- sample: samples/Guards.cs debug-assert -->
+```csharp
+static int DebugAssert(int count)
+{
+    System.Diagnostics.Debug.Assert(count > 0, "the queue is empty");
+    return count - 1;
+}
+```
+
+```text
+Debug.Assert failed: count > 0: the queue is empty
+  in DebugAssert at Guards.cs:237
+```
+
+Where `DEBUG` isn't defined, as in Release builds, the compiler removes each call along with its
+arguments. That is decided where the call is compiled, so the asserts are only in your own code:
+`lib/` and zerocore come compiled without `DEBUG`, and their own checks are always on (see
+[Memory without a GC](memory.html) for `Arena.DebugChecks`).
 
 ## Choosing how to dispatch
 

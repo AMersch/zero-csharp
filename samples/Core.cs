@@ -1,6 +1,6 @@
 // Example: the smaller parts of the core library (zerocore): Math and MathF,
 // Interlocked, Volatile, interface calls from one call site to many classes,
-// extension members, and C# 15 unions (zerocore/System/Exceptions.cs and
+// extension members, C# 15 unions, and caller-info attributes (zerocore/System/Exceptions.cs and
 // Unions.cs explain what those two need from the library).
 // Exit code = number of failed checks.
 // Build: ./build.sh Core
@@ -110,6 +110,11 @@ public static class Program
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     static string Opaque(string value) => value;
+
+    static string CallerMember([CallerMemberName] string member = null) => member;
+    static int CallerLine([CallerLineNumber] int line = 0) => line;
+    static string CallerFile([CallerFilePath] string file = null) => file;
+    static string ArgumentText(int value, [CallerArgumentExpression(nameof(value))] string text = null) => text;
 
     static bool Near(double actual, double expected) => Math.Abs(actual - expected) < 1e-12;
 
@@ -252,6 +257,22 @@ public static class Program
         Check("switch on a union", ValueOrMinusOne(Opaque("42")) == 42 && ValueOrMinusOne(Opaque("4.2")) == -1);
         // docs:end
         Section("unions");
+
+        // docs:caller-info
+        // The compiler fills in caller-info parameters with constants.
+        string member = CallerMember();
+        int first = CallerLine();
+        int second = CallerLine();
+        Check("CallerMemberName", member == "Main");
+        Check("CallerLineNumber", first > 0 && second == first + 1);
+        Check("CallerFilePath", CallerFile().EndsWith("Core.cs"));
+        Check("CallerArgumentExpression", ArgumentText(first + 1) == "first + 1");
+        // docs:end
+        // This file doesn't define DEBUG, so the call and its arguments are gone.
+        int evaluated = 0;
+        System.Diagnostics.Debug.Assert(++evaluated < 0);
+        Check("Debug.Assert without DEBUG is removed", evaluated == 0);
+        Section("caller info");
 
         Out.Line();
         if (s_failures == 0)

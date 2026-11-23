@@ -19,6 +19,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A newer push to a pull request cancels the run for the older one; runs on
+# master and on tags always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # The fork's branch whose bflat the packages carry. master for a release.
 env:
   BFLAT_REF: master
@@ -174,8 +180,11 @@ jobs:
   # bflat can't build itself for macOS: the fork's tools/build-macos-layout.sh
   # makes the layout on a Mac (NativeAOT, Microsoft's osx-arm64 JITs, LLVM's
   # lld), from the linux-glibc-arm64 layout's lib/ and ref/.
+  # The macOS layout: built on a Mac (cached), then trimmed with the
+  # linux-arm64 list, mapped (otool needs a Mac). One job, so one wait for a
+  # Mac runner.
   bflat-macos:
-    needs: bflat
+    needs: [bflat, trim]
     runs-on: macos-latest
     outputs:
       key: ${{ steps.key.outputs.key }}
@@ -184,11 +193,10 @@ jobs:
         run: echo "key=bflat-macos-layout-${{ needs.bflat.outputs.commit }}" >> "$GITHUB_OUTPUT"
       - name: Restore the macOS layout from the cache
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: bflat/layouts/osx-arm64
           key: ${{ steps.key.outputs.key }}
-          lookup-only: true
       - uses: actions/checkout@v4
         if: steps.cache.outputs.cache-hit != 'true'
         with:
@@ -219,20 +227,9 @@ jobs:
         with:
           path: bflat/layouts/osx-arm64
           key: ${{ steps.key.outputs.key }}
-
-  # The macOS list is linux-arm64's, mapped (otool needs a Mac).
-  trim-macos:
-    needs: [bflat-macos, trim]
-    runs-on: macos-latest
-    steps:
       - uses: actions/checkout@v4
         with:
           path: zero-csharp
-      - uses: actions/cache/restore@v4
-        with:
-          path: bflat/layouts/osx-arm64
-          key: ${{ needs.bflat-macos.outputs.key }}
-          fail-on-cache-miss: true
       - uses: actions/download-artifact@v4
         with:
           name: trimmed-linux-arm64
@@ -246,7 +243,7 @@ jobs:
           path: zero-csharp/sdk/trimmed/osx-arm64
 
   pack:
-    needs: [trim, trim-windows, trim-macos]
+    needs: [trim, trim-windows, bflat-macos]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -396,11 +393,6 @@ jobs:
   # ad hoc, and printing (or answering the .NET caller) what they should.
   mac-programs:
     needs: [test, windows]
-    strategy:
-      fail-fast: false
-      matrix:
-        built-on: [linux-x64, linux-arm64, win-x64]
-    name: mac-programs (built on ${{ matrix.built-on }})
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -409,18 +401,20 @@ jobs:
           dotnet-version: '10.0.x'
       - uses: actions/download-artifact@v4
         with:
-          name: mac-built-${{ matrix.built-on }}
+          pattern: mac-built-*
           path: built
-      - name: Run them
+      - name: Run the programs and call the libraries built on each host
         run: |
-          chmod +x built/native built/threads
-          codesign -v built/native built/threads
-          out=$(built/native); echo "$out"; [ "$out" = hi ]
-          out=$(built/threads); echo "$out"; [ "$out" = "$(printf '499500\n1')" ]
-      - name: Call the native library
-        run: |
-          codesign -v built/nativelib.dylib
-          sdk/test/call-native-lib.sh built/nativelib.dylib
+          for host in linux-x64 linux-arm64 win-x64; do
+            echo "== built on $host"
+            dir=built/mac-built-$host
+            chmod +x $dir/native $dir/threads
+            codesign -v $dir/native $dir/threads
+            out=$($dir/native); echo "$out"; [ "$out" = hi ]
+            out=$($dir/threads); echo "$out"; [ "$out" = "$(printf '499500\n1')" ]
+            codesign -v $dir/nativelib.dylib
+            sdk/test/call-native-lib.sh $dir/nativelib.dylib
+          done
 
   macos:
     needs: pack

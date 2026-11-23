@@ -1,0 +1,2 @@
+Test match: 3 to 7, 204 hits in 18836 frames
+All 5 checks passed.

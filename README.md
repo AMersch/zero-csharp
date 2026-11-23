@@ -5,7 +5,7 @@
 C# compiled to small native programs with no .NET runtime and no garbage collector. On Linux a hello
 world is 16 to 39 KB. It builds on [bflat](https://flattened.net/)'s zero mode, uses C# 15 with the updated
 memory safety rules, and runs on Linux, macOS, Windows, WebAssembly, DOS on a 386, and UEFI with no
-operating system at all.
+operating system at all. Programs that are small enough run on a Commodore 64.
 
 You keep C#'s syntax, generics, spans, interfaces and lambdas. You lose the garbage collector,
 catchable exceptions, reflection and almost all of the base class library. Memory you want back goes in
@@ -62,13 +62,17 @@ More: [Coming from .NET](https://onurgumus.github.io/zero-csharp/get-started/com
 | WebAssembly (WASI) | `./build.sh --wasm` | 16 KB to 80 KB |
 | DOS, 386 with a 387 | `./build.sh --dos` | 16 KB to 93 KB |
 | UEFI x64 and arm64, no OS | `./build.sh --uefi` | 10 KB to 72 KB |
+| Commodore 64 | `./build.sh --c64` | 7 KB to 49 KB, of the 50 KB there are |
 
-The sizes leave out Llama, which carries its model and is about 1.1 MB everywhere. WebAssembly and
-DOS go through [NativeAOT-LLVM](https://github.com/dotnet/runtimelab/tree/feature/NativeAOT-LLVM)
+The sizes leave out Llama, which carries its model and is about 1.1 MB everywhere. WebAssembly, DOS
+and the Commodore 64 go through [NativeAOT-LLVM](https://github.com/dotnet/runtimelab/tree/feature/NativeAOT-LLVM)
 instead of bflat's own code generator. The DOS build runs under the HX DOS extender and is tested on
 an emulated 386 with 4 MB. A UEFI program is started by the PC's firmware, from a USB stick or in QEMU,
 and has no operating system or C library under it.
-[Build for UEFI](https://onurgumus.github.io/zero-csharp/how-to/build-for-uefi.html) shows how. [Targets](https://onurgumus.github.io/zero-csharp/concepts/targets.html)
+[Build for UEFI](https://onurgumus.github.io/zero-csharp/how-to/build-for-uefi.html) shows how. On the
+Commodore 64 the same bitcode is rewritten for 16-bit addresses and compiled by
+[llvm-mos](https://llvm-mos.org/); the samples that fit in its memory run there, in the VICE emulator
+([Build for the Commodore 64](https://onurgumus.github.io/zero-csharp/how-to/build-for-c64.html)). [Targets](https://onurgumus.github.io/zero-csharp/concepts/targets.html)
 explains how each one is built.
 
 ## What works
@@ -116,11 +120,11 @@ was freed. See [Memory without a GC](https://onurgumus.github.io/zero-csharp/con
 | Folder | What |
 |---|---|
 | [`zerocore/`](zerocore/README.md) | The core library: `object`, `string`, casts, allocation. About 2,400 lines of C#, MIT licensed |
-| [`lib/`](lib/) | Arenas, collections, strings, input and output, files, the clock, random numbers, SIMD kernels, `Parallel.For`, DOS and UEFI graphics ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
+| [`lib/`](lib/) | Arenas, collections, strings, input and output, files, the clock, random numbers, SIMD kernels, `Parallel.For`, DOS and UEFI graphics, the Commodore 64's screen and sprites ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
 | [`samples/`](samples/) | The programs below |
 | [`sdk/`](sdk/) | The `ZeroCSharp.*` NuGet packages |
 | [`docs/`](docs/) | The documentation site |
-| `mac/`, `win/`, `wasm/`, `dos/`, `efi/` | Each target's entry point and the C functions it needs (`efi/libm/` is from musl, MIT) |
+| `mac/`, `win/`, `wasm/`, `dos/`, `efi/`, `c64/` | Each target's entry point and the C functions it needs (`efi/libm/` is from musl, MIT) |
 
 The programs don't use bflat's own zero-mode library, zerolib, which is AGPL. zerocore replaces it, so
 nothing AGPL is linked into them.
@@ -151,6 +155,9 @@ nothing AGPL is linked into them.
 | `Refs` | Structs in an arena passed and returned by `ref` | 75 KB |
 | `Llama` | Karpathy's stories260K language model, compiled into the program; it tells the same story on every target, DOS and UEFI included | 1.1 MB |
 | `Vga` | DOS and UEFI only: a small game in 320x200 with 256 colors | 36 KB |
+| `SmallStrings`, `SmallIntegers`, `SmallObjects` and seven more | Tests sized for a small machine: what Strings, Casts, Collections and the others check, in pieces that each fit in a Commodore 64 | 49 to 81 KB |
+| `C64Demo` | Commodore 64 only: text, a sprite and raster bars, with objects, a list and a lambda behind them | 36 KB |
+| `Paddles` | Commodore 64 only: a paddle-and-ball game against the computer, with sprites, SID sound, records and unions | 34 KB |
 
 Sizes are for Linux arm64 and include debug information (only Tiny is stripped).
 

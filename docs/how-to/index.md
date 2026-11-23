@@ -44,6 +44,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   running a program on a real machine.
 - [Draw on the VGA screen](draw-on-vga.html): graphics mode, colors, drawing a frame without flicker,
   and reading the keyboard under DOS.
+- [Build for the Commodore 64](build-for-c64.html): the toolchain, what fits in 50 KB and what each
+  feature costs, the screen and sprites, a game, and running a program in VICE.
 - [Build for UEFI](build-for-uefi.html): programs the firmware starts with no operating system, running
   them in QEMU, and booting a real PC from a USB stick.
 

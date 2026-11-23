@@ -12,6 +12,9 @@
 # With --dos, builds 32-bit DOS programs for a 386 and later (bin/dos/*.exe),
 # with NativeAOT-LLVM and a clang that has the x86 target (./setup.sh --dos).
 #
+# With --c64, builds Commodore 64 programs (bin/c64/*.prg), with NativeAOT-LLVM
+# and llvm-mos, a compiler for the 6502 (./setup.sh --c64).
+#
 # With --win, builds 64-bit Windows programs (bin/win/*.exe), with bflat and
 # a clang that has the x86 target for the small C and assembly part.
 #
@@ -24,7 +27,7 @@
 # bin/mac/obj (from `./build.sh --native-mac-objects <samples>` on Linux), and
 # needs neither bflat nor Docker: that is how CI's macOS job works.
 #
-# Usage:  ./build.sh [--wasm | --dos | --win | --mac | --uefi] [Sample ...]     default: all samples
+# Usage:  ./build.sh [--wasm | --dos | --c64 | --win | --mac | --uefi] [Sample ...]     default: all samples
 #         ./build.sh --sdk-payload <dir>     what the ZeroCSharp.Sdk package carries (sdk/)
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh),
 #         BFLAT_EXTRA_FLAGS (see bflat_flags)
@@ -32,10 +35,19 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
 
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama)
+# The Small samples are tests sized for a machine with little memory: what
+# Strings, Casts, Collections and the others check, in pieces that each fit
+# in a Commodore 64. They run on every target.
+SMALL_SAMPLES=(SmallStrings SmallBuilders SmallIntegers SmallDoubles SmallObjects SmallArena SmallLists SmallDicts SmallStrDicts SmallText SmallFloats)
+ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama "${SMALL_SAMPLES[@]}")
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
 # Vga is a game for DOS and UEFI (lib/Dos.cs, lib/Uefi.cs: graphics, keyboard, clock).
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama "${SMALL_SAMPLES[@]}" Vga)
+# A C64 program has about 50 KB for its code, data, heap and stack together,
+# and the default is the samples that fit. Any sample can be asked for by
+# name; the linker says by how much it is too big. C64Demo and Paddles are for
+# the C64 only (lib/C64.cs: the screen, the video chip, the keyboard).
+C64_SAMPLES=(Tiny Minimal VirtualTest QuizStep1 QuizStep2 Refs "${SMALL_SAMPLES[@]}" C64Demo Paddles)
 # UEFI gets every sample, and Vga too (lib/Uefi.cs has what it uses of lib/Dos.cs).
 UEFI_SAMPLES=("${ALL_SAMPLES[@]}" Vga)
 
@@ -205,11 +217,12 @@ check_wasm() {
 }
 
 # Source -> IL (bflat, as for the native build) -> LLVM bitcode (NativeAOT-LLVM).
-# $1: sample; $2: directory for the output; $3: zerocore's WebAssembly build.
+# $1: sample; $2: directory for the output; $3: zerocore's WebAssembly build;
+# $4: how to optimize (default -O; --Os favors size over speed).
 # Leaves $name.N.bc (bitcode: the code) and two WASM object files that need no
 # compiling: $name.bc (the program's data) and $name.external.o.
 compile_bitcode() {
-    local name=$1 obj=$2 core=$3
+    local name=$1 obj=$2 core=$3 optimize=${4:--O}
     rm -rf "$obj"
     mkdir -p "$obj"
 
@@ -219,7 +232,7 @@ compile_bitcode() {
     # to the target's C library.
     if ! "$WASM_ILC" "$obj/$name.dll" "${LIB_REFS[@]}" -r "$core" --reflectiondata:none \
             --generateunmanagedentrypoints:System.Private.CoreLib \
-            --targetos:wasi --targetarch:wasm -O --wasm-global-base:1024 \
+            --targetos:wasi --targetarch:wasm "$optimize" --wasm-global-base:1024 \
             --codegenopt:Target=wasm32-unknown-wasip2 --codegenopt:LlvmExceptionHandlingModel=emulated \
             --directpinvoke:libc --directpinvoke:libm.so.6 -o:"$obj/$name.bc" > "$obj/ilc.log" 2>&1; then
         cat "$obj/ilc.log" >&2
@@ -371,6 +384,132 @@ check_386() {
             echo "$bad" >&2
             exit 1
         fi
+    done
+}
+
+# ---- Commodore 64 ------------------------------------------------------------
+#
+# The same bitcode again, for a processor with 16-bit addresses. Two steps:
+# on macOS the first runs in the build container and the second on the Mac,
+# where llvm-mos is.
+#
+#   build_c64_bitcode   C# -> bitcode, against zerocore's single-threaded
+#                       32-bit build (the WebAssembly one)
+#   build_c64_programs  bitcode -> .prg: c64/ll2mos.py rewrites the code for
+#                       2-byte pointers, c64/wasm2mos.py the data, and
+#                       llvm-mos compiles and links both with c64/runtime.c
+#                       (zerocore's native half) and its C library
+
+C64_CORE=bin/c64/System.Private.CoreLib.dll
+
+check_c64() {
+    if [ ! -x "$LLVM_MOS/bin/mos-c64-clang" ]; then
+        echo "Error: no llvm-mos in $C64_TOOLS. Run ./setup.sh --c64" >&2
+        exit 1
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "Error: python3 is needed for the tools in c64/" >&2
+        exit 1
+    fi
+}
+
+build_c64_bitcode() {
+    local name
+    check_bflat
+    check_dos_ilc
+    build_core "$CORE"
+    build_core "$C64_CORE" -d WASM
+    build_lib
+    for name in "$@"; do
+        echo "[c64]   $name -> bitcode"
+        # --Os: for size, not speed. The compiler then keeps one copy of each
+        # loop (for speed it makes a second one without bounds checks).
+        compile_bitcode "$name" "bin/c64/obj/$name" "$C64_CORE" --Os
+    done
+}
+
+build_c64_programs() {
+    local name obj out bc method module candidate
+    local whole separate extra remaining
+    local mos=("$LLVM_MOS/bin/mos-c64-clang" -Os -Wall -Wno-override-module -Wno-unused-command-line-argument)
+    for name in "$@"; do
+        echo "[c64]   $name -> bin/c64/$name.prg"
+        obj=bin/c64/obj/$name
+        out=$obj/mos
+        rm -rf "$out"
+        mkdir -p "$out/ir"
+
+        # Bitcode -> text (any target will do for reading it) -> rewritten text.
+        for bc in "$obj/$name".*.bc; do
+            "$LLVM_MOS/bin/clang" --target=wasm32 -Wno-override-module -S -emit-llvm "$bc" \
+                -o "$out/ir/$(basename "${bc%.bc}").ll"
+        done
+        python3 c64/ll2mos.py "$out" "$out"/ir/*.ll
+        python3 c64/wasm2mos.py "$obj/$name.bc" "$out/data" "$out"/ir/*.ll
+        if [ -f "$obj/$name.external.o" ]; then
+            python3 c64/wasm2mos.py "$obj/$name.external.o" "$out/external" "$out"/ir/*.ll
+        fi
+
+        # One compilation of everything: llvm-mos optimizes the whole program
+        # at link time, which is where it decides what can live at fixed
+        # addresses instead of on a stack, and makes it a fifth smaller.
+        # -Os: there are 50 KB for it all.
+        #
+        # The 6502 has three registers, and now and then a method made larger
+        # by that optimization (others get folded into it) is more than
+        # llvm-mos can fit into them: "ran out of registers". The module with
+        # that method is then compiled on its own, where the method stays as
+        # it was written, and the link is tried again.
+        whole=("$out"/*.ll)
+        separate=()
+        extra=("$out"/*.s)
+        [ -f "$out/data.c" ] && extra+=("$out/data.c")
+        [ -f "$out/external.c" ] && extra+=("$out/external.c")
+
+        # save-basic.o: by default an llvm-mos program never returns (it has
+        # overwritten memory BASIC uses). This saves that memory at the start
+        # and puts it back at the end, so the program ends at BASIC's READY.
+        while ! "${mos[@]}" "${whole[@]}" ${separate[@]+"${separate[@]}"} "${extra[@]}" c64/runtime.c \
+                "$LLVM_MOS/mos-platform/commodore/lib/save-basic.o" \
+                -o "bin/c64/$name.prg" 2> "$out/link.log"; do
+            method=$(sed -n "s/.*ran out of registers during register allocation in function '\(.*\)'.*/\1/p" "$out/link.log" | head -1)
+            module=
+            if [ -n "$method" ]; then
+                for candidate in "${whole[@]}"; do
+                    if grep -F -e "@$method(" -e "@\"$method\"(" "$candidate" | grep -q '^define '; then
+                        module=$candidate
+                    fi
+                done
+            fi
+            if [ -n "$module" ]; then
+                echo "[c64]   $name: $method is too much for the 6502's registers once optimized with the rest; compiling its module on its own"
+                "${mos[@]}" -fno-lto -c "$module" -o "$module.o"
+                separate+=("$module.o")
+                remaining=()
+                for candidate in "${whole[@]}"; do
+                    [ "$candidate" = "$module" ] || remaining+=("$candidate")
+                done
+                whole=("${remaining[@]}")
+            elif grep -q "will not fit in region" "$out/link.log"; then
+                echo "Error: $name doesn't fit in a C64's memory:" >&2
+                grep -m1 "will not fit in region" "$out/link.log" | sed 's/^.*overflowed by/  too big by/' >&2
+                exit 1
+            elif grep -q "undefined symbol: cs_" "$out/link.log"; then
+                # What C# imports ([DllImport]) is bound to cs_<name>.
+                echo "Error: $name calls functions the C64's runtime (c64/runtime.c) doesn't have:" >&2
+                sed -n 's/.*undefined symbol: cs_\([A-Za-z0-9_]*\).*/\1/p' "$out/link.log" | sort -u | tr '\n' ' ' | sed 's/^/  /; s/ $//' >&2
+                echo >&2
+                exit 1
+            else
+                if [ -n "$method" ]; then
+                    echo "Error: $method is too complex for llvm-mos (the 6502 has three registers). Split it into smaller methods." >&2
+                fi
+                cat "$out/link.log" >&2
+                exit 1
+            fi
+        done
+        # The linker also leaves bin/c64/$name.prg.elf, with the symbols:
+        # c64/run.sh looks an address up in it.
     done
 }
 
@@ -555,6 +694,11 @@ if [ "${1:-}" = "--native-dos-link" ]; then
     build_dos_link "$@"
     exit 0
 fi
+if [ "${1:-}" = "--native-c64-bitcode" ]; then
+    shift
+    build_c64_bitcode "$@"
+    exit 0
+fi
 if [ "${1:-}" = "--native" ]; then
     shift
     build_native "$@"
@@ -595,6 +739,7 @@ TARGET=native
 case "${1:-}" in
     --wasm) TARGET=wasm; shift ;;
     --dos)  TARGET=dos; shift ;;
+    --c64)  TARGET=c64; shift ;;
     --win)  TARGET=win; shift ;;
     --mac)  TARGET=mac; shift ;;
     --uefi) TARGET=uefi; shift ;;
@@ -612,6 +757,8 @@ esac
 if [ $# -eq 0 ]; then
     if [ "$TARGET" = dos ]; then
         set -- "${DOS_SAMPLES[@]}"
+    elif [ "$TARGET" = c64 ]; then
+        set -- "${C64_SAMPLES[@]}"
     elif [ "$TARGET" = uefi ]; then
         set -- "${UEFI_SAMPLES[@]}"
     else
@@ -627,6 +774,11 @@ for name in "$@"; do
         fi
     elif [ "$TARGET" = uefi ] && [[ " ${UEFI_SAMPLES[*]} " == *" $name "* ]]; then
         :
+    elif [ "$TARGET" = c64 ] && [[ " ${C64_SAMPLES[*]} " == *" $name "* ]]; then
+        :
+    elif [[ " ${C64_SAMPLES[*]} " == *" $name "* ]] && [[ " ${ALL_SAMPLES[*]} " != *" $name "* ]]; then
+        echo "$name is a Commodore 64 program: ./build.sh --c64 $name" >&2
+        exit 1
     elif [[ " ${DOS_SAMPLES[*]} " == *" $name "* ]] && [[ " ${ALL_SAMPLES[*]} " != *" $name "* ]]; then
         echo "$name is a DOS and UEFI program: ./build.sh --dos $name or ./build.sh --uefi $name" >&2
         exit 1
@@ -638,6 +790,7 @@ done
 case "$TARGET" in
     wasm)   output() { echo "bin/wasm/$1.wasm"; } ;;
     dos)    output() { echo "bin/dos/$1.exe"; } ;;
+    c64)    output() { echo "bin/c64/$1.prg"; } ;;
     win)    output() { echo "bin/win/$1.exe"; } ;;
     mac)    output() { echo "bin/mac/$1"; } ;;
     uefi)   output() { echo "bin/uefi/$1.efi"; } ;;
@@ -748,6 +901,11 @@ case "$TARGET" in
         else
             echo "[dos]   (not checked for instructions newer than a 386: no llvm-objdump found)"
         fi
+        ;;
+    c64)
+        check_c64
+        run c64-bitcode "$@"
+        build_c64_programs "$@"
         ;;
 esac
 

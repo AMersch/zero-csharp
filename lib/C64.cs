@@ -1,0 +1,216 @@
+// The Commodore 64: its 40x25 character screen and 16 colors, sprites, the
+// video chip's raster line, the keyboard, a joystick and a clock. Only for
+// programs built with ./build.sh --c64; the functions are in c64/runtime.c,
+// and a program for another target that calls them won't link.
+//
+//   C64.Clear(C64.Black);
+//   C64.Border(C64.Black);
+//   C64.Print(4, 2, "Hello from C#", C64.Yellow);     // column, row
+//   while (C64.ReadKey() == 0)
+//   {
+//       C64.WaitFrame();                                // 50 times a second
+//       C64.Poke(0xD020, frame++ & 15);                 // any address at all
+//   }
+//
+// Out.Line and In.ReadLine work as everywhere, through the C64's own screen
+// editor: text scrolls, and a typed line is handed over at RETURN. Print
+// puts characters at a position without moving that cursor.
+//
+// Everything here is a few Peeks and Pokes, and each of those costs about
+// 125 processor cycles, of the 20,000 in a frame: a call from C# passes
+// 32-bit numbers through an 8-bit processor. Print loops in C, at about 170
+// cycles a character.
+
+using System;
+using System.Runtime.InteropServices;
+
+public static class C64
+{
+    public const int Columns = 40, Rows = 25;
+
+    // The 16 colors.
+    public const int Black = 0, White = 1, Red = 2, Cyan = 3, Purple = 4, Green = 5, Blue = 6, Yellow = 7;
+    public const int Orange = 8, Brown = 9, LightRed = 10, DarkGray = 11, Gray = 12, LightGreen = 13;
+    public const int LightBlue = 14, LightGray = 15;
+
+    // Joystick: what Joystick returns, added up.
+    public const int Up = 1, Down = 2, Left = 4, Right = 8, Fire = 16;
+
+    // Where things are in the C64's memory.
+    const int Screen = 0x0400;          // a character code per cell, row after row
+    const int ColorMemory = 0xD800;     // and each cell's color
+    const int SpritePointers = 0x07F8;  // which 64-byte block each sprite shows
+    const int SpriteShapes = 0x0340;    // blocks 13-15: the cassette buffer, free
+    const int Video = 0xD000;           // the video chip's registers
+    const int JoystickPort2 = 0xDC00;
+
+    [DllImport("libc")] static safe extern int c64_peek(int address);
+    [DllImport("libc")] static safe extern void c64_poke(int address, int value);
+    [DllImport("libc")] static safe extern void c64_clear();
+    [DllImport("libc")] static unsafe extern void c64_print(int cell, char* text, int count, int color);
+    [DllImport("libc")] static unsafe extern void c64_copy(int address, byte* source, int count);
+    [DllImport("libc")] static safe extern void c64_wait_line(int line);
+    [DllImport("libc")] static safe extern int c64_key();
+    [DllImport("libc")] static safe extern uint c64_ticks();
+
+    // ---- memory ------------------------------------------------------------------
+
+    /// <summary>The byte at a memory address (0-65535).</summary>
+    public static int Peek(int address) => c64_peek(address);
+
+    /// <summary>Writes a byte to a memory address. Nothing stops it writing into the program itself.</summary>
+    public static void Poke(int address, int value) => c64_poke(address, value);
+
+    // ---- the screen ----------------------------------------------------------------
+
+    /// <summary>Empties the screen, sets its background color, and puts Out's cursor in the top left corner.</summary>
+    public static void Clear(int background = Blue)
+    {
+        c64_poke(Video + 0x21, background);
+        c64_clear();
+    }
+
+    /// <summary>Sets the color of the frame around the screen.</summary>
+    public static void Border(int color) => c64_poke(Video + 0x20, color);
+
+    /// <summary>Writes text at a column (0-39) and row (0-24), without moving Out's cursor. Returns the column after it. Text that reaches the end of a row goes on in the next.</summary>
+    public static int Print(int column, int row, string text, int color = White)
+    {
+        if (text == null || !InScreen(column, row, text.Length))
+            return column;
+        unsafe
+        {
+            // SAFETY: the pointer and length are the string's own, and
+            // InScreen checked that the cells are on the screen.
+            fixed (char* p = text)
+                c64_print(row * Columns + column, p, text.Length, color);
+        }
+        return column + text.Length;
+    }
+
+    /// <summary>Writes one character at a column and row.</summary>
+    public static void Print(int column, int row, char character, int color = White)
+    {
+        if (!InScreen(column, row, 1))
+            return;
+        unsafe
+        {
+            // SAFETY: one character, a local's; InScreen checked the cell.
+            c64_print(row * Columns + column, &character, 1, color);
+        }
+    }
+
+    /// <summary>Writes a number at a column and row. Returns the column after it.</summary>
+    public static int Print(int column, int row, int value, int color = White)
+    {
+        Span<char> digits = stackalloc char[11];
+        int at = digits.Length;
+        uint rest = value < 0 ? (uint)(-value) : (uint)value;
+        do
+        {
+            digits[--at] = (char)('0' + rest % 10);
+            rest /= 10;
+        } while (rest != 0);
+        if (value < 0)
+            digits[--at] = '-';
+
+        int count = digits.Length - at;
+        if (!InScreen(column, row, count))
+            return column;
+        unsafe
+        {
+            // SAFETY: at..at+count is inside digits, and InScreen checked
+            // that the cells are on the screen.
+            fixed (char* p = digits)
+                c64_print(row * Columns + column, p + at, count, color);
+        }
+        return column + count;
+    }
+
+    static bool InScreen(int column, int row, int count)
+        => column >= 0 && column < Columns && row >= 0 && row < Rows
+            && row * Columns + column + count <= Columns * Rows;
+
+    // ---- sprites -------------------------------------------------------------------
+
+    /// <summary>Gives sprite 0-7 a shape and a color and shows it. The shape is 63 bytes: 21 rows of 24 pixels, three bytes a row, the leftmost pixel in the highest bit. There is room for three shapes (slot 0-2); sprites can share one.</summary>
+    public static void Sprite(int sprite, int slot, ReadOnlySpan<byte> shape, int color)
+    {
+        if ((uint)sprite > 7 || (uint)slot > 2 || shape.Length != 63)
+            return;
+        unsafe
+        {
+            // SAFETY: the pointer and length come from the span; the 63 bytes
+            // land in the slot's 64-byte block.
+            fixed (byte* p = shape)
+                c64_copy(SpriteShapes + slot * 64, p, shape.Length);
+        }
+        c64_poke(SpritePointers + sprite, SpriteShapes / 64 + slot);
+        c64_poke(Video + 0x27 + sprite, color);
+        c64_poke(Video + 0x15, c64_peek(Video + 0x15) | (1 << sprite));
+    }
+
+    /// <summary>Moves a sprite. Its top left corner is at the screen's top left corner when x is 24 and y is 50; x goes up to 343, y to 249.</summary>
+    public static void MoveSprite(int sprite, int x, int y)
+    {
+        if ((uint)sprite > 7)
+            return;
+        int bit = 1 << sprite;
+        int high = c64_peek(Video + 0x10);      // each sprite's ninth x bit
+        c64_poke(Video + 0x10, x > 255 ? high | bit : high & ~bit);
+        c64_poke(Video + sprite * 2, x);
+        c64_poke(Video + sprite * 2 + 1, y);
+    }
+
+    /// <summary>Hides a sprite.</summary>
+    public static void HideSprite(int sprite)
+    {
+        if ((uint)sprite <= 7)
+            c64_poke(Video + 0x15, c64_peek(Video + 0x15) & ~(1 << sprite));
+    }
+
+    // ---- timing --------------------------------------------------------------------
+
+    /// <summary>Waits until the video chip starts drawing a line of the picture (0-255; the screen's 200 lines are 51-250). Changing a color then changes it from that line down: that is how raster bars are made.</summary>
+    public static void WaitLine(int line) => c64_wait_line(line);
+
+    /// <summary>Waits for the picture's lower border: once per frame, 50 times a second (60 on an American machine), and the moment to move things without flicker.</summary>
+    public static void WaitFrame() => c64_wait_line(251);
+
+    /// <summary>Sixtieths of a second since the machine was switched on.</summary>
+    public static uint Ticks => c64_ticks();
+
+    // ---- keyboard and joystick -------------------------------------------------------
+
+    /// <summary>The next key pressed, as its character ('a', 'A', '1', ' ', '\n' for RETURN), or 0 if no key waits. Keys without an ASCII character come as the C64's own codes (cursor down is 17, F1 is 133).</summary>
+    public static int ReadKey()
+    {
+        int key = c64_key();
+        if (key >= 0x41 && key <= 0x5A)
+            return key + 0x20;          // unshifted letters
+        if (key >= 0xC1 && key <= 0xDA)
+            return key - 0x80;          // shifted letters
+        return key == 13 ? '\n' : key;
+    }
+
+    // The key held down, as the KERNAL's keyboard scan leaves it at $CB: a
+    // position on the keyboard's 8x8 matrix, or 64 for none. This is each
+    // position's character; '\0' for keys without one, '_' for the left arrow.
+    const string KeyMatrix =
+        "\0\n\0\0\0\0\0\0" + "3wa4zse\0" + "5rd6cftx" + "7yg8bhuv" +
+        "9ij0mkon" + "+pl-.:@," + "\0*;\0\0=\0/" + "1_\02 \0q\0";
+
+    /// <summary>Whether a key is held down right now: a letter (either case), a digit, ' ' or a sign on the keyboard. Unlike ReadKey this doesn't wait for a press, so a game can move something for as long as a key is held. One key at a time: of two held together it sees one. Shift, Ctrl and C= don't count.</summary>
+    public static bool KeyHeld(char key)
+    {
+        int position = c64_peek(0xCB);
+        if (position >= 64)
+            return false;
+        if (key >= 'A' && key <= 'Z')
+            key = (char)(key + 32);
+        return KeyMatrix[position] == key;
+    }
+
+    /// <summary>The joystick in port 2: Up, Down, Left, Right and Fire, added up; 0 when it is at rest.</summary>
+    public static int Joystick => ~c64_peek(JoystickPort2) & 31;
+}

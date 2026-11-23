@@ -1,0 +1,9 @@
+int: 42, negative: -42, zero: 0
+limits: -2147483648 to 2147483647
+long: -9223372036854775808 to 9223372036854775807
+ulong: 18446744073709551615, uint: 4000000000
+small: 255 -128 -32768 65535
+hex: 2a FF 002a deadbeef ffffffffffffffff
+padded: [    42] [42    ] [   -42] [00042]
+text: [left    ] [   right] c true false
+Write: 42 -9000000000 true

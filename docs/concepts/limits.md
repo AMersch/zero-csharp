@@ -152,9 +152,13 @@ static int ValueOrMinusOne(string text) => ParseNumber(text) switch
 ```
 
 A union keeps its value in a field of type `object`, so a struct value is boxed: each `Parsed` or
-`BadChar` returned above is a heap allocation that is never freed. That is fine for an error that
-happens once, but not for a function called in a hot loop. There, return a struct with a tag field,
-or allocate in an [arena](memory.html).
+`BadChar` returned above is a heap allocation, about 24 bytes, that is never freed. That is fine for
+an error that happens once, but not for a function called in a loop. There, write the union out by
+hand: a struct marked `[Union]` that keeps its cases in its own fields, with a constructor and a
+`TryGetValue` for each case. The compiler treats it as a union (`return new BadChar { ... }`
+converts to it, and a `switch` takes it apart) without allocating anything.
+[Build for the Commodore 64](../how-to/build-for-c64.html#a-game) has one: a game's `Outcome`, made 50
+times a second.
 
 Casts to interfaces work as in .NET, except that a failed `(T)x` ends the program instead of throwing:
 

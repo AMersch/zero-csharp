@@ -36,6 +36,7 @@ PAGES = [
     ('Kernels.cs', ['Kernels'], 'kernels', 'SIMD math for inference: dot products, softmax, norms.'),
     ('Dos.cs', ['Dos'], 'dos', 'DOS only: VGA graphics, keyboard, mouse, speaker, files, clock.'),
     ('Uefi.cs', ['Uefi'], 'uefi', 'UEFI only: the same members as Dos, plus Shutdown and Reboot.'),
+    ('C64.cs', ['C64'], 'c64', 'Commodore 64 only: the screen and its colors, sprites, the raster line, keyboard, joystick, clock.'),
 ]
 # Public nested types that are compiler plumbing: readers never name them.
 PLUMBING = {'Enumerator', 'InterpolatedHandler'}

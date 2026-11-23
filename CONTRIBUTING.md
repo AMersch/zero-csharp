@@ -22,6 +22,8 @@ built next to this repository. It has no release to download; the
 - **DOS:** `./setup.sh --dos` downloads FreeDOS and the HX DOS extender into `tools/` and checks for
   clang, Python 3 and an emulator. Use Bochs (`brew install bochs`): its `i386` processor refuses
   instructions a 386 doesn't have, and QEMU's `486` doesn't.
+- **Commodore 64:** `./setup.sh --c64` downloads llvm-mos, a compiler for the 6502, into `tools/c64`
+  (about 750 MB) and checks for Python 3 and VICE, the emulator (`brew install vice`).
 - **UEFI:** QEMU with the OVMF firmware (`brew install qemu` includes it; on Ubuntu
   `qemu-system-x86 ovmf`, or `qemu-system-arm qemu-efi-aarch64` for arm64), a clang with the Windows
   targets (as for `--win`), and Python 3. `UEFI_FIRMWARE` points at another firmware file.
@@ -36,6 +38,8 @@ built next to this repository. It has no release to download; the
 ./build.sh --wasm             # bin/wasm/; ./run.sh --wasm runs them with wasmtime
 ./build.sh --dos              # bin/dos/; ./run.sh --dos runs them under FreeDOS in an emulator
 ./run.sh --dos --window Vga   # the DOS game, on screen: arrow keys steer, Esc quits
+./build.sh --c64              # bin/c64/*.prg, the samples that fit; ./run.sh --c64 runs them in VICE
+./run.sh --c64 --window C64Demo  # a C64's screen: text, a sprite, raster bars; any key ends it
 ./build.sh --uefi             # bin/uefi/*.efi; ./run.sh --uefi runs them in QEMU on OVMF
 ./run.sh --uefi --window Vga  # the same game, started by the firmware
 ```
@@ -97,6 +101,7 @@ exit with their number of failed checks), and those whose output doesn't vary mu
 ./test.sh            # this machine
 ./test.sh --wasm     # WebAssembly
 ./test.sh --dos      # DOS, on an emulated 386 with 4 MB
+./test.sh --c64      # Commodore 64, in VICE: the samples that fit in it
 ./test.sh --mac      # macOS
 ./test.sh --win      # Windows, under Wine
 ./test.sh --uefi     # UEFI, in QEMU on OVMF, for BFLAT_ARCH (x64 or arm64)
@@ -106,6 +111,13 @@ exit with their number of failed checks), and those whose output doesn't vary mu
 
 Simd and Kernels print timings, so only their exit codes are checked. So are Arena's and Collections'
 on WebAssembly and DOS, where 32-bit pointers change the byte counts they print.
+
+The Small samples (`SmallStrings`, `SmallIntegers`, `SmallObjects`, ...) are tests sized for a machine
+with little memory: each covers a piece of what the large samples check and fits in a Commodore 64,
+which has 50 KB for a program, its heap and its stack. They run on every target. When you add one,
+check that the C64 really does its work: a compiler that optimizes the whole program computes at build
+time whatever it can see, so the samples read their inputs through a static field (`s_never`), and
+`llvm-nm bin/c64/<Sample>.prg.elf` shows whether the routines you meant to test are in the program.
 
 The guards are tested the other way round. `lib/` stops the program when it catches a mistake, and
 `samples/Guards.cs` makes one mistake per run (`./run.sh Guards restore-order`). `test.sh` runs each

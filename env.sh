@@ -117,6 +117,32 @@ find_dos_emulator() {
     fi
 }
 
+# Commodore 64 (./setup.sh --c64, ./build.sh --c64, ./run.sh --c64): programs
+# for the 6502, an 8-bit processor with 16-bit addresses. C# is compiled to
+# LLVM bitcode by NativeAOT-LLVM, as for WebAssembly and DOS (only that part
+# of WASM_TOOLS is needed); c64/ll2mos.py rewrites it for 2-byte pointers and
+# llvm-mos, an LLVM for the 6502 with a C library for the C64, compiles and
+# links it. llvm-mos runs on this machine, not in the build container.
+# The programs run in VICE, a Commodore emulator (macOS: brew install vice).
+#
+# C64_TOOLS     where llvm-mos is stored. Default: tools/c64
+# C64_EMULATOR  VICE's C64 emulator. Default: x64sc, or x64 if that's all there is
+LLVM_MOS_VERSION=v23.4.0
+C64_TOOLS=${C64_TOOLS:-tools/c64}
+LLVM_MOS=$C64_TOOLS/llvm-mos-$LLVM_MOS_VERSION
+
+find_c64_emulator() {
+    local candidate
+    for candidate in "${C64_EMULATOR:-}" x64sc x64; do
+        [ -n "$candidate" ] || continue
+        if command -v "$candidate" >/dev/null 2>&1; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # UEFI (./build.sh --uefi, ./run.sh --uefi): programs the firmware starts,
 # run in QEMU with OVMF, the UEFI firmware from the EDK II project. QEMU ships
 # it (Homebrew: share/qemu/edk2-*-code.fd); Linux distributions package it

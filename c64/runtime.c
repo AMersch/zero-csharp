@@ -1,7 +1,7 @@
 // The native half of zerocore on the Commodore 64.
 //
 // The program is the same LLVM bitcode as on WebAssembly and DOS, compiled
-// for the 6502 by llvm-mos after c64/ll2mos.py has rewritten it. zerocore
+// for the 6502 by llvm-mos after zero-bitcode's ll2mos has rewritten it. zerocore
 // (C#) is the runtime, as everywhere; this file holds the entry point, the
 // functions the compiled code expects from a runtime, and what C# imports
 // from "libc", on top of llvm-mos's small C library and the C64's KERNAL.
@@ -10,11 +10,11 @@
 //
 // C's int is 16 bits here and C#'s is 32. Everything compiled C# calls takes
 // and returns `long` where C# has int or nint. The imports get the prefix
-// cs_ (c64/wasm2mos.py), so that C#'s calloc(nuint, nuint) and the C
+// cs_ (zero-bitcode's wasm2mos), so that C#'s calloc(nuint, nuint) and the C
 // library's calloc(size_t, size_t) are two functions.
 //
 // An object reference in memory is a 4-byte slot (the layout is the 32-bit
-// one, see ll2mos.py): the address and two zero bytes.
+// one, see sdk/ZeroCSharp.Bitcode/Ll2Mos.cs): the address and two zero bytes.
 
 #include <cbm.h>
 #include <stdio.h>
@@ -84,7 +84,7 @@ void RhpPInvokeReturn(void *frame) { (void)frame; }
 // ---- exceptions: zero mode has none ------------------------------------------
 
 // RhpExceptionThrown, the flag compiled code checks after calls, is missing
-// on purpose: ll2mos.py replaces every read of it with zero, and if a write
+// on purpose: ll2mos replaces every read of it with zero, and if a write
 // survived the optimizer the program wouldn't link. These two are only called
 // from the code those checks guard, so they normally aren't linked in either.
 void *RhpHandleExceptionWasmCatch(void *a, i32 b)

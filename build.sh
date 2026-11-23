@@ -284,10 +284,29 @@ build_wasm() {
 #                       32-bit build (the WebAssembly one)
 #   build_dos_objects   bitcode -> 386 object files; the program's data, which
 #                       NativeAOT-LLVM writes as a WebAssembly object file, is
-#                       rewritten as assembly by dos/wasm2i386.py
+#                       rewritten as assembly by zero-bitcode (wasm2i386)
 #   build_dos_link      -> a 32-bit Windows console program, which the HX DOS
 #                       extender runs under DOS, with dos/runtime.c as its C
 #                       library and zerocore's native half
+
+# zero-bitcode (sdk/ZeroCSharp.Bitcode): turns NativeAOT-LLVM's output into
+# sources for DOS and the C64. A .NET program, built here on first use; it runs
+# on the host, not in the build container.
+build_bitcode_tool() {
+    if ! command -v dotnet >/dev/null 2>&1; then
+        echo "Error: the .NET SDK (10 or newer) is needed to build zero-bitcode, the tool in sdk/ZeroCSharp.Bitcode" >&2
+        exit 1
+    fi
+    mkdir -p bin/tools
+    if ! dotnet build sdk/ZeroCSharp.Bitcode -c Release -o bin/tools/zero-bitcode -v q -nologo > bin/tools/zero-bitcode.log 2>&1; then
+        cat bin/tools/zero-bitcode.log >&2
+        exit 1
+    fi
+}
+
+zero_bitcode() {
+    dotnet bin/tools/zero-bitcode/zero-bitcode.dll "$@"
+}
 
 DOS_CORE=bin/dos/System.Private.CoreLib.dll
 # Windows object files (COFF), C calling convention, nothing newer than a 386.
@@ -324,9 +343,9 @@ build_dos_objects() {
         out=$obj/i386
         mkdir -p "$out"
 
-        python3 dos/wasm2i386.py "$obj/$name.bc" "$out/data"
+        zero_bitcode wasm2i386 "$obj/$name.bc" "$out/data"
         if [ -f "$obj/$name.external.o" ]; then
-            python3 dos/wasm2i386.py "$obj/$name.external.o" "$out/external"
+            zero_bitcode wasm2i386 "$obj/$name.external.o" "$out/external"
         fi
         for source in "$out"/*.s; do
             "$clang" "${DOS_TARGET[@]}" -c "$source" -o "$source.o"
@@ -395,8 +414,8 @@ check_386() {
 #
 #   build_c64_bitcode   C# -> bitcode, against zerocore's single-threaded
 #                       32-bit build (the WebAssembly one)
-#   build_c64_programs  bitcode -> .prg: c64/ll2mos.py rewrites the code for
-#                       2-byte pointers, c64/wasm2mos.py the data, and
+#   build_c64_programs  bitcode -> .prg: zero-bitcode's ll2mos rewrites the
+#                       code for 2-byte pointers, its wasm2mos the data, and
 #                       llvm-mos compiles and links both with c64/runtime.c
 #                       (zerocore's native half) and its C library
 
@@ -405,10 +424,6 @@ C64_CORE=bin/c64/System.Private.CoreLib.dll
 check_c64() {
     if [ ! -x "$LLVM_MOS/bin/mos-c64-clang" ]; then
         echo "Error: no llvm-mos in $C64_TOOLS. Run ./setup.sh --c64" >&2
-        exit 1
-    fi
-    if ! command -v python3 >/dev/null 2>&1; then
-        echo "Error: python3 is needed for the tools in c64/" >&2
         exit 1
     fi
 }
@@ -444,10 +459,10 @@ build_c64_programs() {
             "$LLVM_MOS/bin/clang" --target=wasm32 -Wno-override-module -S -emit-llvm "$bc" \
                 -o "$out/ir/$(basename "${bc%.bc}").ll"
         done
-        python3 c64/ll2mos.py "$out" "$out"/ir/*.ll
-        python3 c64/wasm2mos.py "$obj/$name.bc" "$out/data" "$out"/ir/*.ll
+        zero_bitcode ll2mos "$out" "$out"/ir/*.ll
+        zero_bitcode wasm2mos "$obj/$name.bc" "$out/data" "$out"/ir/*.ll
         if [ -f "$obj/$name.external.o" ]; then
-            python3 c64/wasm2mos.py "$obj/$name.external.o" "$out/external" "$out"/ir/*.ll
+            zero_bitcode wasm2mos "$obj/$name.external.o" "$out/external" "$out"/ir/*.ll
         fi
 
         # One compilation of everything: llvm-mos optimizes the whole program
@@ -886,10 +901,7 @@ case "$TARGET" in
             echo "Error: no clang that can compile for 32-bit x86. Run ./setup.sh --dos" >&2
             exit 1
         fi
-        if ! command -v python3 >/dev/null 2>&1; then
-            echo "Error: python3 is needed for the tools in dos/" >&2
-            exit 1
-        fi
+        build_bitcode_tool
         run dos-bitcode "$@"
         build_dos_objects "$DOS_CLANG" "$@"
         run dos-link "$@"
@@ -904,6 +916,7 @@ case "$TARGET" in
         ;;
     c64)
         check_c64
+        build_bitcode_tool
         run c64-bitcode "$@"
         build_c64_programs "$@"
         ;;

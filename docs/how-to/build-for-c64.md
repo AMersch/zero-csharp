@@ -20,7 +20,9 @@ This downloads NativeAOT-LLVM (shared with `--wasm` and `--dos`) and
 into `tools/`: a 190 MB download, 750 MB unpacked. llvm-mos has builds for macOS and for x64 Linux.
 `setup.sh` also checks for what it can't download:
 
-- **Python 3**, for the tools in `c64/`.
+- **The .NET SDK** (10 or newer), to build `zero-bitcode` (`sdk/ZeroCSharp.Bitcode`), which rewrites
+  the compiler's output for the 6502.
+- **Python 3**, for `c64/run.sh`, which types input into the emulator and reads its output.
 - **VICE**, the Commodore emulator (`x64sc`). `brew install vice` on macOS, `sudo apt install vice` on
   Debian or Ubuntu.
 
@@ -393,11 +395,12 @@ On the C64, `LOAD"*",8,1` and then `RUN`. The program ends at BASIC's `READY.`
 
 1. **bflat and NativeAOT-LLVM** compile the sample to LLVM bitcode, as for WebAssembly and DOS, but with
    `--Os`.
-2. **`c64/ll2mos.py`** rewrites the bitcode. NativeAOT-LLVM lays out every object for 4-byte pointers,
+2. **`zero-bitcode ll2mos`** rewrites the bitcode. NativeAOT-LLVM lays out every object for 4-byte pointers,
    and the 6502's are 2 bytes. Memory keeps the 32-bit layout: a pointer in memory stays a 4-byte slot
    holding the address and two zero bytes, and only pointers in registers shrink.
-3. **`c64/wasm2mos.py`** turns the program's data, which NativeAOT-LLVM writes as a WebAssembly object
-   file, into assembly (it shares `dos/wasm2i386.py`'s reader).
+3. **`zero-bitcode wasm2mos`** turns the program's data, which NativeAOT-LLVM writes as a WebAssembly
+   object file, into assembly. `zero-bitcode` is a small .NET program in `sdk/ZeroCSharp.Bitcode`,
+   built on first use.
 4. **llvm-mos** compiles and links it all with `c64/runtime.c`, zerocore's native half: the entry point,
    memory, the keyboard and the screen as standard input and output, the clock, and the floating-point
    functions llvm-mos's library lacks.

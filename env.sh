@@ -120,7 +120,7 @@ find_dos_emulator() {
 # Commodore 64 (./setup.sh --c64, ./build.sh --c64, ./run.sh --c64): programs
 # for the 6502, an 8-bit processor with 16-bit addresses. C# is compiled to
 # LLVM bitcode by NativeAOT-LLVM, as for WebAssembly and DOS (only that part
-# of WASM_TOOLS is needed); c64/ll2mos.py rewrites it for 2-byte pointers and
+# of WASM_TOOLS is needed); zero-bitcode rewrites it for 2-byte pointers and
 # llvm-mos, an LLVM for the 6502 with a C library for the C64, compiles and
 # links it. llvm-mos runs on this machine, not in the build container.
 # The programs run in VICE, a Commodore emulator (macOS: brew install vice).

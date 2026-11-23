@@ -93,8 +93,8 @@ They are the system's own on Linux, macOS, Windows and WebAssembly, and `dos/run
   wasmtime with `--dir=.`, the current directory.
 - **DOS** names are 8.3: `files.tmp`, not `settings.json`. Files stop at 2 GB.
 - **UEFI** paths start at the root of the volume the program was loaded from; `/` and `\` both work.
-- **Windows** paths are passed to the C library as UTF-8, which it reads in the system's code page:
-  names outside ASCII may not open.
+- **Windows** paths go to the system as UTF-16, converted from UTF-8 by `win/runtime.c`, so any name
+  works, as on Linux.
 
 On DOS and UEFI there is no buffering underneath: each `Read` or `Write` is one call to DOS or the
 firmware, so read and write in large pieces.

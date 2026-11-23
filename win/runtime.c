@@ -142,6 +142,30 @@ int pthread_setspecific(u64 key, void *value) { return TlsSetValue((u32)key, val
 
 int get_nprocs(void) { return (int)GetActiveProcessorCount(0xFFFF); }
 
+// lib/File.cs passes paths as UTF-8, as every other target takes them; the
+// Universal CRT's fopen and remove read them in the ANSI code page, which
+// garbles or refuses any other character. These take UTF-8 and call the
+// UTF-16 functions. Like getenv below, they are linked with /wrap:fopen and
+// /wrap:remove, which send calls here, since the Universal CRT is read first.
+enum { MaxPath = 4096 }; // in UTF-16 units; lib/File.cs's limit is 1024 bytes
+
+void *__wrap_fopen(const char *path, const char *mode)
+{
+    wchar wide_path[MaxPath], wide_mode[16];
+    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wide_path, MaxPath)
+        || !MultiByteToWideChar(CP_UTF8, 0, mode, -1, wide_mode, 16))
+        return 0;
+    return _wfopen(wide_path, wide_mode);
+}
+
+int __wrap_remove(const char *path)
+{
+    wchar wide_path[MaxPath];
+    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wide_path, MaxPath))
+        return -1;
+    return _wremove(wide_path);
+}
+
 // Environment.GetEnvironmentVariable passes the name as UTF-8 and expects the
 // value back as UTF-8; the Universal CRT's getenv speaks the ANSI code page.
 // This one goes through the UTF-16 environment instead. The linker reads the

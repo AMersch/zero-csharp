@@ -289,7 +289,3 @@ jobs:
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: xvfb-run -a ./test.sh --c64
-      # Until the Python tools are gone: their C# port must write the same.
-      - name: Compare zero-bitcode with the Python tools
-        working-directory: zero-csharp
-        run: scripts/compare-bitcode-tools.sh

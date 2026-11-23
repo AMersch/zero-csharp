@@ -130,23 +130,29 @@
     .gone li span { color: #c5cce0; }
     .ledger code { font: .875em var(--mono); color: #f3c86a; }
 
-    /* Six machines: three desktops on top; UEFI, WebAssembly and DOS below. */
+    /* Six machines: the three desktops share one terminal on top; UEFI, WebAssembly and DOS below. */
     .machines { padding: 56px 0 64px; }
     h2 { margin: 0 0 10px; color: var(--ink); font-size: 1.75rem; letter-spacing: -0.02em; line-height: 1.2; }
     .section-intro { margin: 0 0 32px; max-width: 40em; }
-    .screens { display: grid; grid-template-columns: repeat(6, 1fr); gap: 20px; align-items: stretch; }
+    /* Top row: one terminal for Linux, macOS and Windows, and what each one gets beside it. */
+    .screens { display: grid; grid-template-columns: repeat(6, 1fr); gap: 48px 32px; align-items: stretch; }
     .screen { display: flex; flex-direction: column; grid-column: span 2; }
+    .screen.desktop { grid-column: span 3; }
+    .desktops { grid-column: span 3; margin: 0; padding: 0; list-style: none; display: grid; gap: 18px; align-content: center; }
+    .desktops li { border-left: 3px solid var(--amber); padding-left: 16px; }
+    .desktops h3 { margin: 0 0 2px; color: var(--ink); font-size: 1rem; }
+    .desktops p { margin: 0; font-size: .9375rem; }
+    .desktops code { font: .8125rem var(--mono); color: var(--ink); }
     .screen-body {
-      flex: 1; margin: 0; padding: 16px 18px; border-radius: 10px; font: .8125rem/1.65 var(--mono);
+      flex: 1; margin: 0; padding: 20px 22px; border-radius: 10px; font: .8125rem/1.7 var(--mono);
       white-space: pre; overflow-x: auto; min-height: 150px;
     }
-    .screen h3 { margin: 14px 2px 2px; color: var(--ink); font-size: 1rem; }
+    .screen h3 { margin: 16px 2px 4px; color: var(--ink); font-size: 1rem; }
     .screen p { margin: 0 2px; font-size: .9375rem; }
-    .linux .screen-body { background: #1d2333; color: #d8dde9; }
+    /* Screens on the bottom row keep one height, however long their captions run. */
+    .screen:not(.desktop) .screen-body { flex: none; height: 210px; }
+    .desktop .screen-body { background: #1d2333; color: #d8dde9; font-size: .875rem; }
     .wasm .screen-body { background: #241b3a; color: #e4ddf7; }
-    .mac .screen-body { background: #1e1e1e; color: #e6e6e6; }
-    .win .screen-body { background: #0c0c0c; color: #cccccc; }
-    .win .prompt { color: #61d6d6; }
     .prompt { color: #7ee2a8; }
     .wasm .prompt { color: #c4a5ff; }
     .wasm p a { color: var(--amber-ink); font-weight: 600; }
@@ -190,8 +196,9 @@
 
     @media (max-width: 900px) {
       .hero { grid-template-columns: 1fr; gap: 36px; padding-top: 48px; }
-      .screens { grid-template-columns: 1fr; }
-      .screen { grid-column: auto; }
+      .screens { grid-template-columns: 1fr; gap: 32px; }
+      .screen:not(.desktop) .screen-body { height: auto; }
+      .screen, .screen.desktop, .desktops { grid-column: auto; }
       .idea-list { grid-template-columns: 1fr; }
       .ledger-grid, .kept ul { grid-template-columns: 1fr; }
       .path { grid-template-columns: 1fr 1fr; }
@@ -278,33 +285,18 @@ mistakes.Add(<span class="t">Str</span>.Format(keep,
         <h2>One program, six machines</h2>
         <p class="section-intro">A new project from <code>dotnet new zero</code>, built for each target by setting one property, <code>ZeroTarget</code>. The repository builds WebAssembly and DOS too, and one test suite requires the same output on every target.</p>
         <div class="screens">
-          <div class="screen linux">
+          <div class="screen desktop">
 <pre class="screen-body"><span class="prompt">$</span> dotnet new zero -n Hello
 <span class="prompt">$</span> cd Hello &amp;&amp; dotnet build -c Release
 <span class="prompt">$</span> bin/Release/zero03/Hello
 What's your name? Ada
 Hello, Ada!</pre>
-            <h3>Linux, x64 or arm64</h3>
-            <p>A native program that needs only the C library: 46 KB.</p>
           </div>
-          <div class="screen mac">
-<pre class="screen-body"><span class="prompt">$</span> dotnet new zero -n Hello
-<span class="prompt">$</span> cd Hello &amp;&amp; dotnet build -c Release
-<span class="prompt">$</span> bin/Release/zero03/Hello
-What's your name? Ada
-Hello, Ada!</pre>
-            <h3>macOS on Apple Silicon</h3>
-            <p>A native Mac program, 66 KB, linked by the package's own linker. No Xcode needed.</p>
-          </div>
-          <div class="screen win">
-<pre class="screen-body"><span class="prompt">&gt;</span> dotnet new zero -n Hello
-<span class="prompt">&gt;</span> cd Hello &amp;&amp; dotnet build -c Release
-<span class="prompt">&gt;</span> bin\Release\zero03\Hello.exe
-What's your name? Ada
-Hello, Ada!</pre>
-            <h3>Windows x64</h3>
-            <p>A 14 KB console program on Windows' own C library, built on Windows, Linux or a Mac.</p>
-          </div>
+          <ul class="desktops">
+            <li><h3>Linux, x64 or arm64</h3><p>46 KB. A native program that needs only the C library.</p></li>
+            <li><h3>macOS on Apple Silicon</h3><p>66 KB. Linked by the package's own linker; no Xcode needed.</p></li>
+            <li><h3>Windows x64</h3><p>14 KB. A console program on Windows' own C library, built on Windows, Linux or a Mac. It runs as <code>bin\Release\zero03\Hello.exe</code>.</p></li>
+          </ul>
           <div class="screen uefi">
 <pre class="screen-body"><span class="dim">dotnet build -p:ZeroTarget=uefi-x64</span>
 <span class="prompt">Shell&gt;</span> fs0:

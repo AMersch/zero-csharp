@@ -62,6 +62,14 @@ cp "$program" "$work/program.prg"
 # -autostartprgmode 1: put the program into memory directly, no disk drive.
 options=(-default +saveres +confirmonexit -autostartprgmode 1 -autostart "$work/program.prg")
 
+# The ROMs ./setup.sh --c64 fetched on Linux, before VICE's own system files.
+if [ -d "$C64_ROMS/C64" ]; then
+    roms=$C64_ROMS
+    [[ "$roms" = /* ]] || roms=$PWD/$roms
+    share=$(cd "$(dirname "$(command -v "$emulator")")/../share/vice" 2>/dev/null && pwd || true)
+    options+=(-directory "$roms${share:+:$share:$share/C64:$share/DRIVES}")
+fi
+
 if [ "$window" = 1 ]; then
     # -sound: VICE (3.10 on macOS, at least) starts with its sound off.
     exec "$emulator" "${options[@]}" -sound > /dev/null 2>&1

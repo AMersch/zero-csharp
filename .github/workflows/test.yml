@@ -242,3 +242,40 @@ jobs:
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: ./test.sh --wasm
+
+  # The Commodore 64: llvm-mos (x64 Linux build) and VICE from Ubuntu, with the
+  # ROMs ./setup.sh --c64 fetches from VICE's source release. VICE has no mode
+  # without a window, so it gets a virtual screen (xvfb-run).
+  c64:
+    needs: bflat
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zero-csharp
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            bflat/layouts/linux-glibc-x64
+            bflat/layouts/linux-glibc-arm64
+          key: ${{ needs.bflat.outputs.key }}
+          fail-on-cache-miss: true
+      - name: Restore the C64 tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            zero-csharp/tools/c64
+            zero-csharp/tools/wasm
+          key: c64-tools-${{ hashFiles('zero-csharp/env.sh') }}
+      - name: Install VICE, a virtual screen, and what bflat needs
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends vice xvfb xauth binutils
+      - name: Set up
+        working-directory: zero-csharp
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
+        run: ./setup.sh --c64
+      - name: Test
+        working-directory: zero-csharp
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
+        run: xvfb-run -a ./test.sh --c64

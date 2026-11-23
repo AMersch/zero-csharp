@@ -32,7 +32,7 @@ namespace System.Runtime.CompilerServices
         public static bool AreSame<T>(ref T left, ref T right) => AreSame(ref left, ref right);
     }
 
-    public static unsafe class RuntimeHelpers
+    public static unsafe partial class RuntimeHelpers
     {
         // Records' generated ToString calls this before printing nested
         // records, to stop a cycle from overflowing the stack. There's no

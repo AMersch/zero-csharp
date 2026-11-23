@@ -1,7 +1,8 @@
 // Example: the smaller parts of the core library (zerocore): Math and MathF,
 // Interlocked, Volatile, interface calls from one call site to many classes,
-// extension members, C# 15 unions, and caller-info attributes (zerocore/System/Exceptions.cs and
-// Unions.cs explain what those two need from the library).
+// extension members, C# 15 unions (zerocore/System/Exceptions.cs and Unions.cs
+// explain what those two need from the library), caller-info attributes, and
+// indices and ranges.
 // Exit code = number of failed checks.
 // Build: ./build.sh Core
 
@@ -273,6 +274,27 @@ public static class Program
         System.Diagnostics.Debug.Assert(++evaluated < 0);
         Check("Debug.Assert without DEBUG is removed", evaluated == 0);
         Section("caller info");
+
+        // docs:index-range
+        int[] numbers = { 10, 20, 30, 40, 50 };
+        Span<int> span = numbers;
+        Check("^1 is the last element", span[^1] == 50 && span[^5] == 10);
+        Check("a span's range is a Slice", span[1..^1].Length == 3);
+        Check("open ends", span[..2][1] == 20 && span[3..][0] == 40);
+        int[] copy = numbers[1..3];       // a new array
+        copy[0] = 0;
+        Check("an array's range copies", copy.Length == 2 && numbers[1] == 20);
+        string text = Opaque("hello world");
+        Check("a string's range copies", text[6..] == "world");
+        Check("a span of a string doesn't",
+            text.AsSpan()[..5].SequenceEqual("hello"));
+        Index last = ^1;
+        Range middle = 1..^1;
+        Check("Index and Range print as written",
+            last.ToString() == "^1" && middle.ToString() == "1..^1");
+        Check("GetOffsetAndLength", middle.GetOffsetAndLength(5) == (1, 3));
+        // docs:end
+        Section("indices and ranges");
 
         Out.Line();
         if (s_failures == 0)

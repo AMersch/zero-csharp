@@ -14,3 +14,4 @@ Usage: Guards <case>, where the case is one of:
   union-no-case        a switch on a union that holds none of its cases
   debug-assert         a Debug.Assert whose condition is false
   debug-fail           a Debug.Fail
+  range-too-long       an array range that ends past the array

@@ -112,6 +112,22 @@ namespace System
 
         public static bool operator !=(string a, string b) => !Equals(a, b);
 
+        // A new string holding a copy of these characters; text[a..b] calls it.
+        // text.AsSpan(start, length) gives the same characters without a copy.
+        public string Substring(int startIndex) => Substring(startIndex, _stringLength - startIndex);
+
+        public string Substring(int startIndex, int length)
+        {
+            if ((uint)startIndex > (uint)_stringLength || (uint)length > (uint)(_stringLength - startIndex))
+                Environment.FailFast("string.Substring: out of range");
+            if (length == _stringLength)
+                return this;
+            string result = Allocate(length);
+            for (int i = 0; i < length; i++)
+                Unsafe.Add(ref result._firstChar, i) = Unsafe.Add(ref _firstChar, startIndex + i);
+            return result;
+        }
+
         // Null counts as the empty string, as in .NET.
         public static string Concat(string a, string b)
         {

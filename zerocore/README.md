@@ -35,10 +35,11 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `Runtime/ObjectAllocator.cs` | Where each thread's objects come from: `calloc` by default, or a function a library sets for that thread (`../lib/Arena.cs`'s `AllocateObjectsHere` sends them to an arena); and a scan of static fields for debug checks |
 | `System/Equality.cs`, `System/Type.cs`, `System/Number.cs`, `System/Text/StringBuilder.cs` | What records, anonymous types and `"n=" + 5` need: `object`'s `Equals`, `GetHashCode` and `ToString` (overridden by every primitive, `string`, structs and enums), `EqualityComparer<T>`, `IEquatable<T>`, `string.Format` (`{0}` holes), `StringBuilder`, and `Type` for `typeof` and `GetType()`, one per type, compared by identity |
 | `System/GC.cs` | `GC.GetTotalAllocatedBytes()`: every byte allocated so far, so a test can check that a loop allocates nothing |
-| `System/String.cs` | `string`: `Length`, indexer, `==`, `!=`, `Equals`, `IsNullOrEmpty`, `Concat` (so `a + b` and `switch` on strings work) |
+| `System/String.cs` | `string`: `Length`, indexer, `==`, `!=`, `Equals`, `IsNullOrEmpty`, `Concat`, `Substring` (so `a + b` and `switch` on strings work) |
 | `System/Span.cs` | `Span<T>` and `ReadOnlySpan<T>`: indexing, `Slice`, `CopyTo`, `Fill`, `Clear`, `foreach`, `fixed` |
 | `System/Exceptions.cs` | `Exception` and a few standard subclasses (`InvalidOperationException`, `ArgumentException`, …), for `throw` as a panic and for code the compiler generates |
 | `System/Unions.cs` | `IUnion` and `UnionAttribute`, which C# 15 `union` declarations need |
+| `System/Range.cs` | `Index` and `Range`, for `^1` and `a..b`, and `RuntimeHelpers.GetSubArray` for `array[a..b]` (`string.Substring` is in `String.cs`) |
 | `System/Debug.cs` | `Debug.Assert` and `Debug.Fail`, for builds with `DEBUG` defined: print the condition, member, file and line, then `FailFast`. They use the caller-info attributes in `System/Attributes.cs` (`CallerMemberName`, `CallerLineNumber`, `CallerFilePath`, `CallerArgumentExpression`) |
 | `System/Environment.cs` | `Environment.FailFast`, which is what every failure ends in; `Exit`, `GetEnvironmentVariable`, `ProcessorCount`, `TickCount64` and `NewLine` (`"\n"`) |
 | `Runtime/RuntimeExports.cs` | Allocation (`calloc`, never freed), boxing and unboxing; `throw` (print the message, abort) |

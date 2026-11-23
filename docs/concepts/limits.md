@@ -39,6 +39,8 @@ With zerocore, as `build.sh` builds it:
   of bits.
 - **Extension methods**, and C# 14 **extension members**: properties, static members and
   `ref` receivers in `extension(...)` blocks.
+- **Indices and ranges**: `span[^1]`, `span[1..^1]`, and on strings and arrays, where a range
+  makes a copy.
 - **Caller information** (`[CallerMemberName]`, `[CallerLineNumber]`, `[CallerFilePath]`,
   `[CallerArgumentExpression]`) and **`Debug.Assert`/`Debug.Fail`** in Debug builds.
 
@@ -250,6 +252,36 @@ Where `DEBUG` isn't defined, as in Release builds, the compiler removes each cal
 arguments. That is decided where the call is compiled, so the asserts are only in your own code:
 `lib/` and zerocore come compiled without `DEBUG`, and their own checks are always on (see
 [Memory without a GC](memory.html) for `Arena.DebugChecks`).
+
+### Indices and ranges
+
+`^1` counts from the end and `a..b` is a range, as in .NET. On a `Span<T>` or `ReadOnlySpan<T>` a
+range is a `Slice`, with nothing copied. On a string or an array it allocates a copy, which in
+zero mode is never freed (see [Memory without a GC](memory.html)), so slice `text.AsSpan()` instead
+where you can:
+
+<!-- sample: samples/Core.cs index-range -->
+```csharp
+int[] numbers = { 10, 20, 30, 40, 50 };
+Span<int> span = numbers;
+Check("^1 is the last element", span[^1] == 50 && span[^5] == 10);
+Check("a span's range is a Slice", span[1..^1].Length == 3);
+Check("open ends", span[..2][1] == 20 && span[3..][0] == 40);
+int[] copy = numbers[1..3];       // a new array
+copy[0] = 0;
+Check("an array's range copies", copy.Length == 2 && numbers[1] == 20);
+string text = Opaque("hello world");
+Check("a string's range copies", text[6..] == "world");
+Check("a span of a string doesn't",
+    text.AsSpan()[..5].SequenceEqual("hello"));
+Index last = ^1;
+Range middle = 1..^1;
+Check("Index and Range print as written",
+    last.ToString() == "^1" && middle.ToString() == "1..^1");
+Check("GetOffsetAndLength", middle.GetOffsetAndLength(5) == (1, 3));
+```
+
+`lib/`'s `List<T>` has no indexer, so `list[^1]` doesn't compile; `list.AsSpan()[^1]` does.
 
 ## Choosing how to dispatch
 

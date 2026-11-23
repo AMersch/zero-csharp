@@ -163,50 +163,28 @@ public struct List<T> where T : unmanaged
     /// </summary>
     public void Sort(delegate*<T, T, int> compare)
     {
-        if (_header == null || compare == null)
+        if (compare == null)
             return;
-        DebugCheck();
-
-        unsafe
-        {
-            // SAFETY: a live header; every index stays below Count. compare is the
-            // caller's function, called with two items of the list.
-            T* data = _header->Data;
-            int count = _header->Count;
-
-            // Arrange the items as a heap with the largest first, then move the
-            // largest to the end and repair the heap, one item at a time.
-            for (int start = count / 2 - 1; start >= 0; start--)
-                SiftDown(data, start, count, compare);
-            for (int end = count - 1; end > 0; end--)
-            {
-                T largest = data[0];
-                data[0] = data[end];
-                data[end] = largest;
-                SiftDown(data, 0, end, compare);
-            }
-        }
+        Sort(new System.Collections.Generic.FunctionPointerComparer<T>(compare));
     }
 
-    // Moves data[root] down until neither child is larger, within [0, count).
-    static unsafe void SiftDown(T* data, int root, int count, delegate*<T, T, int> compare)
+    /// <summary>Sorts the items by T's IComparable&lt;T&gt; (<c>Comparer&lt;T&gt;.Default</c>).</summary>
+    public void Sort() => Sort(new System.Collections.Generic.DefaultComparer<T>());
+
+    /// <summary>
+    /// Sorts the items by <paramref name="comparer"/>. A struct is fastest: the
+    /// sort is compiled for it, and its Compare is a direct call.
+    /// </summary>
+    public void Sort<TComparer>(TComparer comparer) where TComparer : System.Collections.Generic.IComparer<T>
     {
+        if (_header == null)
+            return;
+        DebugCheck();
         unsafe
         {
-            while (true)
-            {
-                int child = 2 * root + 1;
-                if (child >= count)
-                    return;
-                if (child + 1 < count && compare(data[child], data[child + 1]) < 0)
-                    child++;
-                if (compare(data[root], data[child]) >= 0)
-                    return;
-                T item = data[root];
-                data[root] = data[child];
-                data[child] = item;
-                root = child;
-            }
+            // SAFETY: a live header; comparer only sees items of the list, and
+            // nothing changes the list during the sort.
+            System.Collections.Generic.Sorting.HeapSort(new Span<T>(_header->Data, _header->Count), comparer);
         }
     }
 

@@ -8,7 +8,7 @@ namespace System
     // here (by + and Concat) are allocated like any other object and never freed.
     // Object has no Equals or GetHashCode to override here.
 #pragma warning disable CS0660, CS0661
-    public sealed unsafe class String : IEquatable<string>
+    public sealed unsafe class String : IEquatable<string>, IComparable<string>
 #pragma warning restore CS0660, CS0661
     {
         // The compiler finds these two fields by name, to lay out string literals.
@@ -51,6 +51,30 @@ namespace System
         }
 
         public bool Equals(string other) => Equals(this, other);
+
+        // By UTF-16 code unit, as string.CompareOrdinal does. .NET's CompareTo
+        // uses the current culture's rules; zero mode has no cultures. So
+        // "B" goes before "a" here ('B' is 66, 'a' is 97), not after it.
+        public int CompareTo(string other) => CompareOrdinal(this, other);
+
+        // Null goes before every string, as in .NET.
+        public static int CompareOrdinal(string a, string b)
+        {
+            if ((object)a == b)
+                return 0;
+            if (a is null)
+                return -1;
+            if (b is null)
+                return 1;
+            int length = a._stringLength < b._stringLength ? a._stringLength : b._stringLength;
+            for (int i = 0; i < length; i++)
+            {
+                int difference = Unsafe.Add(ref a._firstChar, i) - Unsafe.Add(ref b._firstChar, i);
+                if (difference != 0)
+                    return difference;
+            }
+            return a._stringLength - b._stringLength;
+        }
 
         public override bool Equals(object obj) => obj is string other && Equals(this, other);
 

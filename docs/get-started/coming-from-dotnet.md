@@ -214,6 +214,13 @@ Arenas and `lib/`'s collections aren't thread-safe, so give each thread its own;
 - **`IsSupported` is a constant.** `Avx2.IsSupported` is `true` only when the build names the
   instruction set, and the program then assumes the processor has it.
 - **Arrays aren't `IList<T>` or `IEnumerable<T>`.** Pass a span instead.
+- **Strings sort by character code.** `string.CompareTo`, `Comparer<string>.Default`, and so
+  `Sort()` on strings, compare UTF-16 code units, as `string.CompareOrdinal` does: zero mode has no
+  cultures to follow. Every capital letter goes before every lowercase one, so `"Banana"` sorts
+  before `"apple"`, where .NET puts `"apple"` first. To ignore case, sort with your own comparer.
+- **`HashCode` gives the same result on every run.** .NET seeds `HashCode.Combine` with a random
+  number in each process; zero mode has nothing random at startup, so its seed is fixed. Don't save
+  or send hash codes in either case.
 
 [Limits](../concepts/limits.html) has the full list and the known issues.
 

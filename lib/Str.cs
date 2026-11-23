@@ -39,7 +39,7 @@ namespace System.Runtime.CompilerServices
 
 namespace System
 {
-    public static class MemoryExtensions
+    public static partial class MemoryExtensions
     {
         // ---- string -> span ----------------------------------------------
 

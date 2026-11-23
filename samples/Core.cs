@@ -7,6 +7,7 @@
 // Build: ./build.sh Core
 
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
@@ -63,6 +64,19 @@ public struct BadChar { public int Position; }
 // handle both.
 public union ParseResult(Parsed, BadChar);
 // docs:end
+
+// docs:equatable-struct
+public readonly struct Point : IEquatable<Point>
+{
+    public readonly int X, Y;
+    public Point(int x, int y) { X = x; Y = y; }
+    public bool Equals(Point other) => X == other.X && Y == other.Y;
+    public override int GetHashCode() => HashCode.Combine(X, Y);
+}
+// docs:end
+
+public enum Unsigned : uint { Low = 1, High = 0x80000000 }
+public enum Signed : sbyte { Negative = -1, Positive = 1 }
 
 public class Triangle : IShape { public int Sides => 3; }
 public class Square : IShape { public int Sides => 4; }
@@ -295,6 +309,55 @@ public static class Program
         Check("GetOffsetAndLength", middle.GetOffsetAndLength(5) == (1, 3));
         // docs:end
         Section("indices and ranges");
+
+        // docs:default-comparers
+        // The comparer for Point calls Point.Equals(Point): no boxing.
+        var points = EqualityComparer<Point>.Default;
+        long before = GC.GetTotalAllocatedBytes();
+        bool same = points.Equals(new Point(1, 2), new Point(1, 2));
+        bool different = points.Equals(new Point(1, 2), new Point(2, 1));
+        Check("IEquatable<T> struct, compared without allocating",
+            same && !different && GC.GetTotalAllocatedBytes() == before);
+        // docs:end
+        var signedEquality = EqualityComparer<Signed>.Default;
+        before = GC.GetTotalAllocatedBytes();
+        Check("enum equality without allocating",
+            signedEquality.Equals(Signed.Negative, (Signed)Opaque(-1))
+            && GC.GetTotalAllocatedBytes() == before);
+        Check("Comparer<int>.Default",
+            Comparer<int>.Default.Compare(Opaque(1), 2) < 0);
+        Check("unsigned enum order",
+            Comparer<Unsigned>.Default.Compare(Unsigned.High, Unsigned.Low) > 0);
+        Check("signed enum order",
+            Comparer<Signed>.Default.Compare(Signed.Negative, Signed.Positive) < 0);
+        Check("Nullable: null first",
+            Comparer<int?>.Default.Compare(null, 0) < 0
+            && EqualityComparer<int?>.Default.Equals(3, Opaque(3)));
+        Check("strings compare by code unit",
+            Comparer<string>.Default.Compare("B", Opaque("a")) < 0
+            && "abc".CompareTo(Opaque("abd")) < 0);
+        Check("NaN goes first",
+            Comparer<double>.Default.Compare(double.NaN, double.NegativeInfinity) < 0);
+        Check("Comparer.Create",
+            Comparer<int>.Create((a, b) => b - a).Compare(Opaque(1), 2) > 0);
+        Section("comparers");
+
+        var builder = new HashCode();
+        builder.Add(1);
+        builder.Add(2);
+        Check("Combine is Add then ToHashCode",
+            HashCode.Combine(1, 2) == builder.ToHashCode());
+        builder.Add(3);
+        builder.Add(4);
+        Check("four or more values, likewise",
+            HashCode.Combine(1, 2, 3, 4) == builder.ToHashCode());
+        Check("order matters", HashCode.Combine(1, 2) != HashCode.Combine(2, 1));
+        Check("null hashes as zero", HashCode.Combine<string>(null) == HashCode.Combine(0));
+        before = GC.GetTotalAllocatedBytes();
+        int pointHash = HashCode.Combine(new Point(1, 2), Opaque(3));
+        Check("a struct's hash code without allocating",
+            pointHash != 0 && GC.GetTotalAllocatedBytes() == before);
+        Section("HashCode");
 
         Out.Line();
         if (s_failures == 0)

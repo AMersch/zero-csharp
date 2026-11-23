@@ -70,11 +70,40 @@ or for structs whose padding bytes may differ, so avoid such keys or normalize t
 
 ## Sort and iterate
 
-- `List.Sort(&Compare)` and `RefList.Sort` take the address of a static method that returns negative,
-  zero or positive. It is a heapsort: no extra memory, and not stable.
+- `Sort()` on a `List`, a `RefList` or a span orders the items by their `IComparable<T>`, as
+  `Comparer<T>.Default` does: numbers by value, strings by character code (capitals first).
+- `Sort(comparer)` takes anything that implements `IComparer<T>`. Make it a struct and the sort is
+  compiled for it, with a direct call to its `Compare`. A lambda (on a span) or the address of a
+  static method (`list.Sort(&Compare)`) works too, at the cost of an indirect call per comparison.
+- All of them are a heapsort: no extra memory, and not stable. On a sorted span, `BinarySearch`
+  finds an item, or the bitwise complement of where it would go.
 - `foreach` works on `RefList`, `Dict`, `StrDict` and `RefDict`. Maps yield their pairs in no
   particular order. Don't `Set` or `Remove` during the loop: entries move, so some may be skipped or
   seen twice. For a `List`, loop over `Count` with `Get`, or over `AsSpan()`.
+
+<!-- sample: samples/Collections.cs descending -->
+```csharp
+// A comparer as a struct: Sort is compiled for it; Compare is a direct call.
+public struct Descending : IComparer<int>
+{
+    public int Compare(int a, int b) => b.CompareTo(a);
+}
+```
+
+<!-- sample: samples/Collections.cs sort-comparers -->
+```csharp
+unsorted.Sort();                  // by int's IComparable<int>
+Out.Write("Sort():     ");
+PrintList(unsorted);
+unsorted.Sort(new Descending());  // by a struct: an IComparer<int>
+Out.Write("Descending: ");
+PrintList(unsorted);
+
+Span<int> span = values;          // spans sort in place too
+span.Sort();
+Out.Line($"BinarySearch(19): {span.BinarySearch(19)}, "
+    + $"(20) would go at {~span.BinarySearch(20)}");
+```
 
 ## Copy into another arena
 

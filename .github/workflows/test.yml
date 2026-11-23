@@ -18,6 +18,12 @@ permissions:
   contents: read
   packages: read # the fork's build restores packages from GitHub Packages
 
+# A newer push to a pull request cancels the run for the older one; runs on
+# master and on tags always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   bflat:
     runs-on: ubuntu-22.04

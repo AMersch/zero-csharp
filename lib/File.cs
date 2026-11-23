@@ -18,7 +18,8 @@
 // Underneath are the C library's stdio functions (fopen, fread, fwrite,
 // fseeko, ftello, fclose, remove): the system's own on Linux, macOS, Windows
 // and WebAssembly; dos/runtime.c and efi/machine.c supply them on DOS and
-// UEFI. On DOS, names are 8.3. Under wasmtime, a program sees only the
+// UEFI. On Windows, win/runtime.c's fopen and remove take the UTF-8 path in
+// place of the Universal CRT's, which would read it in the ANSI code page. On DOS, names are 8.3. Under wasmtime, a program sees only the
 // directories it is given with --dir.
 
 using System;

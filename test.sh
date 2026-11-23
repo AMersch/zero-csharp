@@ -116,6 +116,26 @@ run_all() {
             echo "ok   Guards $name (stopped, as it must be)"
         fi
     done < "$EXPECTED/Guards.fail"
+
+    # A file name outside ASCII must reach the system as it was written: Files
+    # makes one and leaves it, and it must be here under exactly that name.
+    # (Not on DOS, whose names are 8.3, nor UEFI, whose files are on a disk image.)
+    if [ "$target" != dos ] && [ "$target" != uefi ]; then
+        name="zero é☃𝄞.tmp"
+        rm -f -- "$name"
+        status=0
+        "${run[@]}" Files --keep "$name" < /dev/null > /dev/null 2>&1 || status=$?
+        if [ "$status" != 0 ]; then
+            echo "FAIL Files --keep: exit code $status"
+            failures=$((failures + 1))
+        elif [ ! -f "$name" ]; then
+            echo "FAIL Files --keep: no file named \"$name\" (the name was garbled)"
+            failures=$((failures + 1))
+        else
+            echo "ok   Files --keep (a name outside ASCII)"
+        fi
+        rm -f -- "$name"
+    fi
 }
 
 test_native() {

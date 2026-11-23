@@ -191,11 +191,11 @@
                 Condition="'$(ZeroNativeLibrary)' == 'true' and ('$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64')" />
       <_ZeroArg Include="--ldflags --soname=$(AssemblyName).so"
                 Condition="'$(ZeroNativeLibrary)' == 'true' and ('$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64') and !$(AssemblyName.Contains(' '))" />
-      <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags /wrap:getenv --ldflags &quot;$(ZeroNativeDir)start.obj&quot; --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' != 'true'" />
+      <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags /wrap:getenv --ldflags /wrap:fopen --ldflags /wrap:remove --ldflags &quot;$(ZeroNativeDir)start.obj&quot; --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' != 'true'" />
       <!-- A Windows native library: bflat links it /dll with a .def file of
            the entry points; zero_dll_start (win/library.c) sets up zerocore
            when it loads. -->
-      <_ZeroArg Include="--os windows --target Shared --ldflags /entry:zero_dll_start --ldflags /wrap:getenv --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)library.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' == 'true'" />
+      <_ZeroArg Include="--os windows --target Shared --ldflags /entry:zero_dll_start --ldflags /wrap:getenv --ldflags /wrap:fopen --ldflags /wrap:remove --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)library.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' == 'true'" />
       <!-- UEFI: a program the firmware starts, with no operating system and no
            C library; the payload's efi/ objects and musl's libm stand in for it. -->
       <_ZeroArg Include="--os uefi --arch x64" Condition="'$(ZeroTarget)' == 'uefi-x64'" />

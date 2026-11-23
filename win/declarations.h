@@ -30,6 +30,8 @@ IMPORT int QueryPerformanceCounter(i64 *count);
 IMPORT int QueryPerformanceFrequency(i64 *frequency);
 IMPORT void GetSystemTimePreciseAsFileTime(u64 *time);
 IMPORT int _fseeki64(void *stream, i64 offset, int origin);
+IMPORT void *_wfopen(const wchar *path, const wchar *mode);
+IMPORT int _wremove(const wchar *path);
 IMPORT i64 _ftelli64(void *stream);
 IMPORT __declspec(noreturn) void ExitProcess(u32 code);
 IMPORT unsigned int _set_abort_behavior(unsigned int flags, unsigned int mask);

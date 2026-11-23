@@ -408,7 +408,7 @@ build_win() {
         # shellcheck disable=SC2046
         "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none \
             "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os windows --arch x64 $(BFLAT_ARCH=x64 bflat_flags "$name") \
-            --ldflags "/entry:zero_start /wrap:getenv $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
+            --ldflags "/entry:zero_start /wrap:getenv /wrap:fopen /wrap:remove $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
         rm -f "bin/win/$name.pdb"
     done
 }

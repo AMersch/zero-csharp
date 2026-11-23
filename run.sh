@@ -45,7 +45,9 @@ if [ "${1:-}" = --win ]; then
     ensure_win_image
     name=$1
     shift
-    exec docker run --rm -i --platform linux/amd64 -v "$PWD:/w" -w /w "$WIN_IMAGE" wine64 "bin/win/$name.exe" "$@"
+    # LANG: Wine converts arguments and file names between UTF-16 and the
+    # container's bytes in its locale; without a UTF-8 one, "é" becomes "?".
+    exec docker run --rm -i --platform linux/amd64 -e LANG=C.UTF-8 -v "$PWD:/w" -w /w "$WIN_IMAGE" wine64 "bin/win/$name.exe" "$@"
 fi
 
 wasm=0

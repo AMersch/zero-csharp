@@ -1,6 +1,7 @@
 // Example: files (lib/File.cs): whole files in one call, and an open file
 // read, written and moved through piece by piece. Writes files.tmp in the
-// current directory and deletes it again.
+// current directory and deletes it again. "Files --keep <name>" writes that
+// file and leaves it.
 // Exit code = number of failed checks.
 // Build: ./build.sh Files
 
@@ -34,8 +35,14 @@ public static class Program
         }
     }
 
-    public static int Main()
+    public static int Main(string[] args)
     {
+        // "Files --keep <name>": writes the file and leaves it, so test.sh can
+        // check from outside that it has exactly that name (a name the system
+        // got wrong would read back fine from in here).
+        if (args.Length == 2 && args[0] == "--keep")
+            return File.WriteAllText(args[1], "kept\n") ? 0 : 1;
+
         Arena arena = Arena.Create(64 * 1024);
         WholeFiles(arena);
         OpenFiles(arena);

@@ -317,6 +317,75 @@ __declspec(noreturn) void abort(void)
     }
 }
 
+// Environment.Exit: the code is the status, as start.c returns Main's.
+__declspec(noreturn) void exit(int code)
+{
+    efi_system->boot_services->exit(efi_image, (Status)(u8)code, 0, 0);
+    for (;;) {
+    }
+}
+
+// Environment.GetEnvironmentVariable: the shell's variables (set, in the
+// shell), converted from UTF-16 to UTF-8. Without a shell there are none.
+char *getenv(const char *name)
+{
+    static const Guid shell_guid = SHELL_GUID;
+    static char value[4096];
+    char16 wide_name[256];
+    Shell *shell;
+    if (EFI_ERROR(efi_system->boot_services->locate_protocol(&shell_guid, 0, (void **)&shell)))
+        return 0;
+
+    // The name: UTF-8 to UTF-16, characters past U+FFFF aside (no name has one).
+    usize n = 0;
+    for (const u8 *p = (const u8 *)name; *p; n++) {
+        if (n == 255)
+            return 0;
+        u32 c = *p++;
+        if (c >= 0xE0 && p[0] && p[1]) {
+            c = ((c & 0x0F) << 12) | ((p[0] & 0x3F) << 6) | (p[1] & 0x3F);
+            p += 2;
+        } else if (c >= 0xC0 && p[0]) {
+            c = ((c & 0x1F) << 6) | (p[0] & 0x3F);
+            p += 1;
+        }
+        wide_name[n] = (char16)c;
+    }
+    wide_name[n] = 0;
+
+    const char16 *wide = shell->get_env(wide_name);
+    if (!wide)
+        return 0;
+    usize length = 0;
+    for (; *wide; wide++) {
+        u32 c = *wide;
+        if (c >= 0xD800 && c <= 0xDBFF && wide[1] >= 0xDC00 && wide[1] <= 0xDFFF) {
+            c = 0x10000 + ((c - 0xD800) << 10) + (*++wide - 0xDC00);
+        } else if (c >= 0xD800 && c <= 0xDFFF) {
+            c = 0xFFFD;
+        }
+        if (length + 5 > sizeof value)
+            return 0;
+        if (c < 0x80) {
+            value[length++] = (char)c;
+        } else if (c < 0x800) {
+            value[length++] = (char)(0xC0 | (c >> 6));
+            value[length++] = (char)(0x80 | (c & 0x3F));
+        } else if (c < 0x10000) {
+            value[length++] = (char)(0xE0 | (c >> 12));
+            value[length++] = (char)(0x80 | ((c >> 6) & 0x3F));
+            value[length++] = (char)(0x80 | (c & 0x3F));
+        } else {
+            value[length++] = (char)(0xF0 | (c >> 18));
+            value[length++] = (char)(0x80 | ((c >> 12) & 0x3F));
+            value[length++] = (char)(0x80 | ((c >> 6) & 0x3F));
+            value[length++] = (char)(0x80 | (c & 0x3F));
+        }
+    }
+    value[length] = 0;
+    return value;
+}
+
 // ---- the clock --------------------------------------------------------------
 //
 // The firmware has a calendar clock (GetTime) but no monotonic one with good

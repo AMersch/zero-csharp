@@ -142,6 +142,25 @@ int pthread_setspecific(u64 key, void *value) { return TlsSetValue((u32)key, val
 
 int get_nprocs(void) { return (int)GetActiveProcessorCount(0xFFFF); }
 
+// Environment.GetEnvironmentVariable passes the name as UTF-8 and expects the
+// value back as UTF-8; the Universal CRT's getenv speaks the ANSI code page.
+// This one goes through the UTF-16 environment instead. The linker reads the
+// Universal CRT before this file, so a getenv here would clash with its; the
+// link passes /wrap:getenv instead, which sends calls to getenv here.
+// (Environment.Exit uses the Universal CRT's exit, which flushes its files.)
+char *__wrap_getenv(const char *name)
+{
+    enum { MaxValue = 32767 }; // the longest a variable can be, in UTF-16
+    static wchar wide_name[256], wide_value[MaxValue];
+    static char value[MaxValue * 3 + 1];
+    if (!MultiByteToWideChar(65001, 0, name, -1, wide_name, 256))
+        return 0;
+    u32 length = GetEnvironmentVariableW(wide_name, wide_value, MaxValue);
+    if (length == 0 || length >= MaxValue)
+        return 0;
+    return WideCharToMultiByte(65001, 0, wide_value, -1, value, sizeof value, 0, 0) ? value : 0;
+}
+
 // Linux's clock numbers, as lib/Clock.cs passes them: 0 is the wall clock
 // (CLOCK_REALTIME), anything else the monotonic clock.
 int clock_gettime(int clock, i64 *timespec)

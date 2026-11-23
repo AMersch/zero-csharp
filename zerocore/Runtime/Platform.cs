@@ -16,6 +16,22 @@ namespace System.Runtime
         [DllImport("*"), SuppressGCTransition]
         internal static extern void abort();
 
+        // For Environment. DOS, UEFI and Windows get get_nprocs, clock_gettime
+        // (Linux's clock numbers; 1 is the monotonic clock) and getenv (UTF-8)
+        // from their runtime.c, macOS and WebAssembly some of them; DOS and UEFI
+        // get exit there too.
+        [DllImport("*"), SuppressGCTransition]
+        internal static extern void exit(int code);
+
+        [DllImport("*"), SuppressGCTransition]
+        internal static extern byte* getenv(byte* name);
+
+        [DllImport("*"), SuppressGCTransition]
+        internal static extern int get_nprocs();
+
+        [DllImport("*"), SuppressGCTransition]
+        internal static extern int clock_gettime(int clock, long* timespec);
+
         // Gives the processor to another thread: a thread waiting for another
         // one's static constructor (ClassConstructorRunner) calls it between
         // checks. Windows and DOS get it from their runtime.c.

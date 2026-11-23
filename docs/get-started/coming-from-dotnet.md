@@ -27,7 +27,7 @@ instead, and lists what compiles as usual but behaves differently.
 | `File.ReadAllText`, `File.WriteAllText`, `FileStream` | `File`, with the same names for whole files; strings and bytes read go in an arena | [Read and write files](../how-to/read-and-write-files.html) |
 | `Stopwatch`, `DateTime.UtcNow` | `Clock.Monotonic` (nanoseconds), `Clock.UtcNow` (a `CalendarTime`) | [Use the clock and random numbers](../how-to/use-the-clock-and-random-numbers.html) |
 | `Random` | `Random`, a struct with .NET's method names: pass it by `ref` | [Use the clock and random numbers](../how-to/use-the-clock-and-random-numbers.html) |
-| `Environment.Exit(code)` | Return the code from `Main` | |
+| `Environment.Exit`, `GetEnvironmentVariable`, `ProcessorCount`, `TickCount64`, `NewLine` | The same, in zerocore; `NewLine` is `"\n"` on every target | [Read environment variables and exit](../how-to/use-the-environment.html) |
 | `Vector128.IsHardwareAccelerated`, `Avx2.IsSupported` at run time | Decided when building, by `ZeroInstructionSet` (`-m`) | [Use SIMD](../how-to/use-simd.html) |
 | NuGet packages | Zero libraries, packed for `zero03`; ordinary .NET packages are refused | [Create a library](../how-to/create-a-library.html) |
 | `[DllImport]` | Works, bound when linking; `ZeroDllImports` names libraries besides `libc` and `libm.so.6` | [Install with dotnet](install-with-dotnet.html) |

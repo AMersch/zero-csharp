@@ -39,7 +39,7 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `System/Span.cs` | `Span<T>` and `ReadOnlySpan<T>`: indexing, `Slice`, `CopyTo`, `Fill`, `Clear`, `foreach`, `fixed` |
 | `System/Exceptions.cs` | `Exception` and a few standard subclasses (`InvalidOperationException`, `ArgumentException`, …), for `throw` as a panic and for code the compiler generates |
 | `System/Unions.cs` | `IUnion` and `UnionAttribute`, which C# 15 `union` declarations need |
-| `System/Environment.cs` | `Environment.FailFast`, which is what every failure ends in |
+| `System/Environment.cs` | `Environment.FailFast`, which is what every failure ends in; `Exit`, `GetEnvironmentVariable`, `ProcessorCount`, `TickCount64` and `NewLine` (`"\n"`) |
 | `Runtime/RuntimeExports.cs` | Allocation (`calloc`, never freed), boxing and unboxing; `throw` (print the message, abort) |
 | `Runtime/TypeCast.cs` | `is`, `as` and casts to classes and interfaces; type-checked stores into arrays |
 | `Runtime/InterfaceDispatch.cs` | Calling an interface method on an object whose class isn't known at build time, with a small cache per call site |

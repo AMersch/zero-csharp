@@ -213,6 +213,15 @@ typedef struct {
     File *std_in, *std_out, *std_err;
 } ShellParameters;
 
+// The UEFI Shell itself; only its environment is used (Environment's
+// GetEnvironmentVariable).
+#define SHELL_GUID { 0x6302d008, 0x7f9b, 0x4f30, { 0x87, 0xac, 0x60, 0xc9, 0xfe, 0xf5, 0xda, 0x4e } }
+
+typedef struct {
+    void *execute;
+    const char16 *(*get_env)(const char16 *name);
+} Shell;
+
 #define GRAPHICS_OUTPUT_GUID { 0x9042A9DE, 0x23DC, 0x4A38, { 0x96, 0xFB, 0x7A, 0xDE, 0xD0, 0x80, 0x51, 0x6A } }
 
 enum { PixelRedGreenBlueReserved8 = 0, PixelBlueGreenRedReserved8 = 1, PixelBitMask = 2, PixelBltOnly = 3 };

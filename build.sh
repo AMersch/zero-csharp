@@ -32,10 +32,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
 
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama)
+ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
 # Vga is a game for DOS and UEFI (lib/Dos.cs, lib/Uefi.cs: graphics, keyboard, clock).
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama Vga)
 # UEFI gets every sample, and Vga too (lib/Uefi.cs has what it uses of lib/Dos.cs).
 UEFI_SAMPLES=("${ALL_SAMPLES[@]}" Vga)
 
@@ -408,7 +408,7 @@ build_win() {
         # shellcheck disable=SC2046
         "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none \
             "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os windows --arch x64 $(BFLAT_ARCH=x64 bflat_flags "$name") \
-            --ldflags "/entry:zero_start $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
+            --ldflags "/entry:zero_start /wrap:getenv $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
         rm -f "bin/win/$name.pdb"
     done
 }

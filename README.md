@@ -145,6 +145,7 @@ nothing AGPL is linked into them.
 | `Threads` | `Parallel.For` with one arena per thread | 88 KB |
 | `Files` | `lib/File.cs`: whole files, and an open file read, written and moved through | 78 KB |
 | `Dice` | `lib/Random.cs` and `lib/Clock.cs`: seeded dice rolls that match on every target, durations, the date | 80 KB |
+| `Env` | `System.Environment`: variables, `Exit` from anywhere (writing what `Out` holds), the processor count | 70 KB |
 | `Pipe` | `In.Read`: standard input as bytes, checked byte for byte through a pipe | 70 KB |
 | `Records` | `record struct` and `record class`, `with`, `ToString`, `typeof`, anonymous types | 108 KB |
 | `Refs` | Structs in an arena passed and returned by `ref` | 75 KB |

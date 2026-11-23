@@ -12,7 +12,7 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
 ## Text and input
 
 - [Read input from the user](read-input.html): read a line into a buffer with `In.ReadLine`, and handle
-  the end of input, lines that don't fit, and numbers.
+  the end of input, lines that don't fit, and numbers; or read raw bytes with `In.Read`.
 - [Format text](format-text.html): `$"..."` with alignment and number formats, written to stdout, into an
   arena string or into a `StrBuilder`.
 - [Keep a string](keep-a-string.html): copy a line or a scratch result into an arena that lives long

@@ -9,7 +9,8 @@ The same C# source builds for six targets: a native Linux program, a macOS progr
 Silicon, a 64-bit Windows program, a WebAssembly module, a DOS program for a 386, and a UEFI program
 that the firmware starts with no operating system. WebAssembly and DOS need a different compiler for
 their last step, but all six share the same first step and the same core library. This page explains how each path works and what changes
-along it.
+along it. A seventh target takes the programs that are small enough: the
+[Commodore 64](#the-commodore-64), an 8-bit machine with 50 KB for a program.
 
 ## The shared first step
 
@@ -19,8 +20,8 @@ place of a header file. Because it holds IL rather than native code, the last st
 compiles only what that program uses: generics are instantiated for its types, calls are inlined across
 the library boundary, and code is generated for its target and its `-m` flags.
 
-`lib/` is the same assembly for all six targets. zerocore is built a second time with `-d WASM` for
-WebAssembly and DOS, because that build finds static fields differently.
+`lib/` is the same assembly for every target. zerocore is built a second time with `-d WASM` for
+WebAssembly, DOS and the Commodore 64, because that build finds static fields differently.
 
 ## Native Linux
 
@@ -164,6 +165,62 @@ What the DOS target needs, and how it stays honest:
 
 [Run on DOS](../get-started/dos.html), [Build for DOS](../how-to/build-for-dos.html) and
 [Draw on VGA](../how-to/draw-on-vga.html) go further.
+
+## The Commodore 64
+
+The 6502 is an 8-bit processor with three registers and 16-bit addresses, and a C64 has 64 KB of
+memory. NativeAOT-LLVM can't compile for it: it only knows 32-bit and 64-bit machines, and every
+object layout in its output assumes 4-byte pointers. But its output is bitcode, and
+[llvm-mos](https://llvm-mos.org/) is an LLVM that generates 6502 code. `./build.sh --c64` joins the two:
+
+1. **bflat and NativeAOT-LLVM** compile each sample to bitcode as for DOS, but optimizing for size
+   (`--Os`), which among other things keeps one copy of each loop where `-O` makes two.
+2. **`c64/ll2mos.py`** rewrites the bitcode, as text, for 2-byte pointers. Memory keeps the 32-bit
+   layout: a pointer in memory stays a 4-byte slot, holding the 16-bit address and two zero bytes, so
+   every offset the compiler worked out still holds. Only pointers in registers shrink. A store of a
+   pointer becomes a store of the address widened to 32 bits; a load reads the low half; pointers inside
+   struct types become integers. NativeAOT-LLVM only uses packed structs, so nothing else in a layout
+   depends on the processor.
+3. **`c64/wasm2mos.py`** does for the 6502 what `dos/wasm2i386.py` does for the 386, with the same
+   reader: the program's data becomes assembly, each address in it a 2-byte address and two zero bytes.
+4. **llvm-mos** compiles it all with `c64/runtime.c` and optimizes the whole program at link time, into
+   a `.prg` file that BASIC loads and starts.
+
+Three things that are harmless on a 32-bit processor matter here:
+
+- **A pointer and a 32-bit integer travel in different registers.** A function declared as returning
+  one and defined as returning the other works on a 386 and returns garbage on a 6502. `ll2mos.py`
+  refuses a program with such a pair, and the few functions NativeAOT-LLVM writes as WebAssembly get
+  their real types from the bitcode that calls them.
+- **C's `int` is 16 bits.** Every function C# imports is bound to a `cs_` name, which `c64/runtime.c`
+  defines with 32-bit parameters, so C#'s `calloc(nuint, nuint)` and the C library's
+  `calloc(size_t, size_t)` are two functions.
+- **zerocore keeps flags in the low bits of pointers,** which needs allocations aligned to 4 bytes.
+  llvm-mos's `malloc` aligns to nothing, so `runtime.c` aligns what it hands out.
+
+The exception flag that compiled code checks after every call is never set in zero mode (a `throw`
+ends the program), so `ll2mos.py` replaces each read of it with zero and the checks disappear. The
+flag isn't defined anywhere: a program for which that were wrong wouldn't link.
+
+What the C64 target needs, and how it stays honest:
+
+- **Programs that fit in 50 KB**, with their heap and stack. Hello world is 7 KB; arithmetic on
+  `double` alone is 25 KB of software, because the processor has none. The large samples don't fit, so
+  the Small samples check the same ground in pieces that do.
+- **Tests that the 6502 really runs.** A compiler that optimizes the whole program sees through a
+  method that isn't inlined, and did the Small samples' arithmetic at build time until they were
+  changed to read their inputs through a static field.
+- **VICE for testing.** `run.sh --c64` runs the real `.prg` on an emulated C64 and reads its output and
+  exit code from outside: the emulator's monitor logs each character the program prints, and a
+  "debug cartridge" ends the run with the exit code.
+- **One thread, no files, and the keyboard for input.**
+
+```bash
+./run.sh --c64 Refs                 # runs on an emulated C64
+./run.sh --c64 --window C64Demo     # shows its screen
+```
+
+[Build for the Commodore 64](../how-to/build-for-c64.html) goes further.
 
 ## UEFI, with no operating system
 

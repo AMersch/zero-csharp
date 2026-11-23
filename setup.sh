@@ -7,10 +7,14 @@
 # NativeAOT-LLVM (shared with --wasm), FreeDOS and the HX DOS extender, about
 # 75 MB. It also checks for a clang with the x86 target and an emulator.
 #
+# With --c64, downloads what Commodore 64 builds need into $WASM_TOOLS and
+# $C64_TOOLS: NativeAOT-LLVM (shared with --wasm) and llvm-mos, the compiler
+# for the 6502, about 750 MB unpacked. It also checks for VICE, the emulator.
+#
 # bflat comes from the fork (OnurGumus/bflat, branch master), which must be
 # built first; see README, "Getting bflat".
 #
-# Usage: ./setup.sh [--wasm | --dos]
+# Usage: ./setup.sh [--wasm | --dos | --c64]
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
@@ -18,8 +22,10 @@ source ./env.sh
 ok=1
 want_wasm=0
 want_dos=0
+want_c64=0
 [ "${1:-}" = --wasm ] && want_wasm=1
 [ "${1:-}" = --dos ] && want_dos=1
+[ "${1:-}" = --c64 ] && want_c64=1
 
 # NativeAOT-LLVM: the compiler from C# (IL) to LLVM bitcode.
 fetch_ilc() {
@@ -114,10 +120,47 @@ fetch_dos_tools() {
     fi
 }
 
-if ! command -v python3 >/dev/null 2>&1 && [ "$want_dos" = 1 ]; then
-    echo "Missing: python3, for the tools in dos/"
+# llvm-mos: clang and a linker for the 6502, with a C library and startup
+# code for the C64. Its releases are builds for x64 Linux and for macOS.
+fetch_c64_tools() {
+    fetch_ilc
+    mkdir -p "$C64_TOOLS"
+
+    if [ ! -x "$LLVM_MOS/bin/mos-c64-clang" ]; then
+        local archive host
+        case "$(uname -s)-$HOST_ARCH" in
+            Darwin-*)  host=macos ;;
+            Linux-x64) host=linux ;;
+            *) echo "Missing: llvm-mos has no build for this machine ($(uname -s), $HOST_ARCH)."
+               echo "         Build it from https://github.com/llvm-mos/llvm-mos-sdk and unpack it as $LLVM_MOS"
+               ok=0
+               return ;;
+        esac
+        archive=$C64_TOOLS/llvm-mos.tar.xz
+        echo "Downloading llvm-mos $LLVM_MOS_VERSION ($host, about 190 MB)..."
+        curl -fsSL -o "$archive" \
+            "https://github.com/llvm-mos/llvm-mos-sdk/releases/download/$LLVM_MOS_VERSION/llvm-mos-$host.tar.xz"
+        rm -rf "$C64_TOOLS/llvm-mos" "$LLVM_MOS"
+        tar -xf "$archive" -C "$C64_TOOLS"
+        mv "$C64_TOOLS/llvm-mos" "$LLVM_MOS"
+        rm "$archive"
+    fi
+    echo "c64:    $LLVM_MOS"
+
+    local emulator
+    if emulator=$(find_c64_emulator); then
+        echo "vice:   $emulator"
+    else
+        echo "Missing: VICE, the emulator run.sh --c64 uses (x64sc). macOS: brew install vice"
+        ok=0
+    fi
+}
+
+if ! command -v python3 >/dev/null 2>&1 && { [ "$want_dos" = 1 ] || [ "$want_c64" = 1 ]; }; then
+    echo "Missing: python3, for the tools in dos/ and c64/"
     ok=0
     want_dos=0
+    want_c64=0
 fi
 
 if [ -x "$BFLAT_DIR/bflat" ]; then
@@ -153,12 +196,17 @@ fi
 if [ "$want_dos" = 1 ]; then
     fetch_dos_tools
 fi
+if [ "$want_c64" = 1 ]; then
+    fetch_c64_tools
+fi
 
 if [ "$ok" = 1 ]; then
     if [ "$want_wasm" = 1 ]; then
         echo "Ready. Run ./build.sh --wasm"
     elif [ "$want_dos" = 1 ]; then
         echo "Ready. Run ./build.sh --dos"
+    elif [ "$want_c64" = 1 ]; then
+        echo "Ready. Run ./build.sh --c64"
     else
         echo "Ready. Run ./build.sh"
     fi

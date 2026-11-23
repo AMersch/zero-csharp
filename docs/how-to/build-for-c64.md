@@ -1,0 +1,424 @@
+---
+title: Build for the Commodore 64
+index: 21
+---
+
+# Build for the Commodore 64
+
+`./build.sh --c64` compiles a sample, `lib/` and zerocore to a `.prg` file for a Commodore 64: an 8-bit
+6502 processor at 1 MHz, with 64 KB of memory, of which a program gets 50. It is the same C#, with
+classes, interfaces, generics, lambdas, arenas and strings. What changes is how much of it fits.
+
+## Get the tools
+
+```bash
+./setup.sh --c64
+```
+
+This downloads NativeAOT-LLVM (shared with `--wasm` and `--dos`) and
+[llvm-mos](https://llvm-mos.org/), an LLVM with a 6502 code generator and a C library for the C64,
+into `tools/`: a 190 MB download, 750 MB unpacked. It also checks for what it can't download:
+
+- **Python 3**, for the tools in `c64/`.
+- **VICE**, the Commodore emulator (`x64sc`). `brew install vice` on macOS.
+
+## Build
+
+```bash
+./build.sh --c64              # the samples that fit, into bin/c64/*.prg
+./build.sh --c64 QuizStep2    # just one
+./build.sh --c64 Strings      # any sample can be tried
+```
+
+A sample that is too big stops the build with how much too big it is:
+
+```text
+Error: Strings doesn't fit in a C64's memory:
+  too big by 99789 bytes
+```
+
+To build a program of your own, add its name to `C64_SAMPLES` in `build.sh`.
+
+## Run in the emulator
+
+```bash
+./run.sh --c64 Refs                    # prints the output, exits with the program's code
+./run.sh --c64 --window C64Demo        # shows the C64's screen, at its real speed
+./run.sh --c64 QuizStep2 < answers.txt # types the file into the C64's keyboard
+./test.sh --c64                        # every C64 sample, compared with tests/expected
+```
+
+A C64 has no standard output and no exit code, so `run.sh --c64` watches from outside. Every character
+a program prints goes through one function in `c64/runtime.c`, and VICE's monitor logs the processor's
+registers each time that function starts: the character is in register A. The runtime writes the exit
+code to an address that VICE's "debug cartridge" watches, and VICE quits with it. The machine runs as
+fast as the host allows, so a run takes a second or two. VICE has no mode without a window; one opens,
+minimized, for the run. A run that hasn't finished after `C64_TIMEOUT` seconds of C64 time (default
+600) is stopped and exits with 124.
+
+With `--window` you get the machine itself: its screen, sound and keyboard, at 1 MHz. Close the window
+to end.
+
+## Memory
+
+A program, its data, its heap and its stack share the 50 KB from `$0801` to `$CFFF`. These are the
+programs `./test.sh --c64` runs:
+
+| Sample | Size | What is left for heap and stack |
+|---|---|---|
+| `Tiny`, `Minimal` | 7 KB | 42 KB |
+| `QuizStep1` | 13 KB | 36 KB |
+| `VirtualTest` | 15 KB | 34 KB |
+| `SmallIntegers` | 18 KB | 31 KB |
+| `QuizStep2` | 20 KB | 29 KB |
+| `SmallText`, `SmallArena`, `SmallDicts`, `SmallStrings` | 25 to 28 KB | 21 to 24 KB |
+| `Refs`, `SmallLists`, `SmallStrDicts`, `SmallObjects` | 32 to 34 KB | 15 to 17 KB |
+| `C64Demo` | 36 KB | 13 KB |
+| `SmallBuilders` | 43 KB | 6 KB |
+| `SmallDoubles` | 47 KB | 2.4 KB |
+| `SmallFloats` | 49 KB | 0.6 KB |
+
+The size includes the 2 KB shadow stack NativeAOT-LLVM's code keeps object references on. The Small
+samples are tests written to fit: each covers a piece of what Strings, Casts, Collections and the
+other large samples check.
+
+What a feature costs once a program uses it, measured in these programs:
+
+| Feature | Cost |
+|---|---|
+| The runtime, with nothing else | 7 KB |
+| `Out` with `$"..."` formatting of whole numbers | 3 KB |
+| An arena | 4 KB |
+| `List<T>`, for two element types | 7 KB |
+| `Dict<int, int>` | 7 KB |
+| `StrDict<int>` | 9 KB |
+| `StrBuilder`, `Str.Format` and `Str.Concat` | 8 KB |
+| Arithmetic on `float` and `double` | 25 to 29 KB |
+| Printing a `double` | 7 KB more |
+
+Floating point is the expensive one: the 6502 has none, and the software that stands in for it takes
+half the machine. Every kind of collection (each set of type arguments) is compiled separately and
+costs again.
+
+So keep to whole numbers where you can, share collection types, and keep arenas small: 1 KB blocks
+instead of the default 4 KB. Memory really does run out here; `Arena.Create(..., stopOnOutOfMemory:
+true)` says so when it does (see [Catch arena mistakes](catch-arena-mistakes.html)).
+
+The build already favors size everywhere: the C# compiler runs with `--Os`, every function is marked
+to be compiled for size, and llvm-mos optimizes the whole program at link time, which makes it a fifth
+smaller again.
+
+## The screen, sprites and the keyboard
+
+`lib/C64.cs` has the machine. `Out.Line` and `In.ReadLine` work as everywhere, through the C64's own
+screen editor; `C64.Print` puts text at a position, in a color:
+
+<!-- sample: samples/C64Demo.cs text -->
+```csharp
+static void Draw()
+{
+    C64.Clear(C64.Black);
+    C64.Border(C64.Black);
+
+    string title = "C# on the Commodore 64";
+    for (int i = 0; i < title.Length; i++)
+        C64.Print(9 + i, 2, title[i], C64.Red + i % 6);
+    C64.Print(4, 4, "zero-mode .NET, no runtime, 6502", C64.LightGray);
+
+    // Interface calls on objects from the heap.
+    IShape[] shapes = { new Rect { W = 6, H = 7 }, new Circle { Radius = 10 } };
+    for (int i = 0; i < shapes.Length; i++)
+    {
+        int column = C64.Print(4, 7 + i, shapes[i].Name, C64.Yellow);
+        column = C64.Print(column, 7 + i, " area = ", C64.Yellow);
+        C64.Print(column, 7 + i, shapes[i].Area());
+    }
+
+    // A generic list in an arena, filled with Fibonacci numbers.
+    Arena arena = Arena.Create(1024);
+    List<int> fib = List<int>.Create(arena, 16);
+    int a = 0, b = 1;
+    for (int i = 0; i < 16; i++)
+    {
+        fib.Add(a);
+        int next = a + b;
+        a = b;
+        b = next;
+    }
+    int x = C64.Print(4, 11, "Fib: ", C64.LightGreen);
+    for (int i = 0; i < fib.Count && x < 36; i++)
+        x = C64.Print(x, 11, fib.Get(i)) + 1;
+
+    // A lambda that captures a local.
+    int offset = 1900;
+    Func<int, int> year = n => n + offset;
+    x = C64.Print(4, 13, "Lambda: 82 + 1900 = ", C64.LightBlue);
+    C64.Print(x, 13, Apply(year, 82));
+
+    x = C64.Print(4, 15, "32-bit int: 123456 * 789 = ", C64.LightRed);
+    C64.Print(4, 16, 123456 * Opaque(789));
+
+    C64.Print(4, 22, "Press a key to stop", C64.Gray);
+}
+```
+
+A sprite's shape is 63 bytes, 21 rows of 24 pixels:
+
+<!-- sample: samples/C64Demo.cs sprite -->
+```csharp
+// A ball, 24 pixels wide and 21 high: three bytes a row.
+static ReadOnlySpan<byte> Ball => new byte[]
+{
+    0x00, 0x7E, 0x00,  0x03, 0xFF, 0xC0,  0x07, 0xFF, 0xE0,
+    0x1F, 0xFF, 0xF8,  0x1F, 0xFF, 0xF8,  0x3F, 0xFF, 0xFC,
+    0x7F, 0xFF, 0xFE,  0x7F, 0xFF, 0xFE,  0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF,  0xFF, 0xFF, 0xFF,  0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF,  0x7F, 0xFF, 0xFE,  0x7F, 0xFF, 0xFE,
+    0x3F, 0xFF, 0xFC,  0x1F, 0xFF, 0xF8,  0x1F, 0xFF, 0xF8,
+    0x07, 0xFF, 0xE0,  0x03, 0xFF, 0xC0,  0x00, 0x7E, 0x00,
+};
+```
+
+`C64.Sprite(0, 0, Ball, C64.White)` shows it. `C64.WaitLine` waits until the video chip draws a given
+line of the picture; changing the border color then changes it from that line down, which is how the
+bars in the border are made. `C64.WaitFrame` waits for the picture's lower border, the moment to move
+things without flicker:
+
+<!-- sample: samples/C64Demo.cs loop -->
+```csharp
+// One frame: color bars down the border, then move the ball while the
+// video chip is below the screen. Returns the ball's new position.
+static void Frame(int frame, ref int x, ref int y, ref int dx, ref int dy)
+{
+    for (int line = 56; line < 248; line += 8)
+    {
+        C64.WaitLine(line);
+        C64.Border(((line >> 3) + frame) & 15);
+    }
+    C64.WaitFrame();
+    C64.Border(C64.Black);
+
+    x += dx;
+    y += dy;
+    if (x <= 24 || x >= 320)
+        dx = -dx;
+    if (y <= 50 || y >= 229)
+        dy = -dy;
+    C64.MoveSprite(0, x, y);
+}
+```
+
+`C64.ReadKey` gives the next key pressed without waiting, `C64.Joystick` the joystick in port 2, and
+`C64.Peek` and `C64.Poke` reach every address there is. Each call from C# costs about 125 processor
+cycles, of the 20,000 in a frame, because it passes 32-bit numbers through an 8-bit processor;
+`C64.Print` takes about 170 a character, so a full line is a third of a frame.
+
+## A game
+
+`Paddles` is a paddle-and-ball game: you against the computer, first to 7 points, with W and S or
+a joystick in port 2. It plays a tune on the SID's second and third voices (M turns it off) and its
+sound effects on the first.
+
+```bash
+./build.sh --c64 Paddles
+./run.sh --c64 --window Paddles
+```
+
+Its state is records, and unions say who moves a paddle and what each frame of play led to:
+
+<!-- sample: samples/Paddles.cs unions -->
+```csharp
+// Who moves a paddle, and how fast.
+readonly record struct Human(int Speed);
+readonly record struct Computer(int Speed);
+union Controller(Human, Computer);
+
+// What a frame of play led to.
+readonly record struct InPlay();
+readonly record struct HitWall();
+readonly record struct HitPaddle(Side Side);
+readonly record struct Scored(Side By);
+```
+
+A frame of play returns an `Outcome`, and the game takes it apart with a `switch`:
+
+<!-- sample: samples/Paddles.cs play -->
+```csharp
+// Plays the match until someone wins (returns true) or a key stops it:
+// Q always, any key in a demo (returns false).
+static bool Play(ref Match match, Controller left, Controller right, bool demo,
+    int maxFrames = int.MaxValue)
+{
+    Screen.DrawCourt(match.Score);
+    int pause = 50;    // a second before each serve
+    for (; match.Frames < maxFrames; match.Frames++)
+    {
+        Screen.NextFrame();
+        Screen.Place(match);
+        int key = C64.ReadKey();
+        if (key == 'm')
+            Music.Toggle();
+        else if (key == 'q' || (demo && key != 0))
+            return false;
+        if (pause > 0)
+        {
+            pause--;
+            continue;
+        }
+
+        Outcome outcome = match.Step(left, right);
+        if (!match.OnField)
+            match.Strays++;
+        switch (outcome)
+        {
+            case HitWall:
+                Sound.Play(Effect.Wall);
+                break;
+            case HitPaddle:
+                Sound.Play(Effect.Paddle);
+                break;
+            case Scored(var side):
+                match.Score = match.Score.For(side);
+                Screen.ShowScore(match.Score);
+                Sound.Play(Effect.Point);
+                if (match.Score.Winner is not null)
+                    return true;
+                match.Serve(towards: side.Opposite);
+                pause = 50;
+                break;
+        }
+    }
+    return true;
+}
+```
+
+`union Outcome(InPlay, HitWall, HitPaddle, Scored)` would allocate 24 bytes every frame, which zero
+mode never frees: 70 KB a minute, more than the machine has. So `Outcome` is written out by hand, a
+struct that keeps its case in its own fields. The `switch` and the `return new HitWall();` above work
+on it unchanged:
+
+<!-- sample: samples/Paddles.cs struct-union -->
+```csharp
+// Outcome is a union too, written out by hand. `union Outcome(InPlay, ...)`
+// would keep its case in a field of type object, so each of the 50 outcomes
+// a second would be boxed, and zero mode never frees a box. This one keeps
+// the case in its own fields. The compiler takes it for a union all the
+// same: `return new HitWall();` goes through a constructor, and a switch
+// through TryGetValue, so nothing is allocated.
+[Union]
+readonly struct Outcome : IUnion
+{
+    enum Case : byte { None, InPlay, HitWall, HitPaddle, Scored }
+
+    readonly Case _case;
+    readonly Side _side;    // HitPaddle's Side, Scored's By
+
+    public Outcome(InPlay value) => _case = Case.InPlay;
+    public Outcome(HitWall value) => _case = Case.HitWall;
+    public Outcome(HitPaddle value) =>
+        (_case, _side) = (Case.HitPaddle, value.Side);
+    public Outcome(Scored value) => (_case, _side) = (Case.Scored, value.By);
+
+    public bool HasValue => _case != Case.None;
+
+    public bool TryGetValue(out InPlay value)
+    {
+        value = new();
+        return _case == Case.InPlay;
+    }
+
+    public bool TryGetValue(out HitWall value)
+    {
+        value = new();
+        return _case == Case.HitWall;
+    }
+
+    public bool TryGetValue(out HitPaddle value)
+    {
+        value = new(_side);
+        return _case == Case.HitPaddle;
+    }
+
+    public bool TryGetValue(out Scored value)
+    {
+        value = new(_side);
+        return _case == Case.Scored;
+    }
+
+
+    // What IUnion asks for. It boxes; nothing in the game calls it.
+    public object Value => _case switch
+    {
+        Case.InPlay => new InPlay(),
+        Case.HitWall => new HitWall(),
+        Case.HitPaddle => new HitPaddle(_side),
+        Case.Scored => new Scored(_side),
+        _ => null,
+    };
+}
+```
+
+`Controller` stays an ordinary union: there are two of them, made once.
+
+Typing `T` at its title screen plays one match computer against computer and reports on it, which is
+what `./test.sh --c64` runs: the match is the same every time, and the program checks that it ended
+with a winner, that nothing left the field, and that playing allocated nothing.
+
+## Run on a real machine
+
+A `.prg` file is what a C64 loads. An SD card reader for the C64 takes it as it is; for a disk drive or
+another emulator, VICE's `c1541` puts it on a disk image:
+
+```bash
+c1541 -format "zero,01" d64 zero.d64 -write bin/c64/QuizStep1.prg quizstep1
+```
+
+On the C64, `LOAD"*",8,1` and then `RUN`. The program ends at BASIC's `READY.`
+
+## How it works
+
+1. **bflat and NativeAOT-LLVM** compile the sample to LLVM bitcode, as for WebAssembly and DOS, but with
+   `--Os`.
+2. **`c64/ll2mos.py`** rewrites the bitcode. NativeAOT-LLVM lays out every object for 4-byte pointers,
+   and the 6502's are 2 bytes. Memory keeps the 32-bit layout: a pointer in memory stays a 4-byte slot
+   holding the address and two zero bytes, and only pointers in registers shrink.
+3. **`c64/wasm2mos.py`** turns the program's data, which NativeAOT-LLVM writes as a WebAssembly object
+   file, into assembly (it shares `dos/wasm2i386.py`'s reader).
+4. **llvm-mos** compiles and links it all with `c64/runtime.c`, zerocore's native half: the entry point,
+   memory, the keyboard and the screen as standard input and output, the clock, and the floating-point
+   functions llvm-mos's library lacks.
+
+C's `int` is 16 bits on the 6502 and C#'s is 32, so every function C# imports is bound to a `cs_` name
+that `c64/runtime.c` defines with 32-bit parameters: C#'s `calloc` is `cs_calloc` there.
+
+## What's different
+
+- **No end of input.** A keyboard has none, and programs wait for one. A line holding only the `←` key
+  (top left of the keyboard) ends the input, as Ctrl-Z does on DOS. `run.sh` types it after a file.
+- **Input is a line at a time,** edited with the C64's own cursor keys and handed over at RETURN. A line
+  is at most 80 characters.
+- **40 columns, and ASCII.** Text prints in the C64's character set with both cases. Characters outside
+  ASCII come out as something else.
+- **No arguments, files, environment or threads.** `Environment` has no variables; `lib/File.cs` and
+  `Parallel.For` don't link.
+- **No `Sin`, `Pow`, `Log` and the like:** a program that calls them doesn't link. `+ - * /`, `%`, `Sqrt`,
+  `Floor`, `Ceiling`, `Truncate` and the conversions work, in software; `SmallDoubles` checks that they
+  give the same results as on other targets.
+- **The clock starts when the machine is switched on** and counts sixtieths of a second. There is no
+  date.
+- **Failure messages go to the screen.** A failed cast or an index out of range ends the program with
+  exit code 134, which only an emulator sees.
+- **C# can call only the C functions `c64/runtime.c` defines,** as `cs_<name>`.
+
+## Watch out for
+
+- **Tested in VICE 3.10 on macOS only.** Nothing has run on a real C64, on Linux, or in CI. The disk
+  image route was checked in VICE with its drive emulation.
+- **Programs that fit can still run out of memory.** `SmallFloats` runs with 0.6 KB to spare.
+- **A long method can be too much for llvm-mos:** the 6502 has three registers, and the error is
+  "ran out of registers". `build.sh` then compiles that method's module separately and tries again; if
+  it still fails, split the method.
+- **The compiler versions are a set,** as for WebAssembly and DOS, and llvm-mos is one more.
+- **The `ZeroCSharp.Sdk` package doesn't build for the C64.** Only this repository's scripts do.
+
+See also: [How the targets work](../concepts/targets.html) and [Build for DOS](build-for-dos.html).

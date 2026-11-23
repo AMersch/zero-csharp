@@ -14,19 +14,24 @@
 # Usage:  ./test.sh            native, for this machine (or BFLAT_ARCH)
 #         ./test.sh --wasm     WebAssembly (needs ./setup.sh --wasm)
 #         ./test.sh --dos      DOS, on an emulated 386 with 4 MB (needs ./setup.sh --dos)
+#         ./test.sh --c64      Commodore 64, in VICE (needs ./setup.sh --c64): the
+#                              samples that fit in it, which the Small ones are made to
 #         ./test.sh --win      Windows x64, under Wine in a container
 #         ./test.sh --mac      macOS, natively (on a Mac with Apple Silicon)
 #         ./test.sh --uefi     UEFI, in QEMU on OVMF, for BFLAT_ARCH (x64 or arm64)
 #         ./test.sh --all      native, the other architecture (macOS only, run
 #                              under emulation), Windows, macOS (on Apple
-#                              Silicon), and WebAssembly and DOS if set up
+#                              Silicon), and WebAssembly, DOS and the C64 if set up
 #         ./test.sh --update   native, and rewrite tests/expected from the output
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS (see env.sh)
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
 
-SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama)
+# The Small samples are tests sized for a machine with little memory: what the
+# larger ones check, in pieces that each fit in a Commodore 64.
+SMALL_SAMPLES=(SmallStrings SmallBuilders SmallIntegers SmallDoubles SmallObjects SmallArena SmallLists SmallDicts SmallStrDicts SmallText SmallFloats)
+SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama "${SMALL_SAMPLES[@]}")
 
 # Simd and Kernels print timings, so only their exit code is checked.
 TIMED=" Simd Kernels "
@@ -36,12 +41,16 @@ POINTER_SIZED=" Arena Collections "
 # Simd and Kernels aren't built for DOS: they benchmark SIMD instructions,
 # which a 386 doesn't have.
 # Vga is a game for DOS and UEFI; "Vga test" plays by itself and reports.
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Llama "${SMALL_SAMPLES[@]}" Vga)
+# A C64 has 50 KB for a program and its memory: these fit. C64Demo and Paddles
+# are for the C64 only; they check themselves, at the key tests/input types.
+# (QuizStep3 fits too, but its input has bytes no C64 keyboard can type.)
+C64_SAMPLES=(Tiny Minimal VirtualTest QuizStep1 QuizStep2 Refs "${SMALL_SAMPLES[@]}" C64Demo Paddles)
 
 EXPECTED=tests/expected
 failures=0
 
-# $1: a label for the report; $2: "native", "wasm" or "dos"; $3: "check" or "update"
+# $1: a label for the report; $2: "native", "wasm", "dos", ...; $3: "check" or "update"
 run_all() {
     local label=$1 target=$2 mode=$3 name out status expected argument input line missing i
     local fields=()
@@ -57,6 +66,10 @@ run_all() {
     if [ "$target" = dos ]; then
         run+=(--dos)
         samples=("${DOS_SAMPLES[@]}")
+    fi
+    if [ "$target" = c64 ]; then
+        run+=(--c64)
+        samples=("${C64_SAMPLES[@]}")
     fi
 
     echo
@@ -94,6 +107,9 @@ run_all() {
             echo "ok   $name"
         fi
     done
+
+    # Guards and Files don't fit in a C64.
+    [ "$target" = c64 ] && return
 
     while IFS= read -r line; do
         [ -n "$line" ] || continue
@@ -175,11 +191,17 @@ test_dos() {
     run_all "DOS ($emulator, ${DOS_CPU:-$cpu}, ${DOS_MEMORY:-4} MB)" dos check
 }
 
+test_c64() {
+    ./build.sh --c64 > /dev/null
+    run_all "Commodore 64 (VICE)" c64 check
+}
+
 case "${1:-}" in
     "")       test_native ;;
     --update) test_native update ;;
     --wasm)   test_wasm ;;
     --dos)    test_dos ;;
+    --c64)    test_c64 ;;
     --win)    test_win ;;
     --mac)    test_mac ;;
     --uefi)   test_uefi ;;
@@ -218,8 +240,14 @@ case "${1:-}" in
             echo
             echo "(skipping DOS: run ./setup.sh --dos first)"
         fi
+        if [ -x "$WASM_ILC" ] && [ -x "$LLVM_MOS/bin/mos-c64-clang" ] && find_c64_emulator > /dev/null; then
+            test_c64
+        else
+            echo
+            echo "(skipping the Commodore 64: run ./setup.sh --c64 first)"
+        fi
         ;;
-    *) echo "Usage: ./test.sh [--wasm | --dos | --win | --mac | --uefi | --all | --update]" >&2; exit 2 ;;
+    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --win | --mac | --uefi | --all | --update]" >&2; exit 2 ;;
 esac
 
 echo

@@ -1,0 +1,5 @@
+PASS string (8 checks)
+PASS spans (8 checks)
+PASS parsing (4 checks)
+
+All checks passed.

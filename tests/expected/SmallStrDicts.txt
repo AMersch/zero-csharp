@@ -1,0 +1,3 @@
+PASS StrDict (4 checks)
+
+All checks passed.

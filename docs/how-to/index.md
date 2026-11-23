@@ -21,6 +21,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   written piece by piece, and what differs on each target.
 - [Use the clock and random numbers](use-the-clock-and-random-numbers.html): measure a duration, tell
   the date and time, and roll dice with numbers that are the same on every target.
+- [Read environment variables and exit](use-the-environment.html): `Environment.GetEnvironmentVariable`,
+  `Environment.Exit` from anywhere, the processor count and `NewLine`.
 
 ## Memory and collections
 

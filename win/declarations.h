@@ -23,6 +23,8 @@ IMPORT int WriteFile(Handle file, const void *buffer, u32 count, u32 *written, v
 IMPORT int ReadFile(Handle file, void *buffer, u32 count, u32 *read, void *overlapped);
 IMPORT u32 GetLastError(void);
 IMPORT int GetConsoleMode(Handle console, u32 *mode);
+IMPORT u32 GetEnvironmentVariableW(const wchar *name, wchar *buffer, u32 size);
+IMPORT int MultiByteToWideChar(u32 page, u32 flags, const char *text, int length, wchar *out, int size);
 IMPORT int SetConsoleOutputCP(u32 page);
 IMPORT int QueryPerformanceCounter(i64 *count);
 IMPORT int QueryPerformanceFrequency(i64 *frequency);

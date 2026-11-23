@@ -159,6 +159,8 @@ public static class Out
     {
         if (s_length == Capacity)
             Flush();
+        else if (s_length == 0)
+            unsafe { Environment.s_beforeExit = &Flush; } // so Environment.Exit writes what's held
 
         unsafe
         {

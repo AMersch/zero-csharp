@@ -29,6 +29,7 @@ typedef u32 size_t;
 IMPORT void *WINAPI GetStdHandle(u32 which);
 IMPORT int WINAPI WriteFile(void *file, const void *buffer, u32 count, u32 *written, void *overlapped);
 IMPORT void WINAPI ExitProcess(u32 code);
+IMPORT u32 WINAPI GetEnvironmentVariableA(const char *name, char *buffer, u32 size);
 IMPORT void *WINAPI GetProcessHeap(void);
 IMPORT void *WINAPI HeapAlloc(void *heap, u32 flags, u32 size);
 IMPORT int WINAPI HeapFree(void *heap, u32 flags, void *block);
@@ -143,6 +144,23 @@ void abort(void)
 {
     ExitProcess(134);
     for (;;) { }
+}
+
+// Environment.Exit. Files need no flushing: fwrite here isn't buffered.
+void exit(int code)
+{
+    ExitProcess((u32)code);
+    for (;;) { }
+}
+
+// Environment.GetEnvironmentVariable: DOS's environment, through HX. DOS has
+// no character set beyond the code page, so non-ASCII bytes come back as they
+// are (and turn into U+FFFD unless they happen to be UTF-8).
+char *getenv(const char *name)
+{
+    static char value[1024];
+    u32 length = GetEnvironmentVariableA(name, value, sizeof value);
+    return length == 0 || length >= sizeof value ? 0 : value;
 }
 
 static void fatal(const char *message, size_t length)

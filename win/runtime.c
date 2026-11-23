@@ -52,19 +52,24 @@ i64 write(int fd, const void *buffer, u64 count)
     return (i64)count;
 }
 
-// A console hands over lines ending in "\r\n"; lib/In expects "\n", as from a
-// file or a pipe, so carriage returns are dropped.
+// A console hands over typed lines ending in "\r\n", so carriage returns from
+// a console are dropped. A file or a pipe is passed through as it is: its
+// bytes may not be text (lib/In's Read), and In's ReadLine handles "\r\n".
 i64 read(int fd, void *buffer, u64 count)
 {
     Handle file = handle_for(fd);
     char *bytes = buffer;
     u32 chunk = count > 0x40000000 ? 0x40000000 : (u32)count;
+    u32 mode;
+    int console = GetConsoleMode(file, &mode);
     for (;;) {
         u32 got = 0;
         if (!ReadFile(file, bytes, chunk, &got, 0))
             return GetLastError() == ERROR_BROKEN_PIPE ? 0 : -1;
         if (got == 0)
             return 0;
+        if (!console)
+            return got;
         u32 kept = 0;
         for (u32 i = 0; i < got; i++)
             if (bytes[i] != '\r')

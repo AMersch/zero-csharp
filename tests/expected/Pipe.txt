@@ -1,0 +1,3 @@
+pipe test
+515 bytes, FNV-1a 375C07AA
+PASS

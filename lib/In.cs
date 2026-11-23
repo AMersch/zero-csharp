@@ -11,6 +11,16 @@
 // one past the next read, copy it: Str.ToArenaString(arena, answer).
 // Input is decoded as UTF-8 (invalid bytes become U+FFFD), and the line ending,
 // "\n" or "\r\n", is left out.
+//
+// In.Read takes the bytes as they are, for input that isn't text or that you
+// decode yourself:
+//
+//   Span<byte> chunk = stackalloc byte[4096];
+//   int count;
+//   while ((count = In.Read(chunk)) > 0)
+//       Out.WriteUtf8(chunk.Slice(0, count)); // cat
+//
+// The two can be mixed: Read starts with whatever ReadLine has read ahead.
 
 using System;
 using System.Runtime.InteropServices;
@@ -72,6 +82,50 @@ public static class In
             }
         }
         return length;
+    }
+
+    /// <summary>
+    /// Reads up to buffer.Length bytes of standard input, as they are, and returns how many
+    /// it read: possibly fewer than asked for even before the end, and 0 at the end of input.
+    /// Bytes ReadLine has already read ahead come first.
+    /// </summary>
+    public static int Read(Span<byte> buffer)
+    {
+        Out.Flush();
+        if (buffer.Length == 0)
+            return 0;
+
+        if (s_start < s_end)
+        {
+            int buffered = Math.Min(s_end - s_start, buffer.Length);
+            for (int i = 0; i < buffered; i++)
+            {
+                unsafe
+                {
+                    // SAFETY: s_start + i < s_end <= Capacity.
+                    buffer[i] = s_buffer.Bytes[s_start + i];
+                }
+            }
+            s_start += buffered;
+            return buffered;
+        }
+        if (s_ended)
+            return 0;
+
+        nint count;
+        unsafe
+        {
+            // SAFETY: read() writes at most buffer.Length bytes into buffer.
+            fixed (byte* p = buffer)
+                count = read(0, p, (nuint)buffer.Length);
+        }
+        if (count <= 0)
+        {
+            // 0 is the end of input; a read error ends it too.
+            s_ended = true;
+            return 0;
+        }
+        return (int)count;
     }
 
     static void Store(Span<char> buffer, ref int length, char c)

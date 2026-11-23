@@ -22,6 +22,7 @@ IMPORT Handle GetStdHandle(u32 which);
 IMPORT int WriteFile(Handle file, const void *buffer, u32 count, u32 *written, void *overlapped);
 IMPORT int ReadFile(Handle file, void *buffer, u32 count, u32 *read, void *overlapped);
 IMPORT u32 GetLastError(void);
+IMPORT int GetConsoleMode(Handle console, u32 *mode);
 IMPORT int SetConsoleOutputCP(u32 page);
 IMPORT int QueryPerformanceCounter(i64 *count);
 IMPORT int QueryPerformanceFrequency(i64 *frequency);

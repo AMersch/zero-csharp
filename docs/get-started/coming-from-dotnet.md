@@ -16,6 +16,7 @@ instead, and lists what compiles as usual but behaves differently.
 |---|---|---|
 | `Console.Write`, `Console.WriteLine` | `Out.Write`, `Out.Line`, with `$"..."` written straight to stdout | [Format text](../how-to/format-text.html) |
 | `Console.ReadLine()` | `In.ReadLine(buffer)` into a `Span<char>` you provide | [Read input](../how-to/read-input.html) |
+| `Console.OpenStandardInput().Read` | `In.Read(bytes)` into a `Span<byte>` you provide | [Read input](../how-to/read-input.html#read-bytes-instead-of-lines) |
 | `int.Parse`, `double.TryParse` | `Str.TryParse(span, out value)` | [Read input](../how-to/read-input.html) |
 | `string.Format`, `$"..."` kept as a string | `Str.Format(arena, $"...")`, `StrBuilder` | [Keep a string](../how-to/keep-a-string.html) |
 | `List<T>`, `Dictionary<TKey, TValue>` | `List<T>`, `Dict<TKey, TValue>`, `StrDict<TValue>`, `RefList<T>`, `RefDict<TKey, TValue>`, each created in an arena | [Choose a collection](../how-to/choose-a-collection.html) |

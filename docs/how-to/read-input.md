@@ -161,13 +161,41 @@ Mistakes:
 
 The answers from the file aren't echoed, which is why each prompt runs into the reply.
 
+## Read bytes instead of lines
+
+For input that isn't text, or that you decode yourself, `In.Read` fills a `Span<byte>` with the bytes
+as they arrived and returns how many it put there: 0 at the end of input. It may return fewer than the
+span holds before the end, so loop until it returns 0. `samples/Pipe.cs` reads standard input in
+pieces of 7 bytes:
+
+<!-- sample: samples/Pipe.cs read -->
+```csharp
+Span<byte> chunk = stackalloc byte[7];
+int count;
+while ((count = In.Read(chunk)) > 0)
+{
+    for (int i = 0; i < count; i++)
+        Take(chunk[i]);
+}
+```
+
+`Out.WriteUtf8` writes bytes out the same way, so a program can sit in a pipe:
+`./run.sh Pipe < tests/input/Pipe.txt`. Nothing is decoded or translated, on any target: a `\r` or a
+NUL byte arrives as it was sent. The one exception is typing into a Windows console, which hands over
+`\r\n` at the end of each line and so has its `\r` dropped; a file or a pipe on Windows is passed
+through untouched.
+
+`ReadLine` and `Read` can be mixed: `Read` starts with whatever `ReadLine` had read ahead of the line
+it returned.
+
 ## Watch out for
 
 - **The line lives only until the next read.** The next `In.ReadLine` into the same buffer overwrites
   it. To keep a line, copy it into an arena: `Str.ToArenaString(arena, line)`. See
   [Keep a string](keep-a-string.html).
 - **Read standard input only through `In`.** `In` reads it 256 bytes at a time into a buffer of its
-  own, so a direct `read()` call elsewhere would miss the bytes `In` has already taken.
+  own, so a direct `read()` call elsewhere would miss the bytes `In` has already taken. For raw
+  bytes, use `In.Read`.
 
 See also: [`In` reference](../reference/in.html), [`Str` reference](../reference/str.html),
 [Strings without a garbage collector](../concepts/strings.html), and the tutorial pages

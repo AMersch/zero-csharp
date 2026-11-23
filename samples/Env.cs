@@ -54,7 +54,6 @@ public static class Program
         long later = start;
         for (int i = 0; i < 1_000_000 && later == start; i++)
             later = Environment.TickCount64;
-        Check("TickCount64 is positive", start > 0);
         Check("TickCount64 goes forward", later >= start);
         Out.Line("checked Environment");
 

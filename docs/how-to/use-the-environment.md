@@ -53,7 +53,9 @@ is fine when the process is about to end anyway. Exit codes are 0 to 255 everywh
 
 - **`Environment.ProcessorCount`**: the number of processors, at least 1; 1 on DOS and UEFI. It isn't
   capped, unlike `Parallel.ProcessorCount`, which is the number of threads `Parallel.For` uses.
-- **`Environment.TickCount64`**: milliseconds from the monotonic clock. For finer durations, use
+- **`Environment.TickCount64`**: milliseconds from the monotonic clock, counted from an arbitrary
+  start: use it for differences only. Under wasmtime the clock starts with the program, so it can read
+  0 at first, where .NET counts from boot. For finer durations, use
   `Clock.Monotonic`, in nanoseconds ([Use the clock](use-the-clock-and-random-numbers.html)).
 - **`Environment.NewLine`**: `"\n"` on every target, the line ending `Out.Line` writes. In .NET it is
   `"\r\n"` on Windows; here a program writes the same bytes everywhere, and Windows programs and consoles

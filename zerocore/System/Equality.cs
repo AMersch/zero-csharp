@@ -112,18 +112,40 @@ namespace System.Collections.Generic
         }
     }
 
-    // What records and anonymous types used before: T's Equals(object). For a
-    // struct, the argument is boxed.
-    public sealed class ObjectEqualityComparer<T> : EqualityComparer<T>
+    // For a T that implements neither IEquatable<T> nor anything else the
+    // compiler picks a comparer for. A class is compared by its Equals(object).
+    // A struct is compared and hashed by its bytes, as zerocore's
+    // ValueType.Equals and GetHashCode do, but here without boxing it (which
+    // would allocate memory that is never freed). So a struct that overrides
+    // Equals(object) without implementing IEquatable<T> is still compared by
+    // its bytes: implement IEquatable<T> to have yours used.
+    public sealed unsafe class ObjectEqualityComparer<T> : EqualityComparer<T>
     {
         public override bool Equals(T x, T y)
         {
+            if (default(T) != null) // a struct: the compiler keeps one branch
+            {
+                uint size = MethodTable.Of<T>()->ValueTypeSize;
+                ref byte a = ref Unsafe.As<T, byte>(ref x);
+                ref byte b = ref Unsafe.As<T, byte>(ref y);
+                for (uint i = 0; i < size; i++)
+                {
+                    if (Unsafe.Add(ref a, (nint)i) != Unsafe.Add(ref b, (nint)i))
+                        return false;
+                }
+                return true;
+            }
             if (x != null)
                 return y != null && x.Equals(y);
             return y == null;
         }
 
-        public override int GetHashCode(T obj) => obj == null ? 0 : obj.GetHashCode();
+        public override int GetHashCode(T obj)
+        {
+            if (default(T) != null)
+                return Number.HashBytes((byte*)Unsafe.AsPointer(ref obj), (int)MethodTable.Of<T>()->ValueTypeSize);
+            return obj == null ? 0 : obj.GetHashCode();
+        }
     }
 
     // Null goes before everything else, as in .NET.

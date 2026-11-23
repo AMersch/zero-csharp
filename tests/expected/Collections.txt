@@ -36,6 +36,25 @@ Remove(3): true, again: false, Count: 3
 foreach over scores: 3 pairs, values sum to 1349
 After removing the 500 even keys: Count 500, odd keys intact: 500
 
+--- Dict with a comparer ---
+By bytes: 2 keys; by value: 1
+Modulo 10: 1 key, [3] = 2
+TryAdd: true, again: false
+100 lookups by a struct key: 100 found, 0 bytes allocated
+
+--- HashSet<int> ---
+7 distinct, 4 duplicates
+Intersect: 4 items summing to 18; except: 3 summing to 12
+Union: 8 items summing to 37
+1000 intersected with every third: 334 left, multiples of 3: 334
+ExceptWith itself: 0
+
+--- Queue, Stack, PriorityQueue ---
+Queue: front was 31, 50 out in order: true, empty: true
+Stack, top first: 5 4 3 2 1; popped 5, then 4 on top
+By priority: a1 b2 c3 d4
+200 random priorities, largest first: true
+
 --- RefList<string> ---
 Sorted (null first): [null, alpha:5, bravo:5, charlie:7, delta:5] (5 items)
 RemoveAt(0), Set(0): [ALPHA, bravo:5, charlie:7, delta:5] (4 items)
@@ -60,7 +79,7 @@ Clones unchanged: snapshot[0] = 10, scoresCopy[2] = 250
 Clone capacity fits its 12 items: 12
 Clone of default(List) is not created: true
 
-Arena used: 163952 bytes
+Arena used: 163984 bytes
 StrDict clone, keys copied: the = 3, dog = 1, Count 6
 After destroying the first arena, clones still work: 13 items, last = 1234, scoresCopy[-42] = 999
 Done!

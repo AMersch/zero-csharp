@@ -98,7 +98,8 @@ and leaves out `Console`.
 zero mode gets what .NET's base class library would otherwise provide:
 
 - `Arena`, the allocator for everything short-lived (see [Memory without a GC](memory.html));
-- collections that live in an arena: `List`, `Dict`, `RefList`, `StrDict`, `RefDict`;
+- collections that live in an arena: `List`, `Dict`, `HashSet`, `Queue`, `Stack`, `PriorityQueue`,
+  `RefList`, `StrDict`, `RefDict`;
 - `Str`, `StrBuilder`, `Out` and `In` for text, input and output (see
   [Strings without a GC](strings.html));
 - `Kernels`, SIMD math, and `Dos`, the PC's screen, keyboard and speaker on DOS.

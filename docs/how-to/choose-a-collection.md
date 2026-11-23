@@ -5,8 +5,8 @@ index: 3
 
 # Choose a collection
 
-zerocore has no collections of its own. `lib/` has five, all built on an arena: two for unmanaged
-values and three for references. Which one you need depends on what you store and how you find it.
+zerocore has no collections of its own. `lib/`'s are all built on an arena: most hold unmanaged
+values, and three hold references. Which one you need depends on what you store and how you find it.
 
 ## Pick by what you store and how you look it up
 
@@ -14,7 +14,11 @@ values and three for references. Which one you need depends on what you store an
 |---|---|---|---|
 | numbers, structs (unmanaged) | position | `List<T>` | `Add`, `Get`, `Set`, `RemoveAt`, `Sort`, `AsSpan` |
 | strings, objects, arrays | position | `RefList<T>` | same API as `List`, plus `foreach` |
-| unmanaged values | an unmanaged key | `Dict<TKey, TValue>` | keys compared by their raw bytes |
+| unmanaged values | an unmanaged key | `Dict<TKey, TValue>` | keys compared as .NET's `Dictionary` does |
+| unmanaged values | whether it's there | `HashSet<T>` | `Add`, `Contains`, `UnionWith`, `IntersectWith`, `ExceptWith` |
+| unmanaged values | first in, first out | `Queue<T>` | `Enqueue`, `TryDequeue`, `TryPeek` |
+| unmanaged values | last in, first out | `Stack<T>` | `Push`, `TryPop`, `TryPeek` |
+| unmanaged values | smallest priority | `PriorityQueue<TElement, TPriority>` | a binary heap, as .NET's |
 | any value | a string's text | `StrDict<TValue>` | keys copied into the map's arena |
 | strings, objects, arrays | an unmanaged key | `RefDict<TKey, TValue>` | values stored as references |
 
@@ -64,9 +68,113 @@ byId.Set(9, null);
 Hand out each id once and never reuse it. A map entry left behind for an object that is gone would
 otherwise answer for the new object with the same id.
 
-`Dict` hashes and compares keys by their raw bytes. That is exact for integers and for structs
-without padding. It is not value equality for floats (0.0 and -0.0 differ, and NaN payloads do too)
-or for structs whose padding bytes may differ, so avoid such keys or normalize them first.
+## Compare keys your way
+
+`Dict` and `HashSet` compare keys as .NET's `Dictionary` and `HashSet` do, with
+`EqualityComparer<T>.Default`: a type's own `Equals(T)` if it implements `IEquatable<T>` (every
+primitive does, so `0.0` and `-0.0` are one key), an enum's value, and otherwise a struct's bytes.
+None of it boxes. A struct that overrides `Equals(object)` without implementing `IEquatable<T>` is
+still compared by its bytes: implement `IEquatable<T>` to have your `Equals` used.
+
+For other rules, name a comparer: `Dict<TKey, TValue, TComparer>` and `HashSet<T, TComparer>` take an
+unmanaged struct that implements `IEqualityComparer<T>`. It is kept with the collection, so it can
+carry state, and its methods are called directly. `ByteEqualityComparer<T>` compares raw bytes:
+
+<!-- sample: samples/Collections.cs modulo -->
+```csharp
+// A comparer with state: keys that leave the same remainder are one key.
+public struct Modulo : IEqualityComparer<int>
+{
+    public int By;
+    public bool Equals(int a, int b) => a % By == b % By;
+    public int GetHashCode(int value) => value % By;
+}
+```
+
+<!-- sample: samples/Collections.cs dict-comparer -->
+```csharp
+// As in .NET, 0.0 and -0.0 are one key; by raw bytes, they're two.
+var byValue = Dict<double, int>.Create(more);
+var byBytes =
+    Dict<double, int, ByteEqualityComparer<double>>.Create(more);
+byBytes.Set(0.0, 1);
+byBytes.Set(-0.0, 2);
+byValue.Set(0.0, 1);
+byValue.Set(-0.0, 2);
+Out.Line($"By bytes: {byBytes.Count} keys; by value: {byValue.Count}");
+
+var lastDigit =
+    Dict<int, int, Modulo>.Create(more, comparer: new Modulo { By = 10 });
+lastDigit.Set(13, 1);
+lastDigit.Set(23, 2);  // the same key as 13
+lastDigit.TryGet(3, out int atThree);
+Out.Line($"Modulo 10: {lastDigit.Count} key, [3] = {atThree}");
+```
+
+A `HashSet` is a `Dict` without values. `Add` returns false for an item that is already there:
+
+<!-- sample: samples/Collections.cs hashset -->
+```csharp
+var seen = HashSet<int>.Create(more);
+int duplicates = 0;
+foreach (int id in new[] { 3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5 })
+{
+    if (!seen.Add(id))
+        duplicates++;
+}
+Out.Line($"{seen.Count} distinct, {duplicates} duplicates");
+
+var odds = HashSet<int>.Create(more);
+for (int i = 1; i < 10; i += 2)
+    odds.Add(i);
+var both = seen.Clone(more);
+both.IntersectWith(odds);      // in seen and odds: 1, 3, 5, 9
+var evens = seen.Clone(more);
+evens.ExceptWith(odds);        // in seen, not odds: 2, 4, 6
+```
+
+## Queues, stacks and priorities
+
+`Queue<T>`, `Stack<T>` and `PriorityQueue<TElement, TPriority>` have .NET's names, with `Try` in front
+of the methods that take an item out, since there is no exception to say the collection is empty.
+A queue reuses the memory of items already dequeued, so one that is fed as fast as it is drained
+doesn't keep growing:
+
+<!-- sample: samples/Collections.cs queue -->
+```csharp
+var queue = Queue<int>.Create(more);
+for (int i = 1; i <= 40; i++)
+    queue.Enqueue(i);
+int expected = 1;
+bool inOrder = true;
+for (int i = 0; i < 30; i++)   // past half: the rest move to the front
+{
+    queue.TryDequeue(out int item);
+    inOrder &= item == expected++;
+}
+for (int i = 41; i <= 50; i++)
+    queue.Enqueue(i);
+queue.TryPeek(out int front);
+while (queue.TryDequeue(out int item))
+    inOrder &= item == expected++;
+```
+
+A `PriorityQueue` gives the smallest priority first, by its `IComparable<T>`, or by a comparer struct
+named as a third type argument (`PriorityQueue<TElement, TPriority, TComparer>`). Elements with equal
+priorities come out in no particular order:
+
+<!-- sample: samples/Collections.cs priority-queue -->
+```csharp
+var tasks = PriorityQueue<char, int>.Create(more);
+tasks.Enqueue('c', 3);
+tasks.Enqueue('a', 1);
+tasks.Enqueue('d', 4);
+tasks.Enqueue('b', 2);
+Out.Write("By priority:");
+while (tasks.TryDequeue(out char task, out int priority))
+    Out.Write($" {task}{priority}");
+Out.Line();
+```
 
 ## Sort and iterate
 
@@ -145,5 +253,6 @@ So a `RefList<string>` clone still points at the original strings. Copy them too
 
 See also: [Memory and arenas](../concepts/memory.html), and the reference pages for
 [`List`](../reference/list.html), [`Dict`](../reference/dict.html),
+[`HashSet`](../reference/hashset.html), [`Queue`, `Stack` and `PriorityQueue`](../reference/queue.html),
 [`RefList`](../reference/reflist.html), [`StrDict`](../reference/strdict.html) and
 [`RefDict`](../reference/refdict.html).

@@ -141,6 +141,7 @@ or not: see [Make a game window](../how-to/make-a-game-window.html), which uses 
 |---|---|---|
 | `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64`, `osx-arm64`, `uefi-x64`, `uefi-arm64`, `c64` | the build machine's |
 | `ZeroOptimizeFor` | `None` (bflat's `-O0`), `Speed`, or `Size` (bflat's `-Os`) | `None` in Debug, `Speed` otherwise |
+| `ZeroStripSymbols` | `true`: no debug information and no symbol table, about half of a Linux or macOS program; `false` keeps them for a debugger | `false` in Debug, `true` otherwise |
 | `ZeroInstructionSet` | passed to bflat as `-m`, e.g. `x86-64-v3` or `dotprod` (see [Use SIMD](../how-to/use-simd.html)) | none |
 | `ZeroDllImports` | more libraries whose `[DllImport]`s are bound when linking, besides `libc` and `libm.so.6`, which always are | none |
 | `ZeroLibraryPath` | folders, separated by `;`, searched first for the C libraries `ZeroLinkLibrary` names (see [Make a game window](../how-to/make-a-game-window.html)) | none |

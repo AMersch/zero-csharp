@@ -14,13 +14,13 @@ proper generics".
 ## Why give up the runtime
 
 A normal .NET program brings `System.Private.CoreLib` and a native runtime with it: megabytes of code
-before your own. Zero mode drops both. The smallest sample, `samples/Tiny.cs`, is about 16 KB once it
-is stripped, and a hello world through `puts` is about 39 KB on Linux arm64.
+before your own. Zero mode drops both. The smallest sample, `samples/Tiny.cs`, and a hello world through
+`puts` are both about 12 KB on Linux arm64, without debug information or a symbol table.
 
 <!-- sample: samples/Tiny.cs file -->
 ```csharp
-// Example: Smallest possible bflat binary (~16 KB stripped).
-// Build: ./build.sh Tiny   (build.sh adds -Os --no-pie and strips)
+// Example: Smallest possible bflat binary (~12 KB).
+// Build: ./build.sh Tiny   (build.sh adds -Os)
 
 using System.Runtime.InteropServices;
 

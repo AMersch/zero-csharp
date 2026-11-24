@@ -1,5 +1,5 @@
-// Example: Smallest possible bflat binary (~16 KB stripped).
-// Build: ./build.sh Tiny   (build.sh adds -Os --no-pie and strips)
+// Example: Smallest possible bflat binary (~12 KB).
+// Build: ./build.sh Tiny   (build.sh adds -Os)
 
 using System.Runtime.InteropServices;
 

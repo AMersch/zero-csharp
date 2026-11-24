@@ -3,7 +3,7 @@
 ![Debugging a zero-mode program in VS Code](bflat.png)
 
 C# compiled to small native programs with no .NET runtime and no garbage collector. On Linux a hello
-world is 16 to 39 KB. It builds on [bflat](https://flattened.net/)'s zero mode, uses C# 15 with the updated
+world is 12 KB. It builds on [bflat](https://flattened.net/)'s zero mode, uses C# 15 with the updated
 memory safety rules, and runs on Linux, macOS, Windows, WebAssembly, DOS on a 386, and UEFI with no
 operating system at all. Programs that are small enough run on a Commodore 64.
 
@@ -56,8 +56,8 @@ More: [Coming from .NET](https://onurgumus.github.io/zero-csharp/get-started/com
 
 | Target | Build from this repo | Program sizes |
 |---|---|---|
-| Linux x64 and arm64 | `./build.sh` | 16 KB (Tiny) to 159 KB (Strings) |
-| macOS, Apple Silicon | `./build.sh --mac`, on a Mac | from 63 KB |
+| Linux x64 and arm64 | `./build.sh` | 12 KB (Tiny) to 84 KB (Collections) |
+| macOS, Apple Silicon | `./build.sh --mac`, on a Mac | from 50 KB |
 | Windows x64 | `./build.sh --win`, from Linux or macOS | 9 KB to 68 KB |
 | WebAssembly (WASI) | `./build.sh --wasm` | 16 KB to 80 KB |
 | DOS, 386 with a 387 | `./build.sh --dos` | 16 KB to 93 KB |
@@ -133,33 +133,35 @@ nothing AGPL is linked into them.
 
 | Sample | Shows | Size |
 |---|---|---|
-| `Tiny` | The smallest program (`-Os --no-pie`, stripped) | 16 KB |
-| `Minimal` | Hello world through `puts` | 39 KB |
-| `Arena` | The arena allocator: growth, alignment, `Save`/`Restore`, scopes, objects in an arena, debug checks | 82 KB |
-| `Collections` | `List`, `Dict`, `RefList`, `StrDict`, `RefDict`: word counts, sorting, `foreach`, `Clone` | 98 KB |
-| `VirtualTest` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | 50 KB |
-| `Casts` | 41 checks of `is`, `as`, `(T)x`, boxing, interface calls and delegates | 97 KB |
-| `Core` | 32 checks of `Math`, `MathF`, `Interlocked`, `Volatile` and interface dispatch | 75 KB |
-| `Simd` | A dot product with NEON or AVX and FMA, 12x faster than scalar on Apple Silicon | 52 KB |
-| `Kernels` | `lib/Kernels.cs`: exp, softmax, SiLU, RMSNorm, matrix-vector, int8 dot product; softmax is 7x faster than scalar libm on Apple Silicon | 65 KB |
-| `Strings` | 140 checks of span operations, parsing, `$"..."` formatting, arena strings and `StrBuilder` | 159 KB |
-| `Quiz`, `QuizStep1` to `QuizStep3` | A quiz that reads answers with `In.ReadLine`, and the tutorial's steps towards it | 52 to 67 KB |
-| `Guards` | One mistake per run that `lib/` stops the program for, such as marks restored out of order | 77 KB |
-| `Queries` | LINQ-style queries with `lib/Seq.cs`, checked to allocate nothing | 144 KB |
-| `Threads` | `Parallel.For` with one arena per thread | 88 KB |
-| `Files` | `lib/File.cs`: whole files, and an open file read, written and moved through | 78 KB |
-| `Dice` | `lib/Random.cs` and `lib/Clock.cs`: seeded dice rolls that match on every target, durations, the date | 80 KB |
-| `Env` | `System.Environment`: variables, `Exit` from anywhere (writing what `Out` holds), the processor count | 70 KB |
-| `Pipe` | `In.Read`: standard input as bytes, checked byte for byte through a pipe | 70 KB |
-| `Records` | `record struct` and `record class`, `with`, `ToString`, `typeof`, anonymous types | 108 KB |
-| `Refs` | Structs in an arena passed and returned by `ref` | 75 KB |
+| `Tiny` | The smallest program (`-Os`) | 12 KB |
+| `Minimal` | Hello world through `puts` | 12 KB |
+| `Arena` | The arena allocator: growth, alignment, `Save`/`Restore`, scopes, objects in an arena, debug checks | 35 KB |
+| `Collections` | `List`, `Dict`, `RefList`, `StrDict`, `RefDict`: word counts, sorting, `foreach`, `Clone` | 84 KB |
+| `VirtualTest` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | 15 KB |
+| `Casts` | 41 checks of `is`, `as`, `(T)x`, boxing, interface calls and delegates | 32 KB |
+| `Core` | 32 checks of `Math`, `MathF`, `Interlocked`, `Volatile` and interface dispatch | 48 KB |
+| `Simd` | A dot product with NEON or AVX and FMA, 12x faster than scalar on Apple Silicon | 18 KB |
+| `Kernels` | `lib/Kernels.cs`: exp, softmax, SiLU, RMSNorm, matrix-vector, int8 dot product; softmax is 7x faster than scalar libm on Apple Silicon | 24 KB |
+| `Strings` | 140 checks of span operations, parsing, `$"..."` formatting, arena strings and `StrBuilder` | 67 KB |
+| `Quiz`, `QuizStep1` to `QuizStep3` | A quiz that reads answers with `In.ReadLine`, and the tutorial's steps towards it | 16 to 25 KB |
+| `Guards` | One mistake per run that `lib/` stops the program for, such as marks restored out of order | 56 KB |
+| `Queries` | LINQ-style queries with `lib/Seq.cs`, checked to allocate nothing | 44 KB |
+| `Threads` | `Parallel.For` with one arena per thread | 28 KB |
+| `Files` | `lib/File.cs`: whole files, and an open file read, written and moved through | 31 KB |
+| `Dice` | `lib/Random.cs` and `lib/Clock.cs`: seeded dice rolls that match on every target, durations, the date | 29 KB |
+| `Env` | `System.Environment`: variables, `Exit` from anywhere (writing what `Out` holds), the processor count | 20 KB |
+| `Pipe` | `In.Read`: standard input as bytes, checked byte for byte through a pipe | 19 KB |
+| `Records` | `record struct` and `record class`, `with`, `ToString`, `typeof`, anonymous types | 34 KB |
+| `Refs` | Structs in an arena passed and returned by `ref` | 24 KB |
 | `Llama` | Karpathy's stories260K language model, compiled into the program; it tells the same story on every target, DOS and UEFI included | 1.1 MB |
 | `Vga` | DOS and UEFI only: a small game in 320x200 with 256 colors | 36 KB |
-| `SmallStrings`, `SmallIntegers`, `SmallObjects` and seven more | Tests sized for a small machine: what Strings, Casts, Collections and the others check, in pieces that each fit in a Commodore 64 | 49 to 81 KB |
+| `SmallStrings`, `SmallIntegers`, `SmallObjects` and seven more | Tests sized for a small machine: what Strings, Casts, Collections and the others check, in pieces that each fit in a Commodore 64 | 17 to 36 KB |
 | `C64Demo` | Commodore 64 only: text, a sprite and raster bars, with objects, a list and a lambda behind them | 36 KB |
 | `Paddles` | Commodore 64 only: a paddle-and-ball game against the computer, with sprites, SID sound, records and unions | 34 KB |
 
-Sizes are for Linux arm64 and include debug information (only Tiny is stripped).
+Sizes are for Linux arm64. `build.sh` leaves out debug information and the symbol table and turns off
+position-independent code, which halves most programs; `KEEP_SYMBOLS=1 ./build.sh` keeps them, for gdb
+or perf.
 
 To build them, clone this repository and build the bflat fork next to it
 ([Install](https://onurgumus.github.io/zero-csharp/get-started/install.html)), then:

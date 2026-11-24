@@ -67,7 +67,7 @@
   <Target Name="ZeroNativeBuild" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="IncrementalClean"
           Condition="'$(ZeroBuildsNative)' == 'true' and '$(ZeroTarget)' != 'c64'"
           DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand;ZeroFSharpEntry"
-          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);@(ZeroResolvedLinkLibrary);$(ZeroNativeArgsFile);@(ZeroFSharpNativeInput)"
+          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);@(ZeroResolvedLinkLibrary);$(ZeroNativeArgsFile);@(ZeroFSharpNativeInput);$(ZeroLinkArgsInput)"
           Outputs="$(ZeroNativeOutput);$(ZeroDebugObject)">
     <!-- NuGet doesn't keep the executable bit; a packages folder that's
          read-only (shared or mounted) must already have it. -->
@@ -328,6 +328,9 @@
       <!-- The macOS program's debug information stays in bflat's object (the
            program only points at it), so a missing object is a reason to rebuild. -->
       <ZeroDebugObject Condition="'$(ZeroTarget)' == 'osx-arm64'">$(ZeroNativeObject)</ZeroDebugObject>
+      <!-- ld64.lld's command line is an input too (ZeroStripSymbols changes
+           it), on macOS only: elsewhere the file isn't written. -->
+      <ZeroLinkArgsInput Condition="'$(ZeroTarget)' == 'osx-arm64'">$(ZeroLinkArgsFile)</ZeroLinkArgsInput>
     </PropertyGroup>
     <ItemGroup>
       <!-- Zero libraries: every resolved reference that isn't zerocore or lib/
@@ -394,6 +397,11 @@
       <_ZeroArg Include="@(_ZeroUefiObject->'--ldflags &quot;$(ZeroNativeDir)%(Identity)&quot;', ' ')" Condition="'$(ZeroTarget)' == 'uefi-x64' or '$(ZeroTarget)' == 'uefi-arm64'" />
       <_ZeroArg Include="-O0" Condition="'$(ZeroOptimizeFor)' == 'None' and '$(ZeroTarget)' != 'c64'" />
       <_ZeroArg Include="-Os" Condition="'$(ZeroOptimizeFor)' == 'Size' and '$(ZeroTarget)' != 'c64'" />
+      <!-- ZeroStripSymbols: no debug information (macOS's stays in bflat's
+           object, so the linker drops the symbols that point to it), and lld
+           leaves the symbol table out of Linux programs. -->
+      <_ZeroArg Include="--no-debug-info" Condition="'$(ZeroStripSymbols)' == 'true' and '$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'c64'" />
+      <_ZeroArg Include="--ldflags --strip-all" Condition="'$(ZeroStripSymbols)' == 'true' and ('$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64')" />
       <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != '' and '$(ZeroTarget)' != 'c64'" />
       <_ZeroArg Include="-o &quot;$(ZeroBflatOutput)&quot;" Condition="'$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'c64'" />
       <_ZeroArg Include="-o &quot;$(ZeroNativeObject)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
@@ -403,6 +411,7 @@
            lld reads response files the GNU way, where a backslash escapes,
            so paths get forward slashes (which Windows takes too). -->
       <_ZeroLinkArg Include="-arch arm64 -platform_version macos 12.0 12.0 -fixup_chains -dead_strip" />
+      <_ZeroLinkArg Include="-x -S" Condition="'$(ZeroStripSymbols)' == 'true'" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$(ZeroNativeObject)'))').Replace('\', '/'))&quot;" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)start.o').Replace('\', '/'))&quot;" Condition="'$(ZeroNativeLibrary)' != 'true'" />
       <!-- A macOS native library: a dylib exporting what bflat's exports file

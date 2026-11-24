@@ -30,7 +30,7 @@
 # Usage:  ./build.sh [--wasm | --dos | --c64 | --win | --mac | --uefi] [Sample ...]     default: all samples
 #         ./build.sh --sdk-payload <dir>     what the ZeroCSharp.Sdk package carries (sdk/)
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh),
-#         BFLAT_EXTRA_FLAGS (see bflat_flags)
+#         BFLAT_EXTRA_FLAGS (see bflat_flags), KEEP_SYMBOLS (see LINK_FLAGS)
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
@@ -87,7 +87,7 @@ bflat_flags() {
     # unoptimized code that the SDK's Debug builds make.
     echo ${BFLAT_EXTRA_FLAGS:-}
     case "$1" in
-        Tiny) echo -Os --no-pie ;;
+        Tiny) echo -Os ;;
         # Zero mode has no runtime CPU detection, so SIMD extensions must be part of
         # the baseline. x64: AVX2/FMA (Haswell, 2013, or newer). arm64 always has
         # NEON; dotprod (SDOT, for int8) needs ARMv8.2+, e.g. Apple M1 or Cortex-A76.
@@ -106,6 +106,14 @@ CORE_NATIVE=bin/zerocore-$BFLAT_ARCH.o
 LINK_FLAGS=(--ldflags "$CORE_NATIVE")
 if [ "$BFLAT_ARCH" = arm64 ]; then
     LINK_FLAGS+=(--ldflags "-z max-page-size=$ARM64_MAX_PAGE_SIZE")
+fi
+# Linux programs are built as releases: without debug information and with no
+# symbol table (the linker drops it, so this works whatever the architecture),
+# and not position-independent, which leaves out the relocations ASLR needs.
+# Together that is 55 to 70% of a program. KEEP_SYMBOLS=1 keeps all three,
+# for gdb or perf.
+if [ -z "${KEEP_SYMBOLS:-}" ]; then
+    LINK_FLAGS+=(--no-debug-info --no-pie --ldflags --strip-all)
 fi
 
 # The sources of a sample: samples/<name>.cs, plus anything generated for it.
@@ -196,13 +204,6 @@ build_native() {
         # shellcheck disable=SC2046
         "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none "${CSHARP_FLAGS[@]}" \
             "${NATIVE_FLAGS[@]}" --arch "$BFLAT_ARCH" $(bflat_flags "$name") "${LINK_FLAGS[@]}" -o "bin/$name"
-        if [ "$name" = Tiny ]; then
-            if [ "$BFLAT_ARCH" = "$HOST_ARCH" ]; then
-                strip "bin/$name"
-            else
-                echo "  (not stripped: strip can't handle $BFLAT_ARCH binaries on $HOST_ARCH)"
-            fi
-        fi
     done
 }
 
@@ -531,7 +532,8 @@ build_mac_link() {
         # into a table in mac-arm64.S (lld, which the SDK uses, can't -alias).
         "$clang" -arch arm64 -o "bin/mac/$name" "$MAC_OBJ/$name.o" "$MAC_OBJ/start.o" "$MAC_OBJ/runtime.o" "$MAC_OBJ/zerocore.o" \
             -Wl,-dead_strip
-        if [ "$name" = Tiny ]; then strip "bin/mac/$name"; fi
+        # Stripped like the Linux programs, unless KEEP_SYMBOLS is set.
+        if [ -z "${KEEP_SYMBOLS:-}" ]; then strip "bin/mac/$name"; fi
     done
 }
 
@@ -752,6 +754,7 @@ in_container() {
         -v "$PWD:/w" -v "$(cd "$BFLAT_DIR" && pwd):/bflat:ro" -w /w \
         -e BFLAT_DIR=/bflat -e BFLAT_ARCH="$BFLAT_ARCH" -e ARM64_MAX_PAGE_SIZE="$ARM64_MAX_PAGE_SIZE" \
         -e WASM_TOOLS="$WASM_TOOLS" -e BFLAT_EXTRA_FLAGS="${BFLAT_EXTRA_FLAGS:-}" \
+        -e KEEP_SYMBOLS="${KEEP_SYMBOLS:-}" \
         "$IMAGE" ./build.sh "$@"
 }
 

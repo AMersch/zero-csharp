@@ -10,6 +10,11 @@ namespace System.Runtime
         [DllImport("*"), SuppressGCTransition]
         internal static extern void* calloc(nuint count, nuint size);
 
+        // Only for memory nothing else can reach any more: a finished thread's
+        // thread-static storage (Internal.Runtime.ThreadStatics).
+        [DllImport("*"), SuppressGCTransition]
+        internal static extern void free(void* memory);
+
         [DllImport("*"), SuppressGCTransition]
         internal static extern nint write(int fd, void* buffer, nuint count);
 

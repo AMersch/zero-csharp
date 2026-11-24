@@ -1,3 +1,4 @@
+using Internal.Runtime;
 using System;
 using System.Runtime;
 using System.Runtime.CompilerServices;
@@ -10,6 +11,7 @@ namespace Internal.Runtime.CompilerHelpers
     internal static unsafe class StartupCodeHelpers
     {
         private const int GCStaticRegionSection = 201;
+        private const int ThreadStaticRegionSection = 202;
 
         // The low bits of a static base's address, as the compiler emits it.
         private const nint Uninitialized = 1;
@@ -161,6 +163,11 @@ namespace Internal.Runtime.CompilerHelpers
             ModuleSection* end = section + header->NumberOfSections;
             for (; section < end; section++)
             {
+                if (section->Id == ThreadStaticRegionSection && ThreadStatics.s_region == null)
+                {
+                    ThreadStatics.s_region = (MethodTable**)section->Start;
+                    ThreadStatics.s_count = (int)((section->End - section->Start) / sizeof(nint));
+                }
                 if (section->Id == GCStaticRegionSection)
                 {
                     InitializeStatics(section->Start, section->End);
@@ -300,6 +307,15 @@ namespace System.Runtime.CompilerServices
         {
             CheckStaticClassConstruction(ref context);
             return nonGcStaticBase;
+        }
+
+        // For a type with [ThreadStatic] fields: this thread's storage for
+        // them, once the type's static constructor has run.
+        private static object CheckStaticClassConstructionReturnThreadStaticBase(void* module, int typeTlsIndex, StaticClassConstructionContext* context)
+        {
+            object threadStaticBase = ThreadStatics.GetThreadStaticBaseForType(module, typeTlsIndex);
+            CheckStaticClassConstruction(ref *context);
+            return threadStaticBase;
         }
 
         // The fast path: the constructor has run (its address is zero).

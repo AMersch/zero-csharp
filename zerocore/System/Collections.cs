@@ -1,6 +1,6 @@
 // The enumeration interfaces. The C# compiler wants them declared before it
 // compiles any foreach, even one over an array (which it turns into an
-// indexed loop). Arrays don't implement them here.
+// indexed loop). Arrays implement IEnumerable<T> through Array<T> (Array.cs).
 
 namespace System.Collections
 {

@@ -76,7 +76,7 @@ namespace System.Runtime
         {
             if (obj == null)
                 Environment.FailFast("NullReferenceException");
-            RhUnboxTypeTest(type, obj._methodTable);
+            RhUnboxTypeTest(type, obj.m_pEEType);
             return ref Unsafe.As<RawData>(obj).Data;
         }
 

@@ -19,11 +19,24 @@
     <CopyOutputSymbolsToOutputDirectory Condition="'$(OutputType)' != 'Library'">false</CopyOutputSymbolsToOutputDirectory>
   </PropertyGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(ZeroLanguage)' == 'CSharp'">
     <Reference Include="$(ZeroRefDir)System.Private.CoreLib.dll" Private="false" ZeroFramework="true" />
-    <Reference Include="$(ZeroRefDir)BflatLib.dll" Private="false" ZeroFramework="true" />
     <!-- The compiler the bflat fork uses: unions and the updated memory safety rules. -->
     <PackageReference Include="Microsoft.Net.Compilers.Toolset" Version="5.12.0" PrivateAssets="all" IsImplicitlyDefined="true" />
+  </ItemGroup>
+  <!-- F#: zerocore under the file name fsc takes its primary assembly from
+       (the IL it writes still names System.Private.CoreLib), the BCL types fsc
+       needs that zerocore lacks, and FSharp.Core. bflat gets zerocore under
+       its own name instead (ZeroNative="false" here, ZeroNativeCommand). -->
+  <ItemGroup Condition="'$(ZeroLanguage)' == 'FSharp'">
+    <Reference Include="$(ZeroRefDir)fsharp/System.Runtime.dll" Private="false" ZeroFramework="true" ZeroNative="false" />
+    <Reference Include="$(ZeroRefDir)fsharp/System.Runtime.Extensions.dll" Private="false" ZeroFramework="true" />
+    <Reference Include="$(ZeroRefDir)fsharp/FSharp.Core.dll" Private="false" ZeroFramework="true" />
+    <!-- printf and the others (fsharp/printf/Printf.fs). -->
+    <Reference Include="$(ZeroRefDir)fsharp/FSharp.Printf.dll" Private="false" ZeroFramework="true" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="$(ZeroRefDir)BflatLib.dll" Private="false" ZeroFramework="true" />
   </ItemGroup>
 
   <!-- bflat for this host, restored with the project. -->
@@ -45,23 +58,30 @@
     The native step: after the normal compile (which checks the code the way the
     editor sees it), bflat compiles the same sources, with zerocore, lib/ and the
     project's zero libraries, into a native program. The flags are build.sh's.
+    F#: bflat compiles only C#, so it compiles a one-method C# program that
+    calls the F# entry point (ZeroFSharpEntry), with the F# compiler's IL as a
+    reference, and makes native code of both.
   -->
   <!-- After the output is copied and before IncrementalClean, which records
        FileWrites: dotnet clean then removes the native program too. -->
   <Target Name="ZeroNativeBuild" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="IncrementalClean"
           Condition="'$(ZeroBuildsNative)' == 'true' and '$(ZeroTarget)' != 'c64'"
-          DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand"
-          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);@(ZeroResolvedLinkLibrary);$(ZeroNativeArgsFile)"
+          DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand;ZeroFSharpEntry"
+          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);@(ZeroResolvedLinkLibrary);$(ZeroNativeArgsFile);@(ZeroFSharpNativeInput)"
           Outputs="$(ZeroNativeOutput);$(ZeroDebugObject)">
     <!-- NuGet doesn't keep the executable bit; a packages folder that's
          read-only (shared or mounted) must already have it. -->
     <Exec Condition="'$(OS)' != 'Windows_NT'" Command="test -x &quot;$(ZeroBflatDir)bflat&quot; &amp;&amp; test -x &quot;$(ZeroBflatDir)bin/lld&quot; || chmod +x &quot;$(ZeroBflatDir)bflat&quot; &quot;$(ZeroBflatDir)bin/lld&quot;" />
     <!-- bflat doesn't make the folder (a target's own, for a chosen target). -->
-    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(ZeroNativeOutput)'))" />
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(ZeroNativeOutput)'));$([System.IO.Path]::GetDirectoryName('$(ZeroBflatOutput)'))" />
     <!-- The arguments as a response file: cmd.exe (Exec on Windows) stops at
          8191 characters, which a project's full source paths can pass. -->
     <Message Text="bflat arguments: $(ZeroNativeArgs)" />
     <Exec Command="&quot;$(ZeroBflatExe)&quot; build @&quot;$(ZeroNativeArgsFile)&quot;" />
+    <!-- F#: the program bflat wrote under its own name (and Windows' PDB). -->
+    <Copy SourceFiles="$(ZeroBflatOutput)" DestinationFiles="$(ZeroNativeOutput)" Condition="'$(ZeroBflatOutput)' != '$(ZeroNativeOutput)' and '$(ZeroTarget)' != 'osx-arm64'" />
+    <Copy SourceFiles="$([System.IO.Path]::ChangeExtension('$(ZeroBflatOutput)', '.pdb'))" DestinationFiles="$([System.IO.Path]::ChangeExtension('$(ZeroNativeOutput)', '.pdb'))"
+          Condition="'$(ZeroBflatOutput)' != '$(ZeroNativeOutput)' and '$(ZeroTarget)' == 'win-x64' and Exists('$([System.IO.Path]::ChangeExtension($(ZeroBflatOutput), `.pdb`))')" />
     <!-- macOS: bflat only compiles (it has no Mach-O linker); the package's
          lld links, as ld64.lld, against the payload's libSystem.tbd. -->
     <Message Text="ld64.lld arguments: $(ZeroLinkArgs)" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
@@ -290,6 +310,16 @@
       <ZeroNativeLibraryExtension Condition="'$(ZeroTarget)' == 'osx-arm64'">.dylib</ZeroNativeLibraryExtension>
       <ZeroNativeLibraryExtension Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'">.so</ZeroNativeLibraryExtension>
       <ZeroNativeOutput Condition="'$(ZeroNativeLibrary)' == 'true'">$(OutDir)$(ZeroTargetFolder)native/$(AssemblyName)$(ZeroNativeLibraryExtension)</ZeroNativeOutput>
+      <!-- Where bflat writes the program. bflat names the assembly it compiles
+           after that file: for F#, the C# entry program, which must not take
+           the F# program's name, so it goes to obj/ and is copied. -->
+      <ZeroBflatOutput>$(ZeroNativeOutput)</ZeroBflatOutput>
+      <ZeroBflatOutput Condition="'$(ZeroLanguage)' == 'FSharp'">$(IntermediateOutputPath)zero-native/$(ZeroTarget)/zero-native$([System.IO.Path]::GetExtension('$(ZeroNativeOutput)'))</ZeroBflatOutput>
+      <!-- F#: the C# that calls the F# entry point or exports (ZeroFSharpEntry),
+           and for a Windows library the exports' .def and import library. -->
+      <ZeroFSharpEntrySource>$(IntermediateOutputPath)zero-fsharp-entry.$(ZeroTarget).cs</ZeroFSharpEntrySource>
+      <ZeroFSharpDefFile Condition="'$(ZeroLanguage)' == 'FSharp' and '$(ZeroNativeLibrary)' == 'true' and '$(ZeroTarget)' == 'win-x64'">$(IntermediateOutputPath)zero-fsharp-exports.def</ZeroFSharpDefFile>
+      <ZeroFSharpImportLibrary>$([System.IO.Path]::ChangeExtension('$(ZeroNativeOutput)', '.lib'))</ZeroFSharpImportLibrary>
       <ZeroNativeArgsFile>$(IntermediateOutputPath)zero-native.args</ZeroNativeArgsFile>
       <ZeroNativeArgsFile Condition="'$(ZeroTargetFolder)' != ''">$(IntermediateOutputPath)zero-native.$(ZeroTarget).args</ZeroNativeArgsFile>
       <!-- macOS: bflat's object, then ld64.lld's command line. -->
@@ -305,17 +335,21 @@
       <_ZeroFrameworkPath Include="@(Reference->'%(FullPath)')" Condition="'%(Reference.ZeroFramework)' == 'true'" />
       <ZeroLibraryReference Include="@(ReferencePath)" Exclude="@(_ZeroFrameworkPath)" />
       <ZeroNativeInput Include="$(ZeroRefDir)*.dll;$(ZeroNativeDir)*" />
-      <_ZeroArg Include="@(Compile->'&quot;%(FullPath)&quot;')" />
-      <_ZeroArg Include="-r &quot;%(Reference.Identity)&quot;" Condition="'%(Reference.ZeroFramework)' == 'true'" />
+      <_ZeroArg Include="@(Compile->'&quot;%(FullPath)&quot;')" Condition="'$(ZeroLanguage)' == 'CSharp'" />
+      <!-- F#: the C# entry program, the F# IL, and zerocore under its own name. -->
+      <_ZeroArg Include="&quot;$([System.IO.Path]::GetFullPath('$(ZeroFSharpEntrySource)'))&quot;" Condition="'$(ZeroLanguage)' == 'FSharp'" />
+      <_ZeroArg Include="@(IntermediateAssembly->'-r &quot;%(FullPath)&quot;')" Condition="'$(ZeroLanguage)' == 'FSharp'" />
+      <_ZeroArg Include="-r &quot;$(ZeroRefDir)System.Private.CoreLib.dll&quot;" Condition="'$(ZeroLanguage)' == 'FSharp'" />
+      <_ZeroArg Include="-r &quot;%(Reference.Identity)&quot;" Condition="'%(Reference.ZeroFramework)' == 'true' and '%(Reference.ZeroNative)' != 'false'" />
       <_ZeroArg Include="@(ZeroLibraryReference->'-r &quot;%(FullPath)&quot;')" />
       <_ZeroArg Include="--stdlib:none --no-reflection" Condition="'$(ZeroTarget)' != 'c64'" />
       <_ZeroArg Include="--stdlib:none -O -o &quot;$(ZeroC64Il)&quot;" Condition="'$(ZeroTarget)' == 'c64'" />
       <!-- The language as the project sets it for the C# compiler. -->
-      <_ZeroArg Include="--langversion $(LangVersion)" Condition="'$(LangVersion)' != ''" />
-      <_ZeroArg Include="$(Features.Split(';'))" Condition="'$(Features)' != ''">
+      <_ZeroArg Include="--langversion $(LangVersion)" Condition="'$(LangVersion)' != '' and '$(ZeroLanguage)' == 'CSharp'" />
+      <_ZeroArg Include="$(Features.Split(';'))" Condition="'$(Features)' != '' and '$(ZeroLanguage)' == 'CSharp'">
         <Prefix>--compiler-feature </Prefix>
       </_ZeroArg>
-      <_ZeroArg Include="$(DefineConstants.Split(';'))" Condition="'$(DefineConstants)' != ''" >
+      <_ZeroArg Include="$(DefineConstants.Split(';'))" Condition="'$(DefineConstants)' != '' and '$(ZeroLanguage)' == 'CSharp'" >
         <Prefix>-d </Prefix>
       </_ZeroArg>
       <_ZeroDllImport Include="libc;libm.so.6;$(ZeroDllImports);@(ZeroResolvedLinkLibrary->'%(DllImport)')" KeepDuplicates="false" />
@@ -361,7 +395,7 @@
       <_ZeroArg Include="-O0" Condition="'$(ZeroOptimizeFor)' == 'None' and '$(ZeroTarget)' != 'c64'" />
       <_ZeroArg Include="-Os" Condition="'$(ZeroOptimizeFor)' == 'Size' and '$(ZeroTarget)' != 'c64'" />
       <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != '' and '$(ZeroTarget)' != 'c64'" />
-      <_ZeroArg Include="-o &quot;$(ZeroNativeOutput)&quot;" Condition="'$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'c64'" />
+      <_ZeroArg Include="-o &quot;$(ZeroBflatOutput)&quot;" Condition="'$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'c64'" />
       <_ZeroArg Include="-o &quot;$(ZeroNativeObject)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
       <!-- ld64.lld (macOS 12 or newer, arm64: what bflat's objects ask for). zerocore's module list comes
            from the payload's objects (mac/start.c or mac/library.c, mac-arm64.S). Chained
@@ -403,6 +437,9 @@
          this one doesn't list, so programs for several targets stay. -->
     <ItemGroup>
       <FileWrites Include="$(ZeroNativeOutput);$(ZeroNativeArgsFile)" />
+      <!-- F#: bflat's own copy of the program, and the C# entry program. -->
+      <FileWrites Include="$(ZeroBflatOutput);$([System.IO.Path]::ChangeExtension('$(ZeroBflatOutput)', '.pdb'))" Condition="'$(ZeroLanguage)' == 'FSharp' and '$(ZeroTarget)' != 'osx-arm64'" />
+      <FileWrites Include="$(ZeroFSharpEntrySource)" Condition="'$(ZeroLanguage)' == 'FSharp'" />
       <FileWrites Include="$(ZeroNativeObject);$(ZeroLinkArgsFile)" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
       <FileWrites Include="$([System.IO.Path]::ChangeExtension('$(ZeroNativeObject)', '.txt'))" Condition="'$(ZeroTarget)' == 'osx-arm64' and '$(ZeroNativeLibrary)' == 'true'" />
       <FileWrites Include="@(ZeroNativeFile)" Condition="Exists('%(FullPath)')" />
@@ -523,5 +560,40 @@
     </ItemGroup>
     <Error Code="ZERO002" Condition="'@(_ZeroNewerLibrary)' != ''"
            Text="%(_ZeroNewerLibrary.Identity) was built with ZeroCSharp.Sdk %(_ZeroNewerLibrary.SdkVersion), newer than this project's $(ZeroSdkVersion): update ZeroCSharp.Sdk in the project's Sdk attribute." />
+  </Target>
+
+  <!--
+    F#: the C# that bflat compiles with the F# IL, written by the task in
+    Sdk/ZeroFSharpNative.cs.txt (not .cs: a project whose packages folder is
+    inside it would compile it with its own sources):
+    a program's Main, which calls the F# entry point, or a native library's
+    exports, which call the F# [<UnmanagedCallersOnly(EntryPoint = ...)>]
+    functions. Read from the F# compiler's IL.
+  -->
+  <Target Name="ZeroFSharpEntry" Condition="'$(ZeroLanguage)' == 'FSharp' and '$(ZeroBuildsNative)' == 'true'"
+          DependsOnTargets="ZeroNativeCommand"
+          Inputs="@(IntermediateAssembly)" Outputs="$(ZeroFSharpEntrySource);$(ZeroFSharpDefFile)">
+    <ZeroFSharpNative Assembly="@(IntermediateAssembly->'%(FullPath)')" Source="$(ZeroFSharpEntrySource)"
+                      Library="$(ZeroNativeLibrary)" DefFile="$(ZeroFSharpDefFile)" DllName="$(AssemblyName).dll" />
+  </Target>
+  <ItemGroup Condition="'$(ZeroLanguage)' == 'FSharp'">
+    <ZeroFSharpNativeInput Include="@(IntermediateAssembly)" />
+  </ItemGroup>
+  <UsingTask TaskName="ZeroFSharpNative" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)ZeroFSharpNative.cs.txt" />
+    </Task>
+  </UsingTask>
+
+  <!-- A Windows F# native library: bflat's import library names its own DLL
+       (zero-native.dll, see ZeroBflatOutput), so it's made again from the
+       exports, naming the project's. lld as lib.exe: /lib first. -->
+  <Target Name="ZeroFSharpImportLibrary" AfterTargets="ZeroNativeBuild"
+          Condition="'$(ZeroLanguage)' == 'FSharp' and '$(ZeroNativeLibrary)' == 'true' and '$(ZeroTarget)' == 'win-x64'"
+          Inputs="$(ZeroFSharpDefFile)" Outputs="$(ZeroFSharpImportLibrary)">
+    <Exec Command="&quot;$(ZeroLldExe)&quot; -flavor link /lib /machine:x64 /def:&quot;$(ZeroFSharpDefFile)&quot; /out:&quot;$(ZeroFSharpImportLibrary)&quot;" />
+    <ItemGroup>
+      <FileWrites Include="$(ZeroFSharpImportLibrary)" />
+    </ItemGroup>
   </Target>
 </Project>

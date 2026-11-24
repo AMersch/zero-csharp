@@ -9,6 +9,11 @@ Each guide reaches one goal: the steps, the code, and what to watch out for. If 
 program yet, start with [Get started](../get-started/index.html); for a longer walk through one program,
 the [tutorial](../tutorial/index.html) builds a quiz step by step.
 
+## Languages
+
+- [Write a program in F#](write-fsharp.html): an `.fsproj` with the same SDK, `printf`, lists,
+  sequences, maps and sets, libraries and native libraries, the memory to watch, and what's missing.
+
 ## Text and input
 
 - [Read input from the user](read-input.html): read a line into a buffer with `In.ReadLine`, and handle

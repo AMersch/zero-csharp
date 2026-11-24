@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check (or --update) the C# excerpts in docs/ against the sample regions they quote.
+"""Check (or --update) the C# and F# excerpts in docs/ against the sample regions they quote.
 
 A sample marks a region with comment lines:
 
@@ -14,8 +14,9 @@ and a page quotes it by putting a marker on the line before a fence:
     ...
     ```
 
-The region `file` is the whole file without its region markers. Every `csharp` fence needs a marker,
-except one opened as ```csharp no-sample (a signature or fragment no sample can hold).
+The region `file` is the whole file without its region markers. Every `csharp` and `fsharp` fence
+needs a marker, except one opened as ```csharp no-sample (a signature or fragment no sample can hold).
+F# sources mark regions with the same `// docs:` comments.
 """
 import re
 import sys
@@ -26,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / 'docs'
 SECTIONS = ['get-started', 'tutorial', 'concepts', 'how-to', 'reference']
 WIDTH = 80  # what a code frame shows at desktop width without scrolling
-CSHARP = {'csharp', 'cs', 'c#'}
+CHECKED = {'csharp', 'cs', 'c#', 'fsharp', 'fs', 'f#'}
 OPEN = re.compile(r'^( *)(`{3,}|~{3,})([^`\s]*)(.*)$')
 MARKER = re.compile(r'^ *<!-- sample: (\S+) ([\w-]+) -->$')
 REGION_LINE = re.compile(r'^[ \t]*// docs:([\w-]+)[ \t]*$')
@@ -105,15 +106,15 @@ def main():
                     if len(code) > WIDTH:
                         errors.append(f'{name}:{number}: {len(code)} columns, more than {WIDTH}')
 
-            if lang not in CSHARP:
+            if lang not in CHECKED:
                 continue
             if 'no-sample' in options:
                 check_width(body)
                 continue
             marker = MARKER.match(lines[first - 1]) if first > 0 else None
             if not marker:
-                errors.append(f'{name}:{line}: C# fence without a <!-- sample: ... --> marker on the line '
-                              'before it (or open it with ```csharp no-sample)')
+                errors.append(f'{name}:{line}: {lang} fence without a <!-- sample: ... --> marker on the '
+                              f'line before it (or open it with ```{lang} no-sample)')
                 continue
             markers_used.add(first - 1)
             sample, region = ROOT / marker[1], marker[2]
@@ -142,7 +143,7 @@ def main():
                                   '(run scripts/check-doc-snippets.py --update)')
         for number, text in enumerate(lines):
             if MARKER.match(text) and number not in markers_used:
-                errors.append(f'{name}:{number + 1}: sample marker not followed by a C# fence')
+                errors.append(f'{name}:{number + 1}: sample marker not followed by a C# or F# fence')
         if replacements:
             for start, end, new in reversed(replacements):
                 lines[start:end] = new

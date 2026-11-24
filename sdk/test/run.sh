@@ -130,7 +130,7 @@ fixture() {
     rm -rf "$to"
     mkdir -p "$(dirname "$to")"
     cp -R "$from" "$to"
-    find "$to" -name '*.csproj' -exec sed -i.bak "s|@ZERO_SDK_VERSION@|$VERSION|g" {} \; -exec rm -f {}.bak \;
+    find "$to" \( -name '*.csproj' -o -name '*.fsproj' \) -exec sed -i.bak "s|@ZERO_SDK_VERSION@|$VERSION|g" {} \; -exec rm -f {}.bak \;
     cat > "$to/nuget.config" <<EOF
 <configuration>
   <packageSources>
@@ -180,7 +180,7 @@ test_hello_compiles() {
     local dll=$dir/bin/Debug/$TFM/hello.dll
     if [ ! -f "$dll" ]; then fail "hello compiles" "no $dll"; return; fi
     # Metadata strings are NUL-terminated: an assembly reference is a whole one.
-    if tr '\0' '\n' < "$dll" | grep -qx 'System.Runtime'; then
+    if LC_ALL=C tr '\0' '\n' < "$dll" | grep -qx 'System.Runtime'; then
         fail "hello compiles" "the output references System.Runtime"; return
     fi
     pass "hello compiles"
@@ -214,7 +214,9 @@ test_payload_complete() {
     LOG=
     # start: a program's entry point; library: a native library's startup
     # (NativeLib=Shared); runtime: what both share.
-    for f in ref/System.Private.CoreLib.dll ref/BflatLib.dll native/linux-x64/zerocore.o native/linux-x64/library.o \
+    for f in ref/System.Private.CoreLib.dll ref/BflatLib.dll \
+             ref/fsharp/System.Runtime.dll ref/fsharp/System.Runtime.Extensions.dll ref/fsharp/FSharp.Core.dll \
+             native/linux-x64/zerocore.o native/linux-x64/library.o \
              native/linux-arm64/zerocore.o native/linux-arm64/library.o \
              native/win-x64/start.obj native/win-x64/runtime.obj native/win-x64/library.obj native/win-x64/zerocore.obj \
              native/osx-arm64/start.o native/osx-arm64/runtime.o native/osx-arm64/library.o native/osx-arm64/zerocore.o \
@@ -592,6 +594,14 @@ test_templates() {
     if grep -q '@ZERO_' "$dir/Hello/.vscode/launch.json"; then fail "$name" "launch.json has a placeholder left"; return; fi
     if ! run_in "$dir" templates-newlib new zerolib -o Lib; then fail "$name" "dotnet new zerolib failed"; return; fi
     if ! run_in "$dir/Lib" templates-pack pack -o "$dir/feed"; then fail "$name" "the library didn't pack"; return; fi
+    # The F# ones: the same names, with -lang F#.
+    if ! run_in "$dir" templates-new-fs new zero -lang F# -o FsHello; then fail "$name" "dotnet new zero -lang F# failed"; return; fi
+    if [ ! -f "$dir/FsHello/FsHello.fsproj" ] || [ ! -f "$dir/FsHello/.vscode/launch.json" ]; then fail "$name" "no FsHello.fsproj or .vscode"; return; fi
+    if ! run_in "$dir/FsHello" templates-build-fs build; then fail "$name" "the F# program didn't build"; return; fi
+    out=$(echo Ann | "$(exe "$dir/FsHello/bin/Debug/$TFM/FsHello")")
+    if [[ "$out" != *"Hello, Ann!"* ]]; then fail "$name" "the F# program printed '$out'"; return; fi
+    if ! run_in "$dir" templates-newlib-fs new zerolib -lang F# -o FsLib; then fail "$name" "dotnet new zerolib -lang F# failed"; return; fi
+    if ! run_in "$dir/FsLib" templates-pack-fs pack -o "$dir/feed"; then fail "$name" "the F# library didn't pack"; return; fi
     pass "$name"
 }
 
@@ -1379,6 +1389,215 @@ test_native_library_app_recipe() {
     pass "$name"
 }
 
+# ---- F# ----------------------------------------------------------------------
+
+# An .fsproj: unions, records, lists, closures across two files, an
+# [<EntryPoint>] that gets the arguments and returns the exit code.
+test_fsharp_program() {
+    local name="F# program" dir exe out code
+    can_build "$name" || return
+    dir=$(fixture fsapp)
+    if ! run_in "$dir" fsapp build; then fail "$name" "dotnet build failed"; return; fi
+    # The IL refers to zerocore by its own name, not the host's System.Runtime
+    # (what fsc picks when it isn't given zerocore as System.Runtime.dll).
+    if LC_ALL=C tr '\0' '\n' < "$dir/bin/Debug/$TFM/fsapp.dll" | grep -qx 'System.Runtime'; then
+        fail "$name" "the IL references System.Runtime"; return
+    fi
+    exe=$(exe "$dir/bin/Debug/$TFM/fsapp")
+    if ! is_host_program "$exe"; then fail "$name" "no program for $HOST_RID at $exe"; return; fi
+    out=$("$exe" a b | tr -d '\r'); code=$?
+    local want=$'args: 2\nsum: 100\nrecords equal\narea: 7\nF# zero'
+    if [ "$out" != "$want" ]; then fail "$name" "printed: $out"; return; fi
+    "$exe" > /dev/null; code=$?
+    if [ "$code" != 7 ]; then fail "$name" "exit code $code, not 7"; return; fi
+    pass "$name"
+}
+
+# Top-level code in the last file, no [<EntryPoint>]: fsc's main@, in a class
+# C# can't name, is reached through [UnsafeAccessor]; dotnet run runs it.
+test_fsharp_top_level() {
+    local name="F# top-level program" dir out
+    can_build "$name" || return
+    dir=$(fixture fstoplevel)
+    if ! run_in "$dir" fstoplevel run; then fail "$name" "dotnet run failed"; return; fi
+    out=$(tr -d '\r' < "$LOG" | tail -1)
+    if [ "$out" != "Hello, top-level F#!" ]; then fail "$name" "printed: $out"; return; fi
+    pass "$name"
+}
+
+# printf, sprintf, ksprintf through an inline wrapper, interpolated strings,
+# and up to ten arguments: the text .NET's printf gives (expected.txt), and
+# eprintfn on standard error.
+test_fsharp_printf() {
+    local name="F# printf" dir exe
+    can_build "$name" || return
+    dir=$(fixture fsprintf)
+    if ! run_in "$dir" fsprintf build; then fail "$name" "dotnet build failed"; return; fi
+    exe=$(exe "$dir/bin/Debug/$TFM/fsprintf")
+    "$exe" > "$WORK/fsprintf.out" 2> "$WORK/fsprintf.err"
+    if ! diff <(tr -d '\r' < "$WORK/fsprintf.out") <(tr -d '\r' < "$dir/expected.txt") > "$WORK/fsprintf.diff"; then
+        fail "$name" "printed: $(head -c 300 "$WORK/fsprintf.diff")"; return
+    fi
+    if [ "$(tr -d '\r' < "$WORK/fsprintf.err")" != "to standard error 1" ]; then fail "$name" "standard error: $(cat "$WORK/fsprintf.err")"; return; fi
+    pass "$name"
+}
+
+# Sequence expressions, comprehensions, and the Seq, List, Array, Map, Set and
+# String modules, against .NET's output; optimized (state machines for seq { })
+# and not (Seq.delay, Seq.append and the others the compiler calls instead).
+test_fsharp_collections() {
+    local name="F# collections" dir exe opt
+    can_build "$name" || return
+    dir=$(fixture fscollections)
+    for opt in true false; do
+        rm -rf "$dir/bin" "$dir/obj"
+        if ! run_in "$dir" fscollections build -p:Optimize=$opt; then fail "$name" "dotnet build failed (Optimize=$opt)"; return; fi
+        exe=$(exe "$dir/bin/Debug/$TFM/fscollections")
+        "$exe" > "$WORK/fscollections.out" 2>&1
+        if ! diff <(tr -d '\r' < "$WORK/fscollections.out") <(tr -d '\r' < "$dir/expected.txt") > "$WORK/fscollections.diff"; then
+            fail "$name" "printed (Optimize=$opt): $(head -c 300 "$WORK/fscollections.diff")"; return
+        fi
+    done
+    pass "$name"
+}
+
+# decimal (zerocore's, against .NET's results) and the math functions.
+test_fsharp_decimal() {
+    local name="F# decimal" dir exe
+    can_build "$name" || return
+    dir=$(fixture fsdecimal)
+    if ! run_in "$dir" fsdecimal build; then fail "$name" "dotnet build failed"; return; fi
+    exe=$(exe "$dir/bin/Debug/$TFM/fsdecimal")
+    "$exe" > "$WORK/fsdecimal.out" 2>&1
+    if ! diff <(tr -d '\r' < "$WORK/fsdecimal.out") <(tr -d '\r' < "$dir/expected.txt") > "$WORK/fsdecimal.diff"; then
+        fail "$name" "printed: $(head -c 300 "$WORK/fsdecimal.diff")"; return
+    fi
+    pass "$name"
+}
+
+# An F# program referencing a C# zero library and an F# one.
+test_fsharp_libraries() {
+    local name="F# with libraries" dir out
+    can_build "$name" || return
+    dir=$(fixture fs-with-libs)
+    if ! run_in "$dir/App" fs-with-libs run; then fail "$name" "dotnet run failed"; return; fi
+    out=$(tr -d '\r' < "$LOG" | tail -3)
+    if [ "$out" != $'C# library: 42\nF# library: 17\nfound 8' ]; then fail "$name" "printed: $out"; return; fi
+    pass "$name"
+}
+
+# The other targets: bflat writes the program under another name (it names
+# the C# entry program's assembly after it), the build copies it.
+test_fsharp_cross_targets() {
+    local name="F# cross targets" dir other other_arch
+    can_build "$name" || return
+    dir=$(fixture fsapp fs-cross)
+    if ! run_in "$dir" fs-cross-win build -p:ZeroTarget=win-x64; then fail "$name" "win-x64 build failed"; return; fi
+    if ! is_pe "$dir/bin/Debug/$TFM/win-x64/fsapp.exe"; then fail "$name" "fsapp.exe isn't a Windows program"; return; fi
+    if [ "$HOST_ARCH_NAME" = x64 ]; then other=linux-arm64; other_arch=aarch64; else other=linux-x64; other_arch=x86-64; fi
+    if ! run_in "$dir" fs-cross-linux build -p:ZeroTarget=$other; then fail "$name" "$other build failed"; return; fi
+    if ! is_elf "$dir/bin/Debug/$TFM/$other/fsapp" "$other_arch"; then fail "$name" "not an ELF for $other_arch"; return; fi
+    if ! run_in "$dir" fs-cross-uefi build -p:ZeroTarget=uefi-x64; then fail "$name" "uefi-x64 build failed"; return; fi
+    if ! is_efi_app "$dir/bin/Debug/$TFM/uefi-x64/fsapp.efi" x64; then fail "$name" "fsapp.efi isn't a UEFI application"; return; fi
+    pass "$name"
+}
+
+test_fsharp_incremental() {
+    local name="F# incremental" dir
+    can_build "$name" || return
+    dir=$(fixture fsapp fs-incremental)
+    if ! run_in "$dir" fs-incremental-1 build -v:n || ! ran_bflat; then fail "$name" "the first build didn't run bflat"; return; fi
+    if ! run_in "$dir" fs-incremental-2 build -v:n || ran_bflat; then fail "$name" "an unchanged project ran bflat again"; return; fi
+    sleep 1; touch "$dir/Shapes.fs"
+    if ! run_in "$dir" fs-incremental-3 build -v:n || ! ran_bflat; then fail "$name" "a changed source didn't run bflat"; return; fi
+    pass "$name"
+}
+
+test_fsharp_publish() {
+    local name="F# publish" dir exe
+    can_build "$name" || return
+    dir=$(fixture fsapp fs-publish)
+    if ! run_in "$dir" fs-publish publish -o "$(native_path "$dir/out")"; then fail "$name" "dotnet publish failed"; return; fi
+    exe=$(exe "$dir/out/fsapp")
+    if ! is_host_program "$exe"; then fail "$name" "no program in the publish folder"; return; fi
+    if [ -f "$dir/out/fsapp.dll" ]; then fail "$name" "the IL was published"; return; fi
+    "$exe" > /dev/null
+    if [ $? != 7 ]; then fail "$name" "the published program didn't run"; return; fi
+    pass "$name"
+}
+
+# An F# native library: fixtures/nativelib's exports written in F#
+# (structs, pointers, static initialization), called by the same C program,
+# loaded at run time and linked. bflat exports what it compiles from C#, so
+# the SDK makes a C# export for each F# one.
+test_fsharp_native_library() {
+    local name="F# native library" dir lib cc caller out exported ldl=
+    can_build "$name" || return
+    dir=$(fixture fsnativelib)
+    if ! run_in "$dir" fsnativelib build; then fail "$name" "dotnet build failed"; return; fi
+    lib=$dir/bin/Debug/$TFM/native/fsnativelib$HOST_LIB_EXT
+    if [ ! -f "$lib" ]; then fail "$name" "no $lib"; return; fi
+    local expected
+    expected=$(printf '%s\n' nl_add nl_cctor_value nl_mul_long nl_negate nl_offset nl_remember nl_scale nl_sum)
+    case "$HOST_OS" in
+        Linux)  exported=$(nm -D --defined-only "$lib" | awk '{print $3}' | sed 's/@.*//' | sort) ;;
+        Darwin) exported=$(nm -gU "$lib" | awk '{print $3}' | sed 's/^_//' | sort) ;;
+        *)      exported=$expected
+                if [ ! -f "$dir/bin/Debug/$TFM/native/fsnativelib.lib" ]; then fail "$name" "no import library"; return; fi ;;
+    esac
+    if [ "$exported" != "$expected" ]; then fail "$name" "exports: $(echo $exported)"; return; fi
+    if ! cc=$(c_compiler); then skip "$name" "no C compiler"; return; fi
+    [ "$HOST_OS" = Linux ] && ldl=-ldl
+    caller=$(exe "$WORK/fsnativelib-caller")
+    LOG=$WORK/fsnativelib-cc.log
+    if ! "$cc" "$(native_path "$ROOT/sdk/test/fixtures/nativelib-c/main.c")" -o "$(native_path "$caller")" $ldl > "$LOG" 2>&1; then
+        fail "$name" "the C caller didn't compile"; return
+    fi
+    expected=$(head -8 "$ROOT/sdk/test/fixtures/nativelib-caller/expected.txt" | tr -d '\r')
+    out=$("$caller" "$(native_path "$lib")" 2>&1 | tr -d '\r')
+    if [ "$out" != "$expected" ]; then fail "$name" "printed: $(echo $out)"; return; fi
+    if [ "$HOST_OS" != Windows ]; then
+        caller=$WORK/fsnativelib-linked-caller
+        if ! "$cc" -DLINKED "$ROOT/sdk/test/fixtures/nativelib-c/main.c" "$lib" -Wl,-rpath,"$(dirname "$lib")" -o "$caller" > "$LOG" 2>&1; then
+            fail "$name" "the linked C caller didn't link"; return
+        fi
+        out=$("$caller" 2>&1)
+        if [ "$out" != "$expected" ]; then fail "$name" "linked, printed: $(echo $out)"; return; fi
+    fi
+    pass "$name"
+}
+
+# The other targets' libraries, and Windows' import library, which the SDK
+# makes again: bflat's names the DLL it was built as (zero-native.dll).
+test_fsharp_native_library_cross() {
+    local name="F# native library cross" dir other other_arch
+    can_build "$name" || return
+    dir=$(fixture fsnativelib fsnativelib-cross)
+    if ! run_in "$dir" fsnativelib-cross-win build -p:ZeroTarget=win-x64; then fail "$name" "win-x64 build failed"; return; fi
+    if ! is_pe_dll "$dir/bin/Debug/$TFM/win-x64/native/fsnativelib.dll"; then fail "$name" "no Windows DLL"; return; fi
+    if ! LC_ALL=C grep -aq 'fsnativelib\.dll' "$dir/bin/Debug/$TFM/win-x64/native/fsnativelib.lib"; then
+        fail "$name" "the import library doesn't name fsnativelib.dll"; return
+    fi
+    if [ "$HOST_ARCH_NAME" = x64 ]; then other=linux-arm64; other_arch=aarch64; else other=linux-x64; other_arch=x86-64; fi
+    if ! run_in "$dir" fsnativelib-cross-linux build -p:ZeroTarget=$other; then fail "$name" "$other build failed"; return; fi
+    if ! is_elf_shared "$dir/bin/Debug/$TFM/$other/native/fsnativelib.so"; then fail "$name" "no shared library for $other"; return; fi
+    pass "$name"
+}
+
+# An export C can't call (a bool) or reach (a private function): ZERO005.
+test_fsharp_native_library_errors() {
+    local name="F# native library errors" dir
+    dir=$(fixture fsnativelib fsnativelib-errors)
+    printf '\n    [<UnmanagedCallersOnly(EntryPoint = "nl_flag")>]\n    let flag (b: bool) = b\n' >> "$dir/Exports.fs"
+    if run_in "$dir" fsnativelib-errors build; then fail "$name" "a bool export built"; return; fi
+    if ! grep -q 'ZERO005.*nl_flag.*bool' "$LOG"; then fail "$name" "no ZERO005 for the bool"; return; fi
+    dir=$(fixture fsnativelib fsnativelib-errors)
+    printf '\n    [<UnmanagedCallersOnly(EntryPoint = "nl_hidden")>]\n    let private hidden (x: int) = x\n' >> "$dir/Exports.fs"
+    if run_in "$dir" fsnativelib-errors-private build; then fail "$name" "a private export built"; return; fi
+    if ! grep -q 'ZERO005.*nl_hidden.*public' "$LOG"; then fail "$name" "no ZERO005 for the private function"; return; fi
+    pass "$name"
+}
+
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets c64_target bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size debug_unoptimized mac_debug_object_kept windows_debugger macos_error
@@ -1397,7 +1616,9 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name
     native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
     link_library link_library_passed_on link_library_newer_glibc sdl3 sdl3_windows
-    native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe)
+    native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe
+    fsharp_program fsharp_printf fsharp_collections fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish
+    fsharp_native_library fsharp_native_library_cross fsharp_native_library_errors)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim

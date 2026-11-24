@@ -106,7 +106,8 @@ jobs:
           fail-on-cache-miss: true
       - name: Install the assemblers and clang
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends binutils binutils-aarch64-linux-gnu clang
-      # zero-bitcode (sdk/ZeroCSharp.Bitcode), which the payload carries.
+      # zero-bitcode (sdk/ZeroCSharp.Bitcode), which the payload carries, and
+      # fsharp/build-core.sh (FSharp.Core is compiled with .NET 10's F# compiler).
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'

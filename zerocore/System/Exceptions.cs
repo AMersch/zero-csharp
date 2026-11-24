@@ -63,4 +63,29 @@ namespace System
         public ArgumentOutOfRangeException() : base("ArgumentOutOfRangeException") { }
         public ArgumentOutOfRangeException(string paramName) : base("ArgumentOutOfRangeException: " + paramName) { }
     }
+
+    // decimal's (Decimal.cs).
+    public class ArithmeticException : Exception
+    {
+        public ArithmeticException() : base("ArithmeticException") { }
+        public ArithmeticException(string message) : base(message) { }
+    }
+
+    public class OverflowException : ArithmeticException
+    {
+        public OverflowException() : base("OverflowException") { }
+        public OverflowException(string message) : base(message) { }
+    }
+
+    public class DivideByZeroException : ArithmeticException
+    {
+        public DivideByZeroException() : base("DivideByZeroException") { }
+        public DivideByZeroException(string message) : base(message) { }
+    }
+
+    public class FormatException : Exception
+    {
+        public FormatException() : base("FormatException") { }
+        public FormatException(string message) : base(message) { }
+    }
 }

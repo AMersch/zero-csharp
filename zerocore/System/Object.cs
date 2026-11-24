@@ -4,10 +4,12 @@ using Internal.Runtime;
 
 namespace System
 {
-    // Every object starts with a pointer to its type's method table.
+    // Every object starts with a pointer to its type's method table. The
+    // compiler finds the field by this name, .NET's: the thunk it makes to call
+    // a shared generic struct's method on a boxed one reads it.
     public unsafe class Object
     {
-        internal MethodTable* _methodTable;
+        internal MethodTable* m_pEEType;
 
         public Object() { }
 
@@ -26,7 +28,7 @@ namespace System
 
         public virtual string ToString() => "object";
 
-        public Type GetType() => Type.Of(_methodTable);
+        public Type GetType() => Type.Of(m_pEEType);
 
         public static bool ReferenceEquals(object a, object b) => a == b;
 
@@ -42,9 +44,9 @@ namespace System
     {
         public override bool Equals(object obj)
         {
-            if (obj == null || obj._methodTable != _methodTable)
+            if (obj == null || obj.m_pEEType != m_pEEType)
                 return false;
-            uint size = _methodTable->ValueTypeSize;
+            uint size = m_pEEType->ValueTypeSize;
             ref byte mine = ref Unsafe.As<RawData>(this).Data;
             ref byte theirs = ref Unsafe.As<RawData>(obj).Data;
             for (uint i = 0; i < size; i++)
@@ -56,7 +58,7 @@ namespace System
         }
 
         public override int GetHashCode()
-            => Number.HashBytes((byte*)Unsafe.AsPointer(ref Unsafe.As<RawData>(this).Data), (int)_methodTable->ValueTypeSize);
+            => Number.HashBytes((byte*)Unsafe.AsPointer(ref Unsafe.As<RawData>(this).Data), (int)m_pEEType->ValueTypeSize);
     }
 
     // With no names to look up, an enum prints its number.
@@ -65,7 +67,7 @@ namespace System
         public override string ToString()
         {
             ref byte data = ref Unsafe.As<RawData>(this).Data;
-            switch (_methodTable->ValueTypeSize)
+            switch (m_pEEType->ValueTypeSize)
             {
                 case 1: return Number.FormatInt64(Unsafe.As<byte, sbyte>(ref data));
                 case 2: return Number.FormatInt64(Unsafe.As<byte, short>(ref data));

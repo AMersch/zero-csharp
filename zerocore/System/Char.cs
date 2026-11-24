@@ -14,7 +14,7 @@ namespace System
     //
     // The (string s, int index) overloads read a surrogate pair at index as
     // the character it encodes, as .NET does: char.IsLetter("𐐀", 0) is true.
-    public unsafe struct Char : IEquatable<char>, IComparable<char>
+    public unsafe struct Char : IEquatable<char>, IComparable<char>, IComparable
     {
         public const char MaxValue = (char)0xFFFF;
         public const char MinValue = (char)0;
@@ -22,6 +22,8 @@ namespace System
         public bool Equals(char other) => (char)this == other;
 
         public int CompareTo(char other) => (char)this < other ? -1 : (char)this > other ? 1 : 0;
+
+        public int CompareTo(object obj) => obj is char other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Char.");
         public override bool Equals(object obj) => obj is char other && (char)this == other;
         public override int GetHashCode() => (char)this;
         public override string ToString() => ToString((char)this);

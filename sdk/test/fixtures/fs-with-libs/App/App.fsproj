@@ -1,0 +1,12 @@
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CsLib/CsLib.csproj" />
+    <ProjectReference Include="../FsLib/FsLib.fsproj" />
+  </ItemGroup>
+</Project>

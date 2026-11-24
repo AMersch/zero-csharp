@@ -1,3 +1,5 @@
+using System.Collections;
+using System.Collections.Generic;
 using System.Runtime;
 using System.Runtime.CompilerServices;
 using Internal.Runtime;
@@ -6,9 +8,11 @@ namespace System
 {
     // A string object is [method table][length][characters][0]. Strings made
     // here (by + and Concat) are allocated like any other object and never freed.
-    // Object has no Equals or GetHashCode to override here.
+    // Object has no Equals or GetHashCode to override here. A string is an
+    // IEnumerable<char>, as in .NET (F# passes strings to Seq functions this
+    // way); C#'s foreach over a string stays an indexed loop.
 #pragma warning disable CS0660, CS0661
-    public sealed unsafe class String : IEquatable<string>, IComparable<string>
+    public sealed unsafe class String : IEquatable<string>, IComparable<string>, IComparable, IEnumerable<char>
 #pragma warning restore CS0660, CS0661
     {
         // The compiler finds these two fields by name, to lay out string literals.
@@ -56,6 +60,8 @@ namespace System
         // uses the current culture's rules; zero mode has no cultures. So
         // "B" goes before "a" here ('B' is 66, 'a' is 97), not after it.
         public int CompareTo(string other) => CompareOrdinal(this, other);
+
+        public int CompareTo(object obj) => obj is string other ? CompareOrdinal(this, other) : obj == null ? 1 : throw new ArgumentException("Object must be of type String.");
 
         // Null goes before every string, as in .NET.
         public static int CompareOrdinal(string a, string b)
@@ -208,6 +214,33 @@ namespace System
             => Unsafe.As<string>(RuntimeExports.RhpNewArray(MethodTable.Of<string>(), length));
 
         internal ref char FirstChar => ref _firstChar;
+
+        IEnumerator<char> IEnumerable<char>.GetEnumerator() => new StringEnumerator(this);
+
+        IEnumerator IEnumerable.GetEnumerator() => new StringEnumerator(this);
+    }
+
+    internal sealed class StringEnumerator : IEnumerator<char>
+    {
+        private readonly string _text;
+        private int _index = -1;
+
+        public StringEnumerator(string text) => _text = text;
+
+        public char Current => _text[_index];
+
+        object IEnumerator.Current => Current;
+
+        public bool MoveNext()
+        {
+            if (_index < _text.Length)
+                _index++;
+            return _index < _text.Length;
+        }
+
+        public void Reset() => _index = -1;
+
+        public void Dispose() { }
     }
 }
 

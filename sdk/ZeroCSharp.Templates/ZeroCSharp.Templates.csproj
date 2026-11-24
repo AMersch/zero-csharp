@@ -31,7 +31,7 @@
     <Copy SourceFiles="@(_ZeroTemplateFile)" DestinationFiles="@(_ZeroTemplateFile->'$(ZeroContent)%(RecursiveDir)%(Filename)%(Extension)')" />
     <WriteLinesToFile File="$(ZeroContent)%(_ZeroTemplateFile.RecursiveDir)%(_ZeroTemplateFile.Filename)%(_ZeroTemplateFile.Extension)"
                       Lines="$([System.IO.File]::ReadAllText('%(_ZeroTemplateFile.FullPath)').Replace('@ZERO_SDK_VERSION@', '$(ZeroSdkVersion)'))"
-                      Overwrite="true" Condition="'%(_ZeroTemplateFile.Extension)' == '.csproj'" />
+                      Overwrite="true" Condition="'%(_ZeroTemplateFile.Extension)' == '.csproj' or '%(_ZeroTemplateFile.Extension)' == '.fsproj'" />
     <!-- dotnet new zerollama's Program.cs: samples/Llama.cs with a header for
          a project, made by pack.sh (in MSBuild, the text's backslashes would
          turn into slashes). -->
@@ -43,6 +43,7 @@
          which names the output folder, filled in. -->
     <ItemGroup>
       <_ZeroVsCode Include="vscode/*" Template="zero" Project="ZeroApp1" />
+      <_ZeroVsCode Include="vscode/*" Template="zero-fs" Project="ZeroApp1" />
       <_ZeroVsCode Include="vscode/*" Template="zerollama" Project="ZeroLlama1" />
       <_ZeroVsCode Include="vscode/*" Template="zerosdl" Project="ZeroSdl1" />
     </ItemGroup>

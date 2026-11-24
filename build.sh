@@ -774,6 +774,9 @@ case "$TARGET" in
         rm -rf "$PAYLOAD_DIR"
         mkdir -p "$PAYLOAD_DIR/native/win-x64"
         run sdk-payload "$PAYLOAD_DIR"
+        # F# projects: zerocore as fsc wants it, the BCL types fsc needs, and
+        # FSharp.Core. Only the .NET SDK is needed, so it runs on the host.
+        fsharp/build-core.sh "$PAYLOAD_DIR/ref/System.Private.CoreLib.dll" "$PAYLOAD_DIR/ref/BflatLib.dll" "$PAYLOAD_DIR/ref/fsharp"
         build_win_objects "$WIN_CLANG"
         cp "$WIN_OBJ/start.obj" "$WIN_OBJ/runtime.obj" "$WIN_OBJ/library.obj" "$WIN_OBJ/zerocore.obj" "$PAYLOAD_DIR/native/win-x64/"
         # macOS: Mach-O objects from the same clang (no Apple headers needed),

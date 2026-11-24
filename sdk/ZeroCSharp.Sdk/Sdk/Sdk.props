@@ -1,5 +1,6 @@
 <!--
-  ZeroCSharp.Sdk: zero-mode C# projects. <Project Sdk="ZeroCSharp.Sdk/0.11.0">.
+  ZeroCSharp.Sdk: zero-mode C# and F# projects (.csproj, .fsproj).
+  <Project Sdk="ZeroCSharp.Sdk/0.11.0">.
 
   A project gets a target framework of its own, ZeroFramework (zero03, in
   version.props), and compiles against zerocore (the core library,
@@ -36,10 +37,28 @@
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     <GenerateDependencyFile>false</GenerateDependencyFile>
 
+    <!-- C# or F#, by the project file's extension. -->
+    <ZeroLanguage Condition="'$(MSBuildProjectExtension)' == '.fsproj'">FSharp</ZeroLanguage>
+    <ZeroLanguage Condition="'$(ZeroLanguage)' == ''">CSharp</ZeroLanguage>
+
     <!-- The language as build.sh compiles it. -->
-    <LangVersion>preview</LangVersion>
-    <Features>$(Features);updated-memory-safety-rules</Features>
+    <LangVersion Condition="'$(ZeroLanguage)' == 'CSharp'">preview</LangVersion>
+    <Features Condition="'$(ZeroLanguage)' == 'CSharp'">$(Features);updated-memory-safety-rules</Features>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- F#: the payload's FSharp.Core (ref/fsharp/, see fsharp/build-core.sh),
+         not the NuGet one, which needs .NET. No reflection, so records and
+         unions get no sprintf-based ToString. zerocore's metadata version is
+         empty, and fsc would copy it into old-format metadata tables that
+         bflat misreads; the metadataversion option sets it, and is "for test
+         purposes" (FS0075). -->
+    <DisableImplicitFSharpCoreReference Condition="'$(ZeroLanguage)' == 'FSharp'">true</DisableImplicitFSharpCoreReference>
+    <ReflectionFree Condition="'$(ZeroLanguage)' == 'FSharp'">true</ReflectionFree>
+    <OtherFlags Condition="'$(ZeroLanguage)' == 'FSharp'">$(OtherFlags) --metadataversion:v4.0.30319</OtherFlags>
+    <NoWarn Condition="'$(ZeroLanguage)' == 'FSharp'">$(NoWarn);FS0075</NoWarn>
+    <!-- fsc calls [<UnmanagedCallersOnly>] unsupported (FS0202); a native
+         library's exports are made from it (Sdk.targets, ZeroFSharpEntry). -->
+    <NoWarn Condition="'$(ZeroLanguage)' == 'FSharp'">$(NoWarn);FS0202</NoWarn>
     <!-- A library's IL is what programs compile from: optimize it, as build.sh's -O does. -->
     <Optimize>true</Optimize>
 

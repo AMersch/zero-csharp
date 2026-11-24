@@ -15,6 +15,13 @@ namespace System
         int CompareTo(T other);
     }
 
+    // The same, for any object: F# takes a type that implements it as one that
+    // supports comparison (the `comparison` constraint).
+    public interface IComparable
+    {
+        int CompareTo(object obj);
+    }
+
     public delegate int Comparison<in T>(T x, T y);
 
     public interface IFormatProvider { }

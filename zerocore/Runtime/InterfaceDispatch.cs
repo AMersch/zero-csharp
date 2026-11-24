@@ -61,7 +61,7 @@ namespace System.Runtime
             if (obj == null)
                 Environment.FailFast("NullReferenceException");
 
-            MethodTable* type = obj._methodTable;
+            MethodTable* type = obj.m_pEEType;
             Cache* cache = CacheOf(cell);
 
             Entry* free = null;

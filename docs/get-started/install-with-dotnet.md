@@ -188,5 +188,7 @@ and VS Code on Linux and Windows, haven't been checked yet. If yours disagrees w
   with the repository's build.
 - [Create a reusable library](../how-to/create-a-library.html): `dotnet new zerolib`, references and
   packages.
+- [Write a program in F#](../how-to/write-fsharp.html): `dotnet new zero -lang F#` makes an F#
+  project, built the same way.
 - [Run a language model](../how-to/run-a-language-model.html): `dotnet new zerollama` makes a
   program that tells stories with a small language model compiled into it.

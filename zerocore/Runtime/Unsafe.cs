@@ -79,7 +79,7 @@ namespace System.Runtime.InteropServices
         // The first element of an array; its data starts two pointers into the
         // object (method table, then the length padded to pointer size).
         public static ref T GetArrayDataReference<T>(T[] array)
-            => ref Unsafe.As<byte, T>(ref Unsafe.AddByteOffset(ref Unsafe.As<Internal.Runtime.RawData>(array).Data, (nint)sizeof(nint)));
+            => ref Unsafe.As<byte, T>(ref Unsafe.AddByteOffset(ref Unsafe.As<System.Runtime.CompilerServices.RawData>(array).Data, (nint)sizeof(nint)));
 
         public static ref T GetReference<T>(Span<T> span) => ref span._reference;
 

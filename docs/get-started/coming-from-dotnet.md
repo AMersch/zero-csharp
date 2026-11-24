@@ -19,7 +19,7 @@ instead, and lists what compiles as usual but behaves differently.
 | `Console.OpenStandardInput().Read` | `In.Read(bytes)` into a `Span<byte>` you provide | [Read input](../how-to/read-input.html#read-bytes-instead-of-lines) |
 | `int.Parse`, `double.TryParse` | `Str.TryParse(span, out value)` | [Read input](../how-to/read-input.html) |
 | `string.Format`, `$"..."` kept as a string | `Str.Format(arena, $"...")`, `StrBuilder` | [Keep a string](../how-to/keep-a-string.html) |
-| `List<T>`, `Dictionary<TKey, TValue>` | `List<T>`, `Dict<TKey, TValue>`, `StrDict<TValue>`, `RefList<T>`, `RefDict<TKey, TValue>`, each created in an arena | [Choose a collection](../how-to/choose-a-collection.html) |
+| `List<T>`, `Dictionary<TKey, TValue>`, `HashSet<T>`, `Queue<T>`, `Stack<T>`, `PriorityQueue<TElement, TPriority>` | `List<T>`, `Dict<TKey, TValue>`, `HashSet<T>`, `Queue<T>`, `Stack<T>`, `PriorityQueue<TElement, TPriority>`, `StrDict<TValue>`, `RefList<T>`, `RefDict<TKey, TValue>`, each created in an arena; `TryDequeue` and `TryPop` in place of `Dequeue` and `Pop` | [Choose a collection](../how-to/choose-a-collection.html) |
 | LINQ | `lib/Seq.cs`: `Where`, `Select`, `Sum`, query syntax, without allocating | [Query data](../how-to/query-data.html) |
 | The garbage collector | Arenas, freed all at once | [Memory without a GC](../concepts/memory.html) |
 | `try`/`catch` | A union or a status in the return value | [Limits](../concepts/limits.html) |
@@ -204,7 +204,9 @@ Arenas and `lib/`'s collections aren't thread-safe, so give each thread its own;
 - **Nothing you `new` is freed**, nor boxed values, concatenated strings or closures, unless an object
   scope is open.
 - **A struct's default `Equals` compares bytes.** A reference field compares by reference, where .NET
-  calls its `Equals`. Records and `IEquatable<T>` compare field by field.
+  calls its `Equals`. Records and `IEquatable<T>` compare field by field. `Dict` and `HashSet` keys
+  follow the same rule, and a struct that overrides `Equals(object)` without implementing
+  `IEquatable<T>` is compared by its bytes there too.
 - **A `Type` has no name.** `typeof` and `GetType()` work for comparing types, and a class without its
   own `ToString` prints `object`.
 - **Variance aborts.** Using an `IEnumerable<string>` as an `IEnumerable<object>`, or a `string[]` as

@@ -25,6 +25,16 @@ public struct Descending : IComparer<int>
 }
 // docs:end
 
+// docs:modulo
+// A comparer with state: keys that leave the same remainder are one key.
+public struct Modulo : IEqualityComparer<int>
+{
+    public int By;
+    public bool Equals(int a, int b) => a % By == b % By;
+    public int GetHashCode(int value) => value % By;
+}
+// docs:end
+
 public static class Program
 {
     public static int Main()
@@ -167,6 +177,140 @@ public static class Program
                 odd++;
         }
         Out.Line($"After removing the 500 even keys: Count {squares.Count}, odd keys intact: {odd}");
+        Out.Line();
+
+        // A separate arena, so the byte count printed at the end stays the same.
+        Arena more = Arena.Create(64 * 1024);
+
+        Out.Line("--- Dict with a comparer ---");
+        // docs:dict-comparer
+        // As in .NET, 0.0 and -0.0 are one key; by raw bytes, they're two.
+        var byValue = Dict<double, int>.Create(more);
+        var byBytes =
+            Dict<double, int, ByteEqualityComparer<double>>.Create(more);
+        byBytes.Set(0.0, 1);
+        byBytes.Set(-0.0, 2);
+        byValue.Set(0.0, 1);
+        byValue.Set(-0.0, 2);
+        Out.Line($"By bytes: {byBytes.Count} keys; by value: {byValue.Count}");
+
+        var lastDigit =
+            Dict<int, int, Modulo>.Create(more, comparer: new Modulo { By = 10 });
+        lastDigit.Set(13, 1);
+        lastDigit.Set(23, 2);  // the same key as 13
+        lastDigit.TryGet(3, out int atThree);
+        Out.Line($"Modulo 10: {lastDigit.Count} key, [3] = {atThree}");
+        // docs:end
+        Out.Line($"TryAdd: {lastDigit.TryAdd(4, 9)}, again: {lastDigit.TryAdd(14, 9)}");
+        // Point implements nothing: compared by its bytes, without boxing.
+        long allocated = GC.GetTotalAllocatedBytes();
+        int hits = 0;
+        for (int i = 0; i < 100; i++)
+            if (pointIds.TryGet(new Point { X = 10, Y = 10 }, out _))
+                hits++;
+        Out.Line($"100 lookups by a struct key: {hits} found, {GC.GetTotalAllocatedBytes() - allocated} bytes allocated");
+        Out.Line();
+
+        Out.Line("--- HashSet<int> ---");
+        // docs:hashset
+        var seen = HashSet<int>.Create(more);
+        int duplicates = 0;
+        foreach (int id in new[] { 3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5 })
+        {
+            if (!seen.Add(id))
+                duplicates++;
+        }
+        Out.Line($"{seen.Count} distinct, {duplicates} duplicates");
+
+        var odds = HashSet<int>.Create(more);
+        for (int i = 1; i < 10; i += 2)
+            odds.Add(i);
+        var both = seen.Clone(more);
+        both.IntersectWith(odds);      // in seen and odds: 1, 3, 5, 9
+        var evens = seen.Clone(more);
+        evens.ExceptWith(odds);        // in seen, not odds: 2, 4, 6
+        // docs:end
+        Out.Line($"Intersect: {both.Count} items summing to {Sum(both)}; except: {evens.Count} summing to {Sum(evens)}");
+        odds.UnionWith(seen);
+        Out.Line($"Union: {odds.Count} items summing to {Sum(odds)}");
+        var thousand = HashSet<int>.Create(more);
+        var everyThird = HashSet<int>.Create(more);
+        for (int i = 0; i < 1000; i++)
+        {
+            thousand.Add(i);
+            if (i % 3 == 0)
+                everyThird.Add(i);
+        }
+        thousand.IntersectWith(everyThird);
+        int multiples = 0;
+        foreach (int item in thousand)
+            if (item % 3 == 0)
+                multiples++;
+        Out.Line($"1000 intersected with every third: {thousand.Count} left, multiples of 3: {multiples}");
+        evens.ExceptWith(evens);
+        Out.Line($"ExceptWith itself: {evens.Count}");
+        Out.Line();
+
+        Out.Line("--- Queue, Stack, PriorityQueue ---");
+        // docs:queue
+        var queue = Queue<int>.Create(more);
+        for (int i = 1; i <= 40; i++)
+            queue.Enqueue(i);
+        int expected = 1;
+        bool inOrder = true;
+        for (int i = 0; i < 30; i++)   // past half: the rest move to the front
+        {
+            queue.TryDequeue(out int item);
+            inOrder &= item == expected++;
+        }
+        for (int i = 41; i <= 50; i++)
+            queue.Enqueue(i);
+        queue.TryPeek(out int front);
+        while (queue.TryDequeue(out int item))
+            inOrder &= item == expected++;
+        // docs:end
+        Out.Line($"Queue: front was {front}, 50 out in order: {inOrder && expected == 51}, empty: {!queue.TryDequeue(out _)}");
+
+        var stack = Stack<int>.Create(more);
+        for (int i = 1; i <= 5; i++)
+            stack.Push(i);
+        Out.Write("Stack, top first:");
+        foreach (int item in stack)
+            Out.Write($" {item}");
+        stack.TryPop(out int top);
+        stack.TryPeek(out int next);
+        Out.Line($"; popped {top}, then {next} on top");
+
+        // docs:priority-queue
+        var tasks = PriorityQueue<char, int>.Create(more);
+        tasks.Enqueue('c', 3);
+        tasks.Enqueue('a', 1);
+        tasks.Enqueue('d', 4);
+        tasks.Enqueue('b', 2);
+        Out.Write("By priority:");
+        while (tasks.TryDequeue(out char task, out int priority))
+            Out.Write($" {task}{priority}");
+        Out.Line();
+        // docs:end
+
+        var largestFirst =
+            PriorityQueue<int, int, Descending>.Create(more);
+        uint seed = 12345;
+        for (int i = 0; i < 200; i++)
+        {
+            seed = seed * 1664525 + 1013904223;
+            int priority = (int)(seed >> 16) % 1000;
+            largestFirst.Enqueue(i, priority);
+        }
+        int previous = int.MaxValue, dequeued = 0;
+        bool descending = true;
+        while (largestFirst.TryDequeue(out _, out int priority))
+        {
+            descending &= priority <= previous;
+            previous = priority;
+            dequeued++;
+        }
+        Out.Line($"200 random priorities, largest first: {descending && dequeued == 200}");
         Out.Line();
 
         // Collections are handles, so `var b = a` shares contents. Clone makes a
@@ -314,6 +458,14 @@ public static class Program
     static int ByLastDigit(int a, int b) => a % 10 != b % 10 ? a % 10 - b % 10 : Ascending(a, b);
 
     static int ByName(string a, string b) => Str.Compare(a, b);
+
+    static int Sum(HashSet<int> set)
+    {
+        int total = 0;
+        foreach (int item in set)
+            total += item;
+        return total;
+    }
 
     static int Count(StrDict<int> counts, string word) => counts.TryGet(word, out int n) ? n : 0;
 

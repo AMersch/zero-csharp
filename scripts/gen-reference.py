@@ -20,7 +20,9 @@ WIDTH = 80
 PAGES = [
     ('Arena.cs', ['Arena'], 'arena', 'Growable bump allocator: allocation, scopes, reset, debug checks.'),
     ('List.cs', ['List'], 'list', 'Growable array of unmanaged items in an arena.'),
-    ('Dict.cs', ['Dict'], 'dict', 'Hash map with unmanaged keys and values in an arena.'),
+    ('Dict.cs', ['Dict', 'DefaultEqualityComparer', 'ByteEqualityComparer'], 'dict', 'Hash map with unmanaged keys and values in an arena, and the comparers for its keys.'),
+    ('HashSet.cs', ['HashSet'], 'hashset', 'Set of unmanaged items in an arena.'),
+    ('Queue.cs', ['Queue', 'Stack', 'PriorityQueue'], 'queue', 'Queue, stack and priority queue of unmanaged items in an arena.'),
     ('RefList.cs', ['RefList'], 'reflist', 'List of references: strings, classes, arrays.'),
     ('StrDict.cs', ['StrDict'], 'strdict', 'Hash map with string keys compared by text, values of any type.'),
     ('RefDict.cs', ['RefDict'], 'refdict', 'Hash map with unmanaged keys and reference values.'),

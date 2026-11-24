@@ -3,16 +3,25 @@
 // Like List<T>, Dict is a handle to an arena header, so copies share contents,
 // and default(Dict) is "not created" (lookups miss, Set fails).
 //
-// Keys are hashed (FNV-1a) and compared by their raw bytes. That is exact for
-// integers and for structs without padding. It is NOT value equality for
-// floats (0.0 vs -0.0, NaN payloads) or for structs whose padding bytes may
-// differ, so avoid such keys or normalize them first.
+// Keys are compared as .NET's Dictionary compares them, by
+// EqualityComparer<TKey>.Default: a type's own Equals(T) if it implements
+// IEquatable<T> (every primitive does, so 0.0 and -0.0 are one key), an
+// enum's value, and a struct's bytes otherwise, all without boxing.
+//
+// Dict<TKey, TValue, TComparer> takes a comparer of your own: an unmanaged
+// struct that implements IEqualityComparer<TKey>, kept in the map's header, so
+// it may carry state. ByteEqualityComparer<TKey> compares raw bytes (FNV-1a),
+// which is what Dict<TKey, TValue> did before:
+//
+//   var byLastDigit = Dict<int, int, Modulo>.Create(arena, comparer: new Modulo { By = 10 });
 
 using System;
+using System.Collections.Generic;
 
-public struct Dict<TKey, TValue>
+public struct Dict<TKey, TValue, TComparer>
     where TKey : unmanaged
     where TValue : unmanaged
+    where TComparer : unmanaged, IEqualityComparer<TKey>
 {
     const int MinCapacity = 8;
 
@@ -30,12 +39,13 @@ public struct Dict<TKey, TValue>
         public Entry* Entries;
         public int Capacity; // always a power of two
         public int Count;
+        public TComparer Comparer;
     }
 
     Header* _header;
 
     /// <summary>Returns a new map in <paramref name="arena"/>, or a not-created map if it is out of memory.</summary>
-    public static Dict<TKey, TValue> Create(Arena arena, int capacity = 32)
+    public static Dict<TKey, TValue, TComparer> Create(Arena arena, int capacity = 32, TComparer comparer = default)
     {
         int rounded = MinCapacity;
         while (rounded < capacity && rounded <= int.MaxValue / 2)
@@ -52,8 +62,9 @@ public struct Dict<TKey, TValue>
             header->Arena = arena;
             header->Entries = entries;
             header->Capacity = rounded;
+            header->Comparer = comparer;
         }
-        return new Dict<TKey, TValue> { _header = header };
+        return new Dict<TKey, TValue, TComparer> { _header = header };
     }
 
     public bool IsCreated => _header != null;
@@ -82,7 +93,31 @@ public struct Dict<TKey, TValue>
             if ((_header->Count + 1) * 4 > _header->Capacity * 3 && !Grow())
                 return false;
 
-            Insert(_header, key, value, Hash(key));
+            Insert(_header, key, value, Hash(ref _header->Comparer, key), overwrite: true);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Adds the key if it isn't there yet. Returns true if it was added; false
+    /// if it was already there (its value unchanged), or the map isn't created
+    /// or the arena is full.
+    /// </summary>
+    public bool TryAdd(TKey key, TValue value)
+    {
+        if (_header == null)
+            return false;
+        DebugCheck();
+
+        unsafe
+        {
+            // SAFETY: as in Set.
+            uint hash = Hash(ref _header->Comparer, key);
+            if (Find(_header, key, hash) != null)
+                return false;
+            if ((_header->Count + 1) * 4 > _header->Capacity * 3 && !Grow())
+                return false;
+            Insert(_header, key, value, hash, overwrite: false);
         }
         return true;
     }
@@ -92,21 +127,14 @@ public struct Dict<TKey, TValue>
         if (_header != null)
         {
             DebugCheck();
-            uint hash = Hash(key);
             unsafe
             {
-                int mask = _header->Capacity - 1;
-                int index = (int)hash & mask;
-                // The load factor guarantees at least one empty slot, so this terminates.
-                while (_header->Entries[index].Used)
+                // SAFETY: a live header.
+                Entry* entry = Find(_header, key, Hash(ref _header->Comparer, key));
+                if (entry != null)
                 {
-                    Entry* entry = &_header->Entries[index];
-                    if (entry->Hash == hash && BytesEqual(entry->Key, key))
-                    {
-                        value = entry->Value;
-                        return true;
-                    }
-                    index = (index + 1) & mask;
+                    value = entry->Value;
+                    return true;
                 }
             }
         }
@@ -124,10 +152,10 @@ public struct Dict<TKey, TValue>
             return false;
         DebugCheck();
 
-        uint hash = Hash(key);
         unsafe
         {
             // SAFETY: a live header; every index is masked into [0, Capacity).
+            uint hash = Hash(ref _header->Comparer, key);
             Entry* entries = _header->Entries;
             int mask = _header->Capacity - 1;
             int hole = (int)hash & mask;
@@ -135,7 +163,7 @@ public struct Dict<TKey, TValue>
             {
                 if (!entries[hole].Used)
                     return false;
-                if (entries[hole].Hash == hash && BytesEqual(entries[hole].Key, key))
+                if (entries[hole].Hash == hash && _header->Comparer.Equals(entries[hole].Key, key))
                     break;
                 hole = (hole + 1) & mask;
             }
@@ -166,6 +194,57 @@ public struct Dict<TKey, TValue>
         return true;
     }
 
+    /// <summary>Removes every key. The table keeps its capacity.</summary>
+    public void Clear()
+    {
+        if (_header == null)
+            return;
+        DebugCheck();
+        unsafe
+        {
+            // SAFETY: a live header with Capacity entries.
+            for (int i = 0; i < _header->Capacity; i++)
+                _header->Entries[i] = default;
+            _header->Count = 0;
+        }
+    }
+
+    // Whether both handles share one table.
+    internal bool SameAs(Dict<TKey, TValue, TComparer> other) => _header == other._header;
+
+    // Removes each key that shouldRemove(state, key) says to, and returns how
+    // many. Removing shifts later entries back into the hole, so the slot is
+    // looked at again before moving on. An entry from the start of the table
+    // can wrap around into a slot not yet reached and be looked at twice, so
+    // shouldRemove must give the same answer for the same key.
+    internal int RemoveWhere<TState>(TState state, delegate*<TState, TKey, bool> shouldRemove)
+    {
+        if (_header == null)
+            return 0;
+        DebugCheck();
+        int removed = 0;
+        unsafe
+        {
+            // SAFETY: a live header; i stays below Capacity. shouldRemove is
+            // the caller's function, called with keys of the map.
+            int i = 0;
+            while (i < _header->Capacity)
+            {
+                Entry* entry = &_header->Entries[i];
+                if (entry->Used && shouldRemove(state, entry->Key))
+                {
+                    Remove(entry->Key);
+                    removed++;
+                }
+                else
+                {
+                    i++;
+                }
+            }
+        }
+        return removed;
+    }
+
     /// <summary>A key with its value, as foreach yields them.</summary>
     public struct Pair
     {
@@ -187,10 +266,10 @@ public struct Dict<TKey, TValue>
 
     public struct Enumerator
     {
-        readonly Dict<TKey, TValue> _dict;
+        readonly Dict<TKey, TValue, TComparer> _dict;
         int _index;
 
-        internal Enumerator(Dict<TKey, TValue> dict)
+        internal Enumerator(Dict<TKey, TValue, TComparer> dict)
         {
             _dict = dict;
             _index = -1;
@@ -244,7 +323,7 @@ public struct Dict<TKey, TValue>
     /// still points wherever it did: into the original's arena, if that's where
     /// it led.
     /// </remarks>
-    public Dict<TKey, TValue> Clone(Arena target)
+    public Dict<TKey, TValue, TComparer> Clone(Arena target)
     {
         if (_header == null)
             return default;
@@ -268,11 +347,33 @@ public struct Dict<TKey, TValue>
             header->Entries = entries;
             header->Capacity = capacity;
             header->Count = _header->Count;
-            return new Dict<TKey, TValue> { _header = header };
+            header->Comparer = _header->Comparer;
+            return new Dict<TKey, TValue, TComparer> { _header = header };
         }
     }
 
-    static unsafe void Insert(Header* header, TKey key, TValue value, uint hash)
+    // The entry holding key, or null.
+    static unsafe Entry* Find(Header* header, TKey key, uint hash)
+    {
+        unsafe
+        {
+            int mask = header->Capacity - 1;
+            int index = (int)hash & mask;
+            // The load factor guarantees at least one empty slot, so this terminates.
+            while (header->Entries[index].Used)
+            {
+                Entry* entry = &header->Entries[index];
+                if (entry->Hash == hash && header->Comparer.Equals(entry->Key, key))
+                    return entry;
+                index = (index + 1) & mask;
+            }
+            return null;
+        }
+    }
+
+    // overwrite: false when the caller knows the key isn't there (growing,
+    // TryAdd), which saves comparing it with the keys on its way.
+    static unsafe void Insert(Header* header, TKey key, TValue value, uint hash, bool overwrite)
     {
         unsafe
         {
@@ -281,7 +382,7 @@ public struct Dict<TKey, TValue>
             while (header->Entries[index].Used)
             {
                 Entry* entry = &header->Entries[index];
-                if (entry->Hash == hash && BytesEqual(entry->Key, key))
+                if (overwrite && entry->Hash == hash && header->Comparer.Equals(entry->Key, key))
                 {
                     entry->Value = value;
                     return;
@@ -319,33 +420,120 @@ public struct Dict<TKey, TValue>
             for (int i = 0; i < oldCapacity; i++)
             {
                 if (oldEntries[i].Used)
-                    Insert(_header, oldEntries[i].Key, oldEntries[i].Value, oldEntries[i].Hash);
+                    Insert(_header, oldEntries[i].Key, oldEntries[i].Value, oldEntries[i].Hash, overwrite: false);
             }
         }
         return true;
     }
 
-    static uint Hash(TKey key)
+    // The comparer's hash code, mixed so that its low bits, which pick the slot,
+    // depend on all of its bits: int's hash code is the int itself, and keys
+    // that are all multiples of 64 would otherwise share a slot.
+    static uint Hash(ref TComparer comparer, TKey key)
     {
-        byte* p = (byte*)&key;
-        uint hash = 2166136261;
-        unsafe
-        {
-            // SAFETY: p points at the local copy of key, sizeof(TKey) bytes long.
-            for (int i = 0; i < sizeof(TKey); i++)
-                hash = (hash ^ p[i]) * 16777619;
-        }
+        uint hash = (uint)comparer.GetHashCode(key);
+        hash ^= hash >> 16;
+        hash *= 0x7FEB352D;
+        hash ^= hash >> 15;
+        hash *= 0x846CA68B;
+        hash ^= hash >> 16;
         return hash;
     }
+}
 
-    static bool BytesEqual(TKey a, TKey b)
+// Dict<TKey, TValue>: a Dict whose keys are compared by EqualityComparer<TKey>.Default.
+public struct Dict<TKey, TValue>
+    where TKey : unmanaged
+    where TValue : unmanaged
+{
+    Dict<TKey, TValue, DefaultEqualityComparer<TKey>> _map;
+
+    /// <summary>Returns a new map in <paramref name="arena"/>, or a not-created map if it is out of memory.</summary>
+    public static Dict<TKey, TValue> Create(Arena arena, int capacity = 32)
+        => new Dict<TKey, TValue> { _map = Dict<TKey, TValue, DefaultEqualityComparer<TKey>>.Create(arena, capacity) };
+
+    public bool IsCreated => _map.IsCreated;
+
+    public int Count => _map.Count;
+
+    /// <summary>Inserts or overwrites. Returns false if the map isn't created or the arena is full.</summary>
+    public bool Set(TKey key, TValue value) => _map.Set(key, value);
+
+    /// <summary>
+    /// Adds the key if it isn't there yet. Returns true if it was added; false
+    /// if it was already there (its value unchanged), or the map isn't created
+    /// or the arena is full.
+    /// </summary>
+    public bool TryAdd(TKey key, TValue value) => _map.TryAdd(key, value);
+
+    public bool TryGet(TKey key, out TValue value) => _map.TryGet(key, out value);
+
+    public bool ContainsKey(TKey key) => _map.ContainsKey(key);
+
+    /// <summary>Removes a key. Returns false if it wasn't there.</summary>
+    public bool Remove(TKey key) => _map.Remove(key);
+
+    /// <summary>Removes every key. The table keeps its capacity.</summary>
+    public void Clear() => _map.Clear();
+
+    /// <summary>A key with its value, as foreach yields them.</summary>
+    public struct Pair
     {
-        byte* pa = (byte*)&a;
-        byte* pb = (byte*)&b;
+        public TKey Key;
+        public TValue Value;
+    }
+
+    /// <summary>
+    /// For foreach: every key and value, in no particular order.
+    /// <code>foreach (var pair in scores) total += pair.Value;</code>
+    /// </summary>
+    /// <remarks>Don't Set or Remove during the loop: entries move, so some may be skipped or seen twice.</remarks>
+    public Enumerator GetEnumerator() => new Enumerator(_map.GetEnumerator());
+
+    public struct Enumerator
+    {
+        Dict<TKey, TValue, DefaultEqualityComparer<TKey>>.Enumerator _inner;
+
+        internal Enumerator(Dict<TKey, TValue, DefaultEqualityComparer<TKey>>.Enumerator inner) => _inner = inner;
+
+        public bool MoveNext() => _inner.MoveNext();
+
+        public Pair Current
+        {
+            get
+            {
+                var pair = _inner.Current;
+                return new Pair { Key = pair.Key, Value = pair.Value };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns an independent copy in <paramref name="target"/> (this map's own
+    /// arena or another one). Returns a not-created map if this one isn't created
+    /// or the target is out of memory.
+    /// </summary>
+    /// <remarks>
+    /// Keys and values are copied as they are. One that is, or contains, a pointer
+    /// still points wherever it did: into the original's arena, if that's where
+    /// it led.
+    /// </remarks>
+    public Dict<TKey, TValue> Clone(Arena target) => new Dict<TKey, TValue> { _map = _map.Clone(target) };
+}
+
+// Compares keys by their raw bytes, and hashes them with FNV-1a. Exact for
+// integers and for structs without padding; not value equality for floats
+// (0.0 and -0.0 differ) or for structs whose padding bytes may differ.
+public struct ByteEqualityComparer<T> : IEqualityComparer<T> where T : unmanaged
+{
+    public bool Equals(T x, T y)
+    {
+        byte* pa = (byte*)&x;
+        byte* pb = (byte*)&y;
         unsafe
         {
-            // SAFETY: both point at local copies, sizeof(TKey) bytes long.
-            for (int i = 0; i < sizeof(TKey); i++)
+            // SAFETY: both point at local copies, sizeof(T) bytes long.
+            for (int i = 0; i < sizeof(T); i++)
             {
                 if (pa[i] != pb[i])
                     return false;
@@ -353,4 +541,26 @@ public struct Dict<TKey, TValue>
         }
         return true;
     }
+
+    public int GetHashCode(T value)
+    {
+        byte* p = (byte*)&value;
+        uint hash = 2166136261;
+        unsafe
+        {
+            // SAFETY: p points at the local copy of value, sizeof(T) bytes long.
+            for (int i = 0; i < sizeof(T); i++)
+                hash = (hash ^ p[i]) * 16777619;
+        }
+        return (int)hash;
+    }
+}
+
+// Compares keys by EqualityComparer<T>.Default, as .NET's Dictionary and
+// HashSet do: what Dict<TKey, TValue> and HashSet<T> use.
+public struct DefaultEqualityComparer<T> : IEqualityComparer<T>
+{
+    public bool Equals(T x, T y) => EqualityComparer<T>.Default.Equals(x, y);
+
+    public int GetHashCode(T value) => EqualityComparer<T>.Default.GetHashCode(value);
 }

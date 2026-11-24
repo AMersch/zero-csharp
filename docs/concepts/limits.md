@@ -377,7 +377,9 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
   `Random` (use [`Clock` and `Random`](../how-to/use-the-clock-and-random-numbers.html)), no
   reflection (a `Type` only compares), async, `Thread`, or boxing of `Nullable<T>`.
 - **A struct's default `Equals` compares bytes.** A reference field compares by reference, where .NET
-  would call its `Equals`. Records and `IEquatable<T>` compare field by field.
+  would call its `Equals`. Records and `IEquatable<T>` compare field by field. `EqualityComparer<T>`,
+  and so `Dict` and `HashSet` keys, compare such a struct by its bytes even if it overrides
+  `Equals(object)`: implement `IEquatable<T>` to have yours used.
 - **Reflection.** Builds need `--no-reflection`.
 - **Run-time CPU detection.** Instruction sets beyond the baseline are available only when the build
   names them with `-m`.

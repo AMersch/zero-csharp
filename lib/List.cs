@@ -221,6 +221,25 @@ public struct List<T> where T : unmanaged
         return copy;
     }
 
+    // Removes the first count items, moving the rest to the front (Queue<T>).
+    internal void RemoveFirst(int count)
+    {
+        if (_header == null || count <= 0)
+            return;
+        DebugCheck();
+        unsafe
+        {
+            // SAFETY: a live header; count is clamped to Count.
+            int total = _header->Count;
+            if (count > total)
+                count = total;
+            T* data = _header->Data;
+            for (int i = count; i < total; i++)
+                data[i - count] = data[i];
+            _header->Count = total - count;
+        }
+    }
+
     unsafe bool Grow()
     {
         unsafe

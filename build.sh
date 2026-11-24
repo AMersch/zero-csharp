@@ -29,6 +29,7 @@
 #
 # Usage:  ./build.sh [--wasm | --dos | --c64 | --win | --mac | --uefi] [Sample ...]     default: all samples
 #         ./build.sh --sdk-payload <dir>     what the ZeroCSharp.Sdk package carries (sdk/)
+#         ./build.sh --must-not-compile      check that tests/must-not-compile/*.cs are refused
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh),
 #         BFLAT_EXTRA_FLAGS (see bflat_flags), KEEP_SYMBOLS (see LINK_FLAGS)
 set -euo pipefail
@@ -39,10 +40,10 @@ source ./env.sh
 # Strings, Casts, Collections and the others check, in pieces that each fit
 # in a Commodore 64. They run on every target.
 SMALL_SAMPLES=(SmallStrings SmallBuilders SmallIntegers SmallDoubles SmallObjects SmallArena SmallLists SmallDicts SmallStrDicts SmallText SmallFloats SmallUnicode SmallEncoding)
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Llama Unicode "${SMALL_SAMPLES[@]}")
+ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Llama Unicode "${SMALL_SAMPLES[@]}")
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
 # Vga is a game for DOS and UEFI (lib/Dos.cs, lib/Uefi.cs: graphics, keyboard, clock).
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Llama Unicode "${SMALL_SAMPLES[@]}" Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Llama Unicode "${SMALL_SAMPLES[@]}" Vga)
 # A C64 program has about 50 KB for its code, data, heap and stack together,
 # and the default is the samples that fit. Any sample can be asked for by
 # name; the linker says by how much it is too big. C64Demo and Paddles are for
@@ -366,7 +367,8 @@ build_dos_objects() {
             "$clang" "${DOS_TARGET[@]}" -Wno-override-module -S -emit-llvm "$bc" -o "$source.bc.ll"
             sed -E 's/^(@[A-Za-z0-9_.$]+ = external) thread_local /\1 /' "$source.bc.ll" > "$source.ll"
             rm "$source.bc.ll"
-            if grep -q thread_local "$source.ll"; then
+            # As a word: a string constant's symbol can contain it ("thread-local").
+            if grep -qw thread_local "$source.ll"; then
                 echo "Error: thread-local variables left in $source.ll" >&2
                 exit 1
             fi
@@ -633,7 +635,39 @@ build_sdk_payload() {
     done
 }
 
+# tests/must-not-compile/*.cs: programs the compiler must refuse, each with
+# the error code it must give on its first line (// expect: CS8352). They
+# check guarantees that rest on the compiler, such as Arena.Scratch's: that
+# nothing allocated from a ScratchScope can outlive the callback. Prints ok or
+# FAIL for each; the exit code is the number of failures.
+build_must_not_compile() {
+    local file name expected out failures=0
+    check_bflat
+    build_core "$CORE" > /dev/null
+    build_lib > /dev/null
+    for file in tests/must-not-compile/*.cs; do
+        name=$(basename "$file" .cs)
+        expected=$(sed -n '1s|^// expect: ||p' "$file")
+        if out=$("$BFLAT_DIR/bflat" build-il "$file" "${LIB_REFS[@]}" -r "$CORE" --stdlib:none "${CSHARP_FLAGS[@]}"                 -o /tmp/must-not-compile.dll 2>&1); then
+            echo "FAIL must-not-compile $name: it compiled"
+            failures=$((failures + 1))
+        elif [ -z "$expected" ] || [[ "$out" != *"error $expected"* ]]; then
+            echo "FAIL must-not-compile $name: not refused with ${expected:-(no // expect: line)}"
+            echo "$out" | grep -m 2 "error" | sed 's/^/       /'
+            failures=$((failures + 1))
+        else
+            echo "ok   must-not-compile $name ($expected)"
+        fi
+    done
+    return "$failures"
+}
+
 # Internal entry points used inside the container.
+if [ "${1:-}" = "--native-must-not-compile" ]; then
+    shift
+    build_must_not_compile
+    exit $?
+fi
 if [ "${1:-}" = "--native-dos-bitcode" ]; then
     shift
     build_dos_bitcode "$@"
@@ -693,6 +727,7 @@ case "${1:-}" in
     --win)  TARGET=win; shift ;;
     --mac)  TARGET=mac; shift ;;
     --uefi) TARGET=uefi; shift ;;
+    --must-not-compile) TARGET=must-not-compile; shift ;;
     --sdk-payload)
         TARGET=sdk-payload
         PAYLOAD_DIR=${2:?--sdk-payload needs a directory, inside this one}
@@ -812,6 +847,10 @@ case "$TARGET" in
         } > "$PAYLOAD_DIR/VERSIONS.txt"
         exit 0
         ;;
+    must-not-compile)
+        status=0
+        if [ "$(uname -s)" = Darwin ]; then in_container --native-must-not-compile || status=$?; else build_must_not_compile || status=$?; fi
+        exit "$status" ;;
     wasm)   run wasm "$@" ;;
     native)
         if [ "$(uname -s)" = Darwin ]; then in_container --native "$@"; else build_native "$@"; fi ;;

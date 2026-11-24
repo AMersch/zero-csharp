@@ -50,7 +50,7 @@ using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-public struct Arena
+public partial struct Arena
 {
     public const nuint DefaultAlign = 16;
 

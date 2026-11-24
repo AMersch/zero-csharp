@@ -120,6 +120,45 @@ copy the result out before freeing the scratch arena. With strings that copy is
 or `StrBuilder` shares the contents, it doesn't copy them. [Keep a string](../how-to/keep-a-string.html)
 shows the pattern.
 
+## Temporary memory the compiler checks
+
+Everything above relies on you: `Restore` and `OpenScope` are `unsafe` because the compiler can't see
+when an arena frees memory, so nothing stops a span from outliving it. **`Arena.Scratch`** is the
+exception. It runs a callback with a `ScratchScope` to allocate from, frees what was allocated when the
+callback returns, and the compiler makes sure nothing allocated is still reachable then:
+
+<!-- sample: samples/Scratch.cs scratch -->
+```csharp
+int[] scores = { 5, 3, 8, 1 };
+var job = new Job { Input = scores };
+int median = Arena.Scratch(ref job,
+    static (scoped ScratchScope scratch, scoped ref Job state) =>
+    {
+        // A copy to sort, so the caller's array keeps its order.
+        Span<int> copy = scratch.AllocSpan<int>(state.Input.Length);
+        state.Input.CopyTo(copy);
+        copy.Sort();
+        return copy[copy.Length / 2];
+    });
+```
+
+The scope is a `ref struct` passed as a `scoped` parameter, so C#'s own escape rules apply to
+everything it hands out. Returning a span or a ref from the callback, putting it in the state, in a
+field or a static, handing the scope itself out: each is a compile error, not a dangling pointer.
+Leaving out `scoped` doesn't open a way out, since a lambda that could leak no longer matches the
+delegate. `tests/must-not-compile/` holds one program per way, and `test.sh` checks that the compiler
+refuses each. No `unsafe` is needed anywhere.
+
+The memory comes from a scratch arena of the thread's own, not from one of yours, so the Restore hazard
+can't happen: a `List` of yours that grows during the callback grows in its own arena. Calls nest, and
+each thread keeps its scratch arena, sized to the most it ever needed at once, until it ends.
+
+The price is the callback. Data goes in and out through a state passed by `ref` (it may be a
+`ref struct` holding spans of yours) and through the callback's return value, so the lambda can be
+`static` and allocates nothing after its first call. And the scope gives out spans and refs only: a
+`List` or a `StrBuilder` needs an arena, and an arena could be kept, so those still belong in
+`OpenScope` or a scratch arena of your own.
+
 ## Ordinary objects in an arena
 
 Code you didn't write for arenas still allocates the ordinary way: `new`, a lambda that captures a

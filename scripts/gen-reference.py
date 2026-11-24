@@ -19,6 +19,7 @@ WIDTH = 80
 # Page order: (file, types documented on the page, page name, one-line description for the index).
 PAGES = [
     ('Arena.cs', ['Arena'], 'arena', 'Growable bump allocator: allocation, scopes, reset, debug checks.'),
+    ('Scratch.cs', ['Arena', 'ScratchScope'], 'scratch', 'Temporary memory whose lifetime the compiler checks: Arena.Scratch and ScratchScope.'),
     ('List.cs', ['List'], 'list', 'Growable array of unmanaged items in an arena.'),
     ('Dict.cs', ['Dict', 'DefaultEqualityComparer', 'ByteEqualityComparer'], 'dict', 'Hash map with unmanaged keys and values in an arena, and the comparers for its keys.'),
     ('HashSet.cs', ['HashSet'], 'hashset', 'Set of unmanaged items in an arena.'),
@@ -193,7 +194,12 @@ def member_name(sig):
         names = re.findall(r'(\w+)\s*=', sig)
         if names:
             return ', '.join(names)
-    first = sig.split('(')[0].split('=')[0].split()
+    head = sig.split('(')[0].split('=')[0]
+    # Name<TState, TResult>: drop the type parameters before splitting on
+    # spaces, which the one after the comma would otherwise break.
+    while re.search(r'<[^<>]*>', head):
+        head = re.sub(r'<[^<>]*>', '', head)
+    first = head.split()
     name = first[-1] if first else sig
     if name.startswith('this['):
         return 'this[]'

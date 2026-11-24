@@ -34,6 +34,8 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `System/Primitives.cs`, `Object.cs`, `Array.cs`, `Attributes.cs`, `Collections.cs` | The types and attributes the C# compiler requires: primitives, `object`, `ValueType`, `Enum`, `Nullable<T>`, `Array`, delegates (`Action`, `Func`), `ValueTuple` (2 to 7 elements), `IDisposable`, `IEnumerable` |
 | `Runtime/ObjectAllocator.cs` | Where each thread's objects come from: `calloc` by default, or a function a library sets for that thread (`../lib/Arena.cs`'s `AllocateObjectsHere` sends them to an arena); and a scan of static fields for debug checks |
 | `System/Equality.cs` | `IEquatable<T>`, `IComparable<T>`, `IEqualityComparer<T>`, `IComparer<T>`, and `EqualityComparer<T>.Default` and `Comparer<T>.Default`, which the compiler fills in for each T (its `[Intrinsic] Create()`) with the class that fits it: `Generic…`, `Enum…`, `Nullable…`, `Object…` or `StringEqualityComparer`, so structs aren't boxed. Every primitive and `string` (ordinal) implements `IComparable<T>` |
+| `System/Char.cs`, `System/Globalization/` | `char`'s methods with .NET's results: `IsLetter`, `IsDigit`, `IsWhiteSpace`, `ToUpper`, `GetNumericValue`, `GetUnicodeCategory`, the `IsAscii…` family, surrogates and `ConvertFromUtf32`/`ConvertToUtf32`; `CharUnicodeInfo` and `UnicodeCategory`. Casing is invariant (no cultures). `UnicodeData.cs` holds the tables, generated from .NET 10's data (Unicode 16.0) by `../scripts/gen-unicode`: categories (16 KB), casing (1.6 KB), numeric values (3 KB), each linked only if used |
+| `System/Text/Encoding.cs`, `UTF8Encoding.cs`, `UnicodeEncoding.cs`, `UTF32Encoding.cs`, `ASCIIEncoding.cs` | `Encoding.UTF8`, `ASCII`, `Latin1`, `Unicode`, `BigEndianUnicode`, `UTF32` and `Default`, with .NET's members and replacements for invalid input (U+FFFD, `?`, Latin-1's best fit). The span and pointer overloads allocate nothing; those returning arrays or strings allocate them. No `Encoder`, `Decoder` or fallback objects |
 | `System/HashCode.cs` | `HashCode.Combine` and `Add`/`ToHashCode`, .NET's algorithm with a fixed seed |
 | `System/Type.cs`, `System/Number.cs`, `System/Text/StringBuilder.cs` | What records, anonymous types and `"n=" + 5` need: `object`'s `Equals`, `GetHashCode` and `ToString` (overridden by every primitive, `string`, structs and enums), `string.Format` (`{0}` holes), `StringBuilder`, and `Type` for `typeof` and `GetType()`, one per type, compared by identity |
 | `System/GC.cs` | `GC.GetTotalAllocatedBytes()`: every byte allocated so far, so a test can check that a loop allocates nothing |
@@ -72,6 +74,7 @@ Most of the library is a contract with the compiler: it looks types, methods and
 - `is`, `as` and casts to classes and interfaces; pattern matching on types; boxing
 - Arrays of any type, `Span<T>`, `stackalloc`, function pointers, P/Invoke
 - Strings: comparison, concatenation, `switch`; literals; UTF-8 literals (`"..."u8`)
+- `char.IsLetter`, `char.ToUpper` and the rest of `char`, for every Unicode character; `Encoding.UTF8` and the other standard encodings
 - Static fields of every type, static constructors, array initializers (`new[] { 1, 2, 3 }`)
 - `Math`, `MathF`, `Interlocked`, `Volatile`
 - `Main()`, `Main(string[] args)` and top-level statements

@@ -1,0 +1,3 @@
+PASS char (9 checks)
+
+All checks passed.

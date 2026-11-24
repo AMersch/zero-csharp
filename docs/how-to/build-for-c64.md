@@ -109,9 +109,10 @@ programs `./test.sh --c64` runs:
 | `VirtualTest` | 15 KB | 34 KB |
 | `SmallIntegers` | 18 KB | 31 KB |
 | `QuizStep2` | 20 KB | 29 KB |
-| `SmallText`, `SmallArena`, `SmallDicts`, `SmallStrings` | 25 to 28 KB | 21 to 24 KB |
+| `SmallText`, `SmallArena`, `SmallDicts`, `SmallStrings`, `SmallEncoding` | 25 to 28 KB | 21 to 24 KB |
 | `Refs`, `SmallLists`, `SmallStrDicts`, `SmallObjects` | 32 to 34 KB | 15 to 17 KB |
 | `C64Demo` | 36 KB | 13 KB |
+| `SmallUnicode` | 37 KB | 12 KB |
 | `SmallBuilders` | 43 KB | 6 KB |
 | `SmallDoubles` | 47 KB | 2.4 KB |
 | `SmallFloats` | 49 KB | 0.6 KB |
@@ -133,10 +134,16 @@ What a feature costs once a program uses it, measured in these programs:
 | `StrBuilder`, `Str.Format` and `Str.Concat` | 8 KB |
 | Arithmetic on `float` and `double` | 25 to 29 KB |
 | Printing a `double` | 7 KB more |
+| `char.IsLetter`, `IsDigit`, `IsUpper`, `IsLower`, `GetUnicodeCategory` (their Unicode table) | 16 KB |
+| `char.ToUpper`, `ToLower` above ASCII (their table) | 1.6 KB |
 
 Floating point is the expensive one: the 6502 has none, and the software that stands in for it takes
 half the machine. Every kind of collection (each set of type arguments) is compiled separately and
 costs again.
+
+The `char` methods know every Unicode character, so they bring tables. For text typed on a C64, the
+ASCII ones do the same job for free: `char.IsAsciiDigit`, `IsAsciiLetter`, `IsAsciiLetterUpper` and the
+rest are plain comparisons, and so are `IsWhiteSpace` and `IsControl`.
 
 So keep to whole numbers where you can, share collection types, and keep arenas small: 1 KB blocks
 instead of the default 4 KB. Memory really does run out here; `Arena.Create(..., stopOnOutOfMemory:

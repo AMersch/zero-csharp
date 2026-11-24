@@ -16,3 +16,4 @@ Usage: Guards <case>, where the case is one of:
   debug-fail           a Debug.Fail
   range-too-long       an array range that ends past the array
   bad-base64           Convert.FromBase64String on text that isn't Base64
+  bad-pattern          Regex.Create with a pattern that isn't valid

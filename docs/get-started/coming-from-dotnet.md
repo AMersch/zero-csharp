@@ -20,6 +20,7 @@ instead, and lists what compiles as usual but behaves differently.
 | `int.Parse`, `double.TryParse` | `Str.TryParse(span, out value)` | [Read input](../how-to/read-input.html) |
 | `string.Format`, `$"..."` kept as a string | `Str.Format(arena, $"...")`, `StrBuilder` | [Keep a string](../how-to/keep-a-string.html) |
 | `List<T>`, `Dictionary<TKey, TValue>`, `HashSet<T>`, `Queue<T>`, `Stack<T>`, `PriorityQueue<TElement, TPriority>` | `List<T>`, `Dict<TKey, TValue>`, `HashSet<T>`, `Queue<T>`, `Stack<T>`, `PriorityQueue<TElement, TPriority>`, `StrDict<TValue>`, `RefList<T>`, `RefDict<TKey, TValue>`, each created in an arena; `TryDequeue` and `TryPop` in place of `Dequeue` and `Pop` | [Choose a collection](../how-to/choose-a-collection.html) |
+| `Regex`, `Regex.Match`, `Matches` | `Regex.Create(arena, pattern)`, then the same names; a subset without backreferences or lookaround, matched in linear time | [Match text with regular expressions](../how-to/match-patterns.html) |
 | LINQ | `lib/Seq.cs`: `Where`, `Select`, `Sum`, query syntax, without allocating | [Query data](../how-to/query-data.html) |
 | The garbage collector | Arenas, freed all at once | [Memory without a GC](../concepts/memory.html) |
 | `try`/`catch` | A union or a status in the return value | [Limits](../concepts/limits.html) |

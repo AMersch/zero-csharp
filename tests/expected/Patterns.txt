@@ -1,0 +1,10 @@
+PASS matching (8 checks)
+PASS which match (8 checks)
+PASS every match (3 checks)
+PASS anchors (5 checks)
+PASS classes and escapes (7 checks)
+PASS options (4 checks)
+PASS errors (11 checks)
+PASS cost (3 checks)
+
+All checks passed.

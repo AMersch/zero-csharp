@@ -31,6 +31,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
 - [Query data without allocating](query-data.html): `Where`, `Select`, `Sum` and query syntax over
   spans with `lib/Seq.cs`, tuples instead of anonymous types, and checking that a loop allocates
   nothing.
+- [Match text with regular expressions](match-patterns.html): compile a pattern into an arena, find
+  matches and groups without allocating, and what the subset can't say.
 - [Pass structs by reference](pass-structs-by-ref.html): allocate a struct in an arena, pass it with
   `ref` and `in`, return a ref, and keep the ref from outliving a list's buffer or an arena scope.
 - [Catch arena mistakes](catch-arena-mistakes.html): turn on `Arena.DebugChecks`, name your arenas, and

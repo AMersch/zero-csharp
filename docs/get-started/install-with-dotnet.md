@@ -133,7 +133,9 @@ exports:
 </ItemGroup>
 ```
 
-Other libraries work the same way, with their own `.tbd` or `.dylib`.
+Other libraries work the same way, with their own `.tbd` or `.dylib`. On every target, a project can
+also name a C library with a `ZeroLinkLibrary` item, which programs using the project inherit, packed
+or not: see [Make a game window](../how-to/make-a-game-window.html), which uses SDL 3 that way.
 
 | Property | Values | Default |
 |---|---|---|
@@ -141,6 +143,7 @@ Other libraries work the same way, with their own `.tbd` or `.dylib`.
 | `ZeroOptimizeFor` | `None` (bflat's `-O0`), `Speed`, or `Size` (bflat's `-Os`) | `None` in Debug, `Speed` otherwise |
 | `ZeroInstructionSet` | passed to bflat as `-m`, e.g. `x86-64-v3` or `dotprod` (see [Use SIMD](../how-to/use-simd.html)) | none |
 | `ZeroDllImports` | more libraries whose `[DllImport]`s are bound when linking, besides `libc` and `libm.so.6`, which always are | none |
+| `ZeroLibraryPath` | folders, separated by `;`, searched first for the C libraries `ZeroLinkLibrary` names (see [Make a game window](../how-to/make-a-game-window.html)) | none |
 | `NativeLib` | `Shared`, with `OutputType` `Library`: a native library in `native/` instead of a zero library (see [Build a native library](../how-to/build-a-native-library.html)) | none |
 
 The build log shows bflat's arguments on a `bflat arguments:` line (`dotnet build -v:n`).
@@ -148,8 +151,9 @@ The build log shows bflat's arguments on a `bflat arguments:` line (`dotnet buil
 Set them on the command line with `-p:`, or in the project file. A Debug build (what `dotnet build`
 and `dotnet run` make) isn't optimized, so a debugger stops on every line and shows every variable
 ([Debug a program](../how-to/debug-a-program.html)); `-c Release` builds an optimized program, the one
-to time and ship. `dotnet publish` builds Release, and copies the program, and only it, to the
-publish folder: it needs nothing next to it.
+to time and ship. `dotnet publish` builds Release, and copies the program to the publish folder. It
+needs nothing next to it, unless a C library it links with has a file for run time, like SDL's
+`SDL3.dll` on Windows: that's copied too.
 
 ## What dotnet build does
 

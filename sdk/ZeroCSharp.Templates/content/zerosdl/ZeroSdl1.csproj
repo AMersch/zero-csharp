@@ -1,0 +1,13 @@
+<!-- dotnet run opens a window with a square the arrow keys move. SDL 3 comes
+     with the ZeroCSharp.SDL3 package on Windows; on Linux and macOS, install
+     it first (brew install sdl3 on macOS; a libsdl3-dev package on Linux,
+     such as Debian 13's).
+     Guide: https://onurgumus.github.io/zero-csharp/how-to/make-a-game-window.html -->
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ZeroCSharp.SDL3" Version="@ZERO_SDK_VERSION@" />
+  </ItemGroup>
+</Project>

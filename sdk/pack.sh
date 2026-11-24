@@ -4,7 +4,8 @@
 #   ZeroCSharp.Bflat.<rid>       bflat for each host, trimmed (sdk/trim-layout.sh, and for
 #                                Windows sdk/trim-windows-layout.sh from the linux-x64 one)
 #   ZeroCSharp.Stories260K       the Llama sample's model, as a zero library
-#   ZeroCSharp.Templates         dotnet new zero, zerolib and zerollama
+#   ZeroCSharp.SDL3              SDL 3 bindings, a zero library, with SDL for Windows
+#   ZeroCSharp.Templates         dotnet new zero, zerolib, zerollama and zerosdl
 #
 # Usage:  sdk/pack.sh
 # Env:    ZERO_HOSTS     the hosts to pack bflat for (default "linux-x64 linux-arm64 win-x64
@@ -61,6 +62,16 @@ cat > "$stage/nuget.config" <<EOF
 </configuration>
 EOF
 NUGET_PACKAGES=$PWD/$stage/packages dotnet pack "$stage/ZeroCSharp.Stories260K.csproj" -o sdk/feed -v:q -nologo
+# ZeroCSharp.SDL3, the SDL 3 bindings, the same way, with SDL's own Windows
+# files (fetch-windows-sdl.sh: a pinned release, checked by its SHA-256).
+sdk/ZeroCSharp.SDL3/fetch-windows-sdl.sh
+sdl_stage=sdk/ZeroCSharp.SDL3/obj/stage
+rm -rf "$sdl_stage" && mkdir -p "$sdl_stage"
+sed "s/@ZERO_SDK_VERSION@/$version/g" sdk/ZeroCSharp.SDL3/ZeroCSharp.SDL3.csproj > "$sdl_stage/ZeroCSharp.SDL3.csproj"
+cp sdk/ZeroCSharp.SDL3/SDL.cs "$sdl_stage/"
+cp -R sdk/ZeroCSharp.SDL3/native "$sdl_stage/"
+cp "$stage/nuget.config" "$sdl_stage/"
+NUGET_PACKAGES=$PWD/$sdl_stage/packages dotnet pack "$sdl_stage/ZeroCSharp.SDL3.csproj" -o sdk/feed -v:q -nologo
 # dotnet new zerollama's Program.cs is the Llama sample, with a header for a
 # project instead of the repo's build.sh.
 mkdir -p sdk/ZeroCSharp.Templates/obj/zerollama

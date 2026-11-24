@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Zero C# contributors",
+  "classifications": ["Native", "Game", "Graphics"],
+  "identity": "ZeroCSharp.Templates.Sdl",
+  "name": "Zero C# game window (SDL 3)",
+  "description": "A native program that opens a window with SDL 3 and moves a square with the arrow keys. No .NET runtime, no garbage collector.",
+  "shortName": "zerosdl",
+  "sourceName": "ZeroSdl1",
+  "preferNameDirectory": true,
+  "tags": { "language": "C#", "type": "project" }
+}

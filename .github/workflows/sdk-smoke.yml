@@ -69,3 +69,20 @@ jobs:
           out=$("bin/Debug/$(ls bin/Debug)/Story$EXE" | tr -d '\r')
           echo "$out"
           [[ "$out" == "Once upon a time, there was a little girl named Lily."* ]]
+      # The game window: ZeroCSharp.SDL3 from nuget.org. Every runner builds it
+      # for Windows, where SDL comes in the package; Windows runs it headless
+      # (the runners have no SDL 3 for Linux or macOS).
+      - name: Make the game window
+        env:
+          EXE: ${{ matrix.exe }}
+        run: |
+          dotnet new zerosdl -o Game
+          cd Game
+          dotnet build -p:ZeroTarget=win-x64
+          ls "bin/Debug/$(ls bin/Debug)/win-x64/" | grep -x SDL3.dll
+          if [ "$EXE" = .exe ]; then
+            dotnet build
+            out=$(SDL_VIDEO_DRIVER=dummy SDL_RENDER_DRIVER=software "bin/Debug/$(ls bin/Debug)/Game.exe" --frames 30 | tr -d '\r')
+            echo "$out"
+            [ "$out" = "30 frames, square at 330,220" ]
+          fi

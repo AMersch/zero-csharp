@@ -21,6 +21,7 @@ values, and three hold references. Which one you need depends on what you store 
 | unmanaged values | smallest priority | `PriorityQueue<TElement, TPriority>` | a binary heap, as .NET's |
 | any value | a string's text | `StrDict<TValue>` | keys copied into the map's arena |
 | strings, objects, arrays | an unmanaged key | `RefDict<TKey, TValue>` | values stored as references |
+| structs that point at each other | following a link | `Ptr<T>` from `arena.New` | linked lists, trees, graphs; see below |
 
 `List<T>` and `Dict` take only unmanaged types because they keep items in arena memory through a `T*`.
 A reference in zero mode is just an address (no garbage collector moves or tracks objects), so
@@ -50,6 +51,92 @@ The same rules hold for all five:
 - **Out of range stops the program.** `Get` and `Set` on a `List` or `RefList` with a bad index end it
   with `List: index out of range`. `RemoveAt` returns false instead.
 - **Freed with the arena.** `Reset`, `Restore` or `Destroy` on the arena frees the collection.
+
+## Link items to each other
+
+A struct can't contain itself, so a linked list, a tree or a graph needs pointers between its items.
+`arena.New(value)` copies a struct into the arena and returns a `Ptr<T>` to it, and a `Ptr` can be a
+field of the struct it points at:
+
+<!-- sample: samples/Links.cs node -->
+```csharp
+// One item of a doubly linked list: a struct can't contain itself, but it
+// can hold pointers to others of its kind.
+public struct Node
+{
+    public int Number;
+    public Ptr<Node> Prev;
+    public Ptr<Node> Next;
+}
+```
+
+`ptr.Value` is a `ref` to the item, to read or change in place, and no `unsafe` is needed. A
+doubly linked list is then the usual code, cycles included:
+
+<!-- sample: samples/Links.cs chain -->
+```csharp
+// The list itself: its two ends, and the arena its items live in.
+public struct Chain
+{
+    public Arena Arena;
+    public Ptr<Node> First;
+    public Ptr<Node> Last;
+
+    public void AddLast(int number)
+    {
+        Ptr<Node> node = Arena.New(new Node { Number = number, Prev = Last });
+        if (Last.IsNull)
+            First = node;
+        else
+            Last.Value.Next = node;
+        Last = node;
+    }
+
+    // Takes the node out by joining its neighbours to each other.
+    public void Remove(Ptr<Node> node)
+    {
+        ref Node n = ref node.Value;
+        if (n.Prev.IsNull)
+            First = n.Next;
+        else
+            n.Prev.Value.Next = n.Next;
+        if (n.Next.IsNull)
+            Last = n.Prev;
+        else
+            n.Next.Value.Prev = n.Prev;
+        n.Prev = default;
+        n.Next = default;
+    }
+}
+```
+
+Recursion works as it does with classes:
+
+<!-- sample: samples/Links.cs insert -->
+```csharp
+// Recursion works as it would with classes.
+static Ptr<TreeNode> Insert(Arena arena, Ptr<TreeNode> node, int key)
+{
+    if (node.IsNull)
+        return arena.New(new TreeNode { Key = key });
+    ref TreeNode n = ref node.Value;
+    if (key < n.Key)
+        n.Left = Insert(arena, n.Left, key);
+    else
+        n.Right = Insert(arena, n.Right, key);
+    return node;
+}
+```
+
+- **`default` is null.** `IsNull` tells you; `Value` on a null `Ptr` stops the program with
+  `Ptr: Value of a null Ptr` instead of crashing it.
+- **`==` compares the pointers,** so a walk round a ring can tell when it is back where it started.
+- **Items live as long as the arena.** There is no freeing one item: removing a node from a list
+  unlinks it, and its memory goes with the arena's.
+- **The arena's rules apply.** Like a collection, a `Ptr` is valid until its arena is reset,
+  destroyed or restored to before the item was made. Under `Arena.DebugChecks`, a `Ptr` used after
+  that stops the program. A `ref` from `Value` kept in a local isn't checked, so take `Value` again
+  after anything that frees memory.
 
 ## Key by an id, not by an object
 

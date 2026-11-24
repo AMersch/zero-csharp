@@ -10,6 +10,29 @@ using System.Threading;
 
 namespace ThreadsSample;
 
+// docs:thread-static
+// Each thread has its own copy of a [ThreadStatic] field, starting at the
+// default value.
+public static class PerThread
+{
+    [ThreadStatic] public static int Index;
+    [ThreadStatic] public static string Name;
+}
+// docs:end
+
+public static class Configured
+{
+    [ThreadStatic] public static int Value;
+    public static int ConstructorRuns;
+
+    static Configured() => ConstructorRuns++;
+}
+
+public sealed class Clobbered
+{
+    public int Count;
+}
+
 public static class Program
 {
     static int s_failures;
@@ -125,6 +148,30 @@ public static class Program
         Check("every part summed its own range", partsRight);
         Check("workers' allocations went to their arenas", heapGrowth == 0);
         Section("an arena per part");
+
+        PerThread.Index = 5;
+        PerThread.Name = "main";
+        Check("a thread reads back its own values", PerThread.Index == 5 && PerThread.Name == "main");
+        // docs:thread-static-loop
+        // Each iteration stores its index, works, and finds it unchanged: no
+        // other thread writes this thread's copy. A plain static would be
+        // overwritten by the other threads now and then.
+        var clobbered = new Clobbered();
+        Parallel.For(0, 2000, clobbered, static (c, i) =>
+        {
+            PerThread.Index = i;
+            SlowSquare(i);
+            if (PerThread.Index != i)
+                Interlocked.Increment(ref c.Count);
+        });
+        // docs:end
+        Check("no thread sees another's copy", clobbered.Count == 0);
+        Check("a field the loop didn't touch keeps this thread's value", PerThread.Name == "main");
+        Check("a type with a static constructor",
+            Configured.Value == 0 && Configured.ConstructorRuns == 1);
+        Configured.Value = 3;
+        Check("then its own copy", Configured.Value == 3 && Configured.ConstructorRuns == 1);
+        Section("[ThreadStatic]");
 
         Out.Line();
         if (s_failures == 0)

@@ -83,6 +83,42 @@ Parallel.For(0, parts.Count, parts, sumPart);
 long heapGrowth = GC.GetTotalAllocatedBytes() - heapBefore;
 ```
 
+## Give each thread its own variable
+
+A `[ThreadStatic]` field has one copy per thread, starting at its default value on each, as in .NET:
+
+<!-- sample: samples/Threads.cs thread-static -->
+```csharp
+// Each thread has its own copy of a [ThreadStatic] field, starting at the
+// default value.
+public static class PerThread
+{
+    [ThreadStatic] public static int Index;
+    [ThreadStatic] public static string Name;
+}
+```
+
+<!-- sample: samples/Threads.cs thread-static-loop -->
+```csharp
+// Each iteration stores its index, works, and finds it unchanged: no
+// other thread writes this thread's copy. A plain static would be
+// overwritten by the other threads now and then.
+var clobbered = new Clobbered();
+Parallel.For(0, 2000, clobbered, static (c, i) =>
+{
+    PerThread.Index = i;
+    SlowSquare(i);
+    if (PerThread.Index != i)
+        Interlocked.Increment(ref c.Count);
+});
+```
+
+Each thread's copies are allocated the first time it touches the type's thread-static fields, from
+the system rather than from an arena (one reset would otherwise free them), and freed when the thread
+ends. A static constructor still runs once, on whichever thread gets there first, so an initializer
+on a `[ThreadStatic]` field sets only that thread's copy, as in .NET: set the value where each thread
+starts instead.
+
 ## What isn't thread-safe
 
 - **Arenas and collections**: one per thread, as above.

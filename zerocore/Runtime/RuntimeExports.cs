@@ -133,14 +133,16 @@ namespace System.Runtime
         // An object straight from calloc, ignoring any ObjectAllocator: for
         // objects zerocore keeps for the rest of the run (see Type).
         internal static T AllocateCalloc<T>() where T : class
+            => Unsafe.As<T>(AllocateCalloc(MethodTable.Of<T>()));
+
+        internal static object AllocateCalloc(MethodTable* type)
         {
-            MethodTable* type = MethodTable.Of<T>();
             System.Threading.Interlocked.Add(ref s_allocatedBytes, (long)type->BaseSize);
             nint memory = (nint)Platform.calloc(1, type->BaseSize);
             if (memory == 0)
                 Environment.FailFast("Out of memory");
             *(MethodTable**)memory = type;
-            return Unsafe.As<nint, T>(ref memory);
+            return Unsafe.As<nint, object>(ref memory);
         }
 
         // Every byte allocated with calloc so far, for GC.GetTotalAllocatedBytes.

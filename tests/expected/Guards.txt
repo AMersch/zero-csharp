@@ -20,3 +20,5 @@ Usage: Guards <case>, where the case is one of:
   scratch-outer-scope  an Arena.Scratch scope allocating inside a nested one
   scratch-outer-list   a ScratchList added to inside a nested Arena.Scratch
   scratch-outer-text   a ScratchText appended to inside a nested Arena.Scratch
+  ptr-null             the Value of a null Ptr
+  ptr-after-reset      a Ptr used after its arena was reset (DebugChecks)

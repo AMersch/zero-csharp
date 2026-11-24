@@ -19,3 +19,5 @@ bad-pattern|Regex: missing ) at 0 in the pattern
 scratch-outer-scope|Arena.Scratch: a scope allocated inside a nested Arena.Scratch
 scratch-outer-list|Arena.Scratch: a ScratchList added to inside a nested Arena.Scratch
 scratch-outer-text|Arena.Scratch: a ScratchText appended to inside a nested Arena.Scratch
+ptr-null|Ptr: Value of a null Ptr
+ptr-after-reset|Arena "links":|Arena.DebugChecks: Ptr used after its item was freed

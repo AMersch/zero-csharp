@@ -605,6 +605,20 @@
   <ItemGroup Condition="'$(ZeroLanguage)' == 'FSharp'">
     <ZeroFSharpNativeInput Include="@(IntermediateAssembly)" />
   </ItemGroup>
+  <!--
+    F#, programs and libraries alike: ZERO006 for an Arena.Scratch callback
+    whose state is a ref struct, which C# checks with `scoped` and F# can't
+    (Sdk/ZeroFSharpNative.cs.txt, CheckScratchStates). Read from the IL, with
+    the references for the types it names from other assemblies.
+  -->
+  <Target Name="ZeroFSharpCheck" Condition="'$(ZeroLanguage)' == 'FSharp'" AfterTargets="CoreCompile"
+          Inputs="@(IntermediateAssembly);@(ReferencePath)" Outputs="$(IntermediateOutputPath)zero-fsharp-check.stamp">
+    <ZeroFSharpNative Assembly="@(IntermediateAssembly->'%(FullPath)')" Check="true" References="@(ReferencePath)" />
+    <Touch Files="$(IntermediateOutputPath)zero-fsharp-check.stamp" AlwaysCreate="true" />
+    <ItemGroup>
+      <FileWrites Include="$(IntermediateOutputPath)zero-fsharp-check.stamp" />
+    </ItemGroup>
+  </Target>
   <UsingTask TaskName="ZeroFSharpNative" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
     <Task>
       <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)ZeroFSharpNative.cs.txt" />

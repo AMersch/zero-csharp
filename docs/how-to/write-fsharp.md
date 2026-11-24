@@ -218,10 +218,130 @@ C# zero programs get the same `decimal`.
 There's no garbage collector: memory a program allocates is never given back. F# allocates more
 than you might think. Each list cell, closure, tuple, option, `seq` enumerator and `Map` update is an
 object, and so is every string `sprintf` and `+` make. A program that runs and ends, as a command-line
-tool does, can usually ignore this. One that loops for a long time, a game or a server, should
-allocate its data before the loop and use arrays and mutable values inside it. Use F#'s
-`[<Struct>]` records, unions and tuples, which aren't objects. [Memory](../concepts/memory.html)
-explains what zero mode does with memory, and the arenas the library gives C#.
+tool does, can usually ignore this. One that loops for a long time, a game or a server, needs to give
+its memory a lifetime. F# gets the same three ways as C#, which
+[Memory](../concepts/memory.html) explains in full; this section shows each from F#. `[<Struct>]`
+records, unions and tuples aren't objects, so they need none of it.
+
+An arena holds memory for one lifetime and frees it all at once. Lib's `List`, `Dict` and
+`StrBuilder` live in the arena you give them:
+
+<!-- sample: sdk/test/fixtures/fsmemory/Program.fs arena -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// One arena per lifetime: this one holds a list for as long as it lives.
+let level = Arena.Create(1024un, "level")
+let scores = List<int>.Create(level)
+for s in [ 30; 10; 20 ] do
+    scores.Add s |> ignore
+printfn "%d scores, first %d" scores.Count (scores.Get 0)
+```
+
+### Free F# values with a scope
+
+Ordinary F# code, with its lists, closures and options, allocates with `new`. Inside
+`OpenObjectScope` those objects go into the arena instead, and leaving the `use` block frees them.
+A loop that would leak on every round then leaks nothing:
+
+<!-- sample: sdk/test/fixtures/fsmemory/Program.fs object-scope -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// Each round's lists, closures and options go into the frame arena, and
+// closing the scope frees them: a thousand rounds leave nothing behind.
+let frame = Arena.Create(4096un, "frame")
+let round (n: int) =
+    use _ = frame.OpenObjectScope()
+    let evens =
+        [ 1 .. 100 ]
+        |> List.map (fun x -> x * 2)
+        |> List.filter (fun x -> x % 3 <> 0)
+    let rotated =
+        match evens with
+        | [] -> []
+        | first :: rest -> rest @ [ first ]
+    let zero = Some n |> Option.map (fun r -> r - n) |> Option.defaultValue 0
+    List.sum rotated + zero
+
+let first = round 0
+let before = GC.GetTotalAllocatedBytes()
+let mutable total = 0
+for n in 1 .. 1000 do
+    total <- total + round n
+let neverFreed = GC.GetTotalAllocatedBytes() - before
+printfn "total %d, first %d, never freed: %d bytes" total first neverFreed
+```
+
+That prints `never freed: 0 bytes`. Nothing may keep a reference to a value made inside the scope
+once it closes: not a module-level value, not a mutable or a collection from outside. Here `round`
+returns an `int`, which is copied out. F#'s own caches are safe: fsc keeps each lambda that captures
+nothing, and each union case without fields such as `[]`, in a static field set by a static
+constructor, and static constructors allocate outside every scope. Set `Arena.DebugChecks <- true`
+while testing: closing a scope then stops the program if a static field points into the arena.
+
+`OpenObjectScope` is `unsafe` in C#, and F# has no `unsafe` to ask for, so the rule above is yours
+to keep without the compiler's reminder.
+
+### Temporary memory F# checks
+
+`Arena.Scratch` runs a callback with a scope to allocate from and frees what it allocated when the
+callback returns. Data goes in and out through a state passed by reference and the result:
+
+<!-- sample: sdk/test/fixtures/fsmemory/Program.fs scratch -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// Temporary memory F# checks: nothing from the scope can leave the callback.
+[<Struct>]
+type Stats = { mutable Sum: int; mutable Count: int }
+
+let summarize (values: int[]) =
+    let mutable stats = { Sum = 0; Count = 0 }
+    let median =
+        Arena.Scratch(&stats, ScratchFunc<Stats, int>(fun scratch st ->
+            // A copy to sort, so the caller's array keeps its order.
+            let copy = scratch.AllocSpan<int>(values.Length)
+            Span<int>(values).CopyTo(copy)
+            copy.Sort()
+            for v in copy do
+                st.Sum <- st.Sum + v
+            st.Count <- copy.Length
+            copy[copy.Length / 2]))
+    median, stats
+
+let values = [| 5; 3; 8; 1; 9 |]
+let median, stats = summarize values
+printfn "median %d, sum %d of %d, first still %d"
+    median stats.Sum stats.Count values[0]
+```
+
+The scope's spans, lists and text are `ref struct`s, and F#'s rules for them keep everything inside
+the callback: a closure can't capture them, a field or a module-level value can't hold them, and
+the result can't be one. Lists and text that grow work the same way; a string to keep is copied out
+into an arena of yours:
+
+<!-- sample: sdk/test/fixtures/fsmemory/Program.fs scratch-list -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// Lists and text that grow, from the scope; the string to keep is copied
+// out into an arena of yours.
+let mutable keep = Arena.Create(1024un, "keep")
+let report =
+    Arena.Scratch(&keep, ScratchFunc<Arena, string>(fun scratch target ->
+        let evens = scratch.List<int>(4)
+        for i in 18 .. -2 .. 0 do
+            evens.Add i
+        evens.AsSpan().Sort()
+        let text = scratch.Text()
+        text.Append(int64 evens.Count)
+        text.Append(" evens:".AsSpan())
+        for e in evens do
+            text.Append(' ')
+            text.Append(int64 e)
+        text.ToArenaString(target)))
+printfn "%s" report
+```
+
+There's one difference from C#. C# lets the state be a `ref struct` holding spans of yours, and its
+`scoped` keyword stops the callback from storing scratch memory in it. F# ignores `scoped`, so it
+can't stop that, and the build does instead: a callback whose state is a `ref struct` (a `Span`, or a
+type with `[<IsByRefLike>]`) is an error, ZERO006, that names it. Pass the state as an array, a
+record or a value. A span of yours can't reach the callback any other way, since closures can't
+capture spans either, so in F# the input is an array, as `summarize`'s is above.
 
 ## Build for the Commodore 64
 

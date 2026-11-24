@@ -19,8 +19,10 @@ WIDTH = 80
 # Page order: (file, types documented on the page, page name, one-line description for the index).
 PAGES = [
     ('Arena.cs', ['Arena'], 'arena', 'Growable bump allocator: allocation, scopes, reset, debug checks.'),
-    ('Scratch.cs', ['Arena', 'ScratchScope', 'ScratchList', 'ScratchText'], 'scratch', 'Temporary memory whose lifetime the compiler checks: Arena.Scratch, ScratchScope and its lists and text.'),
+    ('Scratch.cs', ['Arena', 'ScratchScope', 'ScratchList', 'ScratchText', 'ScratchPool'], 'scratch', 'Temporary memory whose lifetime the compiler checks: Arena.Scratch, ScratchScope and its lists, text and pools.'),
     ('List.cs', ['List'], 'list', 'Growable array of unmanaged items in an arena.'),
+    ('Pool.cs', ['Pool', 'Handle'], 'pool', 'Items removed one by one, found by handles that notice when they are out of date: Pool<T> and Handle<T>.'),
+    ('LinkedList.cs', ['LinkedList', 'LinkedListNode'], 'linkedlist', 'Doubly linked list in an arena, built on Pool<T>.'),
     ('Ptr.cs', ['Ptr', 'Arena'], 'ptr', 'Pointers between items in an arena, for linked lists, trees and graphs: Ptr<T> and Arena.New.'),
     ('Dict.cs', ['Dict', 'DefaultEqualityComparer', 'ByteEqualityComparer'], 'dict', 'Hash map with unmanaged keys and values in an arena, and the comparers for its keys.'),
     ('HashSet.cs', ['HashSet'], 'hashset', 'Set of unmanaged items in an arena.'),

@@ -156,6 +156,68 @@ else
 keys came from, and looking up a span that was just read allocates nothing.
 [Keep a string](../how-to/keep-a-string.html) walks through the choices.
 
+## Characters and encodings
+
+`char`'s methods and `System.Text.Encoding` are in zerocore, with .NET's names and results.
+`char.IsLetter`, `IsDigit`, `IsUpper`, `ToUpper`, `GetNumericValue`, `GetUnicodeCategory` and the others
+know every character, not only ASCII, from tables generated from .NET 10's Unicode data (Unicode 16.0):
+
+<!-- sample: samples/Unicode.cs char-methods -->
+```csharp
+Check("letters in any script",
+    char.IsLetter('é') && char.IsLetter('ж') && char.IsLetter('中'));
+Check("digits in any script",
+    char.IsDigit('٣') && char.GetNumericValue('٣') == 3);
+Check("numbers that aren't digits", char.IsNumber('½') && !char.IsDigit('½')
+    && char.GetNumericValue('½') == 0.5 && char.GetNumericValue('Ⅻ') == 12);
+Check("case", char.ToUpper('ж') == 'Ж' && char.ToLower('Σ') == 'σ'
+    && char.IsUpper('Σ'));
+Check("invariant case: one char to one",
+    char.ToUpper('ß') == 'ß' && char.ToUpper('ı') == 'ı');
+Check("categories",
+    char.GetUnicodeCategory('€') == UnicodeCategory.CurrencySymbol
+    && char.IsPunctuation('¿') && char.IsSymbol('+')
+    && char.IsWhiteSpace('\u00A0'));
+```
+
+There are no cultures, so `ToUpper` and `ToLower` are `ToUpperInvariant` and `ToLowerInvariant`: each
+char maps to one char, as in .NET's invariant mode. The tables are linked only into programs that use
+them: categories take about 16 KB, casing 1.6 KB and numeric values 3 KB. `IsAsciiDigit`, `IsAsciiLetter`
+and the other ASCII methods, `IsWhiteSpace` and `IsControl` are plain comparisons and need none, which
+matters on a Commodore 64. `CharUnicodeInfo` (in `System.Globalization`) answers for code points above
+U+FFFF too, and the `(string s, int index)` overloads read a surrogate pair as one character.
+
+`Encoding.UTF8`, `ASCII`, `Latin1`, `Unicode` (UTF-16), `BigEndianUnicode` and `UTF32` convert text to
+bytes and back. Input that doesn't fit becomes what .NET makes of it: U+FFFD for invalid bytes and lone
+surrogates, `?` for what ASCII can't hold. The overloads that return a `byte[]`, `char[]` or `string`
+allocate it and never free it, so in a loop use the span ones, which allocate nothing:
+
+<!-- sample: samples/Unicode.cs encoding -->
+```csharp
+string text = "naïve ☕ 😀";
+byte[] utf8 = Encoding.UTF8.GetBytes(text); // allocated
+Check("UTF-8 bytes",
+    utf8.Length == 15 && Encoding.UTF8.GetString(utf8) == text);
+
+// Into a buffer: nothing allocated.
+Span<byte> buffer = stackalloc byte[64];
+int written = Encoding.UTF8.GetBytes(text, buffer);
+Span<char> chars = stackalloc char[64];
+int read = Encoding.UTF8.GetChars(buffer.Slice(0, written), chars);
+Check("into a span and back", written == 15 && read == text.Length
+    && Encoding.UTF8.GetByteCount(text) == 15);
+
+// What doesn't fit becomes '?' in ASCII, a close letter in Latin-1.
+byte[] ascii = Encoding.ASCII.GetBytes("naïve");
+Check("ASCII", Encoding.ASCII.GetString(ascii) == "na?ve");
+byte[] latin1 = Encoding.Latin1.GetBytes("Āb");
+Check("Latin-1", Encoding.Latin1.GetString(latin1) == "Ab");
+```
+
+There are no `Encoder` or `Decoder` objects, no fallback objects and no other code pages.
+`new UTF8Encoding(false, throwOnInvalidBytes: true)` ends the program at invalid input, which is what
+an exception does here.
+
 ## What isn't there
 
 There is nothing culture-aware. `"n=" + 5`, `ToString()` and `string.Format` (with `{0}`-style holes

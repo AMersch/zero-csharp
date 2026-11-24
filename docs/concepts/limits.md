@@ -43,6 +43,9 @@ With zerocore, as `build.sh` builds it:
   `ref` receivers in `extension(...)` blocks.
 - **Indices and ranges**: `span[^1]`, `span[1..^1]`, and on strings and arrays, where a range
   makes a copy.
+- **`char`'s methods and `System.Text.Encoding`**, with .NET's results for every character:
+  `char.IsLetter`, `IsDigit`, `ToUpper`, `GetUnicodeCategory` and the rest (Unicode 16.0), and UTF-8,
+  ASCII, Latin-1, UTF-16 and UTF-32 encodings (see [Strings without a GC](strings.html#characters-and-encodings)).
 - **Comparers and hashing**: `IComparable<T>`, `IComparer<T>`, `IEqualityComparer<T>`,
   `EqualityComparer<T>.Default` and `Comparer<T>.Default` without boxing, and `HashCode`.
 - **Caller information** (`[CallerMemberName]`, `[CallerLineNumber]`, `[CallerFilePath]`,

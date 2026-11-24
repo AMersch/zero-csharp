@@ -38,11 +38,11 @@ source ./env.sh
 # The Small samples are tests sized for a machine with little memory: what
 # Strings, Casts, Collections and the others check, in pieces that each fit
 # in a Commodore 64. They run on every target.
-SMALL_SAMPLES=(SmallStrings SmallBuilders SmallIntegers SmallDoubles SmallObjects SmallArena SmallLists SmallDicts SmallStrDicts SmallText SmallFloats)
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Llama "${SMALL_SAMPLES[@]}")
+SMALL_SAMPLES=(SmallStrings SmallBuilders SmallIntegers SmallDoubles SmallObjects SmallArena SmallLists SmallDicts SmallStrDicts SmallText SmallFloats SmallUnicode SmallEncoding)
+ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Llama Unicode "${SMALL_SAMPLES[@]}")
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
 # Vga is a game for DOS and UEFI (lib/Dos.cs, lib/Uefi.cs: graphics, keyboard, clock).
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Llama "${SMALL_SAMPLES[@]}" Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Llama Unicode "${SMALL_SAMPLES[@]}" Vga)
 # A C64 program has about 50 KB for its code, data, heap and stack together,
 # and the default is the samples that fit. Any sample can be asked for by
 # name; the linker says by how much it is too big. C64Demo and Paddles are for

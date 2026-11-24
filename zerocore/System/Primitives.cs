@@ -15,22 +15,7 @@ namespace System
         public override string ToString() => (bool)this ? "True" : "False";
     }
 
-    public unsafe struct Char : IEquatable<char>, IComparable<char>
-    {
-        public const char MaxValue = (char)0xFFFF;
-        public const char MinValue = (char)0;
-
-        public bool Equals(char other) => (char)this == other;
-
-        public int CompareTo(char other) => (char)this < other ? -1 : (char)this > other ? 1 : 0;
-        public override bool Equals(object obj) => obj is char other && (char)this == other;
-        public override int GetHashCode() => (char)this;
-        public override string ToString()
-        {
-            char c = (char)this;
-            return Number.FromChars(&c, 1);
-        }
-    }
+    // Char is in Char.cs.
 
     public struct SByte : IEquatable<sbyte>, IComparable<sbyte>
     {

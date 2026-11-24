@@ -27,6 +27,40 @@ public struct Growing
     public List<int> Items;
 }
 
+// docs:own-collection
+// A collection of your own for scratch memory: a ref struct built on a
+// ScratchList, so the compiler keeps it inside the callback too, and the
+// list's own checks cover it in nested calls.
+public ref struct ScratchStack<T> where T : unmanaged
+{
+    ScratchList<T> _items;
+
+    public ScratchStack(ScratchScope scratch) => _items = scratch.List<T>();
+
+    public int Count => _items.Count;
+
+    public void Push(T item) => _items.Add(item);
+
+    public T Pop()
+    {
+        int last = _items.Count - 1;
+        T top = _items[last]; // an empty stack stops the program here
+        _items.RemoveAt(last);
+        return top;
+    }
+}
+// docs:end
+
+// docs:own-struct
+// Only unmanaged fields, so the scope can allocate one.
+public struct Particle
+{
+    public float X;
+    public float Y;
+    public float Speed;
+}
+// docs:end
+
 // A scratch list passed to a nested Arena.Scratch.
 public ref struct Outer
 {
@@ -62,6 +96,13 @@ public static class Program
     {
         unsafe { return (nint)Unsafe.AsPointer(ref span[0]); } // SAFETY: the address is only compared.
     }
+
+    // docs:spawn
+    // Scratch memory isn't on the stack: a helper can allocate it and hand it
+    // back, and it lives until the callback that called the helper returns.
+    static Span<Particle> Spawn(ScratchScope scratch, int count)
+        => scratch.AllocSpan<Particle>(count);
+    // docs:end
 
     static int ScratchLength()
         => Arena.Scratch(static (scoped ScratchScope scratch) => scratch.AllocSpan<int>(10).Length);
@@ -194,6 +235,30 @@ public static class Program
         });
         Check("an outer list in a nested call", nested == 11);
         Section("lists and text");
+
+        // docs:own-types
+        int popped = Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            // An unmanaged struct comes from the scope, used through a ref.
+            ref Particle particle = ref scratch.Alloc<Particle>();
+            particle.Speed = 2;
+
+            // A ref struct of scratch pieces is an ordinary local.
+            var stack = new ScratchStack<int>(scratch);
+            for (int i = 1; i <= 3; i++)
+                stack.Push(i * (int)particle.Speed);
+            return stack.Pop() * 10 + stack.Count;
+        });
+        // docs:end
+        Check("a struct and a stack of your own", popped == 62);
+        int moving = Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            Span<Particle> swarm = Spawn(scratch, 100_000);
+            swarm[^1].Speed = 3;
+            return swarm.Length + (int)swarm[^1].Speed;
+        });
+        Check("a helper's scratch memory", moving == 100_003);
+        Section("types of your own");
 
         Out.Line();
         if (s_failures == 0)

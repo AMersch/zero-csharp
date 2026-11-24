@@ -10,6 +10,27 @@ notice that an object is no longer used. That is fine for objects that live as l
 and it is a leak for everything else. This page explains how programs here handle the "everything
 else": arenas, and the rules that keep them safe.
 
+## Which to use
+
+There are three ways to give memory a lifetime, from the one the compiler checks to the one that
+trusts you. Use the safest one that does the job, for each piece of code rather than the whole
+program: one program often uses all three.
+
+| | Use it for | Who makes sure nothing is used after it's freed |
+|---|---|---|
+| Structs and `Arena.Scratch` | Temporary work inside one call: buffers, intermediate lists, building a string | The compiler, plus a check when the program runs for one nesting case |
+| An arena of yours with `List`, `Dict`, `StrBuilder` | Data that lives for a while: a level, a request, a frame | You, when you call `Reset` or `Restore`, which are `unsafe`; `Arena.DebugChecks` catches mistakes while testing |
+| Classes in `OpenObjectScope` | Class hierarchies, interfaces held as values, library code that calls `new` | You, entirely: nothing created inside may outlive the block |
+
+Interfaces alone don't need the last row: a generic method constrained to the interface
+(`where T : IShape`) calls a struct's methods directly, without boxing it. Classes are for when the
+values really differ in type, like a `List<IShape>` holding circles and squares, and for code you
+didn't write. And whatever lives as long as the program can simply be created with `new`.
+
+The sections below go through each: arenas first, then
+[temporary memory the compiler checks](#temporary-memory-the-compiler-checks), then
+[ordinary objects in an arena](#ordinary-objects-in-an-arena).
+
 ## `new` is for the long-lived
 
 Classes, virtual methods and interfaces all work in zero mode. Each `new` just costs memory for the rest
@@ -189,6 +210,91 @@ outer scope, or a list or text it made, and anything they allocated in there wou
 inner call's memory. So they allocate only while their own callback is the innermost one running:
 inside the nested call they can still be read and written, but allocating from the outer scope,
 adding to the outer list or appending to the outer text stops the program with a message saying so.
+
+### Types of your own
+
+Make a type a plain struct unless it has to hold a span or a scratch list or text: only then does it
+need to be a `ref struct`, which can't go in arrays, lists, class fields or lambdas.
+
+What the scope can give out is what the compiler can follow: spans, refs and `ref struct`s. A type of
+your own works with it in one of two shapes. A struct with only unmanaged fields (numbers, enums, other
+such structs) comes from `scratch.Alloc<T>()` and is used through the `ref` it returns:
+
+<!-- sample: samples/Scratch.cs own-struct -->
+```csharp
+// Only unmanaged fields, so the scope can allocate one.
+public struct Particle
+{
+    public float X;
+    public float Y;
+    public float Speed;
+}
+```
+
+Unlike `stackalloc`, that memory isn't on the stack: its size can be decided at run time and be as
+large as the machine allows, and a helper called from the callback can allocate and return it, since
+it stays valid until the callback returns:
+
+<!-- sample: samples/Scratch.cs spawn -->
+```csharp
+// Scratch memory isn't on the stack: a helper can allocate it and hand it
+// back, and it lives until the callback that called the helper returns.
+static Span<Particle> Spawn(ScratchScope scratch, int count)
+    => scratch.AllocSpan<Particle>(count);
+```
+
+A `ref struct` made of scratch pieces (spans, `ScratchList`, `ScratchText`) is an ordinary local filled
+from the scope. Build a collection of your own the same way, on a `ScratchList` or a span from the
+scope, and it gets the same guarantees with no `unsafe`, including the nested-call check, which the
+list it holds makes:
+
+<!-- sample: samples/Scratch.cs own-collection -->
+```csharp
+// A collection of your own for scratch memory: a ref struct built on a
+// ScratchList, so the compiler keeps it inside the callback too, and the
+// list's own checks cover it in nested calls.
+public ref struct ScratchStack<T> where T : unmanaged
+{
+    ScratchList<T> _items;
+
+    public ScratchStack(ScratchScope scratch) => _items = scratch.List<T>();
+
+    public int Count => _items.Count;
+
+    public void Push(T item) => _items.Add(item);
+
+    public T Pop()
+    {
+        int last = _items.Count - 1;
+        T top = _items[last]; // an empty stack stops the program here
+        _items.RemoveAt(last);
+        return top;
+    }
+}
+```
+
+<!-- sample: samples/Scratch.cs own-types -->
+```csharp
+int popped = Arena.Scratch(static (scoped ScratchScope scratch) =>
+{
+    // An unmanaged struct comes from the scope, used through a ref.
+    ref Particle particle = ref scratch.Alloc<Particle>();
+    particle.Speed = 2;
+
+    // A ref struct of scratch pieces is an ordinary local.
+    var stack = new ScratchStack<int>(scratch);
+    for (int i = 1; i <= 3; i++)
+        stack.Push(i * (int)particle.Speed);
+    return stack.Pop() * 10 + stack.Count;
+});
+```
+
+A class can't come from scratch memory, and neither can a struct holding a `string`, an array or any
+other reference. A reference can be copied anywhere (a static, a field of another object, the return
+value), so nothing can make sure it is gone when the callback returns. A `ref struct` that keeps an
+`Arena` and makes a `List<T>` in it is no better: nothing ties that arena to the callback. For those,
+and for code you didn't write that creates objects with `new`, use `AllocateObjectsHere`, below, and
+its `unsafe` promise.
 
 ## Ordinary objects in an arena
 

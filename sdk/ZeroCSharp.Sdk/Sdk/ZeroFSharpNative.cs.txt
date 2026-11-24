@@ -22,7 +22,8 @@
 // F#'s own rules cover the rest (a ref struct can't be returned through a
 // generic result, captured, or kept in a field), but they let the callback
 // store a span from the scope into a ref struct state, through which it
-// outlives the callback.
+// outlives the callback. An input passed by value (ScratchActionIn,
+// ScratchFuncIn) is a copy, so those may be ref structs.
 //
 // System.Reflection.Metadata isn't available to inline tasks, so the tables
 // are read here; only what these files need.
@@ -312,7 +313,8 @@ public class ZeroFSharpNative : Task
             Log.LogError(null, "ZERO006", null, Assembly, 0, 0, 0, 0,
                 "An Arena.Scratch callback" + (where != null ? " (" + where + ")" : "") + " has a ref struct, " + refStruct
                 + ", as its state. F# doesn't check what the callback stores in it, so a span from the scope could outlive"
-                + " the callback. Pass a state that isn't a ref struct (an array, a record, a value), and keep spans from the scope inside the callback.");
+                + " the callback. Pass it by value instead, Arena.Scratch(input, ScratchFuncIn<...>(fun scratch input -> ...)):"
+                + " the callback then gets a copy. Or use a state that isn't a ref struct.");
             ok = false;
         }
         return ok;

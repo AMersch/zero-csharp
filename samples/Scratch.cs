@@ -131,6 +131,20 @@ public static class Program
             return zeroed ? value : -1;
         });
         Check("Alloc gives a zeroed T to write through", written == 42);
+        // docs:input
+        // An input passed by value: the callback gets a copy of the span,
+        // which points at the same items, so it can fill them.
+        Span<int> squares = stackalloc int[4];
+        Arena.Scratch(squares,
+            static (scoped ScratchScope scratch, Span<int> output) =>
+            {
+                ScratchList<int> work = scratch.List<int>();
+                for (int i = 1; i <= output.Length; i++)
+                    work.Add(i * i);
+                work.AsSpan().CopyTo(output);
+            });
+        // docs:end
+        Check("a span passed by value is filled", squares[0] == 1 && squares[3] == 16);
         Section("using it");
 
         nint firstAddress = Arena.Scratch(static (scoped ScratchScope scratch) => Address(scratch.AllocSpan<int>(64)));

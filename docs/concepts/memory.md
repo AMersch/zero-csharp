@@ -179,6 +179,24 @@ The price is the callback. Data goes in and out through a state passed by `ref` 
 `ref struct` holding spans of yours) and through the callback's return value, so the lambda can be
 `static` and allocates nothing after its first call.
 
+When the data only goes in, or is a span the callback fills, pass it by value instead: the callback
+gets a copy, which for a span still points at your items:
+
+<!-- sample: samples/Scratch.cs input -->
+```csharp
+// An input passed by value: the callback gets a copy of the span,
+// which points at the same items, so it can fill them.
+Span<int> squares = stackalloc int[4];
+Arena.Scratch(squares,
+    static (scoped ScratchScope scratch, Span<int> output) =>
+    {
+        ScratchList<int> work = scratch.List<int>();
+        for (int i = 1; i <= output.Length; i++)
+            work.Add(i * i);
+        work.AsSpan().CopyTo(output);
+    });
+```
+
 Besides spans, the scope makes lists and text that grow as needed, `ScratchList<T>` and
 `ScratchText`. They are `ref struct`s too, so the same rules keep them inside the callback, and a
 string to keep is copied out into an arena of yours:

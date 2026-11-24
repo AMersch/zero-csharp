@@ -1,4 +1,4 @@
-PASS using it (2 checks)
+PASS using it (3 checks)
 PASS its memory (3 checks)
 PASS your arenas (1 checks)
 PASS lists and text (4 checks)

@@ -1,4 +1,7 @@
 3 scores, first 30
 total 6734000, first 6734, never freed: 0 bytes
-median 5, sum 26 of 5, first still 5
-10 evens: 0 2 4 6 8 10 12 14 16 18
+median 5, first still 5, never freed: 0 bytes
+squares 1 4 9 16
+sum 26, largest 9
+10 evens: 0 2 4 6 8 10 12 14 16 18, half of them 5
+inline: 800, something never freed: true

@@ -24,7 +24,8 @@
 //
 // To pass data in and out without a closure (which would allocate), use the
 // overloads with a state passed by ref; it may be a ref struct holding spans
-// of the caller's.
+// of the caller's. For data that only goes in, or spans the callback fills,
+// there are overloads with an input passed by value.
 //
 // Besides spans, the scope makes growable lists and text that live as long:
 //
@@ -36,7 +37,7 @@
 // the callback. One rule the compiler can't check: a scope, and the lists and
 // text it made, allocate only while their callback is the innermost one
 // running. Inside a nested Arena.Scratch (reached through a state passed by
-// ref) the outer ones can still be read and written, but allocating from the
+// ref, or an input) the outer ones can still be read and written, but allocating from the
 // scope, adding to a list or appending to text stops the program: that
 // memory would be freed when the inner callback returns.
 
@@ -237,6 +238,23 @@ public ref struct ScratchText
         _builder.Append(value);
     }
 
+    /// <summary>Appends a number in decimal.</summary>
+    public void Append(int value) => Append((long)value);
+
+    /// <summary>Appends a number as $"{value}" writes it.</summary>
+    public void Append(double value)
+    {
+        CheckInnermost();
+        _builder.Append(value);
+    }
+
+    /// <summary>Appends True or False.</summary>
+    public void Append(bool value)
+    {
+        CheckInnermost();
+        _builder.Append(value);
+    }
+
     /// <summary>Appends $"..." directly, without an intermediate string.</summary>
     public void Append([InterpolatedStringHandlerArgument("")] ref StrBuilder.InterpolatedHandler handler)
     {
@@ -271,6 +289,16 @@ public delegate TResult ScratchFunc<TResult>(scoped ScratchScope scratch);
 
 public delegate TResult ScratchFunc<TState, TResult>(scoped ScratchScope scratch, scoped ref TState state)
     where TState : allows ref struct;
+
+// The same with an input passed by value: the callback gets a copy, so nothing
+// it puts in the copy reaches the caller. That makes a ref struct input (a span
+// of the caller's, or a struct of several) safe in F# too, which doesn't know
+// `scoped` (the SDK refuses a ref struct as the by-ref state there: ZERO006).
+public delegate void ScratchActionIn<TInput>(scoped ScratchScope scratch, TInput input)
+    where TInput : allows ref struct;
+
+public delegate TResult ScratchFuncIn<TInput, TResult>(scoped ScratchScope scratch, TInput input)
+    where TInput : allows ref struct;
 
 public partial struct Arena
 {
@@ -315,6 +343,30 @@ public partial struct Arena
     {
         ScratchThread* thread = EnterScratch(out Mark mark);
         TResult result = func(new ScratchScope(thread), ref state);
+        LeaveScratch(thread, mark);
+        return result;
+    }
+
+    /// <summary>
+    /// The same, with an input the action gets a copy of: for a span of yours,
+    /// or a ref struct of several, that the action reads or fills. What it
+    /// writes into a span's items the caller sees; a change to the copy itself
+    /// it doesn't.
+    /// </summary>
+    public static void Scratch<TInput>(TInput input, ScratchActionIn<TInput> action)
+        where TInput : allows ref struct
+    {
+        ScratchThread* thread = EnterScratch(out Mark mark);
+        action(new ScratchScope(thread), input);
+        LeaveScratch(thread, mark);
+    }
+
+    /// <summary>The same, returning the action's result.</summary>
+    public static TResult Scratch<TInput, TResult>(TInput input, ScratchFuncIn<TInput, TResult> func)
+        where TInput : allows ref struct
+    {
+        ScratchThread* thread = EnterScratch(out Mark mark);
+        TResult result = func(new ScratchScope(thread), input);
         LeaveScratch(thread, mark);
         return result;
     }

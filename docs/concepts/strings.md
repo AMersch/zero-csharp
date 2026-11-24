@@ -75,11 +75,9 @@ Out.Line($"{"apple",-8}|{3,5}|{1.25,9:F2}");
 Out.Line($"{"melon",-8}|{12,5}|{0.5,9:F2}");
 ```
 
-Holes take integers, `double` and `float`, `bool`, `char`, strings and spans, with an optional alignment
-(`{x,8}`, `{x,-8}`) and format: `D`/`Dn` and `X`/`x`/`Xn` for integers, `F`/`Fn` for doubles. Some
-results differ from .NET's: `bool` prints as `true`/`false`, and `{-1:X}` prints 16 hex digits for any
-integer type, since every integer is formatted as a 64-bit value. [Format text](../how-to/format-text.html)
-covers the details.
+Holes take every number type, `bool`, `char`, strings and spans, with an optional alignment
+(`{x,8}`, `{x,-8}`) and one of .NET's format strings (`{x:X4}`, `{x:F2}`, `{x:N0}`), with .NET's
+output. [Format text](../how-to/format-text.html) covers the details.
 
 ## Strings in an arena
 

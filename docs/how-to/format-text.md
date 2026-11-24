@@ -69,9 +69,10 @@ Read the result with `sb.AsSpan()` (valid until the next `Append`), or copy it i
 
 ## Holes: values, alignment and format
 
-A hole takes integers, `double` and `float`, `bool`, `char`, strings and spans. After the value comes
-an optional alignment, `{x,8}` or `{x,-8}`, and an optional format, `{x:F2}`, or both, `{x,6:F1}`.
-These results are checked by `samples/Strings.cs`:
+A hole takes every number type, `bool`, `char`, strings and spans. After the value comes an optional
+alignment, `{x,8}` or `{x,-8}`, and an optional format, `{x:F2}`, or both, `{x,6:F1}`. The formats
+are .NET's (see [below](#nets-format-strings-tostring-string.format-and-tryformat)), with .NET's
+output. These results are checked by `samples/Strings.cs`:
 
 | Hole | Result | Why |
 |---|---|---|
@@ -81,15 +82,19 @@ These results are checked by `samples/Strings.cs`:
 | `{7:D3}` | `007` | `Dn`: at least n digits |
 | `{-7:D3}` | `-007` | the sign doesn't count as a digit |
 | `{255:X}` | `FF` | `X`: hex, upper case; `x` for lower case, `Xn` for at least n digits |
+| `{-1:X}` | `FFFFFFFF` | hex of a negative value is its two's complement, at the type's width |
 | `{3.14159:F2}` | `3.14` | `Fn`: n decimals (`F` alone means 2) |
-| `{2.5:F0}` | `3` | rounding is half away from zero |
-| `{1.5f:F3}` | `1.500` | a `float` is formatted as a `double` |
+| `{2.5:F0}` | `2` | 2.5 is exact in binary, a tie: the even digit, as in .NET |
+| `{1234567.891:N2}` | `1,234,567.89` | `Nn`: with thousands separators |
+| `{0.1 + 0.2}` | `0.30000000000000004` | without a format, the shortest text that reads back as the same double |
+| `{0.000001}` | `1E-06` | .NET's scientific form, below 0.0001 and above 10^17 |
 | `{3.5,6:F1}` | `   3.5` | alignment and format together |
-| `{1e20:F2}` | `1.00e+20` | values of 1.8e19 and up switch to exponent form |
-| `{true}` | `true` | not `True` as in .NET |
+| `{true}` | `True` | as in .NET |
 
-Without a format, a `double` prints up to 6 decimals with trailing zeros removed. The format letters
-`d` and `f` work as `D` and `F`. An unknown format falls back to the default instead of failing.
+On a Commodore 64, holes cost space. A program whose holes are all strings and integers without a
+format stays small: lib prints those itself, the same text in less code. The first hole with a format
+(`{x:X4}`), or of type `double` or `decimal`, brings in .NET's formatting, about 12 KB for integers
+and 14 KB more for doubles.
 
 To line up a table, give every column a width. `samples/QuizStep1.cs` pads each number with `{a,2}` so
 the questions line up, and `samples/Strings.cs` prints its table with
@@ -182,22 +187,18 @@ as `"0.00"` or `"#,##0"` isn't supported and ends the program with a `FormatExce
 malformed hole such as `"{0:F2"`. `samples/Formats.cs` checks these results on every target, and
 `scripts/format-check/check-formats.sh` compares the formatting with .NET's over millions of values.
 
-The holes of `Out`, `Str.Format` and `StrBuilder` above don't use these formats yet: they have their
-own, smaller set, and differ from .NET in places (`{2.5:F0}` is `3`, where .NET prints `2`).
-
 ## What's not supported
 
-- **`{-1:X}` isn't the type's width.** Every integer is formatted as a 64-bit `long` or `ulong`, so
-  `{-1:X}` prints 16 hex digits whatever the type of the value.
-- **No holes of other types.** A struct or class in a hole doesn't compile. Format its fields
-  instead, or call its `ToString()`, which allocates.
-- **No culture, and few formats in holes.** Formatting is invariant: `.` as the decimal point, no
-  thousands separators. In `Out`, `Str.Format` and `StrBuilder` holes, integers know `D` and `X` and
-  doubles know `F`; any other format, such as `N`, `E` or `P`, is ignored and the value prints in the
-  default form. `ToString` and `string.Format` know them all (see above).
+- **No holes of other types.** A struct or class in a hole doesn't compile, unless it implements
+  `ISpanFormattable`. Format its fields instead, or call its `ToString()`, which allocates.
+- **No culture, and no custom formats.** Formatting is invariant: `.` as the decimal point, `,` between
+  thousands. A custom format such as `{x:0.00}` ends the program with a `FormatException`; use a
+  standard one such as `{x:F2}`.
 - **`ToString`, `string.Format`, plain `$"..."` and numbers in `+`** (`"n=" + 5`) work, but
   allocate a string each time with calloc, never freed. In a loop, use `Str.Format(arena, $"n={5}")`,
   or `TryFormat` into a span.
+- **A hole longer than 64 characters** (`{x:F100}`) is formatted into a string of its own, which
+  allocates.
 
 ## Watch out for
 

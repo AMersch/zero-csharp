@@ -194,8 +194,8 @@ public struct StrBuilder
 
     /// <summary>
     /// Lets StrBuilder.Append and Str.Format take $"..." and format each hole
-    /// straight into the arena. Supports {x,alignment} and {x:format}; see Fmt for
-    /// the format strings.
+    /// straight into the arena. Supports {x,alignment} and {x:format}, with
+    /// .NET's format strings.
     /// </summary>
     [InterpolatedStringHandler]
     public ref struct InterpolatedHandler
@@ -239,22 +239,56 @@ public struct StrBuilder
             Put(one, alignment);
         }
 
-        public void AppendFormatted(long value, int alignment = 0, string format = null)
+        // Integers without a format: the small path (see Fmt). Overloads for
+        // each type and without optional parameters, as .NET's handler has
+        // them, so the compiler prefers these to the generic ones below.
+        public void AppendFormatted(sbyte value) => Whole(value, 0);
+        public void AppendFormatted(sbyte value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(byte value) => Whole(value, 0);
+        public void AppendFormatted(byte value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(short value) => Whole(value, 0);
+        public void AppendFormatted(short value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(ushort value) => Whole(value, 0);
+        public void AppendFormatted(ushort value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(int value) => Whole(value, 0);
+        public void AppendFormatted(int value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(uint value) => Whole(value, 0);
+        public void AppendFormatted(uint value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(long value) => Whole(value, 0);
+        public void AppendFormatted(long value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(ulong value) => Whole(value, 0);
+        public void AppendFormatted(ulong value, int alignment) => Whole(value, alignment);
+
+        // Any number with a format, {x:X4} or {x,8:F2}, and double, float,
+        // Half and decimal with or without one: .NET's format strings.
+        public void AppendFormatted<T>(T value) where T : ISpanFormattable => Formatted(value, 0, null);
+
+        public void AppendFormatted<T>(T value, int alignment) where T : ISpanFormattable => Formatted(value, alignment, null);
+
+        public void AppendFormatted<T>(T value, string format) where T : ISpanFormattable => Formatted(value, 0, format);
+
+        public void AppendFormatted<T>(T value, int alignment, string format) where T : ISpanFormattable => Formatted(value, alignment, format);
+
+        void Formatted<T>(T value, int alignment, string format) where T : ISpanFormattable
         {
             Span<char> buffer = stackalloc char[Fmt.MaxChars];
-            Put(buffer.Slice(0, Fmt.Long(value, format, buffer)), alignment);
+            int length = Fmt.Format(value, format, buffer);
+            if (length >= 0)
+                Put(buffer.Slice(0, length), alignment);
+            else
+                Put(value.ToString(format, null), alignment); // longer than the buffer: a string, never freed
         }
 
-        public void AppendFormatted(ulong value, int alignment = 0, string format = null)
+        void Whole(long value, int alignment)
         {
             Span<char> buffer = stackalloc char[Fmt.MaxChars];
-            Put(buffer.Slice(0, Fmt.ULong(value, format, buffer)), alignment);
+            Put(buffer.Slice(0, Fmt.Int(value, buffer)), alignment);
         }
 
-        public void AppendFormatted(double value, int alignment = 0, string format = null)
+        void Whole(ulong value, int alignment)
         {
             Span<char> buffer = stackalloc char[Fmt.MaxChars];
-            Put(buffer.Slice(0, Fmt.Double(value, format, buffer)), alignment);
+            Put(buffer.Slice(0, Fmt.UInt(value, buffer)), alignment);
         }
 
         public void AppendFormatted(bool value, int alignment = 0) => Put(Fmt.Bool(value), alignment);

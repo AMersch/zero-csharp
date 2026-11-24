@@ -19,30 +19,30 @@ Normal blocks grow like Fibonacci: 128, 128, 256, 384, 640, 1024
 4096-byte allocation -> dedicated block of 4111
 Next normal block: before 1664, after 1664
 64-byte aligned buffer, address % 64 = 0
-Bad alignment (3) returns null: true
-Negative count returns null: true
+Bad alignment (3) returns null: True
+Negative count returns null: True
 
-After Reset: blocks 1, capacity kept: true
+After Reset: blocks 1, capacity kept: True
 Capacity: 8335 bytes, used: 0
 New point X: 999
 
 Scratch work: used 16016 bytes in 2 blocks
-After Restore: used as before: true, blocks 1, p4 intact: true
+After Restore: used as before: True, blocks 1, p4 intact: True
 Inside the scope: used 416 bytes
-After the scope: used as before: true
+After the scope: used as before: True
 Arena "demo": 16 of 8335 bytes used (peak 16016 of 24350), 1 block
   block 1: 8335 bytes, 8319 free (current)
-Extend newest allocation in place: true
-Extend after another allocation: false
+Extend newest allocation in place: True
+Extend after another allocation: False
 
 Second arena: list of 100 ints, 920 bytes used
-First arena untouched: true
+First arena untouched: True
 Arena destroyed.
 
 Objects in an arena, 1000 rounds: heap growth 0 bytes, arena blocks 1
-Every round ran: true
+Every round ran: True
 Objects freed with their scope, 1000 rounds: heap growth 0 bytes, arena blocks 1
-Only the scopes' objects freed: true
+Only the scopes' objects freed: True
 
-DebugChecks: pointer is live before Reset: true
-After Reset the stale pointer reads 0xDDDDDDDD, IsLive: false
+DebugChecks: pointer is live before Reset: True
+After Reset the stale pointer reads 0xDDDDDDDD, IsLive: False

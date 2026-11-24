@@ -56,6 +56,10 @@ namespace Internal.Runtime
 
         internal bool IsInterface => !IsParameterized && ((_flags & ElementTypeMask) >> ElementTypeShift) == ElementTypeInterface;
 
+        // For an enum, its underlying type's: 4 sbyte, 5 byte, 6 short,
+        // 7 ushort, 8 int, 9 uint, 10 long, 11 ulong (.NET's EETypeElementType).
+        internal uint ElementTypeKind => (_flags & ElementTypeMask) >> ElementTypeShift;
+
         internal bool IsNullable => !IsParameterized && ((_flags & ElementTypeMask) >> ElementTypeShift) == ElementTypeNullable;
 
         // The size of a struct's fields: its boxed size without the object

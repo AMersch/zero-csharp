@@ -7,6 +7,7 @@
 // unmanaged element type.
 
 using System;
+using System.Collections.Generic;
 
 namespace CollectionsSample;
 
@@ -15,6 +16,14 @@ public struct Point
     public int X;
     public int Y;
 }
+
+// docs:descending
+// A comparer as a struct: Sort is compiled for it; Compare is a direct call.
+public struct Descending : IComparer<int>
+{
+    public int Compare(int a, int b) => b.CompareTo(a);
+}
+// docs:end
 
 public static class Program
 {
@@ -122,6 +131,23 @@ public static class Program
         unsorted.Sort(&ByLastDigit);
         Out.Write("By last digit, then value: ");
         PrintList(unsorted);
+        // docs:sort-comparers
+        unsorted.Sort();                  // by int's IComparable<int>
+        Out.Write("Sort():     ");
+        PrintList(unsorted);
+        unsorted.Sort(new Descending());  // by a struct: an IComparer<int>
+        Out.Write("Descending: ");
+        PrintList(unsorted);
+
+        Span<int> span = values;          // spans sort in place too
+        span.Sort();
+        Out.Line($"BinarySearch(19): {span.BinarySearch(19)}, "
+            + $"(20) would go at {~span.BinarySearch(20)}");
+        // docs:end
+        span.Reverse();
+        Out.Line($"Reversed: {span[0]} ... {span[^1]}");
+        span.Sort((a, b) => a % 10 - b % 10);
+        Out.Line($"By a lambda, last digit first: {span[0]}, then {span[1]}");
 
         Out.Line($"Remove(3): {scores.Remove(3)}, again: {scores.Remove(3)}, Count: {scores.Count}");
         long total = 0;
@@ -159,6 +185,13 @@ public static class Program
         names.Set(0, "ALPHA");
         Out.Write("RemoveAt(0), Set(0): ");
         PrintNames(names);
+        var codes = RefList<string>.Create(arena, 0);
+        codes.Add("b");
+        codes.Add("C");
+        codes.Add("a");
+        codes.Sort(); // string's CompareTo: by UTF-16 code unit, so "C" first
+        Out.Write("Sort(): ");
+        PrintNames(codes);
         RefList<string> noNames = default;
         Out.Line($"default(RefList): Count {noNames.Count}, Add returns {noNames.Add("x")}");
         Out.Line();

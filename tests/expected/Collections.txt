@@ -27,6 +27,11 @@ ID for (10, 10): 2
 --- Sort, Remove, foreach ---
 Ascending:  [3, 7, 7, 19, 42, 61, 88]
 By last digit, then value: [61, 42, 3, 7, 7, 88, 19]
+Sort():     [3, 7, 7, 19, 42, 61, 88]
+Descending: [88, 61, 42, 19, 7, 7, 3]
+BinarySearch(19): 3, (20) would go at 4
+Reversed: 88 ... 3
+By a lambda, last digit first: 61, then 42
 Remove(3): true, again: false, Count: 3
 foreach over scores: 3 pairs, values sum to 1349
 After removing the 500 even keys: Count 500, odd keys intact: 500
@@ -34,6 +39,7 @@ After removing the 500 even keys: Count 500, odd keys intact: 500
 --- RefList<string> ---
 Sorted (null first): [null, alpha:5, bravo:5, charlie:7, delta:5] (5 items)
 RemoveAt(0), Set(0): [ALPHA, bravo:5, charlie:7, delta:5] (4 items)
+Sort(): [C, a, b] (3 items)
 default(RefList): Count 0, Add returns false
 
 --- StrDict ---
@@ -54,7 +60,7 @@ Clones unchanged: snapshot[0] = 10, scoresCopy[2] = 250
 Clone capacity fits its 12 items: 12
 Clone of default(List) is not created: true
 
-Arena used: 163896 bytes
+Arena used: 163952 bytes
 StrDict clone, keys copied: the = 3, dog = 1, Count 6
 After destroying the first arena, clones still work: 13 items, last = 1234, scoresCopy[-42] = 999
 Done!

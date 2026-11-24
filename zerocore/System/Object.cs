@@ -75,32 +75,34 @@ namespace System
         }
     }
 
+    // The fields have .NET's names: the compiler looks up "value" to lay out
+    // a boxed Nullable<T>'s method table.
     public struct Nullable<T> where T : struct
     {
-        private readonly bool _hasValue;
-        private T _value;
+        private readonly bool hasValue;
+        private T value;
 
         public Nullable(T value)
         {
-            _hasValue = true;
-            _value = value;
+            hasValue = true;
+            this.value = value;
         }
 
-        public readonly bool HasValue => _hasValue;
+        public readonly bool HasValue => hasValue;
 
         public readonly T Value
         {
             get
             {
-                if (!_hasValue)
+                if (!hasValue)
                     Environment.FailFast("Nullable object must have a value");
-                return _value;
+                return value;
             }
         }
 
-        public readonly T GetValueOrDefault() => _value;
+        public readonly T GetValueOrDefault() => value;
 
-        public readonly T GetValueOrDefault(T defaultValue) => _hasValue ? _value : defaultValue;
+        public readonly T GetValueOrDefault(T defaultValue) => hasValue ? value : defaultValue;
 
         public static implicit operator T?(T value) => new T?(value);
 

@@ -8,5 +8,7 @@ PASS extension members (5 checks)
 PASS unions (3 checks)
 PASS caller info (5 checks)
 PASS indices and ranges (8 checks)
+PASS comparers (9 checks)
+PASS HashCode (5 checks)
 
 All checks passed.

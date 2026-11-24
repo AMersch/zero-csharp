@@ -6,20 +6,23 @@ namespace System
 {
     public struct Void { }
 
-    public struct Boolean : IEquatable<bool>
+    public struct Boolean : IEquatable<bool>, IComparable<bool>
     {
         public bool Equals(bool other) => (bool)this == other;
+        public int CompareTo(bool other) => (bool)this == other ? 0 : (bool)this ? 1 : -1;
         public override bool Equals(object obj) => obj is bool other && (bool)this == other;
         public override int GetHashCode() => (bool)this ? 1 : 0;
         public override string ToString() => (bool)this ? "True" : "False";
     }
 
-    public unsafe struct Char : IEquatable<char>
+    public unsafe struct Char : IEquatable<char>, IComparable<char>
     {
         public const char MaxValue = (char)0xFFFF;
         public const char MinValue = (char)0;
 
         public bool Equals(char other) => (char)this == other;
+
+        public int CompareTo(char other) => (char)this < other ? -1 : (char)this > other ? 1 : 0;
         public override bool Equals(object obj) => obj is char other && (char)this == other;
         public override int GetHashCode() => (char)this;
         public override string ToString()
@@ -29,96 +32,114 @@ namespace System
         }
     }
 
-    public struct SByte : IEquatable<sbyte>
+    public struct SByte : IEquatable<sbyte>, IComparable<sbyte>
     {
         public const sbyte MaxValue = 0x7F;
         public const sbyte MinValue = -0x80;
 
         public bool Equals(sbyte other) => (sbyte)this == other;
+
+        public int CompareTo(sbyte other) => (sbyte)this < other ? -1 : (sbyte)this > other ? 1 : 0;
         public override bool Equals(object obj) => obj is sbyte other && (sbyte)this == other;
         public override int GetHashCode() => unchecked((int)this);
         public override string ToString() => Number.FormatInt64((long)this);
     }
 
-    public struct Byte : IEquatable<byte>
+    public struct Byte : IEquatable<byte>, IComparable<byte>
     {
         public const byte MaxValue = 0xFF;
         public const byte MinValue = 0;
 
         public bool Equals(byte other) => (byte)this == other;
+
+        public int CompareTo(byte other) => (byte)this < other ? -1 : (byte)this > other ? 1 : 0;
         public override bool Equals(object obj) => obj is byte other && (byte)this == other;
         public override int GetHashCode() => unchecked((int)this);
         public override string ToString() => Number.FormatUInt64((ulong)this);
     }
 
-    public struct Int16 : IEquatable<short>
+    public struct Int16 : IEquatable<short>, IComparable<short>
     {
         public const short MaxValue = 0x7FFF;
         public const short MinValue = -0x8000;
 
         public bool Equals(short other) => (short)this == other;
+
+        public int CompareTo(short other) => (short)this < other ? -1 : (short)this > other ? 1 : 0;
         public override bool Equals(object obj) => obj is short other && (short)this == other;
         public override int GetHashCode() => unchecked((int)this);
         public override string ToString() => Number.FormatInt64((long)this);
     }
 
-    public struct UInt16 : IEquatable<ushort>
+    public struct UInt16 : IEquatable<ushort>, IComparable<ushort>
     {
         public const ushort MaxValue = 0xFFFF;
         public const ushort MinValue = 0;
 
         public bool Equals(ushort other) => (ushort)this == other;
+
+        public int CompareTo(ushort other) => (ushort)this < other ? -1 : (ushort)this > other ? 1 : 0;
         public override bool Equals(object obj) => obj is ushort other && (ushort)this == other;
         public override int GetHashCode() => unchecked((int)this);
         public override string ToString() => Number.FormatUInt64((ulong)this);
     }
 
-    public struct Int32 : IEquatable<int>
+    public struct Int32 : IEquatable<int>, IComparable<int>
     {
         public const int MaxValue = 0x7FFFFFFF;
         public const int MinValue = -0x80000000;
 
         public bool Equals(int other) => (int)this == other;
+
+        public int CompareTo(int other) => (int)this < other ? -1 : (int)this > other ? 1 : 0;
         public override bool Equals(object obj) => obj is int other && (int)this == other;
         public override int GetHashCode() => unchecked((int)this);
         public override string ToString() => Number.FormatInt64((long)this);
     }
 
-    public struct UInt32 : IEquatable<uint>
+    public struct UInt32 : IEquatable<uint>, IComparable<uint>
     {
         public const uint MaxValue = 0xFFFFFFFF;
         public const uint MinValue = 0;
 
         public bool Equals(uint other) => (uint)this == other;
+
+        public int CompareTo(uint other) => (uint)this < other ? -1 : (uint)this > other ? 1 : 0;
         public override bool Equals(object obj) => obj is uint other && (uint)this == other;
         public override int GetHashCode() => unchecked((int)this);
         public override string ToString() => Number.FormatUInt64((ulong)this);
     }
 
-    public struct Int64 : IEquatable<long>
+    public struct Int64 : IEquatable<long>, IComparable<long>
     {
         public const long MaxValue = 0x7FFFFFFFFFFFFFFF;
         public const long MinValue = -0x8000000000000000;
 
         public bool Equals(long other) => (long)this == other;
+
+        public int CompareTo(long other) => (long)this < other ? -1 : (long)this > other ? 1 : 0;
         public override bool Equals(object obj) => obj is long other && (long)this == other;
         public override int GetHashCode() => unchecked((int)this ^ (int)((long)this >> 32));
         public override string ToString() => Number.FormatInt64((long)this);
     }
 
-    public struct UInt64 : IEquatable<ulong>
+    public struct UInt64 : IEquatable<ulong>, IComparable<ulong>
     {
         public const ulong MaxValue = 0xFFFFFFFFFFFFFFFF;
         public const ulong MinValue = 0;
 
         public bool Equals(ulong other) => (ulong)this == other;
+
+        public int CompareTo(ulong other) => (ulong)this < other ? -1 : (ulong)this > other ? 1 : 0;
         public override bool Equals(object obj) => obj is ulong other && (ulong)this == other;
         public override int GetHashCode() => unchecked((int)this ^ (int)((ulong)this >> 32));
         public override string ToString() => Number.FormatUInt64((ulong)this);
     }
 
-    public unsafe struct IntPtr
+    public unsafe struct IntPtr : IEquatable<nint>, IComparable<nint>
     {
+        public bool Equals(nint other) => (nint)this == other;
+        public int CompareTo(nint other) => (nint)this < other ? -1 : (nint)this > other ? 1 : 0;
         public static readonly nint Zero;
 
         public static int Size
@@ -131,8 +152,10 @@ namespace System
         public override string ToString() => Number.FormatInt64((nint)this);
     }
 
-    public unsafe struct UIntPtr
+    public unsafe struct UIntPtr : IEquatable<nuint>, IComparable<nuint>
     {
+        public bool Equals(nuint other) => (nuint)this == other;
+        public int CompareTo(nuint other) => (nuint)this < other ? -1 : (nuint)this > other ? 1 : 0;
         public static readonly nuint Zero;
 
         public static int Size
@@ -150,7 +173,7 @@ namespace System
     //
     // Equals here is bit equality, so NaN equals NaN, as .NET's Equals has
     // it (unlike ==); 0.0 and -0.0 are equal, as in .NET.
-    public unsafe struct Single : IEquatable<float>
+    public unsafe struct Single : IEquatable<float>, IComparable<float>
     {
         public const float MinValue = -3.40282347E+38f;
         public const float MaxValue = 3.40282347E+38f;
@@ -175,6 +198,26 @@ namespace System
         private static uint Bits(float f) => *(uint*)&f;
 
         public bool Equals(float other) => (float)this == other || ((float)this != (float)this && other != other);
+
+        // As in .NET: NaN goes before every number and equals itself.
+
+        public int CompareTo(float other)
+
+        {
+
+            float value = (float)this;
+
+            if (value < other) return -1;
+
+            if (value > other) return 1;
+
+            if (value == other) return 0;
+
+            if (value != value) return other != other ? 0 : -1;
+
+            return 1;
+
+        }
         public override bool Equals(object obj) => obj is float other && Equals(other);
         public override int GetHashCode()
         {
@@ -184,7 +227,7 @@ namespace System
         public override string ToString() => Number.FormatDouble((float)this, 7);
     }
 
-    public unsafe struct Double : IEquatable<double>
+    public unsafe struct Double : IEquatable<double>, IComparable<double>
     {
         public const double MinValue = -1.7976931348623157E+308;
         public const double MaxValue = 1.7976931348623157E+308;
@@ -209,6 +252,26 @@ namespace System
         private static ulong Bits(double d) => *(ulong*)&d;
 
         public bool Equals(double other) => (double)this == other || ((double)this != (double)this && other != other);
+
+        // As in .NET: NaN goes before every number and equals itself.
+
+        public int CompareTo(double other)
+
+        {
+
+            double value = (double)this;
+
+            if (value < other) return -1;
+
+            if (value > other) return 1;
+
+            if (value == other) return 0;
+
+            if (value != value) return other != other ? 0 : -1;
+
+            return 1;
+
+        }
         public override bool Equals(object obj) => obj is double other && Equals(other);
         public override int GetHashCode()
         {

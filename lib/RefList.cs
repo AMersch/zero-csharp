@@ -56,42 +56,29 @@ public struct RefList<T> where T : class
     {
         if (compare == null)
             return;
-
-        Span<nint> items;
-        unsafe { items = _items.AsSpan(); } // SAFETY: nothing changes the list during the sort.
-        int count = items.Length;
-        for (int start = count / 2 - 1; start >= 0; start--)
-            SiftDown(items, start, count, compare);
-        for (int end = count - 1; end > 0; end--)
-        {
-            nint largest = items[0];
-            items[0] = items[end];
-            items[end] = largest;
-            SiftDown(items, 0, end, compare);
-        }
+        Sort(new System.Collections.Generic.FunctionPointerComparer<T>(compare));
     }
 
-    // Moves items[root] down until neither child is larger, within [0, count).
-    static void SiftDown(Span<nint> items, int root, int count, delegate*<T, T, int> compare)
+    /// <summary>Sorts the items by T's IComparable&lt;T&gt; (<c>Comparer&lt;T&gt;.Default</c>).</summary>
+    public void Sort() => Sort(new System.Collections.Generic.DefaultComparer<T>());
+
+    /// <summary>Sorts the items by <paramref name="comparer"/>. A struct is fastest.</summary>
+    public void Sort<TComparer>(TComparer comparer) where TComparer : System.Collections.Generic.IComparer<T>
     {
-        while (true)
-        {
-            int child = 2 * root + 1;
-            if (child >= count)
-                return;
-            unsafe
-            {
-                // SAFETY: compare is the caller's function, called with two items of the list.
-                if (child + 1 < count && compare(FromAddress(items[child]), FromAddress(items[child + 1])) < 0)
-                    child++;
-                if (compare(FromAddress(items[root]), FromAddress(items[child])) >= 0)
-                    return;
-            }
-            nint item = items[root];
-            items[root] = items[child];
-            items[child] = item;
-            root = child;
-        }
+        Span<nint> items;
+        unsafe { items = _items.AsSpan(); } // SAFETY: nothing changes the list during the sort.
+        System.Collections.Generic.Sorting.HeapSort(items, new AddressComparer<TComparer>(comparer));
+    }
+
+    // Compares two stored addresses by the objects they point at.
+    struct AddressComparer<TComparer> : System.Collections.Generic.IComparer<nint>
+        where TComparer : System.Collections.Generic.IComparer<T>
+    {
+        TComparer _comparer;
+
+        public AddressComparer(TComparer comparer) => _comparer = comparer;
+
+        public int Compare(nint x, nint y) => _comparer.Compare(FromAddress(x), FromAddress(y));
     }
 
     /// <summary>

@@ -41,6 +41,8 @@ With zerocore, as `build.sh` builds it:
   `ref` receivers in `extension(...)` blocks.
 - **Indices and ranges**: `span[^1]`, `span[1..^1]`, and on strings and arrays, where a range
   makes a copy.
+- **Comparers and hashing**: `IComparable<T>`, `IComparer<T>`, `IEqualityComparer<T>`,
+  `EqualityComparer<T>.Default` and `Comparer<T>.Default` without boxing, and `HashCode`.
 - **Caller information** (`[CallerMemberName]`, `[CallerLineNumber]`, `[CallerFilePath]`,
   `[CallerArgumentExpression]`) and **`Debug.Assert`/`Debug.Fail`** in Debug builds.
 
@@ -217,6 +219,40 @@ for (int i = 1; i < 100; i += 2)
 var oddPrimes = new BitArray(primes).And(odd);
 Check("And", !oddPrimes[2] && oddPrimes[3] && !oddPrimes[9]);
 ```
+
+### Comparers
+
+`EqualityComparer<T>.Default` and `Comparer<T>.Default` work as in .NET, and the compiler picks
+each `T`'s comparer when it builds the program, so they need no reflection. A struct that implements
+`IEquatable<T>` or `IComparable<T>` is compared by a direct call to its own method, without being
+boxed (which in zero mode would allocate memory that is never freed):
+
+<!-- sample: samples/Core.cs equatable-struct -->
+```csharp
+public readonly struct Point : IEquatable<Point>
+{
+    public readonly int X, Y;
+    public Point(int x, int y) { X = x; Y = y; }
+    public bool Equals(Point other) => X == other.X && Y == other.Y;
+    public override int GetHashCode() => HashCode.Combine(X, Y);
+}
+```
+
+<!-- sample: samples/Core.cs default-comparers -->
+```csharp
+// The comparer for Point calls Point.Equals(Point): no boxing.
+var points = EqualityComparer<Point>.Default;
+long before = GC.GetTotalAllocatedBytes();
+bool same = points.Equals(new Point(1, 2), new Point(1, 2));
+bool different = points.Equals(new Point(1, 2), new Point(2, 1));
+Check("IEquatable<T> struct, compared without allocating",
+    same && !different && GC.GetTotalAllocatedBytes() == before);
+```
+
+Every primitive and `string` implements `IComparable<T>`; strings compare by character code (see
+[Coming from .NET](../get-started/coming-from-dotnet.html#what-compiles-but-behaves-differently)).
+Enums compare by their value, and `Nullable<T>` puts null first. Spans, `List<T>` and `RefList<T>`
+sort with these comparers ([Choose a collection](../how-to/choose-a-collection.html#sort-and-iterate)).
 
 ### Caller information and Debug.Assert
 

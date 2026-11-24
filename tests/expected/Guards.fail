@@ -14,3 +14,4 @@ union-no-case|Unhandled exception: InvalidOperationException
 debug-assert|Debug.Assert failed: count > 0: the queue is empty|  in DebugAssert at Guards.cs:
 debug-fail|Debug.Fail: unreachable state|  in DebugFail at Guards.cs:
 range-too-long|Range: out of range for the length
+bad-base64|Convert.FromBase64String: not valid Base64

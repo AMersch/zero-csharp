@@ -15,3 +15,4 @@ Usage: Guards <case>, where the case is one of:
   debug-assert         a Debug.Assert whose condition is false
   debug-fail           a Debug.Fail
   range-too-long       an array range that ends past the array
+  bad-base64           Convert.FromBase64String on text that isn't Base64

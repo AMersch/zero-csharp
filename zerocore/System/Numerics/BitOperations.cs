@@ -152,8 +152,20 @@ namespace System.Numerics
                 return 32;
             if (X86Base.IsSupported)
                 return (int)X86Base.BitScanForward(value);
+#if WASM
+            // LLVM turns the popcount below into its cttz, which it compiles
+            // to tzcnt (rep bsf) for DOS, where the 386 check refuses it.
+            // Halving the search doesn't look like cttz to it.
+            int count = 0;
+            if ((value & 0xFFFF) == 0) { count += 16; value >>= 16; }
+            if ((value & 0xFF) == 0) { count += 8; value >>= 8; }
+            if ((value & 0xF) == 0) { count += 4; value >>= 4; }
+            if ((value & 3) == 0) { count += 2; value >>= 2; }
+            return count + (int)(~value & 1);
+#else
             // The bits below the lowest set bit, counted.
             return PopCount((value & (0 - value)) - 1);
+#endif
         }
 
         [Intrinsic]

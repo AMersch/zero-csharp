@@ -49,6 +49,7 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `Runtime/InterfaceDispatch.cs` | Calling an interface method on an object whose class isn't known at build time, with a small cache per call site |
 | `System/Math.cs` | `Math` and `MathF`: the processor's instruction where there is one, the C math library otherwise |
 | `System/Half.cs` | `Half` (IEEE half precision, as in .NET: conversions round to nearest even, `ToString` gives the shortest text that reads back) and `BitConverter`'s bit conversions for `Half`, `float` and `double` |
+| `System/Buffers/BinaryPrimitives.cs`, `System/Buffers/Base64.cs`, `System/Convert.cs` | `BinaryPrimitives` (numbers in either byte order, `ReverseEndianness`), `Base64` for UTF-8 and `OperationStatus`, and `Convert`'s hex and Base64 methods. `Unsafe.ReadUnaligned`/`WriteUnaligned` (in `Runtime/Unsafe.cs`) do the loads and stores |
 | `System/Numerics/BitOperations.cs` | `BitOperations`: `PopCount`, `LeadingZeroCount`, `TrailingZeroCount`, `Log2`, rotates, `IsPow2`. clz, rbit and cnt on arm64; bsr and bsf on x64, lzcnt, tzcnt and popcnt with `-m x86-64-v3`; portable code on WebAssembly and DOS |
 | `System/Collections/BitArray.cs` | `BitArray`, with .NET's members (`And`, `Or`, `Xor`, `Not`, shifts, `HasAllSet`, `CopyTo`, ...) |
 | `System/Threading.cs` | `Interlocked` (atomic instructions) and `Volatile` |

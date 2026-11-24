@@ -225,6 +225,10 @@ namespace System
 
     public static unsafe class BitConverter
     {
+        // Every target zero mode builds for (x64, arm64, WebAssembly, i386, the
+        // 6502) stores the low byte first; BinaryPrimitives relies on it.
+        public const bool IsLittleEndian = true;
+
         public static ushort HalfToUInt16Bits(Half value) => value._value;
         public static Half UInt16BitsToHalf(ushort value) => new Half(value);
         public static short HalfToInt16Bits(Half value) => (short)value._value;

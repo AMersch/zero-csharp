@@ -36,6 +36,9 @@ To run the program, open it in VICE, the Commodore emulator: `x64sc bin/Release/
 (`brew install vice`, `sudo apt install vice`). Linux distributions ship VICE without the C64's ROMs;
 [the next section](#get-the-tools) says where the repository gets them.
 
+An F# project builds for the C64 the same way, from SDK 0.12.0 on. [Write a program in F#](write-fsharp.html#build-for-the-commodore-64)
+has `Paddles`, the game below, in F#.
+
 The rest of this page is about the repository's scripts, which build and test its samples.
 
 ## Get the tools

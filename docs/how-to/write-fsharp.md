@@ -223,6 +223,68 @@ allocate its data before the loop and use arrays and mutable values inside it. U
 `[<Struct>]` records, unions and tuples, which aren't objects. [Memory](../concepts/memory.html)
 explains what zero mode does with memory, and the arenas the library gives C#.
 
+## Build for the Commodore 64
+
+An F# project builds for the C64 as a C# one does, with `-p:ZeroTarget=c64`
+([Build for the Commodore 64](build-for-c64.html)). `samples/Paddles.fs` is the paddle-and-ball game
+from that guide, in F#: 38 KB, 2 KB more than the C# one. Its test match ends the same way, to the
+frame, and allocates nothing while it plays. Struct unions do what C# has to write out by hand:
+
+<!-- sample: samples/Paddles.fs unions -->
+```fsharp no-check reason="part of samples/Paddles.fs: the SDK tests build it for the C64 and play its test match"
+// Who moves a paddle, and how fast.
+[<Struct>]
+type Controller =
+    | Human of humanSpeed: int
+    | Computer of computerSpeed: int
+
+// What a frame of play led to. A struct union keeps its case and fields in
+// the value itself, so the 50 outcomes a second are never allocated (zero
+// mode never frees memory). C# had to write this one out by hand.
+[<Struct>]
+type Outcome =
+    | InPlay
+    | HitWall
+    | HitPaddle of paddle: Side
+    | Scored of by: Side
+```
+
+Active patterns say where the ball is. Marked `[<return: Struct>]`, a partial active pattern returns
+a `voption` instead of an `option`, an object, so a match on it allocates nothing:
+
+<!-- sample: samples/Paddles.fs step -->
+```fsharp no-check reason="part of samples/Paddles.fs: the SDK tests build it for the C64 and play its test match"
+let step left right (m: Match) =
+    m.LeftTop <- move m.LeftTop left Left m
+    m.RightTop <- move m.RightTop right Right m
+    m.Ball <- { m.Ball with X = m.Ball.X + m.Ball.Dx; Y = m.Ball.Y + m.Ball.Dy }
+
+    let wall =
+        match m.Ball with
+        | OffWall ->
+            let ball = m.Ball
+            m.Ball <- { ball with Y = Court.clampBall ball.Y; Dy = -ball.Dy }
+            HitWall
+        | _ -> InPlay
+    let hit =
+        match m with
+        | AtPaddle Left -> bounce Left m
+        | AtPaddle Right -> bounce Right m
+        | _ -> wall
+    match m.Ball with
+    | PointFor side -> Scored side
+    | _ -> hit
+```
+
+The C64 has about 50 KB for a program and its memory, and some F# costs more there than it looks:
+
+- **A lambda passed to a library function**, such as `String.iteri (fun i c -> ...)`, is a closure
+  class. On the title screen alone that came to 2 KB; a `for` loop costs nothing extra.
+- **`string` and `+` on numbers, and `printf`**, bring in number formatting. The game writes its
+  report with `Out.Write`, piece by piece.
+- **A function defined inside another one** that uses its values is a closure, made when the outer
+  one runs. The game's frame loop is a function of its own, so that playing allocates nothing.
+
 ## Use libraries
 
 An F# program can reference zero libraries written in C# or F#, with a `<ProjectReference>` or a

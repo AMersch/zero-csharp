@@ -225,3 +225,32 @@ match Map.tryFind "pear" byName with
 
 // ToString of the core types (FSharp.Core writes these itself)
 printfn "%s | %s | %s | %s" (string (Some 1)) (string [ 1; 2; 3; 4 ]) (string (ValueSome 2)) (string [ "a"; "b" ])
+
+// Option and ValueOption
+let half x = if x % 2 = 0 then Some(x / 2) else None
+printfn "%d %d %b" (Option.defaultValue 0 (half 8)) (half 7 |> Option.defaultWith (fun () -> -1)) (Option.isSome (half 2))
+printfn "%d" (half 8 |> Option.map (fun h -> h * 10) |> Option.bind half |> Option.toList |> List.length)
+printfn "%d %d" (Option.count (half 3)) (Option.fold (+) 1 (half 4))
+printfn "%b %b" (Option.exists (fun h -> h > 1) (half 6)) (Option.contains 3 (half 6))
+Option.iter (fun h -> printfn "iter %d" h) (half 10)
+let vhalf x = if x % 2 = 0 then ValueSome(x / 2) else ValueNone
+printfn "%d %d" (ValueOption.defaultValue 0 (vhalf 8)) (vhalf 9 |> ValueOption.map (fun h -> h + 1) |> ValueOption.defaultValue -1)
+printfn "%b %d" (vhalf 4 |> ValueOption.toOption |> Option.isSome) (Option.toValueOption (Some 5) |> ValueOption.get)
+
+// Active patterns: total, partial (option and voption), multi-case
+let (|Doubled|) x = x * 2
+let (|Even|_|) x = if x % 2 = 0 then Some(x / 2) else None
+[<return: Struct>]
+let (|Small|_|) x = if x < 10 then ValueSome x else ValueNone
+let (|Neg|NonNeg|) x = if x < 0 then Neg else NonNeg
+let (|Low|Mid|High|) x = if x < 10 then Low elif x < 100 then Mid else High
+let (|A|B|C|D|E|F|G|) x = match x % 7 with 0 -> A | 1 -> B | 2 -> C | 3 -> D | 4 -> E | 5 -> F | _ -> G
+
+for x in [ -4; 7; 42; 300 ] do
+    let (Doubled d) = x
+    let even = match x with Even h -> sprintf "half %d" h | _ -> "odd"
+    let small = match x with Small s -> sprintf "small %d" s | _ -> "big"
+    let sign = match x with Neg -> "negative" | NonNeg -> "not negative"
+    let size = match x with Low -> "low" | Mid -> "mid" | High -> "high"
+    let seventh = match x with A -> "A" | B -> "B" | C -> "C" | D -> "D" | E -> "E" | F -> "F" | G -> "G"
+    printfn "%d: %d, %s, %s, %s, %s, %s" x d even small sign size seventh

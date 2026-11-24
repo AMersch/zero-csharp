@@ -147,3 +147,14 @@ a_c_e_
 apple, pear, plum
 pears: 4
 Some(1) | [1; 2; 3; ... ] | 2 | [a; b]
+4 -1 true
+1
+0 3
+true true
+iter 5
+4 -1
+true 5
+-4: -8, half -2, small -4, negative, low, G
+7: 14, odd, small 7, not negative, low, A
+42: 84, half 21, big, not negative, mid, A
+300: 600, half 150, big, not negative, high, G

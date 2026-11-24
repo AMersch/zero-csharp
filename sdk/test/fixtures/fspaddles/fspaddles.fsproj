@@ -1,0 +1,10 @@
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <!-- samples/Paddles.fs, the C64 game in F#; the test copies this project
+       to sdk/test/work/fspaddles. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../../samples/Paddles.fs" />
+  </ItemGroup>
+</Project>

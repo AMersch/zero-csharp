@@ -51,7 +51,7 @@
   <Target Name="ZeroNativeBuild" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="IncrementalClean"
           Condition="'$(ZeroBuildsNative)' == 'true' and '$(ZeroTarget)' != 'c64'"
           DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand"
-          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);$(ZeroNativeArgsFile)"
+          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);@(ZeroResolvedLinkLibrary);$(ZeroNativeArgsFile)"
           Outputs="$(ZeroNativeOutput);$(ZeroDebugObject)">
     <!-- NuGet doesn't keep the executable bit; a packages folder that's
          read-only (shared or mounted) must already have it. -->
@@ -152,7 +152,122 @@
            Text="ZeroOptimizeFor '$(ZeroOptimizeFor)' isn't supported. Use one of: None, Speed, Size." />
   </Target>
 
-  <Target Name="ZeroNativeCommand" DependsOnTargets="ZeroNativeFiles">
+  <!--
+    C libraries the program links with (ZeroLinkLibrary, see Sdk.props): the
+    project's own, its referenced projects', and its packages' (dotnet pack
+    writes a library's names into the props file it packs). A name is found as
+    a file here; a path is used as it is.
+  -->
+  <!-- This project's own: names as they are, paths (and RuntimeFile) made full,
+       relative to this project. A path is anything with a slash, or a file
+       next to the project. -->
+  <Target Name="_ZeroLinkOwnItems">
+    <ItemGroup>
+      <_ZeroLinkOwn Include="@(ZeroLinkLibrary->'%(FullPath)')"
+                    Condition="$([System.String]::Copy('%(Identity)').Contains('/')) or $([System.String]::Copy('%(Identity)').Contains('\')) or Exists('%(FullPath)')" />
+      <_ZeroLinkOwn Include="@(ZeroLinkLibrary)"
+                    Condition="!$([System.String]::Copy('%(Identity)').Contains('/')) and !$([System.String]::Copy('%(Identity)').Contains('\')) and !Exists('%(FullPath)')" />
+      <_ZeroLinkOwn Condition="'%(_ZeroLinkOwn.RuntimeFile)' != ''">
+        <RuntimeFile>$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '%(_ZeroLinkOwn.RuntimeFile)'))))</RuntimeFile>
+      </_ZeroLinkOwn>
+    </ItemGroup>
+  </Target>
+
+  <!-- For the projects that reference this one, and for this project itself:
+       its own and, through them, its references' references. -->
+  <Target Name="ZeroLinkLibraryItems" DependsOnTargets="_ZeroLinkOwnItems" Returns="@(_ZeroLinkLibraryOut)">
+    <ItemGroup>
+      <_ZeroLinkRef Include="@(ProjectReference)" Condition="'%(ProjectReference.ReferenceOutputAssembly)' != 'false'" />
+    </ItemGroup>
+    <MSBuild Projects="@(_ZeroLinkRef)" Targets="ZeroLinkLibraryItems" SkipNonexistentTargets="true" SkipNonexistentProjects="true"
+             Condition="'@(_ZeroLinkRef)' != ''">
+      <Output TaskParameter="TargetOutputs" ItemName="_ZeroLinkLibraryOut" />
+    </MSBuild>
+    <ItemGroup>
+      <_ZeroLinkLibraryOut Include="@(_ZeroLinkOwn)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Where a name is looked for: ZeroLibraryPath, then, building for the
+       machine's own system, where its package manager puts libraries. -->
+  <Target Name="_ZeroLinkLibrarySearch" DependsOnTargets="ZeroLinkLibraryItems">
+    <PropertyGroup>
+      <_ZeroLinkTriplet Condition="'$(ZeroTarget)' == 'linux-x64'">x86_64-linux-gnu</_ZeroLinkTriplet>
+      <_ZeroLinkTriplet Condition="'$(ZeroTarget)' == 'linux-arm64'">aarch64-linux-gnu</_ZeroLinkTriplet>
+      <_ZeroLinkSearch>$(ZeroLibraryPath)</_ZeroLinkSearch>
+      <_ZeroLinkSearch Condition="'$(_ZeroLinkTriplet)' != '' and $([MSBuild]::IsOSPlatform('Linux'))">$(_ZeroLinkSearch);/usr/local/lib;/usr/lib/$(_ZeroLinkTriplet);/usr/lib64;/usr/lib</_ZeroLinkSearch>
+      <_ZeroLinkSearch Condition="'$(ZeroTarget)' == 'osx-arm64' and $([MSBuild]::IsOSPlatform('OSX'))">$(_ZeroLinkSearch);/opt/homebrew/lib;/usr/local/lib</_ZeroLinkSearch>
+    </PropertyGroup>
+    <!-- Items for one target (ZeroTarget metadata) apply only to it; there, a
+         path that binds a name's imports (DllImport) takes the name's place:
+         a package's own Windows files, say, where Linux and macOS use the
+         system's library. -->
+    <ItemGroup>
+      <_ZeroLinkForTarget Include="@(_ZeroLinkLibraryOut)"
+                          Condition="'%(_ZeroLinkLibraryOut.ZeroTarget)' == '' or '%(_ZeroLinkLibraryOut.ZeroTarget)' == '$(ZeroTarget)'" />
+      <_ZeroLinkPath Include="@(_ZeroLinkForTarget)" KeepDuplicates="false"
+                     Condition="$([System.String]::Copy('%(Identity)').Contains('/')) or $([System.String]::Copy('%(Identity)').Contains('\'))" />
+      <_ZeroLinkName Include="@(_ZeroLinkForTarget)" Exclude="@(_ZeroLinkPath);@(_ZeroLinkPath->'%(DllImport)')" KeepDuplicates="false" />
+      <_ZeroLinkDir Include="$(_ZeroLinkSearch)" />
+      <_ZeroLinkDir>
+        <Slashed>$([MSBuild]::EnsureTrailingSlash('%(FullPath)'))</Slashed>
+      </_ZeroLinkDir>
+    </ItemGroup>
+  </Target>
+
+  <!-- Once per name: the first file found, in search order. -->
+  <Target Name="_ZeroFindLinkLibrary" DependsOnTargets="_ZeroLinkLibrarySearch" Outputs="%(_ZeroLinkName.Identity)"
+          Condition="'@(_ZeroLinkName)' != ''">
+    <PropertyGroup>
+      <_ZeroLinkNow>%(_ZeroLinkName.Identity)</_ZeroLinkNow>
+      <_ZeroLinkFiles>lib$(_ZeroLinkNow).so</_ZeroLinkFiles>
+      <_ZeroLinkFiles Condition="'$(ZeroTarget)' == 'osx-arm64'">lib$(_ZeroLinkNow).tbd or lib$(_ZeroLinkNow).dylib</_ZeroLinkFiles>
+      <_ZeroLinkFiles Condition="'$(ZeroTarget)' == 'win-x64' or '$(ZeroTarget)' == 'uefi-x64' or '$(ZeroTarget)' == 'uefi-arm64'">$(_ZeroLinkNow).lib</_ZeroLinkFiles>
+    </PropertyGroup>
+    <ItemGroup>
+      <_ZeroLinkCandidate Remove="@(_ZeroLinkCandidate)" />
+      <_ZeroLinkCandidate Include="@(_ZeroLinkDir->'%(Slashed)$(_ZeroLinkFiles)')" Condition="'$(ZeroTarget)' != 'osx-arm64'" />
+      <_ZeroLinkCandidate Include="@(_ZeroLinkDir->'%(Slashed)lib$(_ZeroLinkNow).tbd')" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <_ZeroLinkCandidate Include="@(_ZeroLinkDir->'%(Slashed)lib$(_ZeroLinkNow).dylib')" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <_ZeroLinkFound Remove="@(_ZeroLinkFound)" />
+      <_ZeroLinkFound Include="@(_ZeroLinkCandidate)" Condition="Exists('%(Identity)')" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_ZeroLinkFirst>@(_ZeroLinkFound)</_ZeroLinkFirst>
+      <_ZeroLinkFirst Condition="'$(_ZeroLinkFirst)' != ''">$(_ZeroLinkFirst.Split(';')[0])</_ZeroLinkFirst>
+      <_ZeroLinkWhere>@(_ZeroLinkDir->'%(FullPath)', ', ')</_ZeroLinkWhere>
+    </PropertyGroup>
+    <Error Code="ZERO010" Condition="'$(_ZeroLinkFirst)' == '' and '$(_ZeroLinkWhere)' != ''"
+           Text="The C library '$(_ZeroLinkNow)' (ZeroLinkLibrary) wasn't found for $(ZeroTarget): looked for $(_ZeroLinkFiles) in $(_ZeroLinkWhere). Install it, add its folder to ZeroLibraryPath, or give the file's path." />
+    <Error Code="ZERO010" Condition="'$(_ZeroLinkFirst)' == '' and '$(_ZeroLinkWhere)' == ''"
+           Text="The C library '$(_ZeroLinkNow)' (ZeroLinkLibrary) needs a folder for $(ZeroTarget): building for another system, only ZeroLibraryPath is searched. Set it to a folder with $(_ZeroLinkFiles) for $(ZeroTarget), or give the file's path." />
+    <ItemGroup>
+      <ZeroResolvedLinkLibrary Include="$(_ZeroLinkFirst)" DllImport="$(_ZeroLinkNow)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="ZeroResolveLinkLibraries" DependsOnTargets="_ZeroLinkLibrarySearch;_ZeroFindLinkLibrary">
+    <Error Code="ZERO010" Condition="'@(_ZeroLinkPath)' != '' and !Exists('%(_ZeroLinkPath.FullPath)')"
+           Text="The C library '%(_ZeroLinkPath.Identity)' (ZeroLinkLibrary) doesn't exist." />
+    <ItemGroup>
+      <ZeroResolvedLinkLibrary Include="@(_ZeroLinkPath)" />
+      <!-- What the program loads at run time (RuntimeFile: a Windows DLL next
+           to its import library), copied next to the program. -->
+      <ZeroRuntimeFile Include="@(ZeroResolvedLinkLibrary->'%(RuntimeFile)')" Condition="'%(ZeroResolvedLinkLibrary.RuntimeFile)' != ''" KeepDuplicates="false" />
+    </ItemGroup>
+    <Error Code="ZERO010" Condition="'@(ZeroRuntimeFile)' != '' and !Exists('%(ZeroRuntimeFile.FullPath)')"
+           Text="The run-time file '%(ZeroRuntimeFile.Identity)' (RuntimeFile of a ZeroLinkLibrary) doesn't exist." />
+  </Target>
+
+  <Target Name="ZeroCopyRuntimeFiles" AfterTargets="ZeroNativeBuild" BeforeTargets="IncrementalClean"
+          Condition="'$(ZeroBuildsNative)' == 'true'" DependsOnTargets="ZeroNativeCommand">
+    <Copy SourceFiles="@(ZeroRuntimeFile)" DestinationFolder="$([System.IO.Path]::GetDirectoryName('$(ZeroNativeOutput)'))"
+          SkipUnchangedFiles="true" Condition="'@(ZeroRuntimeFile)' != ''">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites" />
+    </Copy>
+  </Target>
+
+  <Target Name="ZeroNativeCommand" DependsOnTargets="ZeroNativeFiles;ZeroResolveLinkLibraries">
     <PropertyGroup>
       <!-- NuGetPackageRoot is the folder as configured, maybe without a trailing
            slash; package folders are lower-case. -->
@@ -203,8 +318,10 @@
       <_ZeroArg Include="$(DefineConstants.Split(';'))" Condition="'$(DefineConstants)' != ''" >
         <Prefix>-d </Prefix>
       </_ZeroArg>
-      <_ZeroDllImport Include="libc;libm.so.6;$(ZeroDllImports)" KeepDuplicates="false" />
+      <_ZeroDllImport Include="libc;libm.so.6;$(ZeroDllImports);@(ZeroResolvedLinkLibrary->'%(DllImport)')" KeepDuplicates="false" />
       <_ZeroArg Include="@(_ZeroDllImport->'-i %(Identity)', ' ')" Condition="'$(ZeroTarget)' != 'c64'" />
+      <!-- C libraries (ZeroLinkLibrary), where bflat links; macOS's go to ld64.lld below. -->
+      <_ZeroArg Include="@(ZeroResolvedLinkLibrary->'--ldflags &quot;%(FullPath)&quot;', ' ')" Condition="'$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'c64' and '@(ZeroResolvedLinkLibrary)' != ''" />
       <!-- bflat's default operating system is the host's: named, so a Windows
            host builds Linux programs too. -->
       <_ZeroArg Include="--os linux" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'" />
@@ -257,8 +374,9 @@
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)zerocore.o').Replace('\', '/'))&quot;" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)libSystem.tbd').Replace('\', '/'))&quot;" />
       <!-- A project's own .tbd or .dylib (ZeroNativeInput), for libraries
-           beyond libSystem. -->
+           beyond libSystem, and its C libraries (ZeroLinkLibrary). -->
       <_ZeroMacLibrary Include="@(ZeroNativeInput->WithMetadataValue('Extension', '.tbd'));@(ZeroNativeInput->WithMetadataValue('Extension', '.dylib'))" />
+      <_ZeroMacLibrary Include="@(ZeroResolvedLinkLibrary)" />
       <_ZeroMacLibrary Remove="$(ZeroNativeDir)libSystem.tbd" />
       <_ZeroMacLibrary>
         <Forward>$([System.String]::Copy('%(FullPath)').Replace('\', '/'))</Forward>
@@ -332,18 +450,53 @@
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.RelativePath)' == '$(TargetFileName)' or '%(ResolvedFileToPublish.RelativePath)' == '$(TargetName).pdb'" />
       <ResolvedFileToPublish Include="$(ZeroNativeOutput)" RelativePath="$([System.IO.Path]::GetFileName('$(ZeroNativeOutput)'))" CopyToPublishDirectory="PreserveNewest" />
+      <ResolvedFileToPublish Include="@(ZeroRuntimeFile)" RelativePath="%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
   </Target>
 
   <!-- dotnet pack of a library: the dll in lib/<framework>/, and
        build/<id>.props (buildTransitive/ too) naming the SDK version that
        built it, which ZeroCheckLibraryVersions reads in the programs using it. -->
-  <Target Name="ZeroPackDll" BeforeTargets="_GetPackageFiles" Condition="'$(OutputType)' == 'Library' and '$(ZeroNativeLibrary)' != 'true'">
+  <Target Name="ZeroPackDll" BeforeTargets="_GetPackageFiles" DependsOnTargets="_ZeroLinkOwnItems" Condition="'$(OutputType)' == 'Library' and '$(ZeroNativeLibrary)' != 'true'">
+    <!-- The library's C libraries (ZeroLinkLibrary) go in the props too: names
+         as they are; files inside the project packed in native/<target>/
+         (native/any/ without ZeroTarget), with their RuntimeFile, and named
+         from where the props file lands. Files from a package this one
+         depends on come with that package; any other file is this machine's,
+         and isn't packed (ZERO011). -->
+    <ItemGroup>
+      <_ZeroPackLinkName Include="@(_ZeroLinkOwn)" KeepDuplicates="false"
+                         Condition="!$([System.String]::Copy('%(Identity)').Contains('/')) and !$([System.String]::Copy('%(Identity)').Contains('\'))" />
+      <_ZeroPackLinkFile Include="@(_ZeroLinkOwn)" Exclude="@(_ZeroPackLinkName)"
+                         Condition="$([System.String]::Copy('%(FullPath)').StartsWith('$([MSBuild]::EnsureTrailingSlash('$(MSBuildProjectDirectory)'))'))" />
+      <_ZeroPackLinkOutside Include="@(_ZeroLinkOwn)" Exclude="@(_ZeroPackLinkName);@(_ZeroPackLinkFile)"
+                            Condition="'$(NuGetPackageRoot)' == '' or !$([System.String]::Copy('%(FullPath)').StartsWith('$([MSBuild]::EnsureTrailingSlash('$(NuGetPackageRoot)'))'))" />
+      <_ZeroPackLinkFile>
+        <Folder>native/%(_ZeroPackLinkFile.ZeroTarget)/</Folder>
+      </_ZeroPackLinkFile>
+      <_ZeroPackLinkFile Condition="'%(_ZeroPackLinkFile.ZeroTarget)' == ''">
+        <Folder>native/any/</Folder>
+      </_ZeroPackLinkFile>
+      <_ZeroPackLinkFile>
+        <Packed>%24(MSBuildThisFileDirectory)../%(_ZeroPackLinkFile.Folder)%(_ZeroPackLinkFile.Filename)%(_ZeroPackLinkFile.Extension)</Packed>
+      </_ZeroPackLinkFile>
+      <_ZeroPackLinkFile Condition="'%(_ZeroPackLinkFile.RuntimeFile)' != ''">
+        <PackedRuntime>%24(MSBuildThisFileDirectory)../%(_ZeroPackLinkFile.Folder)$([System.IO.Path]::GetFileName('%(_ZeroPackLinkFile.RuntimeFile)'))</PackedRuntime>
+      </_ZeroPackLinkFile>
+      <None Include="@(_ZeroPackLinkFile)" Pack="true" PackagePath="%(_ZeroPackLinkFile.Folder)" />
+      <None Include="@(_ZeroPackLinkFile->'%(RuntimeFile)')" Pack="true" PackagePath="%(_ZeroPackLinkFile.Folder)" Condition="'%(_ZeroPackLinkFile.RuntimeFile)' != ''" />
+    </ItemGroup>
+    <Error Code="ZERO011" Condition="'@(_ZeroPackLinkFile)' != '' and '%(_ZeroPackLinkFile.RuntimeFile)' != '' and !$([System.String]::Copy('%(_ZeroPackLinkFile.RuntimeFile)').StartsWith('$([MSBuild]::EnsureTrailingSlash('$(MSBuildProjectDirectory)'))'))"
+           Text="RuntimeFile '%(_ZeroPackLinkFile.RuntimeFile)' of ZeroLinkLibrary '%(_ZeroPackLinkFile.Identity)' is outside the project, so it can't be packed with it: put it in the project's folder." />
+    <Warning Code="ZERO011" Condition="'@(_ZeroPackLinkOutside)' != ''"
+             Text="ZeroLinkLibrary '%(_ZeroPackLinkOutside.Identity)' is outside the project, so it isn't packed: programs using the package won't link with it. Use the library's name, or put the file in the project's folder to pack it." />
     <PropertyGroup>
       <_ZeroBuiltWithProps>$(IntermediateOutputPath)zero-pack/$(PackageId).props</_ZeroBuiltWithProps>
+      <_ZeroPackLinkItems>@(_ZeroPackLinkName->'&lt;ZeroLinkLibrary Include=&quot;%(Identity)&quot; ZeroTarget=&quot;%(ZeroTarget)&quot; /&gt;', '')</_ZeroPackLinkItems>
+      <_ZeroPackLinkItems>$(_ZeroPackLinkItems)@(_ZeroPackLinkFile->'&lt;ZeroLinkLibrary Include=&quot;%(Packed)&quot; DllImport=&quot;%(DllImport)&quot; ZeroTarget=&quot;%(ZeroTarget)&quot; RuntimeFile=&quot;%(PackedRuntime)&quot; /&gt;', '')</_ZeroPackLinkItems>
     </PropertyGroup>
     <WriteLinesToFile File="$(_ZeroBuiltWithProps)" Overwrite="true" WriteOnlyWhenDifferent="true"
-                      Lines="&lt;Project&gt;&lt;ItemGroup&gt;&lt;ZeroLibraryBuiltWith Include=&quot;$(PackageId)&quot; SdkVersion=&quot;$(ZeroSdkVersion)&quot; /&gt;&lt;/ItemGroup&gt;&lt;/Project&gt;" />
+                      Lines="&lt;Project&gt;&lt;ItemGroup&gt;&lt;ZeroLibraryBuiltWith Include=&quot;$(PackageId)&quot; SdkVersion=&quot;$(ZeroSdkVersion)&quot; /&gt;$(_ZeroPackLinkItems)&lt;/ItemGroup&gt;&lt;/Project&gt;" />
     <ItemGroup>
       <None Include="$(TargetPath)" Pack="true" PackagePath="lib/$(ZeroSdkTfm)/" />
       <None Include="$(_ZeroBuiltWithProps)" Pack="true" PackagePath="build/;buildTransitive/" />

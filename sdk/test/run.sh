@@ -144,6 +144,32 @@ EOF
 }
 
 # run_in <dir> <log name> dotnet args...: runs dotnet in <dir>, output to a log.
+# same_output <output> <expected> <report>: whether the files hold the same
+# lines (ignoring \r); if not, the report names the first line that differs.
+# Plain bash (3.2 too): minimal containers (Fedora's) have no diff.
+same_output() {
+    local got want n=0 got_more want_more
+    exec 5< <(tr -d '\r' < "$1") 6< <(tr -d '\r' < "$2")
+    while :; do
+        n=$((n + 1))
+        got= want= got_more=1 want_more=1
+        IFS= read -r got <&5 || [ -n "$got" ] || got_more=0
+        IFS= read -r want <&6 || [ -n "$want" ] || want_more=0
+        if [ $got_more = 0 ] && [ $want_more = 0 ]; then
+            exec 5<&- 6<&-
+            : > "$3"
+            return 0
+        fi
+        [ $got_more = 1 ] || got="<missing>"
+        [ $want_more = 1 ] || want="<missing>"
+        if [ "$got" != "$want" ]; then
+            exec 5<&- 6<&-
+            printf 'line %d: got "%s", want "%s"\n' "$n" "$got" "$want" > "$3"
+            return 1
+        fi
+    done
+}
+
 run_in() {
     local dir=$1
     LOG=$WORK/$2.log
@@ -1435,7 +1461,7 @@ test_fsharp_printf() {
     if ! run_in "$dir" fsprintf build; then fail "$name" "dotnet build failed"; return; fi
     exe=$(exe "$dir/bin/Debug/$TFM/fsprintf")
     "$exe" > "$WORK/fsprintf.out" 2> "$WORK/fsprintf.err"
-    if ! diff <(tr -d '\r' < "$WORK/fsprintf.out") <(tr -d '\r' < "$dir/expected.txt") > "$WORK/fsprintf.diff"; then
+    if ! same_output "$WORK/fsprintf.out" "$dir/expected.txt" "$WORK/fsprintf.diff"; then
         fail "$name" "printed: $(head -c 300 "$WORK/fsprintf.diff")"; return
     fi
     if [ "$(tr -d '\r' < "$WORK/fsprintf.err")" != "to standard error 1" ]; then fail "$name" "standard error: $(cat "$WORK/fsprintf.err")"; return; fi
@@ -1454,7 +1480,7 @@ test_fsharp_collections() {
         if ! run_in "$dir" fscollections build -p:Optimize=$opt; then fail "$name" "dotnet build failed (Optimize=$opt)"; return; fi
         exe=$(exe "$dir/bin/Debug/$TFM/fscollections")
         "$exe" > "$WORK/fscollections.out" 2>&1
-        if ! diff <(tr -d '\r' < "$WORK/fscollections.out") <(tr -d '\r' < "$dir/expected.txt") > "$WORK/fscollections.diff"; then
+        if ! same_output "$WORK/fscollections.out" "$dir/expected.txt" "$WORK/fscollections.diff"; then
             fail "$name" "printed (Optimize=$opt): $(head -c 300 "$WORK/fscollections.diff")"; return
         fi
     done
@@ -1469,7 +1495,7 @@ test_fsharp_decimal() {
     if ! run_in "$dir" fsdecimal build; then fail "$name" "dotnet build failed"; return; fi
     exe=$(exe "$dir/bin/Debug/$TFM/fsdecimal")
     "$exe" > "$WORK/fsdecimal.out" 2>&1
-    if ! diff <(tr -d '\r' < "$WORK/fsdecimal.out") <(tr -d '\r' < "$dir/expected.txt") > "$WORK/fsdecimal.diff"; then
+    if ! same_output "$WORK/fsdecimal.out" "$dir/expected.txt" "$WORK/fsdecimal.diff"; then
         fail "$name" "printed: $(head -c 300 "$WORK/fsdecimal.diff")"; return
     fi
     pass "$name"

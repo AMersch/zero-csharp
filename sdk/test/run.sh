@@ -1635,7 +1635,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template sdl_template
     framework_from_property newer_sdk_library
     mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
-    trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd
+    trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd mac_target_newer_dylib
     tutorial_steps simd_instruction_set static_constructor_threads
     native_library_dotnet native_library_exports native_library_two native_library_errors
     native_library_not_packable native_library_publish native_library_incremental native_library_clean
@@ -1825,6 +1825,56 @@ test_mac_target_path_with_spaces() {
     dir=$(fixture native "mac space/Zoë Ann")
     if ! run_in "$dir" macspaces build -p:ZeroTarget=osx-arm64; then fail "$name" "dotnet build failed"; return; fi
     if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/native"; then fail "$name" "no arm64 Mach-O program"; return; fi
+    pass "$name"
+}
+
+# A library built for a newer macOS than programs target (Homebrew's, built
+# for the Mac it's on): lld's "has version 27.0, which is newer than target
+# minimum of 12.0" isn't a warning, only a message in a -v:n log. The library
+# is the nativelib fixture, linked again by the package's lld for macOS 27.
+test_mac_target_newer_dylib() {
+    local name="mac target newer dylib" lib app args lld newer out
+    can_build "$name" || return
+    lib=$(fixture nativelib macnewer-lib)
+    if ! run_in "$lib" macnewer-lib build -p:ZeroTarget=osx-arm64; then fail "$name" "the library didn't build"; return; fi
+    lld=${NUGET_PACKAGES:-$HOME/.nuget/packages}/zerocsharp.bflat.$HOST_RID/$(echo "$VERSION" | tr 'A-Z' 'a-z')/tools/bflat/bin/lld
+    [ "$HOST_OS" = Windows ] && lld=$lld.exe
+    newer=$(native_path "$WORK/macnewer/libnewer.dylib" | tr '\\' '/')
+    mkdir -p "$WORK/macnewer"
+    args=$(ls "$lib"/obj/Debug/"$TFM"/zero-link.osx-arm64.args)
+    sed -e 's/-platform_version macos 12.0 12.0/-platform_version macos 27.0 27.0/' \
+        -e 's|-install_name "@rpath/nativelib.dylib"|-install_name "@rpath/libnewer.dylib"|' \
+        -e 's|-o "[^"]*"|-o "'"$newer"'"|' "$args" > "$WORK/macnewer/link.args"
+    if ! "$lld" -flavor darwin @"$(native_path "$WORK/macnewer/link.args")" > "$WORK/macnewer-lld.log" 2>&1; then fail "$name" "relinking for macOS 27 failed"; return; fi
+    app=$WORK/macnewer/App
+    mkdir -p "$app"
+    cp "$(fixture hello macnewer-config)/nuget.config" "$app/"
+    printf '%s\n' "<Project Sdk=\"ZeroCSharp.Sdk/$VERSION\">" '  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>' \
+        "  <ItemGroup><ZeroLinkLibrary Include=\"$newer\" DllImport=\"newer\" /></ItemGroup>" '</Project>' > "$app/App.csproj"
+    cat > "$app/Program.cs" <<'CS'
+using System.Runtime.InteropServices;
+
+public static class Program
+{
+    [DllImport("newer", EntryPoint = "nl_add")] static safe extern int Add(int a, int b);
+
+    public static int Main()
+    {
+        Out.Line($"add {Add(2, 3)}");
+        Out.Flush();
+        return 0;
+    }
+}
+CS
+    if ! run_in "$app" macnewer-app build -p:ZeroTarget=osx-arm64; then fail "$name" "the program didn't build"; return; fi
+    if grep -q "newer than target minimum" "$LOG" || ! grep -q " 0 Warning(s)" "$LOG"; then fail "$name" "the version line is a warning"; return; fi
+    if ! run_in "$app" macnewer-app-v build -p:ZeroTarget=osx-arm64 --no-incremental -v:n || ! grep -q "newer than target minimum" "$LOG"; then
+        fail "$name" "the version line isn't in the -v:n log"; return
+    fi
+    if [ "$HOST_OS" = Darwin ]; then
+        out=$(DYLD_LIBRARY_PATH=$WORK/macnewer "$app/bin/Debug/$TFM/osx-arm64/App")
+        if [ "$out" != "add 5" ]; then fail "$name" "printed '$out'"; return; fi
+    fi
     pass "$name"
 }
 

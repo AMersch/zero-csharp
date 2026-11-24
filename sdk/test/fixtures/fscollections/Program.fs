@@ -222,3 +222,6 @@ match Map.tryFind "pear" byName with
 | Some pear -> printfn "pears: %d" pear.Qty
 | None -> printfn "no pears"
 // docs:end
+
+// ToString of the core types (FSharp.Core writes these itself)
+printfn "%s | %s | %s | %s" (string (Some 1)) (string [ 1; 2; 3; 4 ]) (string (ValueSome 2)) (string [ "a"; "b" ])

@@ -146,3 +146,4 @@ a_c_e_
 2 in stock, worth 8.00
 apple, pear, plum
 pears: 4
+Some(1) | [1; 2; 3; ... ] | 2 | [a; b]

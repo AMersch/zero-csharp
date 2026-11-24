@@ -125,7 +125,8 @@ shows the pattern.
 Everything above relies on you: `Restore` and `OpenScope` are `unsafe` because the compiler can't see
 when an arena frees memory, so nothing stops a span from outliving it. **`Arena.Scratch`** is the
 exception. It runs a callback with a `ScratchScope` to allocate from, frees what was allocated when the
-callback returns, and the compiler makes sure nothing allocated is still reachable then:
+callback returns, and the compiler makes sure nothing allocated is still reachable then (with one
+exception checked when the program runs, below):
 
 <!-- sample: samples/Scratch.cs scratch -->
 ```csharp
@@ -155,9 +156,39 @@ each thread keeps its scratch arena, sized to the most it ever needed at once, u
 
 The price is the callback. Data goes in and out through a state passed by `ref` (it may be a
 `ref struct` holding spans of yours) and through the callback's return value, so the lambda can be
-`static` and allocates nothing after its first call. And the scope gives out spans and refs only: a
-`List` or a `StrBuilder` needs an arena, and an arena could be kept, so those still belong in
-`OpenScope` or a scratch arena of your own.
+`static` and allocates nothing after its first call.
+
+Besides spans, the scope makes lists and text that grow as needed, `ScratchList<T>` and
+`ScratchText`. They are `ref struct`s too, so the same rules keep them inside the callback, and a
+string to keep is copied out into an arena of yours:
+
+<!-- sample: samples/Scratch.cs lists -->
+```csharp
+// Lists and text from the scope grow as needed and go away with the
+// rest of the scratch memory. The string to keep is copied out into
+// an arena of yours.
+Arena keep = Arena.Create(4096);
+string report = Arena.Scratch(ref keep,
+    static (scoped ScratchScope scratch, scoped ref Arena target) =>
+    {
+        ScratchList<int> evens = scratch.List<int>(4);
+        for (int i = 18; i >= 0; i -= 2)
+            evens.Add(i);
+        evens.AsSpan().Sort();
+
+        ScratchText text = scratch.Text();
+        text.Append($"{evens.Count} evens:");
+        foreach (int even in evens)
+            text.Append($" {even}");
+        return text.ToArenaString(target);
+    });
+```
+
+One rule is beyond the compiler. A state passed by `ref` to a nested `Arena.Scratch` can carry the
+outer scope, or a list or text it made, and anything they allocated in there would be freed with the
+inner call's memory. So they allocate only while their own callback is the innermost one running:
+inside the nested call they can still be read and written, but allocating from the outer scope,
+adding to the outer list or appending to the outer text stops the program with a message saying so.
 
 ## Ordinary objects in an arena
 

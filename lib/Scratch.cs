@@ -13,6 +13,8 @@
 // gives out can't be returned, stored in a field or a static, put in the
 // state, or kept in a variable that outlives the callback. Each of those is a
 // compile error, not a dangling pointer. No unsafe block is needed anywhere.
+// The one case the compiler can't see, an outer scope allocating inside a
+// nested Arena.Scratch, stops the program instead (see below).
 //
 // The memory comes from a scratch arena of the thread's own, not from one of
 // yours, so a List or StrBuilder of yours that grows during the callback grows
@@ -23,39 +25,241 @@
 // To pass data in and out without a closure (which would allocate), use the
 // overloads with a state passed by ref; it may be a ref struct holding spans
 // of the caller's.
+//
+// Besides spans, the scope makes growable lists and text that live as long:
+//
+//   ScratchList<int> evens = s.List<int>();
+//   ScratchText line = s.Text();
+//   line.Append($"{evens.Count} evens");
+//
+// They are ref structs too, so the same compile-time rules keep them inside
+// the callback. One rule the compiler can't check: a scope, and the lists and
+// text it made, allocate only while their callback is the innermost one
+// running. Inside a nested Arena.Scratch (reached through a state passed by
+// ref) the outer ones can still be read and written, but allocating from the
+// scope, adding to a list or appending to text stops the program: that
+// memory would be freed when the inner callback returns.
 
 using System;
 using System.Runtime;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
+
+// Each thread's scratch state: its arena and how many Arena.Scratch calls are
+// running on it. It is the arena's first allocation, which no Restore frees.
+internal struct ScratchThread
+{
+    public Arena Arena;
+    public int Depth;
+
+    // Stops the program unless the callback at depth is the innermost one
+    // running, the only one allowed to allocate from the scratch arena.
+    public static void CheckInnermost(ScratchThread* thread, int depth, string what)
+    {
+        if (thread == null)
+            Environment.FailFast("Arena.Scratch: a ScratchScope, ScratchList or ScratchText not from Arena.Scratch");
+        unsafe
+        {
+            // SAFETY: a non-null thread is the live scratch state of this
+            // thread: scopes, lists and text can't leave its callback, and ref
+            // structs can't reach another thread.
+            if (thread->Depth != depth)
+                Environment.FailFast(what);
+        }
+    }
+}
 
 /// <summary>Allocates memory that lives until the Arena.Scratch callback it was given to returns.</summary>
 public ref struct ScratchScope
 {
-    readonly Arena _arena;
+    readonly ScratchThread* _thread;
+    readonly int _depth;
 
-    internal ScratchScope(Arena arena) => _arena = arena;
+    internal ScratchScope(ScratchThread* thread)
+    {
+        _thread = thread;
+        unsafe { _depth = thread->Depth; } // SAFETY: the live scratch state of this thread.
+    }
+
+    Arena Allocator()
+    {
+        ScratchThread.CheckInnermost(_thread, _depth,
+            "Arena.Scratch: a scope allocated inside a nested Arena.Scratch, which would free the memory early");
+        unsafe { return _thread->Arena; } // SAFETY: checked above.
+    }
 
     /// <summary>A zeroed span of <paramref name="count"/> items, valid until the callback returns.</summary>
     public Span<T> AllocSpan<T>(int count) where T : unmanaged
     {
+        Arena arena = Allocator();
         // SAFETY: the span points into the scratch arena, which Arena.Scratch
         // restores only after the callback returns; the compiler keeps the
-        // span from outliving the callback (this scope is a scoped parameter).
-        unsafe { return _arena.AllocSpan<T>(count); }
+        // span from outliving the callback (this scope is a scoped parameter),
+        // and Allocator checked that no nested callback will free it sooner.
+        unsafe { return arena.AllocSpan<T>(count); }
     }
 
     /// <summary>A zeroed T, valid until the callback returns.</summary>
     public ref T Alloc<T>() where T : unmanaged
     {
+        Arena arena = Allocator();
         unsafe
         {
             // SAFETY: as in AllocSpan. The scratch arena stops the program
             // rather than return null.
-            T* item = _arena.Alloc<T>();
+            T* item = arena.Alloc<T>();
             return ref *item;
         }
     }
+
+    /// <summary>An empty list whose items live until the callback returns.</summary>
+    public ScratchList<T> List<T>(int initialCapacity = 16) where T : unmanaged
+        => new ScratchList<T>(global::List<T>.Create(Allocator(), initialCapacity), _thread, _depth);
+
+    /// <summary>Empty text, for building a string that lives until the callback returns.</summary>
+    public ScratchText Text(int initialCapacity = 64)
+        => new ScratchText(StrBuilder.Create(Allocator(), initialCapacity), _thread, _depth);
+}
+
+/// <summary>
+/// A growable list from <see cref="ScratchScope.List{T}"/>, freed when the
+/// Arena.Scratch callback returns. Copies share the same items.
+/// </summary>
+public ref struct ScratchList<T> where T : unmanaged
+{
+    readonly List<T> _list;
+    readonly ScratchThread* _thread;
+    readonly int _depth;
+
+    internal ScratchList(List<T> list, ScratchThread* thread, int depth)
+    {
+        _list = list;
+        _thread = thread;
+        _depth = depth;
+    }
+
+    /// <summary>How many items the list holds.</summary>
+    public int Count => _list.Count;
+
+    /// <summary>The item at <paramref name="index"/>; out of range stops the program.</summary>
+    public ref T this[int index]
+    {
+        get
+        {
+            // SAFETY: GetPtr checks the index. The items stay allocated until
+            // the callback returns, even after growth moves them: the old
+            // buffer is freed only with the rest of the scratch memory.
+            unsafe { return ref *_list.GetPtr(index); }
+        }
+    }
+
+    /// <summary>Appends an item, growing the list if it is full.</summary>
+    public void Add(T item)
+    {
+        CheckInnermost();
+        _list.Add(item); // the scratch arena stops the program rather than fail
+    }
+
+    /// <summary>Appends each of <paramref name="items"/>.</summary>
+    public void AddRange(ReadOnlySpan<T> items)
+    {
+        CheckInnermost();
+        foreach (T item in items)
+            _list.Add(item);
+    }
+
+    /// <summary>Removes the item at <paramref name="index"/>, moving the later ones down. False if out of range.</summary>
+    public bool RemoveAt(int index) => _list.RemoveAt(index);
+
+    /// <summary>Removes every item; the memory stays the list's.</summary>
+    public void Clear() => _list.Clear();
+
+    /// <summary>
+    /// The items, valid until the callback returns. After Add, RemoveAt or
+    /// Clear it may show the items as they were, but its memory stays valid.
+    /// </summary>
+    public Span<T> AsSpan()
+    {
+        // SAFETY: as in the indexer; the compiler keeps the span inside the
+        // callback, since this list can't leave it.
+        unsafe { return _list.AsSpan(); }
+    }
+
+    /// <summary>For foreach: the items, as AsSpan shows them.</summary>
+    public Span<T>.Enumerator GetEnumerator() => AsSpan().GetEnumerator();
+
+    void CheckInnermost() => ScratchThread.CheckInnermost(_thread, _depth,
+        "Arena.Scratch: a ScratchList added to inside a nested Arena.Scratch, which would free its memory early");
+}
+
+/// <summary>
+/// Growable text from <see cref="ScratchScope.Text"/>, with $"..." support,
+/// freed when the Arena.Scratch callback returns. Copies share the same text.
+/// </summary>
+public ref struct ScratchText
+{
+    readonly StrBuilder _builder;
+    readonly ScratchThread* _thread;
+    readonly int _depth;
+
+    internal ScratchText(StrBuilder builder, ScratchThread* thread, int depth)
+    {
+        _builder = builder;
+        _thread = thread;
+        _depth = depth;
+    }
+
+    /// <summary>How many chars the text holds.</summary>
+    public int Length => _builder.Length;
+
+    /// <summary>The text so far, valid until the callback returns.</summary>
+    public ReadOnlySpan<char> AsSpan() => _builder.AsSpan();
+
+    /// <summary>Appends <paramref name="text"/>.</summary>
+    public void Append(ReadOnlySpan<char> text)
+    {
+        CheckInnermost();
+        _builder.Append(text); // the scratch arena stops the program rather than fail
+    }
+
+    /// <summary>Appends one char.</summary>
+    public void Append(char value)
+    {
+        CheckInnermost();
+        _builder.Append(value);
+    }
+
+    /// <summary>Appends a number in decimal.</summary>
+    public void Append(long value)
+    {
+        CheckInnermost();
+        _builder.Append(value);
+    }
+
+    /// <summary>Appends $"..." directly, without an intermediate string.</summary>
+    public void Append([InterpolatedStringHandlerArgument("")] ref StrBuilder.InterpolatedHandler handler)
+    {
+    }
+
+    /// <summary>Empties the text; the memory stays the text's.</summary>
+    public void Clear() => _builder.Clear();
+
+    /// <summary>
+    /// Copies the text into a new string in <paramref name="target"/>, to keep
+    /// after the callback returns. Returns null if the target is out of memory.
+    /// </summary>
+    public string ToArenaString(Arena target) => _builder.ToArenaString(target);
+
+    // For StrBuilder.InterpolatedHandler: the builder to append to.
+    internal StrBuilder BuilderToAppendTo()
+    {
+        CheckInnermost();
+        return _builder;
+    }
+
+    void CheckInnermost() => ScratchThread.CheckInnermost(_thread, _depth,
+        "Arena.Scratch: a ScratchText appended to inside a nested Arena.Scratch, which would free its memory early");
 }
 
 public delegate void ScratchAction(scoped ScratchScope scratch);
@@ -70,8 +274,8 @@ public delegate TResult ScratchFunc<TState, TResult>(scoped ScratchScope scratch
 
 public partial struct Arena
 {
-    // Each thread's scratch arena, behind a pthread key (zero mode has no
-    // [ThreadStatic]). The key's destructor frees it when the thread ends.
+    // Each thread's ScratchThread, behind a pthread key (zero mode has no
+    // [ThreadStatic]). The key's destructor frees its arena when the thread ends.
     static nuint s_scratchKey;
     static int s_scratchKeyState; // 0 none, 1 being created, 2 ready
 
@@ -82,26 +286,26 @@ public partial struct Arena
     /// </summary>
     public static void Scratch(ScratchAction action)
     {
-        Mark mark = EnterScratch(out Arena arena);
-        action(new ScratchScope(arena));
-        LeaveScratch(arena, mark);
+        ScratchThread* thread = EnterScratch(out Mark mark);
+        action(new ScratchScope(thread));
+        LeaveScratch(thread, mark);
     }
 
     /// <summary>The same, with a state the action can read and change, passed by ref.</summary>
     public static void Scratch<TState>(ref TState state, ScratchAction<TState> action)
         where TState : allows ref struct
     {
-        Mark mark = EnterScratch(out Arena arena);
-        action(new ScratchScope(arena), ref state);
-        LeaveScratch(arena, mark);
+        ScratchThread* thread = EnterScratch(out Mark mark);
+        action(new ScratchScope(thread), ref state);
+        LeaveScratch(thread, mark);
     }
 
     /// <summary>The same, returning the action's result, which can't come from the scope's memory.</summary>
     public static TResult Scratch<TResult>(ScratchFunc<TResult> func)
     {
-        Mark mark = EnterScratch(out Arena arena);
-        TResult result = func(new ScratchScope(arena));
-        LeaveScratch(arena, mark);
+        ScratchThread* thread = EnterScratch(out Mark mark);
+        TResult result = func(new ScratchScope(thread));
+        LeaveScratch(thread, mark);
         return result;
     }
 
@@ -109,33 +313,33 @@ public partial struct Arena
     public static TResult Scratch<TState, TResult>(ref TState state, ScratchFunc<TState, TResult> func)
         where TState : allows ref struct
     {
-        Mark mark = EnterScratch(out Arena arena);
-        TResult result = func(new ScratchScope(arena), ref state);
-        LeaveScratch(arena, mark);
+        ScratchThread* thread = EnterScratch(out Mark mark);
+        TResult result = func(new ScratchScope(thread), ref state);
+        LeaveScratch(thread, mark);
         return result;
     }
 
-    static Mark EnterScratch(out Arena arena)
+    static ScratchThread* EnterScratch(out Mark mark)
     {
         if (Volatile.Read(ref s_scratchKeyState) != 2)
             CreateScratchKey();
         unsafe
         {
-            // SAFETY: the key holds null or the state of an arena this thread
-            // created below and hasn't destroyed.
-            State* state = (State*)Platform.pthread_getspecific(s_scratchKey);
-            if (state == null)
+            // SAFETY: the key holds null or the ScratchThread of an arena this
+            // thread created below and hasn't destroyed.
+            ScratchThread* thread = (ScratchThread*)Platform.pthread_getspecific(s_scratchKey);
+            if (thread == null)
             {
-                arena = Create(16 * 1024, "scratch", stopOnOutOfMemory: true);
-                if (Platform.pthread_setspecific(s_scratchKey, arena._state) != 0)
+                Arena arena = Create(16 * 1024, "scratch", stopOnOutOfMemory: true);
+                thread = arena.Alloc<ScratchThread>();
+                thread->Arena = arena;
+                if (Platform.pthread_setspecific(s_scratchKey, thread) != 0)
                     Environment.FailFast("Arena.Scratch: can't keep the thread's scratch arena");
             }
-            else
-            {
-                arena = new Arena { _state = state };
-            }
+            mark = thread->Arena.Save();
+            thread->Depth++;
+            return thread;
         }
-        return arena.Save();
     }
 
     static void CreateScratchKey()
@@ -160,17 +364,23 @@ public partial struct Arena
 
     // Called by the system when a thread with a scratch arena ends.
     [UnmanagedCallersOnly]
-    static void DestroyScratch(void* state)
+    static void DestroyScratch(void* thread)
     {
-        var arena = new Arena { _state = (State*)state };
-        unsafe { arena.Destroy(); } // SAFETY: the thread has ended; nothing of it uses its scratch memory.
+        // SAFETY: the thread has ended; nothing of it uses its scratch memory,
+        // the ScratchThread included (it lives in the arena).
+        unsafe { ((ScratchThread*)thread)->Arena.Destroy(); }
     }
 
-    static void LeaveScratch(Arena arena, Mark mark)
+    static void LeaveScratch(ScratchThread* thread, Mark mark)
     {
-        // SAFETY: only ScratchScope allocates from the scratch arena, and the
-        // compiler kept everything it gave out inside the callback, which has
-        // returned. Nested Scratch calls restore in the reverse order.
-        unsafe { arena.Restore(mark); }
+        // SAFETY: only the scope and its lists and text allocate from the
+        // scratch arena, each only while its callback is the innermost one;
+        // the compiler kept everything they gave out inside the callback,
+        // which has returned. Nested Scratch calls restore in reverse order.
+        unsafe
+        {
+            thread->Depth--;
+            thread->Arena.Restore(mark);
+        }
     }
 }

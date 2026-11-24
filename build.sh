@@ -759,6 +759,11 @@ build_sdk_payload() {
     # native half llvm-mos links in.
     build_core "$dir/native/c64/System.Private.CoreLib.dll" -d WASM
     cp c64/runtime.c "$dir/native/c64/"
+    # The microcontrollers (pico2, r4): the same zerocore, and arm/'s runtime,
+    # boot block and board layouts, which zero-bitcode arm-link compiles.
+    mkdir -p "$dir/native/arm"
+    cp "$dir/native/c64/System.Private.CoreLib.dll" "$dir/native/arm/"
+    cp arm/runtime.c arm/semihost.c arm/rp2350.c arm/rp2350.S arm/an505.ld.in arm/an386.ld.in arm/rp2350.ld.in "$dir/native/arm/"
     for arch in x64 arm64; do
         mkdir -p "$dir/native/linux-$arch"
         BFLAT_ARCH=$arch CORE_NATIVE=$dir/native/linux-$arch/zerocore.o \

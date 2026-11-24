@@ -15,6 +15,10 @@
 # With --c64, builds Commodore 64 programs (bin/c64/*.prg), with NativeAOT-LLVM
 # and llvm-mos, a compiler for the 6502 (./setup.sh --c64).
 #
+# With --pico2 or --r4, builds programs for a Cortex-M microcontroller: the
+# Raspberry Pi Pico 2 or the Arduino Uno R4 (bin/pico2/*.elf, bin/r4/*.elf),
+# with NativeAOT-LLVM and Arm Toolchain for Embedded (./setup.sh --arm).
+#
 # With --win, builds 64-bit Windows programs (bin/win/*.exe), with bflat and
 # a clang that has the x86 target for the small C and assembly part.
 #
@@ -27,7 +31,7 @@
 # bin/mac/obj (from `./build.sh --native-mac-objects <samples>` on Linux), and
 # needs neither bflat nor Docker: that is how CI's macOS job works.
 #
-# Usage:  ./build.sh [--wasm | --dos | --c64 | --win | --mac | --uefi] [Sample ...]     default: all samples
+# Usage:  ./build.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --uefi] [Sample ...]     default: all samples
 #         ./build.sh --sdk-payload <dir>     what the ZeroCSharp.Sdk package carries (sdk/)
 #         ./build.sh --must-not-compile      check that tests/must-not-compile/*.cs are refused
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh),
@@ -49,6 +53,13 @@ DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Di
 # name; the linker says by how much it is too big. C64Demo and Paddles are for
 # the C64 only (lib/C64.cs: the screen, the video chip, the keyboard).
 C64_SAMPLES=(Tiny Minimal VirtualTest QuizStep1 QuizStep2 Refs "${SMALL_SAMPLES[@]}" C64Demo Paddles)
+# A microcontroller has no SIMD to benchmark, and Vga is a PC game. Blink is
+# for microcontrollers only (lib/Board.cs: the LED, registers, a timer). The Uno R4
+# has 32 KB of RAM, for the data, the stacks and the heap: these fit.
+ARM_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Llama Unicode "${SMALL_SAMPLES[@]}" Blink)
+# Arena, Collections, Files, Strings, Queries, Threads, Patterns, Scratch and
+# Unicode need more (Arena, for one, allocates a 16 KB array).
+R4_SAMPLES=(Tiny Minimal VirtualTest Casts Core Bits Dice Pipe Env QuizStep1 QuizStep2 QuizStep3 Quiz Guards Records Shapes Refs "${SMALL_SAMPLES[@]}" Blink)
 # UEFI gets every sample, and Vga too (lib/Uefi.cs has what it uses of lib/Dos.cs).
 UEFI_SAMPLES=("${ALL_SAMPLES[@]}" Vga)
 
@@ -459,6 +470,126 @@ build_c64_programs() {
     done
 }
 
+# ---- Cortex-M microcontrollers -----------------------------------------------
+#
+# The same bitcode once more, for a 32-bit Arm microcontroller (see env.sh for
+# the boards). Little-endian with 4-byte pointers, like WebAssembly, so clang
+# compiles it as it is. Two steps, as for the C64:
+#
+#   build_arm_bitcode   C# -> bitcode (in the build container on macOS), the
+#                       same for every board: bin/arm/obj/<Sample>
+#   build_arm_programs  bitcode -> an ELF program for one board, with Arm
+#                       Toolchain for Embedded's clang, on this machine:
+#                       zero-bitcode's wasm2arm writes the data as assembly,
+#                       and arm/runtime.c is zerocore's native half
+
+ARM_CORE=bin/arm/System.Private.CoreLib.dll
+
+check_arm() {
+    if [ ! -x "$ARM_TOOLCHAIN/bin/clang" ]; then
+        echo "Error: no Arm Toolchain for Embedded in $ARM_TOOLS. Run ./setup.sh --arm" >&2
+        exit 1
+    fi
+}
+
+build_arm_bitcode() {
+    local name
+    check_bflat
+    check_dos_ilc
+    build_core "$CORE"
+    build_core "$ARM_CORE" -d WASM
+    build_lib
+    for name in "$@"; do
+        echo "[arm]   $name -> bitcode"
+        compile_bitcode "$name" "bin/arm/obj/$name" "$ARM_CORE"
+    done
+}
+
+# $1: the board; the rest: samples.
+build_arm_programs() {
+    local board=$1 name obj out source bc
+    local clang=$ARM_TOOLCHAIN/bin/clang
+    shift
+    arm_board "$board"
+    mkdir -p "bin/$board/obj"
+    "$clang" "${ARM_TARGET[@]}" "${ARM_DEFINES[@]}" -Os -Wall -Wextra -c arm/runtime.c -o "bin/$board/obj/runtime.o"
+    "$clang" "${ARM_TARGET[@]}" "${ARM_DEFINES[@]}" -Os -Wall -Wextra -c arm/semihost.c -o "bin/$board/obj/semihost.o"
+    # picolibc's linker script places everything; the board's says where its
+    # flash and RAM are.
+    "$clang" -E -P -x c -DLIBC_LD_FILE=picolibcpp.ld "$ARM_LAYOUT" -o "bin/$board/obj/layout.ld"
+    # For the Pico 2, the real chip's too: its memory map, its boot block,
+    # and arm/rp2350.c instead of semihosting.
+    if [ "$board" = pico2 ]; then
+        mkdir -p "bin/$board/board"
+        "$clang" "${ARM_TARGET[@]}" "${ARM_DEFINES[@]}" -Os -Wall -Wextra -c arm/rp2350.c -o "bin/$board/obj/rp2350.o"
+        "$clang" "${ARM_TARGET[@]}" -c arm/rp2350.S -o "bin/$board/obj/rp2350-boot.o"
+        "$clang" -E -P -x c -DLIBC_LD_FILE=picolibcpp.ld arm/rp2350.ld.in -o "bin/$board/obj/rp2350.ld"
+    fi
+    for name in "$@"; do
+        echo "[$board] $name -> bin/$board/$name.elf"
+        obj=bin/arm/obj/$name
+        out=bin/$board/obj/$name
+        rm -rf "$out"
+        mkdir -p "$out"
+
+        zero_bitcode wasm2arm "$obj/$name.bc" "$out/data"
+        if [ -f "$obj/$name.external.o" ]; then
+            zero_bitcode wasm2arm "$obj/$name.external.o" "$out/external"
+        fi
+        for source in "$out"/*.s; do
+            "$clang" "${ARM_TARGET[@]}" -c "$source" -o "$source.o"
+        done
+        for source in "$out"/*.c; do
+            [ -f "$source" ] || continue
+            "$clang" "${ARM_TARGET[@]}" -Os -ffreestanding -c "$source" -o "$source.o"
+        done
+        for bc in "$obj/$name".*.bc; do
+            source=$out/$(basename "${bc%.bc}")
+            # One thread, so the flag compiled code checks after every call
+            # (RhpExceptionThrown) needs no thread-local storage (see DOS).
+            "$clang" "${ARM_TARGET[@]}" -Wno-override-module -S -emit-llvm "$bc" -o "$source.bc.ll"
+            sed -E 's/^(@[A-Za-z0-9_.$]+ = external) thread_local /\1 /' "$source.bc.ll" > "$source.ll"
+            rm "$source.bc.ll"
+            if grep -qw thread_local "$source.ll"; then
+                echo "Error: thread-local variables left in $source.ll" >&2
+                exit 1
+            fi
+            "$clang" "${ARM_TARGET[@]}" -Wno-override-module -Os -c "$source.ll" -o "$source.o"
+        done
+
+        # crt0-semihost: picolibc's startup code, which gets the command line
+        # from the host; libsemihost: its file functions, done by the host.
+        # --wrap=read: arm/semihost.c reads piped standard input from a file.
+        "$clang" "${ARM_TARGET[@]}" -nostartfiles -lcrt0-semihost -lsemihost \
+            -T "bin/$board/obj/layout.ld" -Wl,--gc-sections -Wl,--wrap=read \
+            -o "bin/$board/$name.elf" "bin/$board/obj/runtime.o" "bin/$board/obj/semihost.o" "$out"/*.o
+
+        # The real Pico 2: picolibc's crt0-hosted (the plain crt0 never returns
+        # from main, so it would never exit), arm/rp2350.c for
+        # the chip, and the program again as a UF2 file, for copying to the
+        # board when it shows up as a USB drive.
+        if [ "$board" = pico2 ]; then
+            "$clang" "${ARM_TARGET[@]}" -nostartfiles -lcrt0-hosted \
+                -T "bin/$board/obj/rp2350.ld" -Wl,--gc-sections \
+                -o "bin/$board/board/$name.elf" "bin/$board/obj/runtime.o" "bin/$board/obj/rp2350.o" \
+                "bin/$board/obj/rp2350-boot.o" "$out"/*.o
+            zero_bitcode elf2uf2 "bin/$board/board/$name.elf" "bin/$board/board/$name.uf2"
+        fi
+    done
+}
+
+# Flash (code and data) and RAM (data, the stacks and what's left for the heap
+# is the rest) of each program. $1: the board; the rest: samples.
+print_arm_sizes() {
+    local board=$1 name
+    shift
+    echo
+    for name in "$@"; do
+        "$ARM_TOOLCHAIN/bin/llvm-size" "bin/$board/$name.elf" | awk -v name="$name" \
+            'NR == 2 { printf "%-14s flash %7d bytes, RAM %7d bytes before the heap\n", name, $1 + $2, $2 + $3 }'
+    done
+}
+
 # Windows, x64 only. The same bflat compiles the samples, against the same
 # zerocore, with two Windows object files linked in:
 #   win/start.c, win/runtime.c  the entry point; write/read/clock_gettime
@@ -683,6 +814,11 @@ if [ "${1:-}" = "--native-c64-bitcode" ]; then
     build_c64_bitcode "$@"
     exit 0
 fi
+if [ "${1:-}" = "--native-arm-bitcode" ]; then
+    shift
+    build_arm_bitcode "$@"
+    exit 0
+fi
 if [ "${1:-}" = "--native" ]; then
     shift
     build_native "$@"
@@ -724,6 +860,8 @@ case "${1:-}" in
     --wasm) TARGET=wasm; shift ;;
     --dos)  TARGET=dos; shift ;;
     --c64)  TARGET=c64; shift ;;
+    --pico2) TARGET=pico2; shift ;;
+    --r4)   TARGET=r4; shift ;;
     --win)  TARGET=win; shift ;;
     --mac)  TARGET=mac; shift ;;
     --uefi) TARGET=uefi; shift ;;
@@ -744,6 +882,10 @@ if [ $# -eq 0 ]; then
         set -- "${DOS_SAMPLES[@]}"
     elif [ "$TARGET" = c64 ]; then
         set -- "${C64_SAMPLES[@]}"
+    elif [ "$TARGET" = pico2 ]; then
+        set -- "${ARM_SAMPLES[@]}"
+    elif [ "$TARGET" = r4 ]; then
+        set -- "${R4_SAMPLES[@]}"
     elif [ "$TARGET" = uefi ]; then
         set -- "${UEFI_SAMPLES[@]}"
     else
@@ -761,6 +903,15 @@ for name in "$@"; do
         :
     elif [ "$TARGET" = c64 ] && [[ " ${C64_SAMPLES[*]} " == *" $name "* ]]; then
         :
+    elif { [ "$TARGET" = pico2 ] || [ "$TARGET" = r4 ]; } && [[ " ${ARM_SAMPLES[*]} " == *" $name "* ]]; then
+        :
+    elif [ "$TARGET" = pico2 ] || [ "$TARGET" = r4 ]; then
+        check_sample "$name"
+        echo "$name isn't built for a microcontroller: it is a PC program (Vga) or benchmarks SIMD instructions." >&2
+        exit 1
+    elif [ "$TARGET" != pico2 ] && [ "$TARGET" != r4 ] && [[ " ${ARM_SAMPLES[*]} " == *" $name "* ]] && [[ " ${ALL_SAMPLES[*]} " != *" $name "* ]]; then
+        echo "$name is a microcontroller program: ./build.sh --pico2 $name or ./build.sh --r4 $name" >&2
+        exit 1
     elif [[ " ${C64_SAMPLES[*]} " == *" $name "* ]] && [[ " ${ALL_SAMPLES[*]} " != *" $name "* ]]; then
         echo "$name is a Commodore 64 program: ./build.sh --c64 $name" >&2
         exit 1
@@ -776,6 +927,7 @@ case "$TARGET" in
     wasm)   output() { echo "bin/wasm/$1.wasm"; } ;;
     dos)    output() { echo "bin/dos/$1.exe"; } ;;
     c64)    output() { echo "bin/c64/$1.prg"; } ;;
+    pico2 | r4) output() { echo "bin/$TARGET/$1.elf"; } ;;
     win)    output() { echo "bin/win/$1.exe"; } ;;
     mac)    output() { echo "bin/mac/$1"; } ;;
     uefi)   output() { echo "bin/uefi/$1.efi"; } ;;
@@ -902,6 +1054,14 @@ case "$TARGET" in
         build_bitcode_tool
         run c64-bitcode "$@"
         build_c64_programs "$@"
+        ;;
+    pico2 | r4)
+        check_arm
+        build_bitcode_tool
+        run arm-bitcode "$@"
+        build_arm_programs "$TARGET" "$@"
+        print_arm_sizes "$TARGET" "$@"
+        exit 0
         ;;
 esac
 

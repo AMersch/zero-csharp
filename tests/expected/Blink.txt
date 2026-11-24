@@ -1,0 +1,4 @@
+Blinking for 2.5 seconds...
+50 ticks, 10 toggles
+200 ticks during C# work, references intact
+PASS

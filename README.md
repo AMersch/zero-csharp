@@ -63,6 +63,8 @@ More: [Coming from .NET](https://onurgumus.github.io/zero-csharp/get-started/com
 | DOS, 386 with a 387 | `./build.sh --dos` | 16 KB to 93 KB |
 | UEFI x64 and arm64, no OS | `./build.sh --uefi` | 10 KB to 72 KB |
 | Commodore 64 | `./build.sh --c64` | 7 KB to 49 KB, of the 50 KB there are |
+| Raspberry Pi Pico 2 (Cortex-M33), in QEMU | `./build.sh --pico2` | 9 KB to 88 KB of flash |
+| Arduino Uno R4 (Cortex-M4, 32 KB of RAM), in QEMU | `./build.sh --r4` | 9 KB to 62 KB of flash |
 
 The sizes leave out Llama, which carries its model and is about 1.1 MB everywhere. WebAssembly, DOS
 and the Commodore 64 go through [NativeAOT-LLVM](https://github.com/dotnet/runtimelab/tree/feature/NativeAOT-LLVM)
@@ -72,8 +74,10 @@ and has no operating system or C library under it.
 [Build for UEFI](https://onurgumus.github.io/zero-csharp/how-to/build-for-uefi.html) shows how. On the
 Commodore 64 the same bitcode is rewritten for 16-bit addresses and compiled by
 [llvm-mos](https://llvm-mos.org/); the samples that fit in its memory run there, in the VICE emulator
-([Build for the Commodore 64](https://onurgumus.github.io/zero-csharp/how-to/build-for-c64.html)). [Targets](https://onurgumus.github.io/zero-csharp/concepts/targets.html)
-explains how each one is built.
+([Build for the Commodore 64](https://onurgumus.github.io/zero-csharp/how-to/build-for-c64.html)). The
+microcontrollers take the same bitcode to Arm's own clang, and run in QEMU for now
+([Build for microcontrollers](https://onurgumus.github.io/zero-csharp/how-to/build-for-microcontrollers.html)).
+[Targets](https://onurgumus.github.io/zero-csharp/concepts/targets.html) explains how each one is built.
 
 ## What works
 
@@ -120,11 +124,11 @@ was freed. See [Memory without a GC](https://onurgumus.github.io/zero-csharp/con
 | Folder | What |
 |---|---|
 | [`zerocore/`](zerocore/README.md) | The core library: `object`, `string`, casts, allocation. About 2,400 lines of C#, MIT licensed |
-| [`lib/`](lib/) | Arenas, collections, strings, input and output, files, the clock, random numbers, SIMD kernels, `Parallel.For`, DOS and UEFI graphics, the Commodore 64's screen and sprites ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
+| [`lib/`](lib/) | Arenas, collections, strings, input and output, files, the clock, random numbers, SIMD kernels, `Parallel.For`, DOS and UEFI graphics, the Commodore 64's screen and sprites, a microcontroller board's LED, registers and timer interrupt ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
 | [`samples/`](samples/) | The programs below |
 | [`sdk/`](sdk/) | The `ZeroCSharp.*` NuGet packages |
 | [`docs/`](docs/) | The documentation site |
-| `mac/`, `win/`, `wasm/`, `dos/`, `efi/`, `c64/` | Each target's entry point and the C functions it needs (`efi/libm/` is from musl, MIT) |
+| `mac/`, `win/`, `wasm/`, `dos/`, `efi/`, `c64/`, `arm/` | Each target's entry point and the C functions it needs (`efi/libm/` is from musl, MIT) |
 
 The programs don't use bflat's own zero-mode library, zerolib, which is AGPL. zerocore replaces it, so
 nothing AGPL is linked into them.
@@ -158,6 +162,7 @@ nothing AGPL is linked into them.
 | `SmallStrings`, `SmallIntegers`, `SmallObjects` and seven more | Tests sized for a small machine: what Strings, Casts, Collections and the others check, in pieces that each fit in a Commodore 64 | 17 to 36 KB |
 | `C64Demo` | Commodore 64 only: text, a sprite and raster bars, with objects, a list and a lambda behind them | 36 KB |
 | `Paddles` | Commodore 64 only: a paddle-and-ball game against the computer, with sprites, SID sound, records and unions | 34 KB |
+| `Blink` | Microcontrollers only: the board's LED, blinked by a C# interrupt handler, and a check that a busy handler leaves the interrupted code's references alone | 18 KB of flash |
 
 Sizes are for Linux arm64. `build.sh` leaves out debug information and the symbol table and turns off
 position-independent code, which halves most programs; `KEEP_SYMBOLS=1 ./build.sh` keeps them, for gdb

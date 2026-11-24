@@ -1,0 +1,278 @@
+// The native half of zerocore on Cortex-M microcontrollers (bare metal).
+//
+// The C# code is NativeAOT-LLVM's WebAssembly bitcode, compiled by clang for
+// a Cortex-M, as for DOS (dos/runtime.c): 32-bit little-endian on both sides,
+// so the bitcode needs no rewriting. Managed code passes its "shadow stack"
+// as a hidden first argument and expects the same few native functions as on
+// WebAssembly (wasm/runtime.c).
+//
+// The C library is Arm Toolchain for Embedded's picolibc: its startup code
+// copies .data from flash, clears .bss, calls main and passes main's result
+// to exit. This file is what every Cortex-M program has. The rest depends on
+// where it runs, and is linked in from one of:
+//
+//   arm/semihost.c  in QEMU (or with a debugger attached): input, output,
+//                   files, the clock and the exit code go to the host
+//   arm/rp2350.c    on a real Raspberry Pi Pico 2: its clocks, a UART
+//                   console and a timer
+//
+// Each defines zero_start, which main calls first.
+
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <unistd.h>
+
+// picolibc has no roundeven. rint rounds the same way: to nearest, ties to
+// even, the mode a program starts in and never leaves.
+double roundeven(double x) { return __builtin_rint(x); }
+float roundevenf(float x) { return __builtin_rintf(x); }
+
+static void fatal(const char *message)
+{
+    write(2, message, strlen(message));
+    abort();
+}
+
+// ---- threads: there are none (see dos/runtime.c) --------------------------------
+
+#define MAX_KEYS 8
+static void *key_values[MAX_KEYS];
+static unsigned key_count;
+
+int pthread_create(void *thread, void *attributes, void *(*start)(void *), void *argument)
+{
+    (void)thread; (void)attributes; (void)start; (void)argument;
+    return 38; // ENOSYS
+}
+
+int sched_yield(void) { return 0; }
+
+int pthread_join(void *thread, void **result)
+{
+    (void)thread; (void)result;
+    return 3; // ESRCH
+}
+
+int pthread_key_create(unsigned *key, void (*destructor)(void *))
+{
+    (void)destructor;
+    if (key_count == MAX_KEYS)
+        return 11; // EAGAIN
+    *key = key_count++;
+    return 0;
+}
+
+void *pthread_getspecific(unsigned key) { return key < key_count ? key_values[key] : 0; }
+
+int pthread_setspecific(unsigned key, void *value)
+{
+    if (key >= key_count)
+        return 22; // EINVAL
+    key_values[key] = value;
+    return 0;
+}
+
+int get_nprocs(void) { return 1; }
+
+// ---- flash is read-only ----------------------------------------------------------
+//
+// String literals stay in flash (zero-bitcode wasm2arm puts them in .rodata).
+// Nothing may write to them, and on a real chip a write to flash is lost or
+// faults. In QEMU the "flash" is RAM, though, so a write would go unnoticed.
+// The memory protection unit makes it fault in both places: one region, the
+// whole of flash, read-only; everything else keeps its default rights.
+
+extern char __boot_flash[], __flash[], __flash_size[];
+
+#define MPU_TYPE (*(volatile uint32_t *)0xE000ED90)
+#define MPU_CTRL (*(volatile uint32_t *)0xE000ED94)
+#define MPU_RNR (*(volatile uint32_t *)0xE000ED98)
+#define MPU_RBAR (*(volatile uint32_t *)0xE000ED9C)
+#define MPU_CTRL_ENABLE 1u
+#define MPU_CTRL_PRIVDEFENA 4u // the default memory map where no region is
+
+static void protect_flash(void)
+{
+    uint32_t start = (uint32_t)__boot_flash;
+    uint32_t end = (uint32_t)__flash + (uint32_t)__flash_size; // just past it
+    if (((MPU_TYPE >> 8) & 0xFF) == 0)
+        return; // no MPU
+    MPU_CTRL = 0;
+    MPU_RNR = 0;
+#if defined(__ARM_ARCH_8M_MAIN__) || defined(__ARM_ARCH_8_1M_MAIN__)
+    // ARMv8-M (Cortex-M33): a region is a start and a last address, 32 bytes apart.
+    // Attribute 0: normal memory, write-through, as flash is.
+    *(volatile uint32_t *)0xE000EDC0 = 0xAA;                  // MPU_MAIR0
+    MPU_RBAR = (start & ~31u) | (3u << 1);                      // AP = read-only
+    *(volatile uint32_t *)0xE000EDA0 = ((end - 1) & ~31u) | 1u; // MPU_RLAR: attribute 0, enabled
+#else
+    // ARMv7-M (Cortex-M4): a region is a power of two in size, aligned to it.
+    uint32_t log2 = 5;
+    while (log2 < 32 && (1u << log2) < end - start)
+        log2++;
+    if (start & ((1u << log2) - 1))
+        return;
+    MPU_RBAR = start;
+    // AP = 110: read-only; C: write-through; SIZE = log2 - 1; enabled.
+    *(volatile uint32_t *)0xE000EDA0 = (6u << 24) | (1u << 17) | ((log2 - 1) << 1) | 1u; // MPU_RASR
+#endif
+    MPU_CTRL = MPU_CTRL_ENABLE | MPU_CTRL_PRIVDEFENA;
+    __asm__ volatile("dsb\n\tisb" ::: "memory");
+}
+
+// ---- the hardware, for lib/Board.cs ---------------------------------------------
+//
+// C# reaches the chip's registers through these, not through its own pointer
+// reads and writes: the compiler may combine, reorder or hoist those out of a
+// loop (on the C64 a polling loop stopped reading), and here each access is
+// exactly one load or store, where it's written.
+
+uint32_t zero_read32(uintptr_t address) { return *(volatile uint32_t *)address; }
+void zero_write32(uintptr_t address, uint32_t value) { *(volatile uint32_t *)address = value; }
+
+void zero_wait_for_interrupt(void) { __asm__ volatile("wfi" ::: "memory"); }
+
+// SysTick, the timer every Cortex-M has: an interrupt hz times a second,
+// counted from the processor's clock (zero_cpu_hz, in semihost.c and
+// rp2350.c), which calls a C# method ([UnmanagedCallersOnly]).
+#define SYST_CSR (*(volatile uint32_t *)0xE000E010)
+#define SYST_RVR (*(volatile uint32_t *)0xE000E014)
+#define SYST_CVR (*(volatile uint32_t *)0xE000E018)
+
+uint32_t zero_cpu_hz(void);
+static void (*volatile tick_handler)(void);
+
+void arm_systick_isr(void)
+{
+    void (*handler)(void) = tick_handler;
+    if (handler)
+        handler();
+}
+
+// 0, or -1 if hz is too slow or too fast for the timer's 24 bits.
+int zero_tick_start(int32_t hz, void (*handler)(void))
+{
+    if (hz <= 0)
+        return -1;
+    uint32_t reload = zero_cpu_hz() / (uint32_t)hz;
+    if (reload < 2 || reload > (1u << 24))
+        return -1;
+    SYST_CSR = 0;
+    tick_handler = handler;
+    SYST_RVR = reload - 1;
+    SYST_CVR = 0;
+    SYST_CSR = 7; // enabled, interrupting, from the processor's clock
+    return 0;
+}
+
+void zero_tick_stop(void)
+{
+    SYST_CSR = 0;
+    tick_handler = 0;
+}
+
+// ---- entry -------------------------------------------------------------------
+
+int __managed__Main(int argc, char **argv);
+
+// Sets up the machine and may change the arguments (semihost.c, rp2350.c).
+void zero_start(int *argc, char ***argv);
+
+// picolibc's vector table: where the processor finds each interrupt's
+// handler (arm_systick_isr among them).
+extern char __interrupt_vector[];
+#define SCB_VTOR (*(volatile uint32_t *)0xE000ED08)
+
+int main(int argc, char **argv)
+{
+    // The processor looks for interrupt handlers where VTOR points, which
+    // isn't necessarily here: the RP2350's boot ROM leaves it at the start of
+    // RAM, and an interrupt would then jump to an address read from data.
+    SCB_VTOR = (uint32_t)__interrupt_vector;
+    __asm__ volatile("dsb\n\tisb" ::: "memory");
+    zero_start(&argc, &argv);
+    protect_flash();
+    return __managed__Main(argc, argv);
+}
+
+extern char __ReadyToRunHeader[];
+
+void *ZeroGetModuleHeader(void *shadowStack)
+{
+    (void)shadowStack;
+    return __ReadyToRunHeader;
+}
+
+// ---- transitions between native and managed code (see wasm/runtime.c) --------
+
+// Managed code's locals that hold references live here, not on the machine
+// stack. 16 KB of the RP2350's 520 KB by default; build.sh sets less for
+// smaller chips.
+#ifndef SHADOW_STACK_SIZE
+#define SHADOW_STACK_SIZE (16 << 10)
+#endif
+static char shadow_stack[SHADOW_STACK_SIZE] __attribute__((aligned(16)));
+
+// An interrupt handler written in C# needs one of its own: it can interrupt
+// managed code anywhere, and must leave that code's frames alone. Handlers
+// don't interrupt each other (they all have the same priority), so one is
+// enough. A quarter of the other.
+static char interrupt_shadow_stack[SHADOW_STACK_SIZE / 4] __attribute__((aligned(16)));
+
+// Where C calls into C#: from main, or from an interrupt (IPSR holds the
+// number of the exception being handled, 0 for none).
+static void *entry_shadow_stack(void)
+{
+    uint32_t exception;
+    __asm__ volatile("mrs %0, ipsr" : "=r"(exception));
+    return exception ? interrupt_shadow_stack : shadow_stack;
+}
+
+// The program's entry point, which has a catch or fault block to register.
+void *RhpReversePInvokeAndPushSparseVirtualUnwindFrame(void *frame, void *a, void *b)
+{
+    (void)frame; (void)a; (void)b;
+    return entry_shadow_stack();
+}
+
+void RhpReversePInvokeReturnAndPopSparseVirtualUnwindFrame(void *frame) { (void)frame; }
+
+// Any other [UnmanagedCallersOnly] method, such as an interrupt handler.
+void *RhpReversePInvoke(int32_t unused)
+{
+    (void)unused;
+    return entry_shadow_stack();
+}
+
+void RhpReversePInvokeReturn(void *frame) { (void)frame; }
+
+void RhpPushSparseVirtualUnwindFrame(void *frame, void *table, unsigned index)
+{
+    (void)frame; (void)table; (void)index;
+}
+
+void RhpPopSparseVirtualUnwindFrame(void) {}
+
+int RhpTrapThreads;
+void RhpPInvoke(void *frame) { (void)frame; }
+void RhpPInvokeReturn(void *frame) { (void)frame; }
+
+int RhpExceptionThrown;
+
+int RhpHandleExceptionWasmCatch(void *a, void *b)
+{
+    (void)a; (void)b;
+    fatal("zero mode: exception thrown\n");
+    return 0;
+}
+
+void RhpHandleUnhandledException(void *a, void *b)
+{
+    (void)a; (void)b;
+    fatal("zero mode: unhandled exception\n");
+}
+
+void RhpAssignRef(void **destination, void *reference) { *destination = reference; }
+void RhpCheckedAssignRef(void **destination, void *reference) { *destination = reference; }
+void RhpInitialDynamicInterfaceDispatch(void) { abort(); }

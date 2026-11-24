@@ -16,12 +16,16 @@
 #         ./test.sh --dos      DOS, on an emulated 386 with 4 MB (needs ./setup.sh --dos)
 #         ./test.sh --c64      Commodore 64, in VICE (needs ./setup.sh --c64): the
 #                              samples that fit in it, which the Small ones are made to
+#         ./test.sh --pico2    Raspberry Pi Pico 2 (Cortex-M33), in QEMU (needs ./setup.sh --arm)
+#         ./test.sh --r4       Arduino Uno R4 (Cortex-M4, 32 KB of RAM), in QEMU: the
+#                              samples that fit in it
 #         ./test.sh --win      Windows x64, under Wine in a container
 #         ./test.sh --mac      macOS, natively (on a Mac with Apple Silicon)
 #         ./test.sh --uefi     UEFI, in QEMU on OVMF, for BFLAT_ARCH (x64 or arm64)
 #         ./test.sh --all      native, the other architecture (macOS only, run
 #                              under emulation), Windows, macOS (on Apple
-#                              Silicon), and WebAssembly, DOS and the C64 if set up
+#                              Silicon), and WebAssembly, DOS, the C64 and
+#                              the microcontrollers if set up
 #         ./test.sh --update   native, and rewrite tests/expected from the output
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS (see env.sh)
 set -euo pipefail
@@ -36,7 +40,7 @@ SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice P
 # Simd and Kernels print timings, so only their exit code is checked.
 TIMED=" Simd Kernels "
 # Arena and Collections print byte counts that depend on the pointer size, so
-# on WebAssembly and DOS (32-bit) only their exit code is checked.
+# on WebAssembly, DOS and microcontrollers (32-bit) only their exit code is checked.
 POINTER_SIZED=" Arena Collections "
 # Simd and Kernels aren't built for DOS: they benchmark SIMD instructions,
 # which a 386 doesn't have.
@@ -46,6 +50,13 @@ DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Di
 # are for the C64 only; they check themselves, at the key tests/input types.
 # (QuizStep3 fits too, but its input has bytes no C64 keyboard can type.)
 C64_SAMPLES=(Tiny Minimal VirtualTest QuizStep1 QuizStep2 Refs "${SMALL_SAMPLES[@]}" C64Demo Paddles)
+# Microcontrollers: no SIMD to benchmark, no PC screen for Vga. Blink is
+# theirs only, and checks itself. The Uno R4
+# has 32 KB of RAM for a program's data, stacks and heap: these fit.
+ARM_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Llama Unicode "${SMALL_SAMPLES[@]}" Blink)
+# Arena, Collections, Files, Strings, Queries, Threads, Patterns, Scratch and
+# Unicode need more (Arena, for one, allocates a 16 KB array).
+R4_SAMPLES=(Tiny Minimal VirtualTest Casts Core Bits Dice Pipe Env QuizStep1 QuizStep2 QuizStep3 Quiz Guards Records Shapes Refs "${SMALL_SAMPLES[@]}" Blink)
 
 EXPECTED=tests/expected
 failures=0
@@ -71,6 +82,14 @@ run_all() {
         run+=(--c64)
         samples=("${C64_SAMPLES[@]}")
     fi
+    if [ "$target" = pico2 ]; then
+        run+=(--pico2)
+        samples=("${ARM_SAMPLES[@]}")
+    fi
+    if [ "$target" = r4 ]; then
+        run+=(--r4)
+        samples=("${R4_SAMPLES[@]}")
+    fi
 
     echo
     echo "== $label"
@@ -90,7 +109,7 @@ run_all() {
             echo "FAIL $name: exit code $status"
             echo "$out" | tail -5 | sed 's/^/       /'
             failures=$((failures + 1))
-        elif [[ "$TIMED" == *" $name "* ]] || { { [ "$target" = wasm ] || [ "$target" = dos ]; } && [[ "$POINTER_SIZED" == *" $name "* ]]; }; then
+        elif [[ "$TIMED" == *" $name "* ]] || { { [ "$target" = wasm ] || [ "$target" = dos ] || [ "$target" = pico2 ] || [ "$target" = r4 ]; } && [[ "$POINTER_SIZED" == *" $name "* ]]; }; then
             echo "ok   $name (exit code only)"
         elif [ "$mode" = update ]; then
             mkdir -p "$EXPECTED"
@@ -136,7 +155,8 @@ run_all() {
     # A file name outside ASCII must reach the system as it was written: Files
     # makes one and leaves it, and it must be here under exactly that name.
     # (Not on DOS, whose names are 8.3, nor UEFI, whose files are on a disk image.)
-    if [ "$target" != dos ] && [ "$target" != uefi ]; then
+    # (Nor the Uno R4, which Files doesn't fit in.)
+    if [ "$target" != dos ] && [ "$target" != uefi ] && [ "$target" != r4 ]; then
         name="zero é☃𝄞.tmp"
         rm -f -- "$name"
         status=0
@@ -200,12 +220,24 @@ test_c64() {
     run_all "Commodore 64 (VICE)" c64 check
 }
 
+test_pico2() {
+    ./build.sh --pico2 > /dev/null
+    run_all "Raspberry Pi Pico 2, Cortex-M33 (QEMU mps2-an505)" pico2 check
+}
+
+test_r4() {
+    ./build.sh --r4 > /dev/null
+    run_all "Arduino Uno R4, Cortex-M4 with 32 KB of RAM (QEMU mps2-an386)" r4 check
+}
+
 case "${1:-}" in
     "")       test_native ;;
     --update) test_native update ;;
     --wasm)   test_wasm ;;
     --dos)    test_dos ;;
     --c64)    test_c64 ;;
+    --pico2)  test_pico2 ;;
+    --r4)     test_r4 ;;
     --win)    test_win ;;
     --mac)    test_mac ;;
     --uefi)   test_uefi ;;
@@ -250,8 +282,15 @@ case "${1:-}" in
             echo
             echo "(skipping the Commodore 64: run ./setup.sh --c64 first)"
         fi
+        if [ -x "$WASM_ILC" ] && [ -x "$ARM_TOOLCHAIN/bin/clang" ] && command -v qemu-system-arm > /dev/null; then
+            test_pico2
+            test_r4
+        else
+            echo
+            echo "(skipping the microcontrollers: run ./setup.sh --arm first)"
+        fi
         ;;
-    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --win | --mac | --uefi | --all | --update]" >&2; exit 2 ;;
+    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --uefi | --all | --update]" >&2; exit 2 ;;
 esac
 
 echo

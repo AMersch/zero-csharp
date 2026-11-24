@@ -11,10 +11,14 @@
 # $C64_TOOLS: NativeAOT-LLVM (shared with --wasm) and llvm-mos, the compiler
 # for the 6502, about 750 MB unpacked. It also checks for VICE, the emulator.
 #
+# With --arm, downloads what Cortex-M builds (--pico2, --r4) need into
+# $WASM_TOOLS and $ARM_TOOLS: NativeAOT-LLVM (shared with --wasm) and Arm
+# Toolchain for Embedded, about 2 GB unpacked. It also checks for QEMU.
+#
 # bflat comes from the fork (OnurGumus/bflat, branch master), which must be
 # built first; see README, "Getting bflat".
 #
-# Usage: ./setup.sh [--wasm | --dos | --c64]
+# Usage: ./setup.sh [--wasm | --dos | --c64 | --arm]
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
@@ -23,9 +27,11 @@ ok=1
 want_wasm=0
 want_dos=0
 want_c64=0
+want_arm=0
 [ "${1:-}" = --wasm ] && want_wasm=1
 [ "${1:-}" = --dos ] && want_dos=1
 [ "${1:-}" = --c64 ] && want_c64=1
+case "${1:-}" in --arm | --pico2 | --r4) want_arm=1 ;; esac
 
 # NativeAOT-LLVM: the compiler from C# (IL) to LLVM bitcode.
 fetch_ilc() {
@@ -173,16 +179,73 @@ fetch_c64_tools() {
     [ -d "$C64_ROMS" ] && echo "roms:   $C64_ROMS"
 }
 
+# Arm Toolchain for Embedded: clang, lld, and picolibc and compiler-rt built
+# for every Cortex-M. Arm builds it for macOS (a disk image, for both kinds of
+# Mac), x64 and arm64 Linux, and x64 Windows.
+fetch_arm_tools() {
+    fetch_ilc
+    mkdir -p "$ARM_TOOLS"
+
+    if [ ! -x "$ARM_TOOLCHAIN/bin/clang" ]; then
+        local file sha256 archive mount actual
+        case "$(uname -s)-$HOST_ARCH" in
+            Darwin-*)    file=Darwin-universal.dmg; sha256=6b7ec8861cd7afdd0f872eed661cf87a6ffd289289de314df53b9a43b0547e00 ;;
+            Linux-x64)   file=Linux-x86_64.tar.xz;  sha256=a7be511613af15151c93961ad39c8cf9ae6889a453c8b547f42f4051a416dc8e ;;
+            Linux-arm64) file=Linux-AArch64.tar.xz; sha256=df3b055d05659d8fda710d820e6c1ceff7bca3234c5067abe82a16e781d8de99 ;;
+            *) echo "Missing: Arm Toolchain for Embedded has no build for this machine ($(uname -s), $HOST_ARCH)."
+               ok=0
+               return ;;
+        esac
+        file=ATfE-$ARM_TOOLCHAIN_VERSION-$file
+        archive=$ARM_TOOLS/$file
+        echo "Downloading Arm Toolchain for Embedded $ARM_TOOLCHAIN_VERSION ($file)..."
+        curl -fsSL -o "$archive" \
+            "https://github.com/arm/arm-toolchain/releases/download/release-$ARM_TOOLCHAIN_VERSION-ATfE/$file"
+        if command -v sha256sum >/dev/null 2>&1; then
+            actual=$(sha256sum "$archive" | cut -d' ' -f1)
+        else
+            actual=$(shasum -a 256 "$archive" | cut -d' ' -f1)
+        fi
+        if [ "$actual" != "$sha256" ]; then
+            echo "Error: $archive isn't the file Arm published (SHA-256 differs)." >&2
+            rm -f "$archive"
+            exit 1
+        fi
+        rm -rf "$ARM_TOOLCHAIN" "$ARM_TOOLS/unpack"
+        mkdir -p "$ARM_TOOLS/unpack"
+        case "$file" in
+            *.dmg)
+                mount=$(mktemp -d)
+                hdiutil attach -quiet -nobrowse -readonly -mountpoint "$mount" "$archive"
+                cp -R "$mount"/ATfE-* "$ARM_TOOLS/unpack/"
+                hdiutil detach -quiet "$mount"
+                rmdir "$mount" ;;
+            *) tar -xJf "$archive" -C "$ARM_TOOLS/unpack" ;;
+        esac
+        mv "$ARM_TOOLS/unpack"/ATfE-* "$ARM_TOOLCHAIN"
+        rm -rf "$ARM_TOOLS/unpack" "$archive"
+    fi
+    echo "arm:    $ARM_TOOLCHAIN"
+
+    if command -v qemu-system-arm >/dev/null 2>&1; then
+        echo "qemu:   $(command -v qemu-system-arm)"
+    else
+        echo "Missing: QEMU, which run.sh --pico2 and --r4 use (qemu-system-arm). macOS: brew install qemu. Ubuntu: apt install qemu-system-arm"
+        ok=0
+    fi
+}
+
 if ! command -v python3 >/dev/null 2>&1 && { [ "$want_dos" = 1 ] || [ "$want_c64" = 1 ]; }; then
     echo "Missing: python3, which dos/run.sh and c64/run.sh use to run programs in the emulator"
     ok=0
 fi
 
-if ! command -v dotnet >/dev/null 2>&1 && { [ "$want_dos" = 1 ] || [ "$want_c64" = 1 ]; }; then
-    echo "Missing: the .NET SDK (10 or newer), to build zero-bitcode (sdk/ZeroCSharp.Bitcode) for DOS and the C64"
+if ! command -v dotnet >/dev/null 2>&1 && { [ "$want_dos" = 1 ] || [ "$want_c64" = 1 ] || [ "$want_arm" = 1 ]; }; then
+    echo "Missing: the .NET SDK (10 or newer), to build zero-bitcode (sdk/ZeroCSharp.Bitcode) for DOS, the C64 and Cortex-M"
     ok=0
     want_dos=0
     want_c64=0
+    want_arm=0
 fi
 
 if [ -x "$BFLAT_DIR/bflat" ]; then
@@ -221,6 +284,9 @@ fi
 if [ "$want_c64" = 1 ]; then
     fetch_c64_tools
 fi
+if [ "$want_arm" = 1 ]; then
+    fetch_arm_tools
+fi
 
 if [ "$ok" = 1 ]; then
     if [ "$want_wasm" = 1 ]; then
@@ -229,6 +295,8 @@ if [ "$ok" = 1 ]; then
         echo "Ready. Run ./build.sh --dos"
     elif [ "$want_c64" = 1 ]; then
         echo "Ready. Run ./build.sh --c64"
+    elif [ "$want_arm" = 1 ]; then
+        echo "Ready. Run ./build.sh --pico2 or ./build.sh --r4"
     else
         echo "Ready. Run ./build.sh"
     fi

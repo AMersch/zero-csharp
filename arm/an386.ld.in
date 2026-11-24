@@ -1,0 +1,13 @@
+/* QEMU's mps2-an386 board (Arm's AN386 FPGA image: a Cortex-M4 with an FPU),
+   cut down to the Arduino Uno R4's chip, the Renesas RA4M1: 256 KB of flash
+   at 0 and 32 KB of RAM at 0x20000000. (The RA4M1's RAM is at 0x20000000 too,
+   less 32 KB: its own linker script, for the board, will differ.) */
+__boot_flash = 0x00000000;
+__boot_flash_size = 0x400;
+__flash = 0x00000400;
+__flash_size = 0x3fc00;
+__ram = 0x20000000;
+__ram_size = 0x8000;
+__stack_size = 0x1000;
+
+INCLUDE LIBC_LD_FILE

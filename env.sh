@@ -149,6 +149,51 @@ find_c64_emulator() {
     return 1
 }
 
+# Cortex-M microcontrollers (./setup.sh --arm; ./build.sh, ./run.sh and
+# ./test.sh with --pico2 or --r4). C# is compiled to LLVM bitcode by
+# NativeAOT-LLVM, as for DOS, and Arm Toolchain for Embedded (Arm's clang,
+# with picolibc, a C library for microcontrollers, built for every Cortex-M)
+# compiles and links it on this machine. The programs run in QEMU, on a
+# Cortex-M board it emulates, with output, the exit code, arguments and files
+# going to the host over semihosting.
+#
+#   pico2  Raspberry Pi Pico 2 (RP2350): a Cortex-M33 with a single-precision
+#          FPU, 520 KB of RAM. QEMU has no RP2350; its mps2-an505 board has a
+#          Cortex-M33, laid out like the RP2350 (arm/an505.ld.in).
+#   r4     Arduino Uno R4 (Renesas RA4M1): a Cortex-M4 with a single-precision
+#          FPU, 32 KB of RAM and 256 KB of flash; in QEMU, the Cortex-M4 of
+#          its mps2-an386 board, cut down to that (arm/an386.ld.in).
+#
+# ARM_TOOLS  where the toolchain is stored. Default: tools/arm
+ARM_TOOLCHAIN_VERSION=23.1.0
+ARM_TOOLS=${ARM_TOOLS:-tools/arm}
+ARM_TOOLCHAIN=$ARM_TOOLS/ATfE-$ARM_TOOLCHAIN_VERSION
+ARM_BOARDS=(pico2 r4)
+
+# $1: a board. Sets ARM_TARGET (clang's flags for its processor), ARM_LAYOUT
+# (its linker script), ARM_MACHINE (QEMU's board) and ARM_DEFINES (for
+# arm/runtime.c).
+arm_board() {
+    case "$1" in
+        pico2)
+            ARM_TARGET=(--target=thumbv8m.main-none-eabihf -mcpu=cortex-m33 -mfloat-abi=hard -mfpu=fpv5-sp-d16)
+            ARM_LAYOUT=arm/an505.ld.in
+            ARM_MACHINE=mps2-an505
+            # The LED register: FPGAIO LED0, at its secure address (the
+            # program runs in secure state). SYSCLK is 20 MHz.
+            ARM_DEFINES=(-DSHADOW_STACK_SIZE=16384 -DZERO_LED_REGISTER=0x50302000 -DZERO_CPU_HZ=20000000) ;;
+        r4)
+            ARM_TARGET=(--target=thumbv7em-none-eabihf -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16)
+            ARM_LAYOUT=arm/an386.ld.in
+            ARM_MACHINE=mps2-an386
+            # FPGAIO LED0; SYSCLK is 25 MHz.
+            ARM_DEFINES=(-DSHADOW_STACK_SIZE=4096 -DZERO_LED_REGISTER=0x40028000 -DZERO_CPU_HZ=25000000) ;;
+        *)
+            echo "Unknown board: $1 (known: ${ARM_BOARDS[*]})" >&2
+            return 1 ;;
+    esac
+}
+
 # UEFI (./build.sh --uefi, ./run.sh --uefi): programs the firmware starts,
 # run in QEMU with OVMF, the UEFI firmware from the EDK II project. QEMU ships
 # it (Homebrew: share/qemu/edk2-*-code.fd); Linux distributions package it

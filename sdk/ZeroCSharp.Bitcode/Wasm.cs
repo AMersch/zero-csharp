@@ -33,6 +33,12 @@ class Target
     /// <summary>A function's real C types, or null when every one of them can
     /// be passed as a 32-bit integer, as here.</summary>
     public virtual (string Result, List<string> Parameters)? Signature(string name) => null;
+
+    /// <summary>Whether data nothing writes goes into .rodata: read-only
+    /// segments and string literals. On a microcontroller .rodata stays in
+    /// flash, and everything else is copied into RAM, which is much smaller.
+    /// Elsewhere one section keeps the layout simple.</summary>
+    public virtual bool ReadOnlyInFlash => false;
 }
 
 sealed class Reader(byte[] data, int pos = 0, int? end = null)
@@ -373,10 +379,27 @@ static class Wasm
 
             // Everything goes into .data: the startup code writes to some of
             // it (static field storage), and one section keeps the layout
-            // simple.
+            // simple. Except, where the target asks for it (ReadOnlyInFlash),
+            // what nothing writes: .rodata segments, and in the frozen
+            // objects' segment the string literals ("__Str_..."), which are
+            // immutable. Other frozen objects (preinitialized arrays, a
+            // lambda's cached instance: "__FrozenObj_...") can be written to.
+            // An object's label is its MethodTable pointer, and its header is
+            // the 4 bytes before, so a string's section starts there.
             lines.Add($"{target.Comment} segment {index}: {name}");
-            lines.Add("\t.data");
+            bool readOnly = target.ReadOnlyInFlash && name.StartsWith(".rodata", StringComparison.Ordinal);
+            lines.Add(readOnly ? "\t.section .rodata" : "\t.data");
             lines.Add($"\t.p2align {Math.Max(align, 2)}");
+            var sectionAt = new Dictionary<long, bool>(); // offset -> read-only from there
+            if (target.ReadOnlyInFlash && name == ".data.__FrozenSegmentStart")
+            {
+                foreach (var (offset, list) in labels)
+                {
+                    if (offset < 4 || list.All(l => l.Name == "__FrozenSegmentStart"))
+                        continue;
+                    sectionAt[offset - 4] = list.All(l => l.Name.StartsWith("__Str_", StringComparison.Ordinal));
+                }
+            }
             int pos = 0;
             var run = new List<byte>();
 
@@ -389,6 +412,13 @@ static class Wasm
 
             while (pos <= data.Length)
             {
+                if (sectionAt.TryGetValue(pos, out bool nowReadOnly) && nowReadOnly != readOnly)
+                {
+                    Flush();
+                    readOnly = nowReadOnly;
+                    lines.Add(readOnly ? "\t.section .rodata" : "\t.data");
+                    lines.Add("\t.p2align 2");
+                }
                 if (labels.TryGetValue(pos, out var here))
                 {
                     Flush();

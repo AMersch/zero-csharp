@@ -55,6 +55,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   feature costs, the screen and sprites, a game, and running a program in VICE.
 - [Build for UEFI](build-for-uefi.html): programs the firmware starts with no operating system, running
   them in QEMU, and booting a real PC from a USB stick.
+- [Build for microcontrollers](build-for-microcontrollers.html): the Raspberry Pi Pico 2 and the
+  Arduino Uno R4, in QEMU; what fits in their RAM and flash, and why `float` beats `double` there.
 
 ## Windows and games
 

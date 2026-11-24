@@ -52,8 +52,16 @@ never copied, and the run state (activations and the key/value cache) comes from
 <!-- sample: samples/Llama.cs create -->
 ```csharp
 Arena arena = Arena.Create(64 * 1024, "llama", stopOnOutOfMemory: true);
-Llama llama = Llama.Create(Stories260K.Model, Stories260K.Tokenizer, arena);
+// Room for the tokens this run makes: -n of them, or all the model
+// allows when taking turns.
+int positions = turns ? 0 : steps;
+Llama llama = Llama.Create(
+    Stories260K.Model, Stories260K.Tokenizer, arena, positions);
 ```
+
+The last argument is how many positions the run will use. The key/value cache grows with it: all
+512 positions of this model take 655 KB, 64 take 82 KB, which is what lets the program run on a
+Raspberry Pi Pico 2 with its 520 KB of RAM.
 
 The spans can be anything that stays put while the model is used. Here they are literals compiled
 into the program; a file read into an arena works the same way.

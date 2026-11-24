@@ -53,8 +53,12 @@ public struct Llama
     /// while the result is used, and allocates the run state in
     /// <paramref name="arena"/>. Returns a not-created Llama if either file is
     /// malformed or the arena is out of memory.
+    /// <paramref name="maxPositions"/>, when above 0 and below the model's
+    /// own limit, is how many tokens Forward will be given at most: SeqLen
+    /// becomes that, and the memory for keys and values shrinks with it (all
+    /// 512 positions of stories260K take 655 KB, more than a Pico 2 has).
     /// </summary>
-    public static Llama Create(ReadOnlySpan<byte> model, ReadOnlySpan<byte> tokenizer, Arena arena)
+    public static Llama Create(ReadOnlySpan<byte> model, ReadOnlySpan<byte> tokenizer, Arena arena, int maxPositions = 0)
     {
         Llama l = default;
         if (model.Length < 28)
@@ -101,6 +105,8 @@ public struct Llama
                 l._classifier = shared ? l._embedding : Take(ref p, vocab * dim);
                 if ((byte*)p - m > model.Length)
                     return default;
+                if (maxPositions > 0 && maxPositions < l.SeqLen)
+                    l.SeqLen = maxPositions;
 
                 // Run state.
                 l._x = arena.AllocArray<float>(l.Dim);

@@ -1,0 +1,13 @@
+/* QEMU's mps2-an505 board (Arm's AN505 FPGA image: a Cortex-M33), laid out
+   like the RP2350: code at 0x10000000 (on the RP2350, flash mapped there),
+   and 520 KB of RAM. Run through the C preprocessor with LIBC_LD_FILE set to
+   picolibc's linker script, which places everything. */
+__boot_flash = 0x10000000;
+__boot_flash_size = 0x400;
+__flash = 0x10000400;
+__flash_size = 0x3ffc00;
+__ram = 0x38000000;
+__ram_size = 0x82000;
+__stack_size = 0x4000;
+
+INCLUDE LIBC_LD_FILE

@@ -222,6 +222,30 @@ What the C64 target needs, and how it stays honest:
 
 [Build for the Commodore 64](../how-to/build-for-c64.html) goes further.
 
+## Microcontrollers
+
+A Cortex-M is a 32-bit, little-endian Arm processor, which is what the WebAssembly bitcode already
+assumes. So `./build.sh --pico2` (a Cortex-M33, the Raspberry Pi Pico 2's) and `./build.sh --r4` (a
+Cortex-M4, the Arduino Uno R4's) take the bitcode as it is:
+
+1. **bflat and NativeAOT-LLVM** compile each sample to bitcode, as for DOS.
+2. **`zero-bitcode wasm2arm`** writes the program's data as assembly, as `wasm2i386` does, except that
+   read-only segments and string literals go to `.rodata`, which stays in flash. RAM is the scarce
+   memory on a microcontroller; flash is several times bigger.
+3. **[Arm Toolchain for Embedded](https://github.com/arm/arm-toolchain)**, Arm's clang with picolibc,
+   compiles it for the board's processor and links it with `arm/runtime.c`.
+
+The programs run in QEMU, on a board with the same processor, laid out like the real chip. Output,
+input, arguments, files and the exit code reach the host through semihosting, so they test like any
+other target. The memory protection unit makes flash read-only, because in QEMU it is really RAM and a
+write to it would otherwise pass unnoticed.
+
+```bash
+./run.sh --pico2 Llama              # the language model, on an emulated Cortex-M33
+```
+
+[Build for microcontrollers](../how-to/build-for-microcontrollers.html) goes further.
+
 ## UEFI, with no operating system
 
 A UEFI program is a PE file with the Windows calling convention, which bflat already makes for

@@ -289,3 +289,48 @@ jobs:
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: xvfb-run -a ./test.sh --c64
+
+  # Cortex-M microcontrollers: the Raspberry Pi Pico 2's processor and the
+  # Arduino Uno R4's, each on the QEMU board that stands in for it.
+  microcontrollers:
+    needs: bflat
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zero-csharp
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            bflat/layouts/linux-glibc-x64
+            bflat/layouts/linux-glibc-arm64
+          key: ${{ needs.bflat.outputs.key }}
+          fail-on-cache-miss: true
+      - name: Restore the Arm tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            zero-csharp/tools/arm
+            zero-csharp/tools/wasm
+          key: arm-tools-${{ hashFiles('zero-csharp/env.sh') }}
+      - name: Install QEMU and what bflat needs
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-arm binutils
+      # For zero-bitcode (sdk/ZeroCSharp.Bitcode), which build.sh builds.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Set up
+        working-directory: zero-csharp
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
+        run: ./setup.sh --arm
+      - name: Test the Pico 2
+        working-directory: zero-csharp
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
+        run: ./test.sh --pico2
+      - name: Test the Uno R4
+        working-directory: zero-csharp
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
+        run: ./test.sh --r4

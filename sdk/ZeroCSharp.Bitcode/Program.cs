@@ -5,6 +5,8 @@
 //   zero-bitcode wasm2mos IN.o OUT MODULE.ll... a WebAssembly object file's data
 //                                               and functions, for the 6502
 //   zero-bitcode wasm2i386 IN.o OUT             the same, for the 386 (DOS)
+//   zero-bitcode wasm2arm IN.o OUT              the same, for Cortex-M
+//   zero-bitcode elf2uf2 IN.elf OUT.uf2         a Pico 2 program as a UF2 file (Uf2.cs)
 //
 // They began as Python scripts (c64/ll2mos.py, c64/wasm2mos.py,
 // dos/wasm2i386.py, removed after the port was checked to write the same
@@ -37,6 +39,8 @@ static class Program
         Usage: zero-bitcode ll2mos OUTDIR IN.ll...
                zero-bitcode wasm2mos IN.o OUT MODULE.ll...
                zero-bitcode wasm2i386 IN.o OUT
+               zero-bitcode wasm2arm IN.o OUT
+               zero-bitcode elf2uf2 IN.elf OUT.uf2
                zero-bitcode tools ilc|llvm-mos
                zero-bitcode c64-bitcode IN.dll OUTDIR CORE.dll [REF.dll...]
                zero-bitcode c64-link OBJDIR NAME RUNTIME.c OUT.prg [--llvm-mos DIR]
@@ -56,6 +60,12 @@ static class Program
                     return 0;
                 case "wasm2i386" when args.Length == 3:
                     Wasm.Convert(args[1], args[2], new Target());
+                    return 0;
+                case "wasm2arm" when args.Length == 3:
+                    Wasm.Convert(args[1], args[2], new Arm());
+                    return 0;
+                case "elf2uf2" when args.Length == 3:
+                    Uf2.Run(args[1], args[2]);
                     return 0;
                 case "tools":
                     Tools.Command(args[1..]);

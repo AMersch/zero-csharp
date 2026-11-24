@@ -322,6 +322,12 @@
       <_ZeroArg Include="@(_ZeroDllImport->'-i %(Identity)', ' ')" Condition="'$(ZeroTarget)' != 'c64'" />
       <!-- C libraries (ZeroLinkLibrary), where bflat links; macOS's go to ld64.lld below. -->
       <_ZeroArg Include="@(ZeroResolvedLinkLibrary->'--ldflags &quot;%(FullPath)&quot;', ' ')" Condition="'$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'c64' and '@(ZeroResolvedLinkLibrary)' != ''" />
+      <!-- Linux: bflat links against its own C library, older than the one a
+           system library was built with (SDL built on Ubuntu 24.04 calls
+           pthread_create@GLIBC_2.34). lld would check the library's own
+           references against bflat's and fail; the system's C library
+           resolves them when the program runs. -->
+      <_ZeroArg Include="--ldflags --allow-shlib-undefined" Condition="('$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64') and '@(ZeroResolvedLinkLibrary)' != ''" />
       <!-- bflat's default operating system is the host's: named, so a Windows
            host builds Linux programs too. -->
       <_ZeroArg Include="--os linux" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'" />

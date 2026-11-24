@@ -1195,6 +1195,41 @@ sdl3_package() {
     run_in "$dir/Sdl3" "$(basename "$dir")-pack" pack -o "$feed"
 }
 
+# A C library built against the system's C library, newer than the one
+# bflat links with (exp@GLIBC_2.29 here; SDL built on Ubuntu 24.04 has
+# GLIBC_2.34 and later): the program links, and runs on this system.
+test_link_library_newer_glibc() {
+    local name="link library newer glibc" dir app out cc
+    linux_only "$name" || return
+    cc=$(command -v cc || command -v gcc || command -v clang) || { skip "$name" "no C compiler"; return; }
+    dir=$WORK/linklib-glibc
+    rm -rf "$dir" && mkdir -p "$dir"
+    printf '%s\n' '#include <math.h>' 'double nl_exp(double x) { return exp(x); }' > "$dir/zexp.c"
+    if ! "$cc" -O0 -shared -fPIC -o "$dir/libzexp.so" "$dir/zexp.c" -lm > "$WORK/linklib-glibc-cc.log" 2>&1; then fail "$name" "the C library didn't build"; return; fi
+    if ! LC_ALL=C grep -aq 'GLIBC_2\.\(29\|3[0-9]\)' "$dir/libzexp.so"; then skip "$name" "this system's exp isn't newer than bflat's"; return; fi
+    app=$(fixture linklib-app linklib-glibc/App)
+    cat > "$app/Program.cs" <<'CS'
+using System.Runtime.InteropServices;
+
+public static class Program
+{
+    [DllImport("zexp")] static safe extern double nl_exp(double x);
+
+    public static int Main()
+    {
+        Out.Line($"exp {(int)(nl_exp(2.0) * 1000)}");
+        Out.Flush();
+        return 0;
+    }
+}
+CS
+    printf '%s\n' "<Project Sdk=\"ZeroCSharp.Sdk/$VERSION\">" '  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>' \
+        '  <ItemGroup><ZeroLinkLibrary Include="zexp" /></ItemGroup>' '</Project>' > "$app/linklib-app.csproj"
+    if ! run_in "$app" linklib-glibc build "-p:ZeroLibraryPath=$dir"; then fail "$name" "the program didn't link"; return; fi
+    out=$(LD_LIBRARY_PATH=$dir "$app/bin/Debug/$TFM/linklib-app"); if [ "$out" != "exp 7389" ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
 # A library's ZeroLinkLibrary items reach the programs using it: packed into
 # its props file (names as they are, files inside the project packed with
 # it, others not, with a warning), and through a ProjectReference.
@@ -1361,7 +1396,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_not_packable native_library_publish native_library_incremental native_library_clean
     native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name
     native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
-    link_library link_library_passed_on sdl3 sdl3_windows
+    link_library link_library_passed_on link_library_newer_glibc sdl3 sdl3_windows
     native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports

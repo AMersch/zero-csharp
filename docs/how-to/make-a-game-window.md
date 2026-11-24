@@ -18,14 +18,36 @@ library of your own.
 On **Windows** there's nothing to install: the package carries SDL's own `SDL3.dll`, and the build
 copies it next to your program.
 
-On **macOS** and **Linux**, the program links with the system's SDL 3:
+On **macOS** and **Linux**, the program links with the system's SDL 3, which the package doesn't
+carry. On a Mac:
 
 ```bash
-brew install sdl3                  # macOS
-sudo apt install libsdl3-dev       # Linux: Debian 13 and other distributions that have SDL 3
+brew install sdl3
 ```
 
-The build finds it in Homebrew's folder, or in the usual library folders on Linux. If it's
+On Linux, newer distributions package SDL 3: Debian 13, Ubuntu 25.04 and Fedora 41, and later
+versions of each.
+
+```bash
+sudo apt install libsdl3-dev       # Debian 13, Ubuntu 25.04
+sudo dnf install SDL3-devel        # Fedora 41
+```
+
+**Ubuntu 24.04 and Debian 12 don't have it.** There, build SDL from source: install the build
+dependencies that [SDL's Linux guide](https://wiki.libsdl.org/SDL3/README-linux#build-dependencies)
+lists for your distribution (SDL's configure step names any that are missing), then:
+
+```bash
+git clone --depth 1 -b release-3.4.20 https://github.com/libsdl-org/SDL
+cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release
+cmake --build SDL/build
+sudo cmake --install SDL/build && sudo ldconfig
+```
+
+That installs it in `/usr/local/lib`. Without SDL 3, the build stops with error ZERO010 and the
+folders it looked in. On any Linux, a program [for Windows](#ship-it) builds without SDL installed.
+
+The build finds SDL in Homebrew's folder, or in the usual library folders on Linux. If it's
 elsewhere, add the folder to `ZeroLibraryPath` (see [below](#where-a-library-is-found)).
 
 ## Make the program

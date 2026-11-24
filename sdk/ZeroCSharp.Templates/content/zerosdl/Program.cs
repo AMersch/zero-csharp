@@ -1,7 +1,8 @@
 // A window with a square the arrow keys move; Escape or closing the window
 // quits. SDL 3 opens the window and draws: on Windows it comes with the
 // ZeroCSharp.SDL3 package, on Linux and macOS it's the system's (Homebrew's
-// sdl3, or a libsdl3-dev package).
+// sdl3; a libsdl3-dev or SDL3-devel package, or SDL built from source: see
+// the guide).
 //
 // "--frames N" stops after N frames and prints where the square ended up
 // (with SDL_VIDEO_DRIVER=dummy or offscreen, it runs without a display).

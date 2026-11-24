@@ -98,7 +98,9 @@ public static class SDL
 {
     const string Lib = "SDL3";
 
+    // docs:imports
     [DllImport(Lib)] static safe extern byte SDL_Init(InitFlags flags);
+    // docs:end
     [DllImport(Lib)] static safe extern void SDL_Quit();
     [DllImport(Lib)] static unsafe extern byte* SDL_GetError();
     [DllImport(Lib)] static unsafe extern Window SDL_CreateWindow(byte* title, int w, int h, WindowFlags flags);
@@ -109,7 +111,10 @@ public static class SDL
     [DllImport(Lib)] static safe extern byte SDL_SetRenderVSync(Renderer renderer, int vsync);
     [DllImport(Lib)] static safe extern byte SDL_SetRenderDrawColor(Renderer renderer, byte r, byte g, byte b, byte a);
     [DllImport(Lib)] static safe extern byte SDL_RenderClear(Renderer renderer);
-    [DllImport(Lib)] static unsafe extern byte SDL_RenderFillRect(Renderer renderer, FRect* rect);
+    // docs:imports-pointer
+    [DllImport(Lib)]
+    static unsafe extern byte SDL_RenderFillRect(Renderer renderer, FRect* rect);
+    // docs:end
     [DllImport(Lib)] static unsafe extern byte SDL_RenderRect(Renderer renderer, FRect* rect);
     [DllImport(Lib)] static safe extern byte SDL_RenderLine(Renderer renderer, float x1, float y1, float x2, float y2);
     [DllImport(Lib)] static safe extern byte SDL_RenderPresent(Renderer renderer);
@@ -118,7 +123,9 @@ public static class SDL
     [DllImport(Lib)] static safe extern ulong SDL_GetTicks();
     [DllImport(Lib)] static safe extern void SDL_Delay(uint ms);
 
+    // docs:wrappers
     public static bool Init(InitFlags flags) => SDL_Init(flags) != 0;
+    // docs:end
     public static void Quit() => SDL_Quit();
 
     /// <summary>The last error's message, as UTF-8 (Out.WriteUtf8 prints it).</summary>
@@ -177,6 +184,7 @@ public static class SDL
     public static bool RenderLine(Renderer renderer, float x1, float y1, float x2, float y2) => SDL_RenderLine(renderer, x1, y1, x2, y2) != 0;
     public static bool RenderPresent(Renderer renderer) => SDL_RenderPresent(renderer) != 0;
 
+    // docs:wrapper-pointer
     public static bool RenderFillRect(Renderer renderer, FRect rect)
     {
         unsafe
@@ -185,6 +193,7 @@ public static class SDL
             return SDL_RenderFillRect(renderer, &rect) != 0;
         }
     }
+    // docs:end
 
     public static bool RenderRect(Renderer renderer, FRect rect)
     {

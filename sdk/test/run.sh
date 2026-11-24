@@ -1188,10 +1188,46 @@ sdl3_package() {
     mkdir -p "$dir"
     "$ROOT/sdk/ZeroCSharp.SDL3/fetch-windows-sdl.sh" > "$WORK/sdl3-fetch.log" 2>&1 || { cat "$WORK/sdl3-fetch.log"; return 1; }
     cp -R "$ROOT/sdk/ZeroCSharp.SDL3" "$dir/Sdl3"
+    rm -rf "$dir/Sdl3/obj" "$dir/Sdl3/bin"    # pack.sh's stage, an earlier build
     sed -i.bak "s|@ZERO_SDK_VERSION@|$VERSION|g" "$dir/Sdl3/ZeroCSharp.SDL3.csproj" && rm -f "$dir/Sdl3/ZeroCSharp.SDL3.csproj.bak"
     fixture hello "$(basename "$dir")-config" > /dev/null    # just for its nuget.config
     cp "$WORK/$(basename "$dir")-config/nuget.config" "$dir/"
     run_in "$dir/Sdl3" "$(basename "$dir")-pack" pack -o "$feed"
+}
+
+# A C library built against the system's C library, newer than the one
+# bflat links with (exp@GLIBC_2.29 here; SDL built on Ubuntu 24.04 has
+# GLIBC_2.34 and later): the program links, and runs on this system.
+test_link_library_newer_glibc() {
+    local name="link library newer glibc" dir app out cc
+    linux_only "$name" || return
+    cc=$(command -v cc || command -v gcc || command -v clang) || { skip "$name" "no C compiler"; return; }
+    dir=$WORK/linklib-glibc
+    rm -rf "$dir" && mkdir -p "$dir"
+    printf '%s\n' '#include <math.h>' 'double nl_exp(double x) { return exp(x); }' > "$dir/zexp.c"
+    if ! "$cc" -O0 -shared -fPIC -o "$dir/libzexp.so" "$dir/zexp.c" -lm > "$WORK/linklib-glibc-cc.log" 2>&1; then fail "$name" "the C library didn't build"; return; fi
+    if ! LC_ALL=C grep -aq 'GLIBC_2\.\(29\|3[0-9]\)' "$dir/libzexp.so"; then skip "$name" "this system's exp isn't newer than bflat's"; return; fi
+    app=$(fixture linklib-app linklib-glibc/App)
+    cat > "$app/Program.cs" <<'CS'
+using System.Runtime.InteropServices;
+
+public static class Program
+{
+    [DllImport("zexp")] static safe extern double nl_exp(double x);
+
+    public static int Main()
+    {
+        Out.Line($"exp {(int)(nl_exp(2.0) * 1000)}");
+        Out.Flush();
+        return 0;
+    }
+}
+CS
+    printf '%s\n' "<Project Sdk=\"ZeroCSharp.Sdk/$VERSION\">" '  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>' \
+        '  <ItemGroup><ZeroLinkLibrary Include="zexp" /></ItemGroup>' '</Project>' > "$app/linklib-app.csproj"
+    if ! run_in "$app" linklib-glibc build "-p:ZeroLibraryPath=$dir"; then fail "$name" "the program didn't link"; return; fi
+    out=$(LD_LIBRARY_PATH=$dir "$app/bin/Debug/$TFM/linklib-app"); if [ "$out" != "exp 7389" ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
 }
 
 # A library's ZeroLinkLibrary items reach the programs using it: packed into
@@ -1218,6 +1254,7 @@ test_link_library_passed_on() {
     # Through a ProjectReference: on Windows, the package's own files.
     sed -i.bak 's|<ZeroLinkLibrary Include="/no/such/libSDL3.so" />|<ZeroLinkLibrary Include="SDL3" />|' "$dir/Sdl3/ZeroCSharp.SDL3.csproj" && rm -f "$dir/Sdl3/ZeroCSharp.SDL3.csproj.bak"
     cp -R "$ROOT/sdk/test/fixtures/sdl3-app" "$dir/App"
+    cp "$ROOT/sdk/ZeroCSharp.Templates/content/zerosdl/Program.cs" "$dir/App/"
     sed -i.bak 's|<PackageReference Include="ZeroCSharp.SDL3" Version="[^"]*" />|<ProjectReference Include="../Sdl3/ZeroCSharp.SDL3.csproj" />|; s|@ZERO_SDK_VERSION@|'"$VERSION"'|g' "$dir/App/App.csproj" && rm -f "$dir/App/App.csproj.bak"
     if ! run_in "$dir/App" linklib-projref build -v:n -p:ZeroTarget=win-x64; then fail "$name" "the win-x64 program didn't build through the reference"; return; fi
     if ! grep -q -- "-i SDL3" "$LOG" || [ ! -f "$dir/App/bin/Debug/$TFM/win-x64/SDL3.dll" ]; then fail "$name" "the program didn't get SDL3 from its reference"; return; fi
@@ -1232,6 +1269,7 @@ test_sdl3_windows() {
     can_build "$name" || return
     if ! sdl3_package "$dir" "$WORK/sdl3-win-feed"; then fail "$name" "the bindings didn't pack"; return; fi
     app=$(fixture sdl3-app sdl3-win/App)
+    cp "$ROOT/sdk/ZeroCSharp.Templates/content/zerosdl/Program.cs" "$app/"
     add_source "$app/nuget.config" sdl3 "$WORK/sdl3-win-feed"
     if ! run_in "$app" sdl3-win-build build -p:ZeroTarget=win-x64; then fail "$name" "the program didn't build"; return; fi
     if [ ! -f "$app/bin/Debug/$TFM/win-x64/SDL3.dll" ]; then fail "$name" "no SDL3.dll next to the program"; return; fi
@@ -1259,6 +1297,7 @@ test_sdl3() {
     esac
     if ! sdl3_package "$dir" "$WORK/sdl3-feed"; then fail "$name" "the bindings didn't pack"; return; fi
     app=$(fixture sdl3-app sdl3/App)
+    cp "$ROOT/sdk/ZeroCSharp.Templates/content/zerosdl/Program.cs" "$app/"
     add_source "$app/nuget.config" sdl3 "$WORK/sdl3-feed"
     if ! run_in "$app" sdl3-app build; then fail "$name" "the program didn't build"; return; fi
     if ls "$app/bin/Debug/$TFM" | grep -qx SDL3.dll; then fail "$name" "the Windows DLL was copied for $HOST_OS"; return; fi
@@ -1348,7 +1387,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
     release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0
     long_command_line windows_builds_linux unusual_packages_folder crlf_input
-    artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template
+    artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template sdl_template
     framework_from_property newer_sdk_library
     mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
     trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd
@@ -1357,7 +1396,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_not_packable native_library_publish native_library_incremental native_library_clean
     native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name
     native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
-    link_library link_library_passed_on sdl3 sdl3_windows
+    link_library link_library_passed_on link_library_newer_glibc sdl3 sdl3_windows
     native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
@@ -1422,6 +1461,39 @@ test_llama_template() {
     if [[ "$out" != *"Tell a story together"* ]] || [ "$(wc -l <<< "$out")" -lt 3 ]; then fail "$name" "-c printed '$out'"; return; fi
     case "$HOST_RID" in win-x64) other=linux-x64 ;; *) other=win-x64 ;; esac
     if ! run_in "$dir/Story" llama-other build -p:ZeroTarget=$other; then fail "$name" "the $other build failed"; return; fi
+    pass "$name"
+}
+
+# dotnet new zerosdl: the SDL 3 window, with ZeroCSharp.SDL3 from the feed.
+# Every host builds it for Windows (SDL's DLL from the package next to it);
+# where SDL 3 is installed, or on Windows, it runs a few frames headless.
+test_sdl_template() {
+    local name="sdl template" dir=$WORK/sdltemplate out run=
+    can_build "$name" || return
+    if [ ! -f "$FEED/ZeroCSharp.SDL3.$VERSION.nupkg" ]; then fail "$name" "the feed has no ZeroCSharp.SDL3"; return; fi
+    rm -rf "$dir" "${NUGET_PACKAGES:-$HOME/.nuget/packages}/zerocsharp.sdl3" && mkdir -p "$dir"
+    fixture hello sdltemplate-config > /dev/null    # just for its nuget.config
+    cp "$WORK/sdltemplate-config/nuget.config" "$dir/"
+    dotnet new uninstall ZeroCSharp.Templates > /dev/null 2>&1 || true
+    if ! run_in "$dir" sdl-install new install "$FEED/ZeroCSharp.Templates.$VERSION.nupkg"; then fail "$name" "install failed"; return; fi
+    if ! run_in "$dir" sdl-new new zerosdl -o Game; then fail "$name" "dotnet new zerosdl failed"; return; fi
+    if ! grep -q "ZeroCSharp.Sdk/$VERSION" "$dir/Game/Game.csproj" || [ ! -f "$dir/Game/.vscode/launch.json" ]; then fail "$name" "the project isn't filled in"; return; fi
+    if ! run_in "$dir/Game" sdl-win build -p:ZeroTarget=win-x64; then fail "$name" "the win-x64 build failed"; return; fi
+    if ! ls "$dir/Game/bin/Debug/$TFM/win-x64" | grep -qx SDL3.dll; then fail "$name" "no SDL3.dll next to the Windows program"; return; fi
+    case "$HOST_OS" in
+        Windows) run=win ;;
+        Linux)   compgen -G '/usr/lib/*/libSDL3.so' > /dev/null && run=linux ;;
+        Darwin)  [ -f /opt/homebrew/lib/libSDL3.dylib ] && run=mac ;;
+    esac
+    if [ -n "$run" ]; then
+        if ! run_in "$dir/Game" sdl-build build; then fail "$name" "the program didn't build"; return; fi
+        case "$run" in
+            win)   out=$(SDL_VIDEO_DRIVER=dummy SDL_RENDER_DRIVER=software "$(exe "$dir/Game/bin/Debug/$TFM/Game")" --frames 30 2>&1 | tr -d '\r') ;;
+            linux) out=$(SDL_VIDEO_DRIVER=offscreen "$dir/Game/bin/Debug/$TFM/Game" --frames 30 2>&1) ;;
+            mac)   out=$("$dir/Game/bin/Debug/$TFM/Game" --frames 30 2>&1) ;;
+        esac
+        if [ "$out" != "30 frames, square at 330,220" ]; then fail "$name" "printed '$out'"; return; fi
+    fi
     pass "$name"
 }
 

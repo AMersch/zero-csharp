@@ -51,6 +51,11 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
 - [Build for UEFI](build-for-uefi.html): programs the firmware starts with no operating system, running
   them in QEMU, and booting a real PC from a USB stick.
 
+## Windows and games
+
+- [Make a game window](make-a-game-window.html): a window, drawing and the keyboard with SDL 3 from
+  NuGet, shipping it, and bindings for another C library with `ZeroLinkLibrary`.
+
 ## Speed
 
 - [Use SIMD](use-simd.html): `Vector128` and `Vector256` without run-time CPU detection, the `-m` flags,

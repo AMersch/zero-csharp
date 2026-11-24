@@ -35,6 +35,9 @@ With zerocore, as `build.sh` builds it:
   `Interlocked` and `Volatile` for shared state, and `[ThreadStatic]` fields for per-thread state.
   There is no `Thread` class or `lock`.
 - **`Math` and `MathF`**, and `Main(string[] args)` and top-level statements.
+- **`System.Numerics`**: `Complex`, `Vector2`, `Vector3`, `Vector4`, `Matrix3x2`, `Matrix4x4`,
+  `Quaternion` and `Plane`, with .NET's members, on every target (see
+  [below](#systemnumerics)).
 - **`Half`, `BitOperations` and `BitArray`**, with .NET's names and results: half-precision
   numbers, bit counts and scans on the processor's own instructions where it has them, and arrays
   of bits.
@@ -225,6 +228,61 @@ for (int i = 1; i < 100; i += 2)
 var oddPrimes = new BitArray(primes).And(odd);
 Check("And", !oddPrimes[2] && oddPrimes[3] && !oddPrimes[9]);
 ```
+
+### System.Numerics
+
+`Complex`, `Vector2`, `Vector3`, `Vector4`, `Matrix3x2`, `Matrix4x4`, `Quaternion` and `Plane` have
+.NET's members and conventions: row vectors (a point is transformed as `v * M`, so `A * B` applies
+`A` first), right-handed projections with depth from 0 to 1, and .NET's `ToString` formats.
+
+<!-- sample: samples/Numerics.cs camera -->
+```csharp
+// A camera at z = 5 looking at the origin sees it 5 units ahead,
+// which is -Z in a right-handed view space.
+var eye = new Vector3(0, 0, F(5));
+var view = Matrix4x4.CreateLookAt(eye, Vector3.Zero, Vector3.UnitY);
+Check("CreateLookAt",
+    Near(Vector3.Transform(Vector3.Zero, view), 0, 0, -5));
+
+// A 90° field of view, square, drawing from 1 to 100 units away:
+// the far plane lands at depth 1.
+var projection = Matrix4x4.CreatePerspectiveFieldOfView(
+    F(MathF.PI / 2), 1, 1, 100);
+var clip = Vector4.Transform(new Vector3(0, 0, -100), projection);
+Check("CreatePerspectiveFieldOfView",
+    Near(clip.Z / clip.W, 1, 1e-6) && projection.M34 == -1);
+```
+
+`Complex` has the arithmetic, `Abs`, `Sqrt`, `Exp`, `Log`, `Pow` and the trigonometric and
+hyperbolic functions, with .NET's branch cuts:
+
+<!-- sample: samples/Numerics.cs complex -->
+```csharp
+var a = new Complex(D(1), D(2));
+var b = new Complex(D(3), D(-4));
+Check("+ - * /", a + b == new Complex(4, -2)
+    && a * b == new Complex(11, 2) && Near(a / b, -0.2, 0.4));
+Check("Sqrt of a negative", Complex.Sqrt(-4) == new Complex(0, 2));
+// e^(iπ) = -1, up to the rounding of π.
+Check("Euler", Near(Complex.Exp(Complex.ImaginaryOne * Math.PI), -1, 0));
+Check("ToString", a.ToString() == "<1; 2>");
+```
+
+They differ from .NET in three ways:
+
+- **They are plain structs.** .NET hands the vectors to the processor's SIMD registers; zero mode's
+  compiler does that only for types marked `[Intrinsic]`, so here each operation is scalar code,
+  which works on every target. Use `lib/Kernels.cs` for SIMD loops.
+- **`Complex.Tan`, `Tanh` and `Atan` are more accurate.** .NET's formulas cancel near `Tan`'s poles
+  (where its results are off in the fourth digit) and for `Atan` of small values; zerocore's don't,
+  and agree with a 40-digit reference. Elsewhere the results agree with .NET's to within a few units
+  in the last place. At infinity `Atan` gives the limit, (±π/2, 0), where .NET 10 gives NaN.
+- **`ToString` ignores the culture**, as everything in zero mode does: `<1, 2.5>`, never `<1; 2,5>`.
+
+`Math` also gained `Asin`, `Acos`, `Atan`, the hyperbolic functions and their inverses, `Cbrt`,
+`Log(a, newBase)`, `IEEERemainder`, `Sign` and `CopySign`. They are built on the C math functions
+every target already has (`atan2`, `exp`, `log`, `sqrt`, `pow`), to within 3 units in the last place
+of .NET's. `scripts/numerics-fuzz` compares all of it with .NET on random values.
 
 ### Binary formats, hex and Base64
 

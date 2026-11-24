@@ -351,7 +351,7 @@ D:\&gt;<span class="cursor" aria-hidden="true"></span></pre>
           <p>The repository also builds for the home computer from 1982: a 1 MHz 6502 with 64 KB of memory. The same bitcode as for WebAssembly is rewritten for 16-bit addresses and compiled by llvm-mos.</p>
           <p>Nineteen of the test programs run there, and so does this game: records, a union and pattern matching, sprites, the keyboard, and music on the SID chip, in 37 KB, with nothing allocated while it plays.</p>
           <p><a href="how-to/build-for-c64.html">Build for the Commodore 64</a></p>
-          <p class="note">Recorded in the VICE emulator. Built with <code>./build.sh --c64</code> from the repository; <code>dotnet build</code> doesn't target the C64 yet.</p>
+          <p class="note">Recorded in the VICE emulator. A project builds for the C64 with <code>dotnet build -p:ZeroTarget=c64</code> (on a Mac, with Docker running).</p>
         </div>
       </div>
     </section>

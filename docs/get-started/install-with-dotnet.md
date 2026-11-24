@@ -93,11 +93,16 @@ dotnet build -p:ZeroTarget=linux-arm64    # bin/Debug/zero03/linux-arm64/Hello
 dotnet build -p:ZeroTarget=linux-x64      # from Windows: bin\Debug\zero03\linux-x64\Hello
 dotnet build -p:ZeroTarget=osx-arm64      # bin/Debug/zero03/osx-arm64/Hello, for Apple Silicon Macs
 dotnet build -p:ZeroTarget=uefi-x64       # bin/Debug/zero03/uefi-x64/Hello.efi, no OS needed
+dotnet build -p:ZeroTarget=c64            # bin/Debug/zero03/c64/Hello.prg, for a Commodore 64
 ```
 
 `uefi-x64` and `uefi-arm64` make a program the PC's firmware starts by itself, with no operating
 system: [Build for UEFI](../how-to/build-for-uefi.html) shows how to run one in QEMU or boot a PC
 with it.
+
+`c64` makes a program for the Commodore 64. Its first build downloads two compilers into a cache in
+your user folder, and on a Mac it needs Docker: see
+[Build for the Commodore 64](../how-to/build-for-c64.html#with-dotnet-build).
 
 `dotnet clean` removes all of them.
 
@@ -132,7 +137,7 @@ Other libraries work the same way, with their own `.tbd` or `.dylib`.
 
 | Property | Values | Default |
 |---|---|---|
-| `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64`, `osx-arm64`, `uefi-x64`, `uefi-arm64` | the build machine's |
+| `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64`, `osx-arm64`, `uefi-x64`, `uefi-arm64`, `c64` | the build machine's |
 | `ZeroOptimizeFor` | `None` (bflat's `-O0`), `Speed`, or `Size` (bflat's `-Os`) | `None` in Debug, `Speed` otherwise |
 | `ZeroInstructionSet` | passed to bflat as `-m`, e.g. `x86-64-v3` or `dotprod` (see [Use SIMD](../how-to/use-simd.html)) | none |
 | `ZeroDllImports` | more libraries whose `[DllImport]`s are bound when linking, besides `libc` and `libm.so.6`, which always are | none |

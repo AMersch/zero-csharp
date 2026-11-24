@@ -9,6 +9,35 @@ index: 21
 6502 processor at 1 MHz, with 64 KB of memory, of which a program gets 50. It is the same C#, with
 classes, interfaces, generics, lambdas, arenas and strings. What changes is how much of it fits.
 
+## With dotnet build
+
+A project made with `dotnet new zero` builds for the C64 too:
+
+```bash
+dotnet build -c Release -p:ZeroTarget=c64    # bin/Release/zero03/c64/Hello.prg
+```
+
+The first build downloads what the C64 needs beyond the .NET SDK: NativeAOT-LLVM, which compiles C#
+to LLVM bitcode, and [llvm-mos](https://llvm-mos.org/), which compiles that for the 6502, 150 to
+250 MB together. They come from their own releases, are checked against the hashes the SDK names,
+and stay in a cache in your user folder (`~/.cache/zerocsharp/tools`, or
+`%LOCALAPPDATA%\ZeroCSharp\tools` on Windows; `ZERO_TOOLS_CACHE` picks another) for every project
+after that.
+
+It builds on Linux x64, Windows x64 and Apple Silicon Macs:
+
+- **On a Mac, Docker has to be running.** Microsoft publishes no NativeAOT-LLVM for Apple Silicon, so
+  the build runs its Linux version in a container. Docker Desktop works, and so do free alternatives
+  such as [Colima](https://github.com/abiosoft/colima) (`brew install colima docker`, then
+  `colima start`) or Podman.
+- **Linux arm64 can't:** llvm-mos has no build for it.
+
+To run the program, open it in VICE, the Commodore emulator: `x64sc bin/Release/zero03/c64/Hello.prg`
+(`brew install vice`, `sudo apt install vice`). Linux distributions ship VICE without the C64's ROMs;
+[the next section](#get-the-tools) says where the repository gets them.
+
+The rest of this page is about the repository's scripts, which build and test its samples.
+
 ## Get the tools
 
 ```bash
@@ -437,6 +466,7 @@ that `c64/runtime.c` defines with 32-bit parameters: C#'s `calloc` is `cs_calloc
   "ran out of registers". `build.sh` then compiles that method's module separately and tries again; if
   it still fails, split the method.
 - **The compiler versions are a set,** as for WebAssembly and DOS, and llvm-mos is one more.
-- **The `ZeroCSharp.Sdk` package doesn't build for the C64.** Only this repository's scripts do.
+- **A C64 build is always optimized for size.** `ZeroOptimizeFor` doesn't apply, nor do
+  `ZeroInstructionSet` and `ZeroDllImports`.
 
 See also: [How the targets work](../concepts/targets.html) and [Build for DOS](build-for-dos.html).

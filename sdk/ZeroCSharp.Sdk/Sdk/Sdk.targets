@@ -85,7 +85,15 @@
     <!-- macOS: bflat only compiles (it has no Mach-O linker); the package's
          lld links, as ld64.lld, against the payload's libSystem.tbd. -->
     <Message Text="ld64.lld arguments: $(ZeroLinkArgs)" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
-    <Exec Command="&quot;$(ZeroLldExe)&quot; -flavor darwin @&quot;$(ZeroLinkArgsFile)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+    <!-- lld's errors and warnings as MSBuild's, except "<dylib> has version
+         27.2.0, which is newer than target minimum of 12.0": a library on the
+         build machine (Homebrew's SDL, say) is built for its own macOS, and
+         the program uses whichever one the machine it runs on has. That line
+         stays in the log (-v:n), as a message. -->
+    <Exec Command="&quot;$(ZeroLldExe)&quot; -flavor darwin @&quot;$(ZeroLinkArgsFile)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64'"
+          IgnoreStandardErrorWarningFormat="true" StandardErrorImportance="normal"
+          CustomErrorRegularExpression="^lld: error: "
+          CustomWarningRegularExpression="^lld: warning: (?!.*, which is newer than target minimum of )" />
     <Message Importance="high" Text="$(MSBuildProjectName) -> $(ZeroNativeOutput)" />
   </Target>
 

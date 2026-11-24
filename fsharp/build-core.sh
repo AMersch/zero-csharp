@@ -9,8 +9,8 @@
 #
 # Usage:  fsharp/build-core.sh <System.Private.CoreLib.dll> <BflatLib.dll> <out dir>
 #         (printf writes through lib/'s Out)
-# Env:    DOTNET_10_SDK   the .NET 10 SDK to compile with (default: the newest
-#                         10.0.x one `dotnet --list-sdks` shows)
+# Env:    DOTNET_10_SDK   the SDK whose compilers to use (default: .NET SDK
+#                         10.0.402, which must be installed; see below)
 #
 # Only the .NET SDK is needed (its C# and F# compilers), not bflat.
 #
@@ -24,9 +24,13 @@
 # - zerocore's metadata version is empty; fsc would copy it and write ECMA
 #   v1.x metadata tables, which bflat misreads. --metadataversion sets it.
 # - --reflectionfree: records and unions get no sprintf-based ToString.
-# - fsc 11 (.NET 11 SDK) fails to compile this FSharp.Core with --optimize+
-#   ("did not contain ... 'Operators'"), not yet understood, so the .NET 10
-#   SDK's compiler builds it. Programs compile against it with either.
+# - The F# compiler is exactly the one in SDK 10.0.402. Later ones (10.0.404,
+#   11.0.100) fail on core.fs: "'Microsoft.FSharp.Core' ... did not contain
+#   ... 'Operators'". They look up Operators (box, for the equality code they
+#   generate for Choice and the other unions) before ops.fs defines it; the real
+#   FSharp.Core declares it ahead in its .fsi signatures, which this one lacks.
+#   Programs compile against the result with any F# compiler. Install it with
+#   dotnet-install.sh --version 10.0.402 (or actions/setup-dotnet), beside others.
 set -euo pipefail
 usage="usage: build-core.sh <System.Private.CoreLib.dll> <BflatLib.dll> <out dir>"
 core=${1:?$usage}
@@ -34,11 +38,13 @@ lib=${2:?$usage}
 out=${3:?$usage}
 here=$(cd "$(dirname "$0")" && pwd)
 
+fsc_sdk=10.0.402
 if [ -z "${DOTNET_10_SDK:-}" ]; then
-    DOTNET_10_SDK=$(dotnet --list-sdks | awk '$1 ~ /^10\./ {v = $1; d = $2} END {if (v != "") {gsub(/[][]/, "", d); print d "/" v}}')
+    DOTNET_10_SDK=$(dotnet --list-sdks | awk -v want=$fsc_sdk '$1 == want {d = $2; gsub(/[][]/, "", d); print d "/" $1}')
 fi
 if [ -z "$DOTNET_10_SDK" ] || [ ! -f "$DOTNET_10_SDK/FSharp/fsc.dll" ]; then
-    echo "Error: no .NET 10 SDK found (for its F# compiler); install one or set DOTNET_10_SDK" >&2
+    echo "Error: the .NET SDK $fsc_sdk isn't installed (its F# compiler builds FSharp.Core; later ones fail," >&2
+    echo "see fsharp/build-core.sh): dotnet-install.sh --version $fsc_sdk, or set DOTNET_10_SDK" >&2
     exit 1
 fi
 

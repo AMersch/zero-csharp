@@ -8,6 +8,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
@@ -72,6 +73,15 @@ public readonly struct Point : IEquatable<Point>
     public Point(int x, int y) { X = x; Y = y; }
     public bool Equals(Point other) => X == other.X && Y == other.Y;
     public override int GetHashCode() => HashCode.Combine(X, Y);
+}
+// docs:end
+
+// docs:unscoped-ref
+// [UnscopedRef] lets a struct hand out a ref to its own field.
+public struct Counter
+{
+    int _value;
+    [UnscopedRef] public ref int Value => ref _value;
 }
 // docs:end
 
@@ -358,6 +368,13 @@ public static class Program
         Check("a struct's hash code without allocating",
             pointHash != 0 && GC.GetTotalAllocatedBytes() == before);
         Section("HashCode");
+
+        var clicks = new Counter();
+        clicks.Value++;
+        ref int count = ref clicks.Value;
+        count += 2;
+        Check("a ref to a struct's own field", clicks.Value == 3);
+        Section("UnscopedRef");
 
         Out.Line();
         if (s_failures == 0)

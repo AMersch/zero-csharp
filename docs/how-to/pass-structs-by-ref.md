@@ -127,6 +127,20 @@ Otherwise the compiler can't be sure the method leaves the struct unchanged, and
 a hidden copy, which costs the copy that `in` was meant to avoid. Reading fields, as `LengthSquared`
 does, never makes a copy.
 
+A struct's own method or property can't return a ref to one of its fields, because the struct might
+be a local about to go away. Mark it `[UnscopedRef]` (`System.Diagnostics.CodeAnalysis`) and the
+compiler allows it, checking instead that the caller's struct outlives the ref:
+
+<!-- sample: samples/Core.cs unscoped-ref -->
+```csharp
+// [UnscopedRef] lets a struct hand out a ref to its own field.
+public struct Counter
+{
+    int _value;
+    [UnscopedRef] public ref int Value => ref _value;
+}
+```
+
 ## Work on elements in place
 
 The same works for a span of structs. `ref points[i]` is a ref to the element, and `foreach (ref ...)`

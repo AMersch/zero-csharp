@@ -3,6 +3,7 @@
   "author": "Zero C# contributors",
   "classifications": ["Console", "Native"],
   "identity": "ZeroCSharp.Templates.Program",
+  "groupIdentity": "ZeroCSharp.Templates.Program",
   "name": "Zero C# program",
   "description": "A native program in zero-mode C#: no .NET runtime, no garbage collector.",
   "shortName": "zero",

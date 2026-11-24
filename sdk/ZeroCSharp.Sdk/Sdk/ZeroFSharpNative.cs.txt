@@ -1,0 +1,579 @@
+// The C# that bflat compiles for an F# project (Sdk.targets, ZeroFSharpNative).
+// MSBuild compiles this inline task; the file isn't named .cs so that a project
+// whose packages folder is inside it doesn't compile it too.
+// bflat compiles only C#, and makes native code of the C# and of the
+// assemblies it references, here the F# compiler's IL. This task reads that IL's
+// metadata (ECMA-335 II.22-24) and writes:
+//
+// - for a program, a Main that calls the F# entry point: an [<EntryPoint>]
+//   function, or the main@ method fsc makes for top-level code in a class C#
+//   can't name. [UnsafeAccessor] reaches either by name; bflat's compiler
+//   implements it, and the attributes are declared in the file (zerocore has
+//   none).
+// - for a native library (NativeLib=Shared), an export for each F# function
+//   with [<UnmanagedCallersOnly(EntryPoint = "...")>], which calls the F# one
+//   through a function pointer: bflat exports the entry points of the assembly
+//   it compiles, not of the ones it references. On Windows also a .def file
+//   for the import library, which names the DLL.
+//
+// System.Reflection.Metadata isn't available to inline tasks, so the tables
+// are read here; only what these files need.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+
+public class ZeroFSharpNative : Task
+{
+    [Required] public string Assembly { get; set; }
+    [Required] public string Source { get; set; }
+    public bool Library { get; set; }
+    /// <summary>Windows libraries: where to write the .def file.</summary>
+    public string DefFile { get; set; }
+    /// <summary>Windows libraries: the DLL's file name, for the .def file.</summary>
+    public string DllName { get; set; }
+
+    private byte[] _pe;
+    private int _strings, _blobs, _stringIndex, _guidIndex, _blobIndex;
+    private readonly int[] _rows = new int[64];
+    private readonly int[] _tableStart = new int[64];
+    private readonly int[] _rowSize = new int[64];
+    private readonly int[][] _columnOffsets = new int[64][];
+    private readonly int[][] _columnSizes = new int[64][];
+
+    private const int TypeRef = 0x01, TypeDef = 0x02, MethodDef = 0x06, MemberRef = 0x0A,
+        CustomAttribute = 0x0C, NestedClass = 0x29;
+
+    // Coded indexes (II.24.2.6): the tag bits and the tables they select.
+    private static readonly int[] TypeDefOrRef = { 0x02, 0x01, 0x1B };
+    private static readonly int[] HasConstant = { 0x04, 0x08, 0x17 };
+    private static readonly int[] HasCustomAttribute = { 0x06, 0x04, 0x01, 0x02, 0x08, 0x09, 0x0A, 0x00, 0x0E, 0x17, 0x14,
+        0x11, 0x1A, 0x1B, 0x20, 0x23, 0x26, 0x27, 0x28, 0x2A, 0x2C, 0x2B };
+    private static readonly int[] HasFieldMarshal = { 0x04, 0x08 };
+    private static readonly int[] HasDeclSecurity = { 0x02, 0x06, 0x20 };
+    private static readonly int[] MemberRefParent = { 0x02, 0x01, 0x1A, 0x06, 0x1B };
+    private static readonly int[] HasSemantics = { 0x14, 0x17 };
+    private static readonly int[] MethodDefOrRef = { 0x06, 0x0A };
+    private static readonly int[] MemberForwarded = { 0x04, 0x06 };
+    private static readonly int[] Implementation = { 0x26, 0x23, 0x27 };
+    private static readonly int[] CustomAttributeType = { -1, -1, 0x06, 0x0A, -1 };
+    private static readonly int[] ResolutionScope = { 0x00, 0x1A, 0x23, 0x01 };
+
+    // The columns of tables 0x00-0x29: a byte count, "s" (string), "g" (guid),
+    // "b" (blob), a table index (int), or a coded index (int[]).
+    private static readonly object[][] Schema =
+    {
+        new object[] { 2, "s", "g", "g", "g" },                          // 00 Module
+        new object[] { ResolutionScope, "s", "s" },                      // 01 TypeRef
+        new object[] { 4, "s", "s", TypeDefOrRef, T(0x04), T(0x06) },    // 02 TypeDef
+        new object[] { T(0x04) },                                        // 03 FieldPtr
+        new object[] { 2, "s", "b" },                                    // 04 Field
+        new object[] { T(0x06) },                                        // 05 MethodPtr
+        new object[] { 4, 2, 2, "s", "b", T(0x08) },                     // 06 MethodDef
+        new object[] { T(0x08) },                                        // 07 ParamPtr
+        new object[] { 2, 2, "s" },                                      // 08 Param
+        new object[] { T(0x02), TypeDefOrRef },                          // 09 InterfaceImpl
+        new object[] { MemberRefParent, "s", "b" },                      // 0A MemberRef
+        new object[] { 2, HasConstant, "b" },                            // 0B Constant
+        new object[] { HasCustomAttribute, CustomAttributeType, "b" },   // 0C CustomAttribute
+        new object[] { HasFieldMarshal, "b" },                           // 0D FieldMarshal
+        new object[] { 2, HasDeclSecurity, "b" },                        // 0E DeclSecurity
+        new object[] { 2, 4, T(0x02) },                                  // 0F ClassLayout
+        new object[] { 4, T(0x04) },                                     // 10 FieldLayout
+        new object[] { "b" },                                            // 11 StandAloneSig
+        new object[] { T(0x02), T(0x14) },                               // 12 EventMap
+        new object[] { T(0x14) },                                        // 13 EventPtr
+        new object[] { 2, "s", TypeDefOrRef },                           // 14 Event
+        new object[] { T(0x02), T(0x17) },                               // 15 PropertyMap
+        new object[] { T(0x17) },                                        // 16 PropertyPtr
+        new object[] { 2, "s", "b" },                                    // 17 Property
+        new object[] { 2, T(0x06), HasSemantics },                       // 18 MethodSemantics
+        new object[] { T(0x02), MethodDefOrRef, MethodDefOrRef },        // 19 MethodImpl
+        new object[] { "s" },                                            // 1A ModuleRef
+        new object[] { "b" },                                            // 1B TypeSpec
+        new object[] { 2, MemberForwarded, "s", T(0x1A) },               // 1C ImplMap
+        new object[] { 4, T(0x04) },                                     // 1D FieldRVA
+        new object[] { 4, 4 },                                           // 1E EncLog
+        new object[] { 4 },                                              // 1F EncMap
+        new object[] { 4, 2, 2, 2, 2, 4, "b", "s", "s" },                // 20 Assembly
+        new object[] { 4 },                                              // 21 AssemblyProcessor
+        new object[] { 4, 4, 4 },                                        // 22 AssemblyOS
+        new object[] { 2, 2, 2, 2, 4, "b", "s", "s", "b" },              // 23 AssemblyRef
+        new object[] { 4, T(0x23) },                                     // 24 AssemblyRefProcessor
+        new object[] { 4, 4, 4, T(0x23) },                               // 25 AssemblyRefOS
+        new object[] { 4, "s", "b" },                                    // 26 File
+        new object[] { 4, 4, "s", "s", Implementation },                 // 27 ExportedType
+        new object[] { 4, 4, "s", Implementation },                      // 28 ManifestResource
+        new object[] { T(0x02), T(0x02) },                               // 29 NestedClass
+    };
+
+    private sealed class TableIndex { public int Table; }
+    private static TableIndex T(int table) => new TableIndex { Table = table };
+
+    private sealed class SignatureError : Exception
+    {
+        public SignatureError(string message) : base(message) { }
+    }
+
+    public override bool Execute()
+    {
+        _pe = File.ReadAllBytes(Assembly);
+        int cli = ReadHeaders();
+        string code;
+        if (Library)
+        {
+            code = Exports();
+            if (code == null)
+                return false;
+        }
+        else
+        {
+            int token = U32(cli + 20);
+            if ((U32(cli + 16) & 0x10) != 0 || token >> 24 != MethodDef)
+            {
+                Error("The F# program has no entry point: put top-level code in its last file, or an [<EntryPoint>] function.");
+                return false;
+            }
+            code = EntryProgram(token & 0xFFFFFF);
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(Source)));
+        File.WriteAllText(Source, code);
+        return true;
+    }
+
+    private void Error(string message) => Log.LogError(null, "ZERO003", null, Assembly, 0, 0, 0, 0, message);
+
+    // ---- The program's Main ------------------------------------------------
+
+    private string EntryProgram(int method)
+    {
+        string name = MethodName(method);
+        int signature = SignatureStart(method);
+        int parameters = _pe[signature + 1];
+        bool returnsInt = _pe[signature + 2] == 0x08;
+        string type = RuntimeTypeName(OwningType(method));
+        string call = parameters == 0 ? "FSharpMain(null)" : "FSharpMain(null, args)";
+        string qualified = (type + ", " + EscapeTypeName(Path.GetFileNameWithoutExtension(Assembly))).Replace("\"", "\"\"");
+        var cs = new StringBuilder();
+        cs.AppendLine("// Generated by ZeroCSharp.Sdk: the native program's Main, which calls");
+        cs.AppendLine("// the F# program's entry point, " + type + "::" + name + ".");
+        cs.AppendLine("using System.Runtime.CompilerServices;");
+        cs.AppendLine("static class ZeroFSharpEntry");
+        cs.AppendLine("{");
+        cs.AppendLine("    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = @\"" + name.Replace("\"", "\"\"") + "\")]");
+        cs.AppendLine("    static extern " + (returnsInt ? "int" : "void") + " FSharpMain([UnsafeAccessorType(@\"" + qualified
+            + "\")] object type" + (parameters == 0 ? "" : ", string[] args") + ");");
+        cs.AppendLine(returnsInt
+            ? "    static int Main(string[] args) => " + call + ";"
+            : "    static int Main(string[] args) { " + call + "; return 0; }");
+        cs.AppendLine("}");
+        cs.AppendLine("namespace System.Runtime.CompilerServices");
+        cs.AppendLine("{");
+        cs.AppendLine("    internal enum UnsafeAccessorKind { Constructor, Method, StaticMethod, Field, StaticField }");
+        cs.AppendLine("    [AttributeUsage(AttributeTargets.Method)]");
+        cs.AppendLine("    internal sealed class UnsafeAccessorAttribute : Attribute");
+        cs.AppendLine("    {");
+        cs.AppendLine("        public UnsafeAccessorAttribute(UnsafeAccessorKind kind) { Kind = kind; }");
+        cs.AppendLine("        public UnsafeAccessorKind Kind { get; }");
+        cs.AppendLine("        public string Name { get; set; }");
+        cs.AppendLine("    }");
+        cs.AppendLine("    [AttributeUsage(AttributeTargets.Parameter | AttributeTargets.ReturnValue)]");
+        cs.AppendLine("    internal sealed class UnsafeAccessorTypeAttribute : Attribute");
+        cs.AppendLine("    {");
+        cs.AppendLine("        public UnsafeAccessorTypeAttribute(string typeName) { TypeName = typeName; }");
+        cs.AppendLine("        public string TypeName { get; }");
+        cs.AppendLine("    }");
+        cs.AppendLine("}");
+        return cs.ToString();
+    }
+
+    // ---- A native library's exports ----------------------------------------
+
+    private string Exports()
+    {
+        var exports = new List<KeyValuePair<string, int>>();
+        for (int row = 1; row <= _rows[CustomAttribute]; row++)
+        {
+            int parent = Cell(CustomAttribute, row, 0);
+            if (parent % 32 != 0) continue;    // tag 0: a MethodDef
+            if (!IsUnmanagedCallersOnly(Cell(CustomAttribute, row, 1))) continue;
+            string entryPoint = NamedStringArgument(Cell(CustomAttribute, row, 2), "EntryPoint");
+            if (entryPoint != null)
+                exports.Add(new KeyValuePair<string, int>(entryPoint, parent >> 5));
+        }
+        var cs = new StringBuilder();
+        cs.AppendLine("// Generated by ZeroCSharp.Sdk: the native library's exports, the F#");
+        cs.AppendLine("// functions with [<UnmanagedCallersOnly(EntryPoint = ...)>], each called");
+        cs.AppendLine("// through a function pointer (bflat exports what it compiles from C#).");
+        cs.AppendLine("static unsafe class ZeroFSharpExports");
+        cs.AppendLine("{");
+        bool ok = true;
+        int n = 0;
+        foreach (var export in exports)
+        {
+            int method = export.Value;
+            string target = CSharpTypeName(OwningType(method), out string why);
+            if (target == null || (MethodFlags(method) & 0x7) != 6)
+            {
+                Log.LogError(null, "ZERO005", null, Assembly, 0, 0, 0, 0,
+                    "The export " + export.Key + " (" + MethodName(method) + ") isn't public"
+                    + (why != null ? " (" + why + ")" : "") + ": exported functions and the modules around them must be public.");
+                ok = false;
+                continue;
+            }
+            List<string> types;
+            try { types = ExportSignature(method); }
+            catch (SignatureError e)
+            {
+                Log.LogError(null, "ZERO005", null, Assembly, 0, 0, 0, 0,
+                    "The export " + export.Key + " (" + MethodName(method) + ") " + e.Message);
+                ok = false;
+                continue;
+            }
+            string ret = types[0];
+            var parameters = new StringBuilder();
+            var arguments = new StringBuilder();
+            for (int i = 1; i < types.Count; i++)
+            {
+                if (i > 1) { parameters.Append(", "); arguments.Append(", "); }
+                parameters.Append(types[i]).Append(" a").Append(i);
+                arguments.Append('a').Append(i);
+            }
+            var pointer = new StringBuilder("delegate* unmanaged<");
+            for (int i = 1; i < types.Count; i++) pointer.Append(types[i]).Append(", ");
+            pointer.Append(ret).Append('>');
+            cs.AppendLine("    [System.Runtime.InteropServices.UnmanagedCallersOnly(EntryPoint = @\"" + export.Key.Replace("\"", "\"\"") + "\")]");
+            cs.AppendLine("    static " + ret + " Export" + n++ + "(" + parameters + ") => ((" + pointer + ")&"
+                + target + "." + MethodName(method) + ")(" + arguments + ");");
+        }
+        cs.AppendLine("}");
+        if (!ok) return null;
+        if (!string.IsNullOrEmpty(DefFile))
+        {
+            var def = new StringBuilder();
+            def.AppendLine("LIBRARY \"" + DllName + "\"");
+            def.AppendLine("EXPORTS");
+            foreach (var export in exports) def.AppendLine("    " + export.Key);
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(DefFile)));
+            File.WriteAllText(DefFile, def.ToString());
+        }
+        return cs.ToString();
+    }
+
+    private bool IsUnmanagedCallersOnly(int attributeType)
+    {
+        int table = CustomAttributeType[attributeType % 8], row = attributeType >> 3;
+        int typeToken;
+        if (table == MemberRef)
+        {
+            int parent = Cell(MemberRef, row, 0);
+            typeToken = (MemberRefParent[parent % 8] << 24) | (parent >> 3);
+        }
+        else if (table == MethodDef)
+            typeToken = (TypeDef << 24) | OwningType(row);
+        else
+            return false;
+        int typeTable = typeToken >> 24, typeRow = typeToken & 0xFFFFFF;
+        if (typeTable != TypeRef && typeTable != TypeDef) return false;
+        int nameColumn = typeTable == TypeRef ? 1 : 1, namespaceColumn = typeTable == TypeRef ? 2 : 2;
+        return Str(Cell(typeTable, typeRow, nameColumn)) == "UnmanagedCallersOnlyAttribute"
+            && Str(Cell(typeTable, typeRow, namespaceColumn)) == "System.Runtime.InteropServices";
+    }
+
+    // A custom attribute's named string argument (II.23.3), or null.
+    private string NamedStringArgument(int blob, string wanted)
+    {
+        int length = CompressedLength(_blobs + blob, out int p);
+        int end = p + length;
+        if (U16(p) != 1) return null;
+        p += 2;    // UnmanagedCallersOnlyAttribute's constructor has no arguments
+        int count = U16(p);
+        p += 2;
+        for (int i = 0; i < count && p < end; i++)
+        {
+            p++;    // FIELD (0x53) or PROPERTY (0x54)
+            int type = _pe[p++];
+            if (type == 0x1D) type = 0x1D00 | _pe[p++];    // SZARRAY of
+            string name = SerString(ref p);
+            switch (type)
+            {
+                case 0x0E:    // string
+                    string value = SerString(ref p);
+                    if (name == wanted) return value;
+                    break;
+                case 0x1D50:    // System.Type[], CallConvs
+                    int items = (int)(uint)U32(p);
+                    p += 4;
+                    if (items != -1)
+                        for (int j = 0; j < items; j++) SerString(ref p);
+                    break;
+                default:
+                    return null;
+            }
+        }
+        return null;
+    }
+
+    private string SerString(ref int p)
+    {
+        if (_pe[p] == 0xFF) { p++; return null; }
+        int length = CompressedLength(p, out int start);
+        p = start + length;
+        return Encoding.UTF8.GetString(_pe, start, length);
+    }
+
+    // The C# types of an export's return value and parameters.
+    private List<string> ExportSignature(int method)
+    {
+        int p = _blobs + Cell(MethodDef, method, 4);
+        CompressedLength(p, out p);
+        int convention = _pe[p++];
+        if ((convention & 0x10) != 0) throw new SignatureError("is generic; an export can't be.");
+        if ((convention & 0x20) != 0) throw new SignatureError("isn't static.");
+        int count = CompressedInt(ref p);
+        var types = new List<string>();
+        for (int i = 0; i <= count; i++)
+            types.Add(SignatureType(ref p, i == 0));
+        return types;
+    }
+
+    private string SignatureType(ref int p, bool isReturn)
+    {
+        int element = _pe[p++];
+        switch (element)
+        {
+            case 0x01: if (isReturn) return "void"; break;
+            case 0x02: throw new SignatureError("takes or returns a bool, which isn't blittable: use byte or int.");
+            case 0x03: throw new SignatureError("takes or returns a char, which isn't blittable: use uint16.");
+            case 0x04: return "sbyte";
+            case 0x05: return "byte";
+            case 0x06: return "short";
+            case 0x07: return "ushort";
+            case 0x08: return "int";
+            case 0x09: return "uint";
+            case 0x0A: return "long";
+            case 0x0B: return "ulong";
+            case 0x0C: return "float";
+            case 0x0D: return "double";
+            case 0x18: return "nint";
+            case 0x19: return "nuint";
+            case 0x0F:    // PTR
+                if (_pe[p] == 0x01) { p++; return "void*"; }
+                return SignatureType(ref p, false) + "*";
+            case 0x11:    // VALUETYPE
+                int coded = CompressedInt(ref p);
+                int table = TypeDefOrRef[coded % 4], row = coded >> 2;
+                string name = table == TypeDef ? CSharpTypeName(row, out _) : table == TypeRef ? CSharpTypeRefName(row) : null;
+                if (name == null) throw new SignatureError("uses a struct C# can't name (a non-public or generic one).");
+                return name;
+            case 0x1F:
+            case 0x20:    // a custom modifier, then the type
+                CompressedInt(ref p);
+                return SignatureType(ref p, isReturn);
+        }
+        throw new SignatureError("takes or returns a type an export can't: use numbers, pointers, nativeint and structs of them.");
+    }
+
+    // ---- Types and methods --------------------------------------------------
+
+    private string MethodName(int method) => Str(Cell(MethodDef, method, 3));
+    private int MethodFlags(int method) => Cell(MethodDef, method, 2);
+
+    private int SignatureStart(int method)
+    {
+        CompressedLength(_blobs + Cell(MethodDef, method, 4), out int start);
+        return start;
+    }
+
+    // The TypeDef whose method list holds the method.
+    private int OwningType(int method)
+    {
+        int type = 0;
+        for (int t = 1; t <= _rows[TypeDef]; t++)
+            if (Cell(TypeDef, t, 5) <= method) type = t;
+        return type;
+    }
+
+    private int EnclosingType(int type)
+    {
+        for (int row = 1; row <= _rows[NestedClass]; row++)
+            if (Cell(NestedClass, row, 0) == type) return Cell(NestedClass, row, 1);
+        return 0;
+    }
+
+    // Namespace.Outer+Inner, escaped as type names are (for UnsafeAccessorType).
+    private string RuntimeTypeName(int type)
+    {
+        int enclosing = EnclosingType(type);
+        string name = EscapeTypeName(Str(Cell(TypeDef, type, 1)));
+        if (enclosing != 0) return RuntimeTypeName(enclosing) + "+" + name;
+        string ns = Str(Cell(TypeDef, type, 2));
+        return ns.Length > 0 ? EscapeTypeName(ns) + "." + name : name;
+    }
+
+    // global::Namespace.Outer.Inner, or null for a type C# can't name or reach.
+    private string CSharpTypeName(int type, out string why)
+    {
+        why = null;
+        int flags = Cell(TypeDef, type, 0), visibility = flags & 0x7;
+        string name = Str(Cell(TypeDef, type, 1));
+        if (visibility != 1 && visibility != 2) { why = name + " isn't public"; return null; }
+        if (!IsIdentifier(name)) { why = name + " isn't a C# name"; return null; }
+        int enclosing = EnclosingType(type);
+        if (enclosing != 0)
+        {
+            string outer = CSharpTypeName(enclosing, out why);
+            return outer == null ? null : outer + "." + name;
+        }
+        string ns = Str(Cell(TypeDef, type, 2));
+        foreach (string part in ns.Split('.'))
+            if (ns.Length > 0 && !IsIdentifier(part)) { why = ns + " isn't a C# namespace"; return null; }
+        return "global::" + (ns.Length > 0 ? ns + "." : "") + name;
+    }
+
+    private string CSharpTypeRefName(int row)
+    {
+        string name = Str(Cell(TypeRef, row, 1)), ns = Str(Cell(TypeRef, row, 2));
+        int scope = Cell(TypeRef, row, 0);
+        if (ResolutionScope[scope % 4] == TypeRef)
+        {
+            string outer = CSharpTypeRefName(scope >> 2);
+            return outer == null ? null : outer + "." + name;
+        }
+        if (!IsIdentifier(name)) return null;
+        return "global::" + (ns.Length > 0 ? ns + "." : "") + name;
+    }
+
+    private static bool IsIdentifier(string name)
+    {
+        if (name.Length == 0 || !(char.IsLetter(name[0]) || name[0] == '_')) return false;
+        foreach (char c in name)
+            if (!(char.IsLetterOrDigit(c) || c == '_')) return false;
+        return true;
+    }
+
+    // Type names escape , + & * [ ] \ with a backslash.
+    private static string EscapeTypeName(string name)
+    {
+        var b = new StringBuilder();
+        foreach (char c in name)
+        {
+            if (",+&*[]\\".IndexOf(c) >= 0) b.Append('\\');
+            b.Append(c);
+        }
+        return b.ToString();
+    }
+
+    // ---- The file and its tables --------------------------------------------
+
+    private int U16(int o) => _pe[o] | _pe[o + 1] << 8;
+    private int U32(int o) => _pe[o] | _pe[o + 1] << 8 | _pe[o + 2] << 16 | _pe[o + 3] << 24;
+
+    private int CompressedInt(ref int p)
+    {
+        int length = CompressedLength(p, out int next);
+        p = next;
+        return length;
+    }
+
+    // A compressed unsigned integer at o (II.23.2); start: the byte after it.
+    private int CompressedLength(int o, out int start)
+    {
+        int b = _pe[o];
+        if ((b & 0x80) == 0) { start = o + 1; return b; }
+        if ((b & 0xC0) == 0x80) { start = o + 2; return (b & 0x3F) << 8 | _pe[o + 1]; }
+        start = o + 4;
+        return (b & 0x1F) << 24 | _pe[o + 1] << 16 | _pe[o + 2] << 8 | _pe[o + 3];
+    }
+
+    private string Str(int offset)
+    {
+        int start = _strings + offset, end = start;
+        while (_pe[end] != 0) end++;
+        return Encoding.UTF8.GetString(_pe, start, end - start);
+    }
+
+    private int Cell(int table, int row, int column)
+    {
+        int o = _tableStart[table] + (row - 1) * _rowSize[table] + _columnOffsets[table][column];
+        return _columnSizes[table][column] == 4 ? U32(o) : _columnSizes[table][column] == 2 ? U16(o) : _pe[o];
+    }
+
+    // The PE headers, the CLI header (returned), the metadata streams, and
+    // where each table's rows start.
+    private int ReadHeaders()
+    {
+        int peHeader = U32(0x3C);
+        int sectionCount = U16(peHeader + 6);
+        int optional = peHeader + 24;
+        int dataDirectories = optional + (U16(optional) == 0x20B ? 112 : 96);
+        int sections = optional + U16(peHeader + 20);
+        Func<int, int> fileOffset = rva =>
+        {
+            for (int i = 0; i < sectionCount; i++)
+            {
+                int section = sections + i * 40, va = U32(section + 12);
+                if (rva >= va && rva < va + Math.Max(U32(section + 8), U32(section + 16)))
+                    return rva - va + U32(section + 20);
+            }
+            throw new InvalidDataException("An address outside every section of " + Assembly);
+        };
+        int cli = fileOffset(U32(dataDirectories + 14 * 8));
+        int root = fileOffset(U32(cli + 8));
+        int streamList = root + 16 + U32(root + 12);
+        int streamCount = U16(streamList + 2), tables = 0, cursor = streamList + 4;
+        for (int i = 0; i < streamCount; i++)
+        {
+            int offset = root + U32(cursor);
+            int nameStart = cursor + 8, nameEnd = nameStart;
+            while (_pe[nameEnd] != 0) nameEnd++;
+            string name = Encoding.ASCII.GetString(_pe, nameStart, nameEnd - nameStart);
+            if (name == "#~") tables = offset;
+            else if (name == "#Strings") _strings = offset;
+            else if (name == "#Blob") _blobs = offset;
+            cursor = nameStart + ((nameEnd - nameStart + 4) & ~3);
+        }
+        int heapSizes = _pe[tables + 6];
+        _stringIndex = (heapSizes & 1) != 0 ? 4 : 2;
+        _guidIndex = (heapSizes & 2) != 0 ? 4 : 2;
+        _blobIndex = (heapSizes & 4) != 0 ? 4 : 2;
+        long valid = (long)(uint)U32(tables + 8) | (long)(uint)U32(tables + 12) << 32;
+        int counts = tables + 24;
+        for (int t = 0; t < 64; t++)
+            if ((valid >> t & 1) != 0) { _rows[t] = U32(counts); counts += 4; }
+        int position = counts;
+        for (int t = 0; t < Schema.Length; t++)
+        {
+            object[] columns = Schema[t];
+            _columnOffsets[t] = new int[columns.Length];
+            _columnSizes[t] = new int[columns.Length];
+            int size = 0;
+            for (int c = 0; c < columns.Length; c++)
+            {
+                int width = ColumnSize(columns[c]);
+                _columnOffsets[t][c] = size;
+                _columnSizes[t][c] = width;
+                size += width;
+            }
+            _rowSize[t] = size;
+            _tableStart[t] = position;
+            position += _rows[t] * size;
+        }
+        return cli;
+    }
+
+    private int ColumnSize(object column)
+    {
+        if (column is int bytes) return bytes;
+        if (column is string heap) return heap == "s" ? _stringIndex : heap == "g" ? _guidIndex : _blobIndex;
+        if (column is TableIndex index) return _rows[index.Table] > 0xFFFF ? 4 : 2;
+        int[] tables = (int[])column;
+        int bits = 0;
+        while ((1 << bits) < tables.Length) bits++;
+        int max = 0;
+        foreach (int t in tables) if (t >= 0) max = Math.Max(max, _rows[t]);
+        return max < (1 << (16 - bits)) ? 2 : 4;
+    }
+}

@@ -6,8 +6,10 @@ namespace System
 {
     public struct Void { }
 
-    public struct Boolean : IEquatable<bool>, IComparable<bool>
+    public struct Boolean : IEquatable<bool>, IComparable<bool>, IComparable
     {
+        public int CompareTo(object obj) => obj is bool other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Boolean.");
+
         public bool Equals(bool other) => (bool)this == other;
         public int CompareTo(bool other) => (bool)this == other ? 0 : (bool)this ? 1 : -1;
         public override bool Equals(object obj) => obj is bool other && (bool)this == other;
@@ -17,8 +19,10 @@ namespace System
 
     // Char is in Char.cs.
 
-    public struct SByte : IEquatable<sbyte>, IComparable<sbyte>
+    public struct SByte : IEquatable<sbyte>, IComparable<sbyte>, IComparable
     {
+        public int CompareTo(object obj) => obj is sbyte other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type SByte.");
+
         public const sbyte MaxValue = 0x7F;
         public const sbyte MinValue = -0x80;
 
@@ -30,8 +34,10 @@ namespace System
         public override string ToString() => Number.FormatInt64((long)this);
     }
 
-    public struct Byte : IEquatable<byte>, IComparable<byte>
+    public struct Byte : IEquatable<byte>, IComparable<byte>, IComparable
     {
+        public int CompareTo(object obj) => obj is byte other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Byte.");
+
         public const byte MaxValue = 0xFF;
         public const byte MinValue = 0;
 
@@ -43,8 +49,10 @@ namespace System
         public override string ToString() => Number.FormatUInt64((ulong)this);
     }
 
-    public struct Int16 : IEquatable<short>, IComparable<short>
+    public struct Int16 : IEquatable<short>, IComparable<short>, IComparable
     {
+        public int CompareTo(object obj) => obj is short other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Int16.");
+
         public const short MaxValue = 0x7FFF;
         public const short MinValue = -0x8000;
 
@@ -56,8 +64,10 @@ namespace System
         public override string ToString() => Number.FormatInt64((long)this);
     }
 
-    public struct UInt16 : IEquatable<ushort>, IComparable<ushort>
+    public struct UInt16 : IEquatable<ushort>, IComparable<ushort>, IComparable
     {
+        public int CompareTo(object obj) => obj is ushort other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type UInt16.");
+
         public const ushort MaxValue = 0xFFFF;
         public const ushort MinValue = 0;
 
@@ -69,8 +79,10 @@ namespace System
         public override string ToString() => Number.FormatUInt64((ulong)this);
     }
 
-    public struct Int32 : IEquatable<int>, IComparable<int>
+    public struct Int32 : IEquatable<int>, IComparable<int>, IComparable
     {
+        public int CompareTo(object obj) => obj is int other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Int32.");
+
         public const int MaxValue = 0x7FFFFFFF;
         public const int MinValue = -0x80000000;
 
@@ -82,8 +94,10 @@ namespace System
         public override string ToString() => Number.FormatInt64((long)this);
     }
 
-    public struct UInt32 : IEquatable<uint>, IComparable<uint>
+    public struct UInt32 : IEquatable<uint>, IComparable<uint>, IComparable
     {
+        public int CompareTo(object obj) => obj is uint other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type UInt32.");
+
         public const uint MaxValue = 0xFFFFFFFF;
         public const uint MinValue = 0;
 
@@ -95,8 +109,10 @@ namespace System
         public override string ToString() => Number.FormatUInt64((ulong)this);
     }
 
-    public struct Int64 : IEquatable<long>, IComparable<long>
+    public struct Int64 : IEquatable<long>, IComparable<long>, IComparable
     {
+        public int CompareTo(object obj) => obj is long other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Int64.");
+
         public const long MaxValue = 0x7FFFFFFFFFFFFFFF;
         public const long MinValue = -0x8000000000000000;
 
@@ -108,8 +124,10 @@ namespace System
         public override string ToString() => Number.FormatInt64((long)this);
     }
 
-    public struct UInt64 : IEquatable<ulong>, IComparable<ulong>
+    public struct UInt64 : IEquatable<ulong>, IComparable<ulong>, IComparable
     {
+        public int CompareTo(object obj) => obj is ulong other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type UInt64.");
+
         public const ulong MaxValue = 0xFFFFFFFFFFFFFFFF;
         public const ulong MinValue = 0;
 
@@ -121,8 +139,10 @@ namespace System
         public override string ToString() => Number.FormatUInt64((ulong)this);
     }
 
-    public unsafe struct IntPtr : IEquatable<nint>, IComparable<nint>
+    public unsafe struct IntPtr : IEquatable<nint>, IComparable<nint>, IComparable
     {
+        public int CompareTo(object obj) => obj is nint other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type IntPtr.");
+
         public bool Equals(nint other) => (nint)this == other;
         public int CompareTo(nint other) => (nint)this < other ? -1 : (nint)this > other ? 1 : 0;
         public static readonly nint Zero;
@@ -137,8 +157,10 @@ namespace System
         public override string ToString() => Number.FormatInt64((nint)this);
     }
 
-    public unsafe struct UIntPtr : IEquatable<nuint>, IComparable<nuint>
+    public unsafe struct UIntPtr : IEquatable<nuint>, IComparable<nuint>, IComparable
     {
+        public int CompareTo(object obj) => obj is nuint other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type UIntPtr.");
+
         public bool Equals(nuint other) => (nuint)this == other;
         public int CompareTo(nuint other) => (nuint)this < other ? -1 : (nuint)this > other ? 1 : 0;
         public static readonly nuint Zero;
@@ -158,8 +180,10 @@ namespace System
     //
     // Equals here is bit equality, so NaN equals NaN, as .NET's Equals has
     // it (unlike ==); 0.0 and -0.0 are equal, as in .NET.
-    public unsafe struct Single : IEquatable<float>, IComparable<float>
+    public unsafe struct Single : IEquatable<float>, IComparable<float>, IComparable
     {
+        public int CompareTo(object obj) => obj is float other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Single.");
+
         public const float MinValue = -3.40282347E+38f;
         public const float MaxValue = 3.40282347E+38f;
         public const float Epsilon = 1.401298E-45f;
@@ -212,8 +236,10 @@ namespace System
         public override string ToString() => Number.FormatDouble((float)this, 7);
     }
 
-    public unsafe struct Double : IEquatable<double>, IComparable<double>
+    public unsafe struct Double : IEquatable<double>, IComparable<double>, IComparable
     {
+        public int CompareTo(object obj) => obj is double other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Double.");
+
         public const double MinValue = -1.7976931348623157E+308;
         public const double MaxValue = 1.7976931348623157E+308;
         public const double Epsilon = 4.9406564584124654E-324;

@@ -134,7 +134,12 @@ namespace Internal.Runtime
         internal Entry* Entries => (Entry*)((byte*)Unsafe.AsPointer(ref this) + 4 * sizeof(ushort));
     }
 
-    // Gives access to an object's memory after its method table pointer.
+}
+
+namespace System.Runtime.CompilerServices
+{
+    // Gives access to an object's memory after its method table pointer. The
+    // compiler finds it by this name (in its thunks for boxed generic structs).
     internal class RawData
     {
         public byte Data;

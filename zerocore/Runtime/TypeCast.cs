@@ -15,14 +15,14 @@ namespace System.Runtime
     {
         private static object IsInstanceOfClass(MethodTable* target, object obj)
         {
-            if (obj == null || IsDerivedFrom(obj._methodTable, target))
+            if (obj == null || IsDerivedFrom(obj.m_pEEType, target))
                 return obj;
             return null;
         }
 
         private static object IsInstanceOfInterface(MethodTable* target, object obj)
         {
-            if (obj == null || Implements(obj._methodTable, target))
+            if (obj == null || Implements(obj.m_pEEType, target))
                 return obj;
             if (target->HasGenericVariance)
                 Environment.FailFast("Casts that need generic variance aren't supported");
@@ -39,11 +39,19 @@ namespace System.Runtime
                 return IsInstanceOfClass(target, obj);
 
             // An array type: only an array of exactly that type matches.
-            MethodTable* type = obj._methodTable;
+            MethodTable* type = obj.m_pEEType;
             if (type == target)
                 return obj;
             if (type->IsParameterized && type->ElementType != target->ElementType)
+            {
+                // An array of structs matches no other array type (.NET also
+                // lets int[] pass as uint[], and an enum's array as its
+                // underlying type's; not here). Arrays of classes could match
+                // by covariance (string[] as object[]), which isn't supported.
+                if (IsValueType(type->ElementType) || IsValueType(target->ElementType))
+                    return null;
                 Environment.FailFast("Casts between array types aren't supported");
+            }
             return null;
         }
 
@@ -79,6 +87,10 @@ namespace System.Runtime
             return false;
         }
 
+        // .NET's EETypeElementType: Boolean (2) up to Nullable (18) are structs.
+        private static bool IsValueType(MethodTable* type)
+            => !type->IsParameterized && type->ElementTypeKind >= 2 && type->ElementTypeKind <= 18;
+
         // A type's interface map lists everything it implements, including what
         // its base types and its interfaces bring in, so one pass is enough.
         private static bool Implements(MethodTable* type, MethodTable* target)
@@ -99,8 +111,8 @@ namespace System.Runtime
             ref object element = ref ElementAt(array, index);
             if (obj != null)
             {
-                MethodTable* elementType = array._methodTable->ElementType;
-                MethodTable* type = obj._methodTable;
+                MethodTable* elementType = array.m_pEEType->ElementType;
+                MethodTable* type = obj.m_pEEType;
                 bool fits = elementType->IsInterface ? Implements(type, elementType)
                     : elementType->IsParameterized ? type == elementType
                     : IsDerivedFrom(type, elementType);
@@ -113,7 +125,7 @@ namespace System.Runtime
         // ref array[index], for arrays of reference types.
         private static ref object LdelemaRef(object[] array, nint index, MethodTable* elementType)
         {
-            if (array._methodTable->ElementType != elementType)
+            if (array.m_pEEType->ElementType != elementType)
                 Environment.FailFast("ArrayTypeMismatchException");
             return ref ElementAt(array, index);
         }

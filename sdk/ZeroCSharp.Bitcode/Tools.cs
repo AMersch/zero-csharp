@@ -103,16 +103,54 @@ static class Tools
             $"https://github.com/llvm-mos/llvm-mos-sdk/releases/download/{LlvmMosVersion}/{file}",
             sha256, (archive, into) =>
             {
-                // .NET reads neither .xz nor .7z; tar does (on Windows 11, its
-                // own tar.exe reads .7z). The archive holds one folder, llvm-mos.
+                // The archive holds one folder, llvm-mos.
                 string unpacked = into + ".unpack";
+                if (Directory.Exists(unpacked))
+                    Directory.Delete(unpacked, recursive: true);
                 Directory.CreateDirectory(unpacked);
-                Run("tar", ["-xf", archive, "-C", unpacked], "unpacking llvm-mos");
+                Unpack(archive, file, unpacked);
                 Directory.Delete(into);
                 Directory.Move(Path.Combine(unpacked, "llvm-mos"), into);
                 Directory.Delete(unpacked, recursive: true);
             });
         return folder;
+    }
+
+    // .tar.xz (Linux, macOS) or .7z (Windows), by SharpCompress: .NET reads
+    // neither, and a system's tar may lack xz (Debian's and Ubuntu's images
+    // do) or 7z.
+    static void Unpack(string archive, string name, string into)
+    {
+        var options = new SharpCompress.Common.ExtractionOptions
+        {
+            ExtractFullPath = true,
+            Overwrite = true,
+            // llvm-mos's bin/ has links (clang to clang-<version>, and others).
+            SymbolicLinkHandler = (link, target) => File.CreateSymbolicLink(link, target),
+        };
+        var readerOptions = new SharpCompress.Readers.ReaderOptions();
+        if (name.EndsWith(".7z", StringComparison.Ordinal))
+        {
+            // A 7z archive is read through its index, not as a stream.
+            using var sevenZip = SharpCompress.Archives.SevenZip.SevenZipArchive.OpenArchive(archive, readerOptions);
+            using var reader = sevenZip.ExtractAllEntries();
+            SharpCompress.Readers.IReaderExtensions.WriteAllToDirectory(reader, into, options);
+        }
+        else
+        {
+            using var reader = SharpCompress.Readers.ReaderFactory.OpenReader(archive, readerOptions);
+            SharpCompress.Readers.IReaderExtensions.WriteAllToDirectory(reader, into, options);
+        }
+
+        // An archive's permissions aren't restored: its programs need to run.
+        if (!OperatingSystem.IsWindows())
+        {
+            foreach (string program in Directory.EnumerateFiles(Path.Combine(into, "llvm-mos", "bin")))
+            {
+                if (File.ResolveLinkTarget(program, returnFinalTarget: false) is null)
+                    File.SetUnixFileMode(program, File.GetUnixFileMode(program) | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
+            }
+        }
     }
 
     // Downloads, checks and unpacks into `folder`, once: a finished folder

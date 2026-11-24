@@ -15,4 +15,9 @@
     <!-- Run as "dotnet zero-bitcode.dll" on every host: no native launcher. -->
     <UseAppHost>false</UseAppHost>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SharpCompress" Version="0.50.11" />
+    <!-- Its license travels with the tool (the SDK package's payload). -->
+    <None Include="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

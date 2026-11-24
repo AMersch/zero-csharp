@@ -222,7 +222,8 @@ test_payload_complete() {
              native/uefi-x64/{start,runtime,machine,stack,zerocore}.obj native/uefi-x64/libm.lib \
              native/uefi-arm64/{start,runtime,machine,stack,zerocore}.obj native/uefi-arm64/libm.lib \
              native/c64/System.Private.CoreLib.dll native/c64/runtime.c \
-             tools/zero-bitcode/zero-bitcode.dll tools/zero-bitcode/zero-bitcode.runtimeconfig.json; do
+             tools/zero-bitcode/zero-bitcode.dll tools/zero-bitcode/zero-bitcode.runtimeconfig.json \
+             tools/zero-bitcode/SharpCompress.dll tools/zero-bitcode/THIRD-PARTY-NOTICES.txt; do
         if [ ! -s "$payload/$f" ]; then fail "payload complete" "missing $f"; return; fi
     done
     if ! is_elf "$payload/native/linux-x64/zerocore.o" x86-64; then fail "payload complete" "linux-x64 object isn't x86-64"; return; fi

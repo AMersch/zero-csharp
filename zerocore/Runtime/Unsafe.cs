@@ -26,6 +26,9 @@ namespace System.Runtime.CompilerServices
         public static ref T AsRef<T>(void* source) => ref AsRef<T>(source);
 
         [Intrinsic]
+        public static ref T AsRef<T>(ref readonly T source) => ref AsRef(in source);
+
+        [Intrinsic]
         public static int SizeOf<T>() => SizeOf<T>();
 
         [Intrinsic]
@@ -86,5 +89,9 @@ namespace System.Runtime.InteropServices
         public static ref T GetReference<T>(ReadOnlySpan<T> span) => ref span._reference;
 
         public static Span<T> CreateSpan<T>(ref T reference, int length) => new Span<T>(ref reference, length);
+
+        // The compiler uses it for `params ReadOnlySpan<T>` arguments.
+        public static ReadOnlySpan<T> CreateReadOnlySpan<T>(ref readonly T reference, int length)
+            => new ReadOnlySpan<T>(ref Unsafe.AsRef(in reference), length);
     }
 }

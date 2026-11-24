@@ -92,8 +92,9 @@ namespace System.Runtime
     }
 
     // Exports a method under a native symbol name, for the compiler's generated
-    // code to call.
-    internal sealed class RuntimeExportAttribute : Attribute
+    // code to call. Public for GPU kernels (lib/Gpu.cs): the GPU build compiles
+    // every method that has it, called or not, and names the kernel after it.
+    public sealed class RuntimeExportAttribute : Attribute
     {
         public RuntimeExportAttribute(string entry) { }
     }

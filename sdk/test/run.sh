@@ -249,7 +249,7 @@ test_payload_complete() {
              native/osx-arm64/libSystem.tbd VERSIONS.txt \
              native/uefi-x64/{start,runtime,machine,stack,zerocore}.obj native/uefi-x64/libm.lib \
              native/uefi-arm64/{start,runtime,machine,stack,zerocore}.obj native/uefi-arm64/libm.lib \
-             native/c64/System.Private.CoreLib.dll native/c64/runtime.c \
+             native/c64/System.Private.CoreLib.dll native/c64/runtime.c native/gpu/metal.m \
              tools/zero-bitcode/zero-bitcode.dll tools/zero-bitcode/zero-bitcode.runtimeconfig.json \
              tools/zero-bitcode/SharpCompress.dll tools/zero-bitcode/THIRD-PARTY-NOTICES.txt; do
         if [ ! -s "$payload/$f" ]; then fail "payload complete" "missing $f"; return; fi
@@ -380,6 +380,57 @@ test_c64_target() {
     # A second build has nothing to do.
     if ! run_in "$dir" c64-again build -p:ZeroTarget=c64 -v:n; then fail "$name" "the second build failed"; return; fi
     if grep -q "c64-bitcode" "$LOG"; then fail "$name" "the second build compiled again"; return; fi
+    pass "$name"
+}
+
+# ZeroGpu=Metal: dotnet new zerogpu makes a program whose C# kernels run on
+# the GPU, and which checks them against the CPU itself (exit code 0). It
+# builds on an Apple Silicon Mac with Xcode's Metal Toolchain and Docker
+# (NativeAOT-LLVM, as for the C64). The project's name has a dot, which
+# NativeAOT's symbol names turn into _, where the build finds the kernels.
+test_gpu_template() {
+    local name="gpu template" dir=$WORK/gputemplate app out
+    can_build "$name" || return
+    if [ "$HOST_RID" != osx-arm64 ]; then skip "$name" "needs an Apple Silicon Mac"; return; fi
+    if ! xcrun -f metal > /dev/null 2>&1; then skip "$name" "no Metal compiler (xcodebuild -downloadComponent MetalToolchain)"; return; fi
+    if ! docker info > /dev/null 2>&1; then skip "$name" "on a Mac the kernels need Docker, which isn't running"; return; fi
+    rm -rf "$dir" && mkdir -p "$dir"
+    fixture hello gputemplate-config > /dev/null    # just for its nuget.config
+    cp "$WORK/gputemplate-config/nuget.config" "$dir/"
+    dotnet new uninstall ZeroCSharp.Templates > /dev/null 2>&1 || true
+    if ! run_in "$dir" gpu-install new install "$FEED/ZeroCSharp.Templates.$VERSION.nupkg"; then fail "$name" "install failed"; return; fi
+    if ! run_in "$dir" gpu-new new zerogpu -o Gpu.Kernels; then fail "$name" "dotnet new zerogpu failed"; return; fi
+    app=$dir/Gpu.Kernels
+    if ! grep -q "ZeroCSharp.Sdk/$VERSION" "$app/Gpu.Kernels.csproj"; then fail "$name" "the project isn't filled in"; return; fi
+    if ! run_in "$app" gpu-build build; then fail "$name" "dotnet build failed"; return; fi
+    if ! out=$("$app/bin/Debug/$TFM/Gpu.Kernels" 2>&1); then fail "$name" "the program failed: $out"; return; fi
+    if [[ "$out" != *"Saxpy: 1048576 elements"*", 0 wrong"* ]] || [[ "$out" != *"Sum:   4718580 (the CPU says 4718580)"* ]]; then
+        fail "$name" "printed '$out'"; return
+    fi
+    # A second build has nothing to compile; a changed kernel compiles again.
+    if ! run_in "$app" gpu-again build -v:n; then fail "$name" "the second build failed"; return; fi
+    if grep -q "gpu-bitcode" "$LOG"; then fail "$name" "the second build compiled the kernels again"; return; fi
+    sed -i.bak 's/y\[i\] = a \* x\[i\] + y\[i\]/y[i] = a * x[i] + y[i] + 1/' "$app/Program.cs" && rm -f "$app/Program.cs.bak"
+    if ! run_in "$app" gpu-changed build -v:n; then fail "$name" "the build after a change failed"; return; fi
+    if ! grep -q "gpu-bitcode" "$LOG"; then fail "$name" "a changed kernel wasn't compiled again"; return; fi
+    out=$("$app/bin/Debug/$TFM/Gpu.Kernels" 2>&1)
+    if [[ "$out" != *"Saxpy: 1048576 elements"*", 1048576 wrong"* ]]; then fail "$name" "the changed kernel printed '$out'"; return; fi
+    pass "$name"
+}
+
+# What ZeroGpu=Metal says where it can't build, on any host.
+test_gpu_errors() {
+    local name="gpu errors" dir
+    can_build "$name" || return
+    dir=$(fixture native gpuerrors)
+    if run_in "$dir" gpu-vulkan build -p:ZeroGpu=Vulkan; then fail "$name" "ZeroGpu=Vulkan built"; return; fi
+    if ! grep -q "ZeroGpu 'Vulkan' isn't supported. Use Metal" "$LOG"; then fail "$name" "no message about Vulkan"; return; fi
+    if run_in "$dir" gpu-linux build -p:ZeroGpu=Metal -p:ZeroTarget=linux-x64; then fail "$name" "ZeroGpu=Metal built for linux-x64"; return; fi
+    if ! grep -q "ZeroGpu=Metal builds for ZeroTarget osx-arm64" "$LOG"; then fail "$name" "no message about the target"; return; fi
+    if [ "$HOST_RID" != osx-arm64 ]; then
+        if run_in "$dir" gpu-host build -p:ZeroGpu=Metal -p:ZeroTarget=osx-arm64; then fail "$name" "ZeroGpu=Metal built off a Mac"; return; fi
+        if ! grep -q "ZeroGpu=Metal builds on an Apple Silicon Mac" "$LOG"; then fail "$name" "no message about the host"; return; fi
+    fi
     pass "$name"
 }
 
@@ -1682,7 +1733,7 @@ test_fsharp_native_library_errors() {
 }
 
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
-    native_hello_runs cross_targets c64_target bad_target path_with_spaces compile_items incremental
+    native_hello_runs cross_targets c64_target gpu_template gpu_errors bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size strip_symbols debug_unoptimized mac_debug_object_kept windows_debugger macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild

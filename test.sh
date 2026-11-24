@@ -188,6 +188,26 @@ test_wasm() {
     run_all "WebAssembly" wasm check
 }
 
+# The GPU samples print timings, so their output isn't compared with a file:
+# each checks its kernels against the CPU itself and ends with OK or FAILED.
+test_gpu() {
+    local name out status
+    ./build.sh --gpu > /dev/null
+    echo
+    echo "== GPU (Metal), macOS arm64"
+    for name in Gpu; do
+        status=0
+        out=$(./run.sh --gpu "$name" < /dev/null 2>&1) || status=$?
+        if [ "$status" != 0 ] || [[ "$out" != *"OK: GPU matches CPU"* ]]; then
+            echo "FAIL $name: exit code $status"
+            echo "$out" | tail -8 | sed 's/^/       /'
+            failures=$((failures + 1))
+        else
+            echo "ok   $name (its own checks)"
+        fi
+    done
+}
+
 test_mac() {
     ./build.sh --mac > /dev/null
     run_all "macOS arm64" mac check
@@ -240,6 +260,7 @@ case "${1:-}" in
     --r4)     test_r4 ;;
     --win)    test_win ;;
     --mac)    test_mac ;;
+    --gpu)    test_gpu ;;
     --uefi)   test_uefi ;;
     --all)
         test_native
@@ -257,6 +278,12 @@ case "${1:-}" in
         fi
         if [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then
             test_mac
+            if [ -x "$WASM_ILC" ] && xcrun -f metal > /dev/null 2>&1; then
+                test_gpu
+            else
+                echo
+                echo "(skipping the GPU: run ./setup.sh --wasm and xcodebuild -downloadComponent MetalToolchain first)"
+            fi
         fi
         if command -v docker >/dev/null 2>&1 && find_dos_clang > /dev/null; then
             test_win
@@ -290,7 +317,7 @@ case "${1:-}" in
             echo "(skipping the microcontrollers: run ./setup.sh --arm first)"
         fi
         ;;
-    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --uefi | --all | --update]" >&2; exit 2 ;;
+    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --uefi | --all | --update]" >&2; exit 2 ;;
 esac
 
 echo

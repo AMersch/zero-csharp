@@ -45,6 +45,8 @@ Add `-p:ZeroTarget=win-x64` (or `linux-x64`, `linux-arm64`, `osx-arm64`, `uefi-x
 build for another system.
 A library project with `<NativeLib>Shared</NativeLib>` builds a `.so`, `.dylib` or `.dll` that .NET and
 C programs can call. The project comes with a VS Code setup for debugging.
+On an Apple Silicon Mac, `dotnet new zerogpu` makes a program whose C# kernels run on the GPU, through
+Metal (`<ZeroGpu>Metal</ZeroGpu>`; it needs Xcode, its Metal Toolchain and Docker).
 
 More: [Coming from .NET](https://onurgumus.github.io/zero-csharp/get-started/coming-from-dotnet.html),
 [Install with dotnet](https://onurgumus.github.io/zero-csharp/get-started/install-with-dotnet.html),
@@ -58,6 +60,7 @@ More: [Coming from .NET](https://onurgumus.github.io/zero-csharp/get-started/com
 |---|---|---|
 | Linux x64 and arm64 | `./build.sh` | 12 KB (Tiny) to 84 KB (Collections) |
 | macOS, Apple Silicon | `./build.sh --mac`, on a Mac | from 50 KB |
+| macOS with C# kernels on the GPU (Metal), experimental | `./build.sh --gpu`, on a Mac | 118 KB (the Gpu sample) |
 | Windows x64 | `./build.sh --win`, from Linux or macOS | 9 KB to 68 KB |
 | WebAssembly (WASI) | `./build.sh --wasm` | 16 KB to 80 KB |
 | DOS, 386 with a 387 | `./build.sh --dos` | 16 KB to 93 KB |
@@ -77,6 +80,12 @@ Commodore 64 the same bitcode is rewritten for 16-bit addresses and compiled by
 ([Build for the Commodore 64](https://onurgumus.github.io/zero-csharp/how-to/build-for-c64.html)). The
 microcontrollers take the same bitcode to Arm's own clang, and run in QEMU for now
 ([Build for microcontrollers](https://onurgumus.github.io/zero-csharp/how-to/build-for-microcontrollers.html)).
+The GPU target compiles a program twice: whole, for macOS, and its kernels (C# methods marked
+`[RuntimeExport("Name")]`) through NativeAOT-LLVM's bitcode into AIR, the LLVM dialect Apple's
+Metal compiler reads (`zero-bitcode ll2air`); `lib/Gpu.cs` launches them. It needs Apple's Metal Toolchain
+(`xcodebuild -downloadComponent MetalToolchain`). AIR isn't documented by Apple, so a new Xcode can break
+it. A kernel can use buffers and values, 2D grids, threadgroup memory, barriers and atomics, and nothing
+that needs the runtime: no allocation, strings, `double` or calls into other methods.
 [Targets](https://onurgumus.github.io/zero-csharp/concepts/targets.html) explains how each one is built.
 
 ## What works
@@ -124,11 +133,12 @@ was freed. See [Memory without a GC](https://onurgumus.github.io/zero-csharp/con
 | Folder | What |
 |---|---|
 | [`zerocore/`](zerocore/README.md) | The core library: `object`, `string`, casts, allocation. About 2,400 lines of C#, MIT licensed |
-| [`lib/`](lib/) | Arenas, collections, strings, input and output, files, the clock, random numbers, SIMD kernels, `Parallel.For`, DOS and UEFI graphics, the Commodore 64's screen and sprites, a microcontroller board's LED, registers and timer interrupt ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
+| [`lib/`](lib/) | Arenas, collections, strings, input and output, files, the clock, random numbers, SIMD kernels, `Parallel.For`, DOS and UEFI graphics, the Commodore 64's screen and sprites, a microcontroller board's LED, registers and timer interrupt, GPU buffers and kernel launches ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
 | [`samples/`](samples/) | The programs below |
 | [`sdk/`](sdk/) | The `ZeroCSharp.*` NuGet packages |
 | [`docs/`](docs/) | The documentation site |
 | `mac/`, `win/`, `wasm/`, `dos/`, `efi/`, `c64/`, `arm/` | Each target's entry point and the C functions it needs (`efi/libm/` is from musl, MIT) |
+| `gpu/` | The GPU target: Metal behind the C functions `lib/Gpu.cs` calls (`metal.m`); `sdk/ZeroCSharp.Bitcode/Air.cs` turns C# kernels into AIR |
 
 The programs don't use bflat's own zero-mode library, zerolib, which is AGPL. zerocore replaces it, so
 nothing AGPL is linked into them.
@@ -162,6 +172,7 @@ nothing AGPL is linked into them.
 | `SmallStrings`, `SmallIntegers`, `SmallObjects` and seven more | Tests sized for a small machine: what Strings, Casts, Collections and the others check, in pieces that each fit in a Commodore 64 | 17 to 36 KB |
 | `C64Demo` | Commodore 64 only: text, a sprite and raster bars, with objects, a list and a lambda behind them | 36 KB |
 | `Paddles` | Commodore 64 only: a paddle-and-ball game against the computer, with sprites, SID sound, records and unions | 34 KB |
+| `Gpu` | GPU only (`--gpu`): kernels for adding, Collatz, SAXPY, a reduction, matrix multiply (plain and tiled), histograms and float atomics, each checked against the CPU and timed against a plain C# loop on one core | 118 KB (macOS) |
 | `Blink` | Microcontrollers only: the board's LED, blinked by a C# interrupt handler, and a check that a busy handler leaves the interrupted code's references alone | 18 KB of flash |
 
 Sizes are for Linux arm64. `build.sh` leaves out debug information and the symbol table and turns off

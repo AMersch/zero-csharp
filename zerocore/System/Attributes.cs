@@ -75,6 +75,11 @@ namespace System.Diagnostics.CodeAnalysis
     {
         public DoesNotReturnIfAttribute(bool parameterValue) { }
     }
+
+    // On a struct's method or property: it may return a ref to the struct's
+    // own fields. The compiler looks for it here, in this namespace.
+    [AttributeUsage(AttributeTargets.Method | AttributeTargets.Property | AttributeTargets.Parameter)]
+    public sealed class UnscopedRefAttribute : Attribute { }
 }
 
 namespace System.Runtime
@@ -155,8 +160,6 @@ namespace System.Runtime.CompilerServices
     public sealed class ModuleInitializerAttribute : Attribute { }
 
     public sealed class SkipLocalsInitAttribute : Attribute { }
-
-    public sealed class UnscopedRefAttribute : Attribute { }
 
     public sealed class RequiredMemberAttribute : Attribute { }
 

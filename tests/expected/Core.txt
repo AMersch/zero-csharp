@@ -10,5 +10,6 @@ PASS caller info (5 checks)
 PASS indices and ranges (8 checks)
 PASS comparers (9 checks)
 PASS HashCode (5 checks)
+PASS UnscopedRef (1 checks)
 
 All checks passed.

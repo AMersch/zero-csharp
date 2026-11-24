@@ -1,0 +1,8 @@
+PASS integers (30 checks)
+PASS double (46 checks)
+PASS float and Half (16 checks)
+PASS decimal (17 checks)
+PASS string.Format and $"..." (17 checks)
+PASS TryFormat and IFormattable (8 checks)
+
+All checks passed.

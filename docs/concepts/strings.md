@@ -220,7 +220,8 @@ an exception does here.
 
 ## What isn't there
 
-There is nothing culture-aware. `"n=" + 5`, `ToString()` and `string.Format` (with `{0}`-style holes
-only) work, but each allocates a new string with calloc that is never freed: fine once, not in a loop.
-There, write `Str.Format(arena, $"n={5}")`.
-With only string holes, a plain `$"..."` works, through `+`.
+There is nothing culture-aware. `"n=" + 5`, `ToString("F2")`, `string.Format` and a plain `$"..."`
+work, with .NET's format strings in the invariant culture (see
+[Format text](../how-to/format-text.html#nets-format-strings-tostring-string.format-and-tryformat)),
+but each allocates a new string with calloc that is never freed: fine once, not in a loop. There,
+write `Str.Format(arena, $"n={5}")`, or `TryFormat` into a span.

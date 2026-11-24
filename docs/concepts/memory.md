@@ -19,7 +19,7 @@ program: one program often uses all three.
 | | Use it for | Who makes sure nothing is used after it's freed |
 |---|---|---|
 | Structs and `Arena.Scratch` | Temporary work inside one call: buffers, intermediate lists, building a string | The compiler, plus a check when the program runs for one nesting case |
-| An arena of yours with `List`, `Dict`, `StrBuilder` | Data that lives for a while: a level, a request, a frame | You, when you call `Reset` or `Restore`, which are `unsafe`; `Arena.DebugChecks` catches mistakes while testing |
+| An arena of yours with `List`, `Dict`, `StrBuilder`, `Ptr` | Data that lives for a while: a level, a request, a frame | You, when you call `Reset` or `Restore`, which are `unsafe`; `Arena.DebugChecks` catches mistakes while testing |
 | Classes in `OpenObjectScope` | Class hierarchies, interfaces held as values, library code that calls `new` | You, entirely: nothing created inside may outlive the block |
 
 Interfaces alone don't need the last row: a generic method constrained to the interface

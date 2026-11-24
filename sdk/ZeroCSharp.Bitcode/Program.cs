@@ -44,9 +44,11 @@ static class Program
                zero-bitcode wasm2i386 IN.o OUT
                zero-bitcode wasm2arm IN.o OUT
                zero-bitcode elf2uf2 IN.elf OUT.uf2
-               zero-bitcode tools ilc|llvm-mos
                zero-bitcode c64-bitcode IN.dll OUTDIR CORE.dll [REF.dll...]
                zero-bitcode c64-link OBJDIR NAME RUNTIME.c OUT.prg [--llvm-mos DIR]
+               zero-bitcode arm-bitcode IN.dll OUTDIR CORE.dll [REF.dll...]
+               zero-bitcode arm-link OBJDIR NAME RUNTIMEDIR pico2|r4 QEMU.elf [BOARD.elf BOARD.uf2] [--arm DIR]
+               zero-bitcode tools ilc|llvm-mos|arm
                zero-bitcode ll2air OUT.ll ASSEMBLY IN.ll...
                zero-bitcode gpu-bitcode IN.dll OUTDIR CORE.dll [REF.dll...]
                zero-bitcode gpu-kernels BITCODEDIR NAME METAL.m OUTDIR
@@ -81,6 +83,12 @@ static class Program
                     return 0;
                 case "c64-link":
                     C64.Link(args[1..]);
+                    return 0;
+                case "arm-bitcode":
+                    ArmTarget.Bitcode(args[1..]);
+                    return 0;
+                case "arm-link":
+                    ArmTarget.Link(args[1..]);
                     return 0;
                 case "ll2air" when args.Length >= 4:
                     Air.Run(args[1], args[2], args[3..]);

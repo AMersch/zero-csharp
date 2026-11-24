@@ -50,12 +50,12 @@ source ./env.sh
 # Strings, Casts, Collections and the others check, in pieces that each fit
 # in a Commodore 64. They run on every target.
 SMALL_SAMPLES=(SmallStrings SmallBuilders SmallIntegers SmallDoubles SmallObjects SmallArena SmallLists SmallDicts SmallStrDicts SmallText SmallFloats SmallUnicode SmallEncoding)
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Llama Unicode "${SMALL_SAMPLES[@]}")
+ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode "${SMALL_SAMPLES[@]}")
 # Programs with kernels for the GPU (Metal): only --gpu builds them.
 GPU_SAMPLES=(Gpu)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
 # Vga is a game for DOS and UEFI (lib/Dos.cs, lib/Uefi.cs: graphics, keyboard, clock).
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Llama Unicode "${SMALL_SAMPLES[@]}" Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode "${SMALL_SAMPLES[@]}" Vga)
 # A C64 program has about 50 KB for its code, data, heap and stack together,
 # and the default is the samples that fit. Any sample can be asked for by
 # name; the linker says by how much it is too big. C64Demo and Paddles are for
@@ -64,7 +64,7 @@ C64_SAMPLES=(Tiny Minimal VirtualTest QuizStep1 QuizStep2 Refs "${SMALL_SAMPLES[
 # A microcontroller has no SIMD to benchmark, and Vga is a PC game. Blink is
 # for microcontrollers only (lib/Board.cs: the LED, registers, a timer). The Uno R4
 # has 32 KB of RAM, for the data, the stacks and the heap: these fit.
-ARM_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Llama Unicode "${SMALL_SAMPLES[@]}" Blink)
+ARM_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode "${SMALL_SAMPLES[@]}" Blink)
 # Arena, Collections, Files, Strings, Queries, Threads, Patterns, Scratch and
 # Unicode need more (Arena, for one, allocates a 16 KB array).
 R4_SAMPLES=(Tiny Minimal VirtualTest Casts Core Bits Dice Pipe Env QuizStep1 QuizStep2 QuizStep3 Quiz Guards Records Shapes Refs "${SMALL_SAMPLES[@]}" Blink)
@@ -845,6 +845,11 @@ build_sdk_payload() {
     # native half llvm-mos links in.
     build_core "$dir/native/c64/System.Private.CoreLib.dll" -d WASM
     cp c64/runtime.c "$dir/native/c64/"
+    # The microcontrollers (pico2, r4): the same zerocore, and arm/'s runtime,
+    # boot block and board layouts, which zero-bitcode arm-link compiles.
+    mkdir -p "$dir/native/arm"
+    cp "$dir/native/c64/System.Private.CoreLib.dll" "$dir/native/arm/"
+    cp arm/runtime.c arm/semihost.c arm/rp2350.c arm/rp2350.S arm/an505.ld.in arm/an386.ld.in arm/rp2350.ld.in "$dir/native/arm/"
     # GPU kernels (ZeroGpu): compiled against that same zerocore, and Metal
     # behind lib/Gpu.cs's C functions, as source: it needs Apple's headers, so
     # it's compiled on the Mac that builds the program.

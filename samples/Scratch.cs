@@ -253,11 +253,13 @@ public static class Program
         Check("a struct and a stack of your own", popped == 62);
         int moving = Arena.Scratch(static (scoped ScratchScope scratch) =>
         {
-            Span<Particle> swarm = Spawn(scratch, 100_000);
+            // 120 KB: far past the scratch arena's first 16 KB block, and
+            // still well inside a Raspberry Pi Pico 2's 520 KB of RAM.
+            Span<Particle> swarm = Spawn(scratch, 10_000);
             swarm[^1].Speed = 3;
             return swarm.Length + (int)swarm[^1].Speed;
         });
-        Check("a helper's scratch memory", moving == 100_003);
+        Check("a helper's scratch memory", moving == 10_003);
         Section("types of your own");
 
         Out.Line();

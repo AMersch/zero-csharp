@@ -41,6 +41,8 @@ public static class Program
             Out.Line("  scratch-outer-scope  an Arena.Scratch scope allocating inside a nested one");
             Out.Line("  scratch-outer-list   a ScratchList added to inside a nested Arena.Scratch");
             Out.Line("  scratch-outer-text   a ScratchText appended to inside a nested Arena.Scratch");
+            Out.Line("  ptr-null             the Value of a null Ptr");
+            Out.Line("  ptr-after-reset      a Ptr used after its arena was reset (DebugChecks)");
             return 0;
         }
 
@@ -67,6 +69,8 @@ public static class Program
             case "scratch-outer-scope": ScratchOuterScope(); break;
             case "scratch-outer-list": ScratchOuterList(); break;
             case "scratch-outer-text": ScratchOuterText(); break;
+            case "ptr-null": PtrNull(); break;
+            case "ptr-after-reset": PtrAfterReset(); break;
             default:
                 Out.Line("Unknown case");
                 return 0;
@@ -299,6 +303,21 @@ public static class Program
                 state.Text.Append($"{42}");
             });
         });
+    }
+
+    static void PtrNull()
+    {
+        Ptr<int> nothing = default;
+        nothing.Value = 1;
+    }
+
+    static void PtrAfterReset()
+    {
+        Arena.DebugChecks = true;
+        Arena arena = Arena.Create(256, "links");
+        Ptr<int> item = arena.New(7);
+        unsafe { arena.Reset(); } // SAFETY: none, on purpose: item is used below.
+        item.Value = 8;
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]

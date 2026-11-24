@@ -85,6 +85,12 @@
          other configurations are. (The IL above is optimized either way.) -->
     <ZeroOptimizeFor Condition="'$(ZeroOptimizeFor)' == '' and '$(Configuration)' == 'Debug'">None</ZeroOptimizeFor>
     <ZeroOptimizeFor Condition="'$(ZeroOptimizeFor)' == ''">Speed</ZeroOptimizeFor>
+    <!-- Programs and libraries leave out debug information and the symbol
+         table, except in Debug builds, where the debugger needs them: about
+         half of a Linux or macOS program. (On Windows the debug information
+         is a .pdb file beside the program; it isn't written.) -->
+    <ZeroStripSymbols Condition="'$(ZeroStripSymbols)' == '' and '$(Configuration)' == 'Debug'">false</ZeroStripSymbols>
+    <ZeroStripSymbols Condition="'$(ZeroStripSymbols)' == ''">true</ZeroStripSymbols>
     <!-- dotnet publish builds Release, as it does for .NET 8 and later (which
          decide by the target framework, and don't know this one). -->
     <PublishRelease Condition="'$(PublishRelease)' == ''">true</PublishRelease>

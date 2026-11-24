@@ -10,7 +10,7 @@ something, and you don't need the repository to build it. This is all of it:
 
 <!-- sample: samples/Minimal.cs file -->
 ```csharp
-// Example: Minimal zero-mode "Hello World" (~39 KB, no .NET runtime).
+// Example: Minimal zero-mode "Hello World" (~12 KB, no .NET runtime).
 // Build: ./build.sh Minimal
 //
 // Under the updated memory safety rules, creating a pointer (stackalloc) is
@@ -77,9 +77,10 @@ ls -l bin/Debug/zero03/Minimal
 ```
 
 About 57 KB on Linux, debug information included, as a Debug build: unoptimized, for debugging.
-`dotnet build -c Release` optimizes it, to under 40 KB. Either needs nothing installed to run: no
+`dotnet build -c Release` optimizes it and leaves out the debug information and
+the symbol table: about 15 KB. Either needs nothing installed to run: no
 .NET, no runtime, only the C library every system has. In the repository, `./build.sh Tiny` builds the smallest sample,
-stripped and optimized for size: 16 KB.
+optimized for size: 12 KB.
 
 ## Without puts
 

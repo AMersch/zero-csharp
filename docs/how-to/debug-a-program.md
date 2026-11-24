@@ -29,8 +29,11 @@ dotnet build -c Release      # bin/Release/zero03/: optimized, for speed and siz
 optimized program the debugger still works, but breakpoints can land on a nearby line, stepping jumps
 around, and some variables show values that are out of date.
 
-An unoptimized program is bigger and slower. `Minimal` is about 57 KB on Linux in Debug and under
-40 KB in Release; the storyteller from `dotnet new zerollama` takes about twice as long. Time and
+A Release build also leaves out the debug information and the symbol table, so a debugger sees no
+names in it; `ZeroStripSymbols` set to `false` keeps them.
+
+An unoptimized program is bigger and slower. `Minimal` is about 57 KB on Linux in Debug and about
+15 KB in Release; the storyteller from `dotnet new zerollama` takes about twice as long. Time and
 measure Release builds.
 
 ## In VS Code

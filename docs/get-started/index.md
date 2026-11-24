@@ -8,7 +8,7 @@ index: 0
 This site documents zero-mode C#: C# compiled by a fork of [bflat](https://flattened.net/) into small
 native programs that carry no .NET runtime and no garbage collector. A program here is C#'s syntax,
 type checking and generics, compiled to something the size of a C program: the hello-world sample is
-about 39 KB, the smallest one 16 KB.
+about 12 KB.
 
 The same source builds for six targets:
 

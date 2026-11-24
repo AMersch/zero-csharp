@@ -65,7 +65,7 @@ Mac's own clang links it with a few small files:
 
 zerocore is unchanged. The link maps Apple's names for the module section's bounds onto the
 `__start___modules` and `__stop___modules` symbols that GNU ld provides on Linux. Programs start at
-63 KB, because macOS arm64 aligns each of a program's four segments to 16 KB pages.
+50 KB, because macOS arm64 aligns each of a program's four segments to 16 KB pages.
 
 ## Windows x64
 

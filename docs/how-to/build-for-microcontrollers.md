@@ -18,6 +18,36 @@ system.
 The programs run in QEMU, on the board it emulates with the same processor. `--pico2` also makes each
 program for the real Pico 2 ([below](#on-a-real-pico-2)); the Uno R4 is QEMU only so far.
 
+## With dotnet build
+
+Without the repository, `dotnet new zeropico` makes a project for the Pico 2 that blinks its LED from
+a C# interrupt handler (`--board r4` makes one for the Uno R4):
+
+```bash
+dotnet new install ZeroCSharp.Templates
+dotnet new zeropico -o Blinky
+cd Blinky
+dotnet build      # bin/Debug/zero03/pico2/Blinky.uf2, .elf, and qemu/Blinky.elf
+dotnet run        # runs it in QEMU (brew install qemu, or apt install qemu-system-arm)
+```
+
+Any project builds for a board with `-p:ZeroTarget=pico2` or `-p:ZeroTarget=r4`, or `<ZeroTarget>`
+in its project file, as `zeropico`'s has. For the Pico 2 the build makes three files:
+`Blinky.uf2` to copy to the board (hold BOOTSEL while plugging it in, and it shows up as a drive),
+`Blinky.elf`, the same program for a debug probe, and `qemu/Blinky.elf`, which `dotnet run` runs in
+QEMU. The Uno R4's is for QEMU only, so far.
+
+The first build downloads what the target needs beyond the .NET SDK: NativeAOT-LLVM, which compiles
+C# to LLVM bitcode, and [Arm Toolchain for Embedded](https://github.com/arm/arm-toolchain), which
+compiles that for the board, about 400 MB together. They come from their own releases, are checked
+against the hashes the SDK names, and stay in a cache in your user folder
+(`~/.cache/zerocsharp/tools`, or `%LOCALAPPDATA%\ZeroCSharp\tools` on Windows; `ZERO_TOOLS_CACHE`
+picks another) for every project after that. It builds on Linux x64 and arm64, Windows x64, and Apple
+Silicon Macs, where Docker has to be running: both compilers run there in a Linux container, as for
+[the C64](build-for-c64.html#with-dotnet-build).
+
+The rest of this page is about the repository's scripts, which build and test its samples.
+
 ## Get the tools
 
 ```bash

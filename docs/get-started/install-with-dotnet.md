@@ -94,6 +94,7 @@ dotnet build -p:ZeroTarget=linux-x64      # from Windows: bin\Debug\zero03\linux
 dotnet build -p:ZeroTarget=osx-arm64      # bin/Debug/zero03/osx-arm64/Hello, for Apple Silicon Macs
 dotnet build -p:ZeroTarget=uefi-x64       # bin/Debug/zero03/uefi-x64/Hello.efi, no OS needed
 dotnet build -p:ZeroTarget=c64            # bin/Debug/zero03/c64/Hello.prg, for a Commodore 64
+dotnet build -p:ZeroTarget=pico2          # bin/Debug/zero03/pico2/Hello.uf2, for a Raspberry Pi Pico 2
 ```
 
 `uefi-x64` and `uefi-arm64` make a program the PC's firmware starts by itself, with no operating
@@ -103,6 +104,10 @@ with it.
 `c64` makes a program for the Commodore 64. Its first build downloads two compilers into a cache in
 your user folder, and on a Mac it needs Docker: see
 [Build for the Commodore 64](../how-to/build-for-c64.html#with-dotnet-build).
+
+`pico2` and `r4` make a program for a microcontroller, a Raspberry Pi Pico 2 or an Arduino Uno R4,
+the same way, and `dotnet run` runs it in QEMU. `dotnet new zeropico` starts such a project: see
+[Build for microcontrollers](../how-to/build-for-microcontrollers.html#with-dotnet-build).
 
 `dotnet clean` removes all of them.
 
@@ -139,7 +144,7 @@ or not: see [Make a game window](../how-to/make-a-game-window.html), which uses 
 
 | Property | Values | Default |
 |---|---|---|
-| `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64`, `osx-arm64`, `uefi-x64`, `uefi-arm64`, `c64` | the build machine's |
+| `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64`, `osx-arm64`, `uefi-x64`, `uefi-arm64`, `c64`, `pico2`, `r4` | the build machine's |
 | `ZeroOptimizeFor` | `None` (bflat's `-O0`), `Speed`, or `Size` (bflat's `-Os`) | `None` in Debug, `Speed` otherwise |
 | `ZeroStripSymbols` | `true`: no debug information and no symbol table, about half of a Linux or macOS program; `false` keeps them for a debugger | `false` in Debug, `true` otherwise |
 | `ZeroInstructionSet` | passed to bflat as `-m`, e.g. `x86-64-v3` or `dotprod` (see [Use SIMD](../how-to/use-simd.html)) | none |

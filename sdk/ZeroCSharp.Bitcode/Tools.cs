@@ -5,6 +5,7 @@
 //
 //   zero-bitcode tools ilc         prints NativeAOT-LLVM's folder (downloading it)
 //   zero-bitcode tools llvm-mos    prints llvm-mos's folder
+//   zero-bitcode tools arm         prints Arm Toolchain for Embedded's folder
 //
 // The cache is ZERO_TOOLS_CACHE if set; otherwise %LOCALAPPDATA%\ZeroCSharp\tools
 // on Windows and $XDG_CACHE_HOME/zerocsharp/tools (~/.cache/zerocsharp/tools)
@@ -38,6 +39,17 @@ static class Tools
         ["windows"] = ("llvm-mos-windows.7z", "1ccfee003fd0cbbe9311b285ebb8c46548f036d3a32ac9cf2881fe46e9cb0a52"),
     };
 
+    // Arm Toolchain for Embedded: clang, lld, and picolibc built for every
+    // Cortex-M. Versions as env.sh. A Mac gets Linux arm64's, run in the same
+    // container as NativeAOT-LLVM: Arm's macOS build is a 750 MB disk image.
+    public const string ArmVersion = "23.1.0";
+    static readonly Dictionary<string, (string File, string Sha256)> ArmToolchain = new()
+    {
+        ["linux-x64"] = ("Linux-x86_64.tar.xz", "a7be511613af15151c93961ad39c8cf9ae6889a453c8b547f42f4051a416dc8e"),
+        ["linux-arm64"] = ("Linux-AArch64.tar.xz", "df3b055d05659d8fda710d820e6c1ceff7bca3234c5067abe82a16e781d8de99"),
+        ["win-x64"] = ("Windows-x86_64.zip", "f1aec4fd8ae5c74186c00f620a8c1eea9d03d4d51db2eba5bcd4e707b4c19fe7"),
+    };
+
     public static string CacheRoot()
     {
         string? chosen = Environment.GetEnvironmentVariable("ZERO_TOOLS_CACHE");
@@ -59,7 +71,7 @@ static class Tools
     {
         bool arm64 = RuntimeInformation.OSArchitecture == Architecture.Arm64;
         if (OperatingSystem.IsMacOS())
-            return arm64 ? "linux-arm64" : throw Fail("the C64 target builds on Apple Silicon Macs, not Intel ones");
+            return arm64 ? "linux-arm64" : throw Fail("the C64 and microcontroller targets build on Apple Silicon Macs, not Intel ones");
         if (OperatingSystem.IsLinux())
             return arm64 ? "linux-arm64" : "linux-x64";
         if (OperatingSystem.IsWindows() && !arm64)
@@ -116,10 +128,44 @@ static class Tools
         return folder;
     }
 
+    /// <summary>Arm Toolchain for Embedded's folder (with bin/clang in it),
+    /// downloaded if needed: the host's build, or on a Mac Linux arm64's, run
+    /// in a container (Arm.cs).</summary>
+    public static string ArmFolder()
+    {
+        string rid = IlcRid(); // the same choice: a Mac gets Linux arm64's
+        if (!ArmToolchain.TryGetValue(rid, out var download))
+            throw Fail($"Arm Toolchain for Embedded has no build for this machine ({RuntimeInformation.OSDescription}, {RuntimeInformation.OSArchitecture})");
+        string file = $"ATfE-{ArmVersion}-{download.File}";
+        string folder = Path.Combine(CacheRoot(), $"atfe-{ArmVersion}-{rid}");
+        Ensure(folder, $"Arm Toolchain for Embedded {ArmVersion} ({rid})",
+            $"https://github.com/arm/arm-toolchain/releases/download/release-{ArmVersion}-ATfE/{file}",
+            download.Sha256, (archive, into) =>
+            {
+                // The archive holds one folder, ATfE-<version>-<host>.
+                string unpacked = into + ".unpack";
+                if (Directory.Exists(unpacked))
+                    Directory.Delete(unpacked, recursive: true);
+                Directory.CreateDirectory(unpacked);
+                if (file.EndsWith(".zip", StringComparison.Ordinal))
+                    ZipFile.ExtractToDirectory(archive, unpacked);
+                else
+                    Unpack(archive, file, unpacked, executables: null);
+                string[] top = Directory.GetDirectories(unpacked);
+                if (top.Length != 1)
+                    throw Fail($"{file} doesn't hold one folder, as expected");
+                Directory.Delete(into);
+                Directory.Move(top[0], into);
+                Directory.Delete(unpacked, recursive: true);
+                MakeExecutable(Path.Combine(into, "bin"));
+            });
+        return folder;
+    }
+
     // .tar.xz (Linux, macOS) or .7z (Windows), by SharpCompress: .NET reads
     // neither, and a system's tar may lack xz (Debian's and Ubuntu's images
     // do) or 7z.
-    static void Unpack(string archive, string name, string into)
+    static void Unpack(string archive, string name, string into, string? executables = "llvm-mos/bin")
     {
         var options = new SharpCompress.Common.ExtractionOptions
         {
@@ -142,14 +188,19 @@ static class Tools
             SharpCompress.Readers.IReaderExtensions.WriteAllToDirectory(reader, into, options);
         }
 
-        // An archive's permissions aren't restored: its programs need to run.
-        if (!OperatingSystem.IsWindows())
+        if (executables != null)
+            MakeExecutable(Path.Combine(into, executables));
+    }
+
+    // An archive's permissions aren't restored: its programs need to run.
+    static void MakeExecutable(string bin)
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+        foreach (string program in Directory.EnumerateFiles(bin))
         {
-            foreach (string program in Directory.EnumerateFiles(Path.Combine(into, "llvm-mos", "bin")))
-            {
-                if (File.ResolveLinkTarget(program, returnFinalTarget: false) is null)
-                    File.SetUnixFileMode(program, File.GetUnixFileMode(program) | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
-            }
+            if (File.ResolveLinkTarget(program, returnFinalTarget: false) is null)
+                File.SetUnixFileMode(program, File.GetUnixFileMode(program) | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
         }
     }
 
@@ -231,7 +282,8 @@ static class Tools
         {
             ["ilc"] => Ilc(),
             ["llvm-mos"] => LlvmMosFolder(),
-            _ => throw Fail("usage: zero-bitcode tools ilc|llvm-mos"),
+            ["arm"] => ArmFolder(),
+            _ => throw Fail("usage: zero-bitcode tools ilc|llvm-mos|arm"),
         };
         Console.WriteLine(folder);
     }

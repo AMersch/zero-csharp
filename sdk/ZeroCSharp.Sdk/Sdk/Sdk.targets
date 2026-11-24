@@ -52,6 +52,9 @@
        and Directory.Build.targets, a ZeroTarget other than the host's is chosen. -->
   <PropertyGroup>
     <ZeroTargetFolder Condition="'$(ZeroTargetChosen)' == 'true' or '$(ZeroTarget)' != '$(ZeroHostRid)'">$(ZeroTarget)/</ZeroTargetFolder>
+    <!-- The targets bflat doesn't compile for: it makes IL, NativeAOT-LLVM
+         makes LLVM bitcode of that, and zero-bitcode takes it from there. -->
+    <_ZeroBitcodeTarget Condition="'$(ZeroTarget)' == 'c64' or '$(ZeroTarget)' == 'pico2' or '$(ZeroTarget)' == 'r4'">true</_ZeroBitcodeTarget>
   </PropertyGroup>
 
   <!--
@@ -65,7 +68,7 @@
   <!-- After the output is copied and before IncrementalClean, which records
        FileWrites: dotnet clean then removes the native program too. -->
   <Target Name="ZeroNativeBuild" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="IncrementalClean"
-          Condition="'$(ZeroBuildsNative)' == 'true' and '$(ZeroTarget)' != 'c64'"
+          Condition="'$(ZeroBuildsNative)' == 'true' and '$(_ZeroBitcodeTarget)' != 'true'"
           DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand;ZeroFSharpEntry"
           Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);@(ZeroResolvedLinkLibrary);$(ZeroNativeArgsFile);@(ZeroFSharpNativeInput);$(ZeroLinkArgsInput)"
           Outputs="$(ZeroNativeOutput);$(ZeroDebugObject)">
@@ -115,12 +118,44 @@
       <_ZeroBitcode>&quot;$(_ZeroDotnet)&quot; &quot;$(ZeroSdkRoot)payload/tools/zero-bitcode/zero-bitcode.dll&quot;</_ZeroBitcode>
     </PropertyGroup>
     <Exec Condition="'$(OS)' != 'Windows_NT'" Command="test -x &quot;$(ZeroBflatDir)bflat&quot; || chmod +x &quot;$(ZeroBflatDir)bflat&quot;" />
-    <MakeDir Directories="$(ZeroC64Dir);$([System.IO.Path]::GetDirectoryName('$(ZeroNativeOutput)'))" />
+    <MakeDir Directories="$(ZeroBitcodeDir);$([System.IO.Path]::GetDirectoryName('$(ZeroNativeOutput)'))" />
     <Message Text="bflat arguments: $(ZeroNativeArgs)" />
     <Exec Command="&quot;$(ZeroBflatExe)&quot; build-il @&quot;$(ZeroNativeArgsFile)&quot;" />
-    <Exec Command="$(_ZeroBitcode) c64-bitcode &quot;$(ZeroC64Il)&quot; &quot;$(ZeroC64Dir)bitcode&quot; &quot;$(ZeroNativeDir)System.Private.CoreLib.dll&quot; &quot;$(ZeroRefDir)BflatLib.dll&quot; @(_ZeroC64Reference->'&quot;%(Identity)&quot;', ' ') @(ZeroLibraryReference->'&quot;%(FullPath)&quot;', ' ')" />
-    <Exec Command="$(_ZeroBitcode) c64-link &quot;$(ZeroC64Dir)bitcode&quot; &quot;$([System.IO.Path]::GetFileNameWithoutExtension('$(ZeroC64Il)'))&quot; &quot;$(ZeroNativeDir)runtime.c&quot; &quot;$(ZeroNativeOutput)&quot;" />
+    <Exec Command="$(_ZeroBitcode) c64-bitcode &quot;$(ZeroBitcodeIl)&quot; &quot;$(ZeroBitcodeDir)bitcode&quot; &quot;$(ZeroNativeDir)System.Private.CoreLib.dll&quot; &quot;$(ZeroRefDir)BflatLib.dll&quot; @(_ZeroBitcodeReference->'&quot;%(Identity)&quot;', ' ') @(ZeroLibraryReference->'&quot;%(FullPath)&quot;', ' ')" />
+    <Exec Command="$(_ZeroBitcode) c64-link &quot;$(ZeroBitcodeDir)bitcode&quot; &quot;$([System.IO.Path]::GetFileNameWithoutExtension('$(ZeroBitcodeIl)'))&quot; &quot;$(ZeroNativeDir)runtime.c&quot; &quot;$(ZeroNativeOutput)&quot;" />
     <Message Importance="high" Text="$(MSBuildProjectName) -> $(ZeroNativeOutput)" />
+  </Target>
+
+  <!--
+    Microcontrollers: the Raspberry Pi Pico 2 (pico2, an RP2350's Cortex-M33)
+    and the Arduino Uno R4 (r4, a Cortex-M4). The same IL and bitcode as for
+    the C64, optimized for speed (zero-bitcode arm-bitcode), and Arm Toolchain
+    for Embedded's clang for the board's processor (zero-bitcode arm-link),
+    downloaded on the first such build into the same cache; on a Mac it runs
+    in Docker too. Each build makes the program for QEMU's stand-in board
+    (qemu/<name>.elf for the pico2, <name>.elf for the r4: dotnet run runs it
+    there), and for the pico2 the program for the real board: <name>.uf2, to
+    copy to it, and <name>.elf, for a debug probe.
+  -->
+  <Target Name="ZeroArmBuild" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="IncrementalClean"
+          Condition="'$(ZeroBuildsNative)' == 'true' and ('$(ZeroTarget)' == 'pico2' or '$(ZeroTarget)' == 'r4')"
+          DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand;ZeroFSharpEntry"
+          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);$(ZeroNativeArgsFile);@(ZeroFSharpNativeInput)"
+          Outputs="$(ZeroNativeOutput);$(ZeroArmQemuOutput)">
+    <PropertyGroup>
+      <_ZeroDotnet>$(DOTNET_HOST_PATH)</_ZeroDotnet>
+      <_ZeroDotnet Condition="'$(_ZeroDotnet)' == ''">dotnet</_ZeroDotnet>
+      <_ZeroBitcode>&quot;$(_ZeroDotnet)&quot; &quot;$(ZeroSdkRoot)payload/tools/zero-bitcode/zero-bitcode.dll&quot;</_ZeroBitcode>
+      <_ZeroArmBoard Condition="'$(ZeroTarget)' == 'pico2'">&quot;$(ZeroArmBoardElf)&quot; &quot;$(ZeroNativeOutput)&quot;</_ZeroArmBoard>
+    </PropertyGroup>
+    <Exec Condition="'$(OS)' != 'Windows_NT'" Command="test -x &quot;$(ZeroBflatDir)bflat&quot; || chmod +x &quot;$(ZeroBflatDir)bflat&quot;" />
+    <MakeDir Directories="$(ZeroBitcodeDir);$([System.IO.Path]::GetDirectoryName('$(ZeroNativeOutput)'))" />
+    <Message Text="bflat arguments: $(ZeroNativeArgs)" />
+    <Exec Command="&quot;$(ZeroBflatExe)&quot; build-il @&quot;$(ZeroNativeArgsFile)&quot;" />
+    <Exec Command="$(_ZeroBitcode) arm-bitcode &quot;$(ZeroBitcodeIl)&quot; &quot;$(ZeroBitcodeDir)bitcode&quot; &quot;$(ZeroNativeDir)System.Private.CoreLib.dll&quot; &quot;$(ZeroRefDir)BflatLib.dll&quot; @(_ZeroBitcodeReference->'&quot;%(Identity)&quot;', ' ') @(ZeroLibraryReference->'&quot;%(FullPath)&quot;', ' ')" />
+    <Exec Command="$(_ZeroBitcode) arm-link &quot;$(ZeroBitcodeDir)bitcode&quot; &quot;$([System.IO.Path]::GetFileNameWithoutExtension('$(ZeroBitcodeIl)'))&quot; &quot;$(ZeroNativeDir.TrimEnd('/'))&quot; $(ZeroTarget) &quot;$(ZeroArmQemuOutput)&quot; $(_ZeroArmBoard)" />
+    <Message Importance="high" Text="$(MSBuildProjectName) -> $(ZeroNativeOutput)" />
+    <Message Importance="high" Text="$(MSBuildProjectName) -> $(ZeroArmQemuOutput) (for QEMU: dotnet run)" Condition="'$(ZeroTarget)' == 'pico2'" />
   </Target>
 
   <!-- The framework is the SDK's: a TargetFramework set in the project would
@@ -172,8 +207,8 @@
            Text="Zero C# builds on Apple Silicon Macs, not Intel ones; build on an Apple Silicon Mac, Linux (x64 or arm64) or Windows x64." />
     <Error Condition="'$(ZeroHostRid)' == '' and !$([MSBuild]::IsOSPlatform('OSX'))"
            Text="Zero C# can't make native programs on this machine yet; build on Linux (x64 or arm64), Windows x64 or an Apple Silicon Mac." />
-    <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64' and '$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'uefi-x64' and '$(ZeroTarget)' != 'uefi-arm64' and '$(ZeroTarget)' != 'c64'"
-           Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64, osx-arm64, uefi-x64, uefi-arm64, c64." />
+    <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64' and '$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'uefi-x64' and '$(ZeroTarget)' != 'uefi-arm64' and '$(ZeroTarget)' != 'c64' and '$(ZeroTarget)' != 'pico2' and '$(ZeroTarget)' != 'r4'"
+           Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64, osx-arm64, uefi-x64, uefi-arm64, c64, pico2, r4." />
     <Error Condition="'$(ZeroTarget)' == 'c64' and '$(ZeroHostRid)' == 'linux-arm64'"
            Text="ZeroTarget c64 builds on Linux x64, Windows x64 or an Apple Silicon Mac: llvm-mos, the compiler for the 6502, has no build for Linux arm64." />
     <Error Condition="'$(ZeroOptimizeFor)' != 'None' and '$(ZeroOptimizeFor)' != 'Speed' and '$(ZeroOptimizeFor)' != 'Size'"
@@ -309,12 +344,22 @@
       <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'win-x64'">$(ZeroNativeOutput).exe</ZeroNativeOutput>
       <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'uefi-x64' or '$(ZeroTarget)' == 'uefi-arm64'">$(ZeroNativeOutput).efi</ZeroNativeOutput>
       <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'c64'">$(ZeroNativeOutput).prg</ZeroNativeOutput>
-      <!-- The C64: bflat's IL and NativeAOT-LLVM's bitcode, in obj/. -->
-      <ZeroC64Dir>$(IntermediateOutputPath)c64/</ZeroC64Dir>
-      <ZeroC64Il>$(ZeroC64Dir)$(AssemblyName).dll</ZeroC64Il>
+      <!-- Microcontrollers: one runtime folder for both boards. The pico2's
+           output is the real board's .uf2, with its .elf beside it and the
+           QEMU build in qemu/; the r4's is the QEMU build. -->
+      <ZeroNativeDir Condition="'$(ZeroTarget)' == 'pico2' or '$(ZeroTarget)' == 'r4'">$(ZeroSdkRoot)payload/native/arm/</ZeroNativeDir>
+      <ZeroArmBoardElf>$(ZeroNativeOutput).elf</ZeroArmBoardElf>
+      <ZeroArmQemuOutput Condition="'$(ZeroTarget)' == 'pico2'">$(OutDir)$(ZeroTargetFolder)qemu/$(AssemblyName).elf</ZeroArmQemuOutput>
+      <ZeroArmQemuOutput Condition="'$(ZeroTarget)' == 'r4'">$(ZeroNativeOutput).elf</ZeroArmQemuOutput>
+      <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'pico2'">$(ZeroNativeOutput).uf2</ZeroNativeOutput>
+      <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'r4'">$(ZeroArmQemuOutput)</ZeroNativeOutput>
+      <!-- The C64 and the microcontrollers: bflat's IL and NativeAOT-LLVM's
+           bitcode, in obj/. -->
+      <ZeroBitcodeDir>$(IntermediateOutputPath)$(ZeroTarget)/</ZeroBitcodeDir>
+      <ZeroBitcodeIl>$(ZeroBitcodeDir)$(AssemblyName).dll</ZeroBitcodeIl>
       <!-- F#: bflat names the assembly it compiles after its file, and the
            C# entry program must not take the F# program's name. -->
-      <ZeroC64Il Condition="'$(ZeroLanguage)' == 'FSharp'">$(ZeroC64Dir)zero-native.dll</ZeroC64Il>
+      <ZeroBitcodeIl Condition="'$(ZeroLanguage)' == 'FSharp'">$(ZeroBitcodeDir)zero-native.dll</ZeroBitcodeIl>
       <!-- A native library: in native/, as NativeAOT puts it, which keeps a
            Windows .dll apart from the IL .dll of the same name. -->
       <ZeroNativeLibraryExtension Condition="'$(ZeroTarget)' == 'win-x64'">.dll</ZeroNativeLibraryExtension>
@@ -351,8 +396,8 @@
       <!-- The C64: what NativeAOT-LLVM compiles besides the entry program,
            zerocore, lib/ and the zero libraries: for F#, the program's IL,
            FSharp.Core and the rest of ref/fsharp/. -->
-      <_ZeroC64Reference Include="@(IntermediateAssembly->'%(FullPath)')" Condition="'$(ZeroLanguage)' == 'FSharp'" />
-      <_ZeroC64Reference Include="@(Reference->'%(FullPath)')" Condition="'$(ZeroLanguage)' == 'FSharp' and '%(Reference.ZeroFramework)' == 'true' and '%(Reference.ZeroNative)' != 'false' and '%(Reference.Filename)' != 'BflatLib'" />
+      <_ZeroBitcodeReference Include="@(IntermediateAssembly->'%(FullPath)')" Condition="'$(ZeroLanguage)' == 'FSharp'" />
+      <_ZeroBitcodeReference Include="@(Reference->'%(FullPath)')" Condition="'$(ZeroLanguage)' == 'FSharp' and '%(Reference.ZeroFramework)' == 'true' and '%(Reference.ZeroNative)' != 'false' and '%(Reference.Filename)' != 'BflatLib'" />
       <ZeroNativeInput Include="$(ZeroRefDir)*.dll;$(ZeroNativeDir)*" />
       <_ZeroArg Include="@(Compile->'&quot;%(FullPath)&quot;')" Condition="'$(ZeroLanguage)' == 'CSharp'" />
       <!-- F#: the C# entry program, the F# IL, and zerocore under its own name. -->
@@ -361,8 +406,8 @@
       <_ZeroArg Include="-r &quot;$(ZeroRefDir)System.Private.CoreLib.dll&quot;" Condition="'$(ZeroLanguage)' == 'FSharp'" />
       <_ZeroArg Include="-r &quot;%(Reference.Identity)&quot;" Condition="'%(Reference.ZeroFramework)' == 'true' and '%(Reference.ZeroNative)' != 'false'" />
       <_ZeroArg Include="@(ZeroLibraryReference->'-r &quot;%(FullPath)&quot;')" />
-      <_ZeroArg Include="--stdlib:none --no-reflection" Condition="'$(ZeroTarget)' != 'c64'" />
-      <_ZeroArg Include="--stdlib:none -O -o &quot;$(ZeroC64Il)&quot;" Condition="'$(ZeroTarget)' == 'c64'" />
+      <_ZeroArg Include="--stdlib:none --no-reflection" Condition="'$(_ZeroBitcodeTarget)' != 'true'" />
+      <_ZeroArg Include="--stdlib:none -O -o &quot;$(ZeroBitcodeIl)&quot;" Condition="'$(_ZeroBitcodeTarget)' == 'true'" />
       <!-- The language as the project sets it for the C# compiler. -->
       <_ZeroArg Include="--langversion $(LangVersion)" Condition="'$(LangVersion)' != '' and '$(ZeroLanguage)' == 'CSharp'" />
       <_ZeroArg Include="$(Features.Split(';'))" Condition="'$(Features)' != '' and '$(ZeroLanguage)' == 'CSharp'">
@@ -372,9 +417,9 @@
         <Prefix>-d </Prefix>
       </_ZeroArg>
       <_ZeroDllImport Include="libc;libm.so.6;$(ZeroDllImports);@(ZeroResolvedLinkLibrary->'%(DllImport)')" KeepDuplicates="false" />
-      <_ZeroArg Include="@(_ZeroDllImport->'-i %(Identity)', ' ')" Condition="'$(ZeroTarget)' != 'c64'" />
+      <_ZeroArg Include="@(_ZeroDllImport->'-i %(Identity)', ' ')" Condition="'$(_ZeroBitcodeTarget)' != 'true'" />
       <!-- C libraries (ZeroLinkLibrary), where bflat links; macOS's go to ld64.lld below. -->
-      <_ZeroArg Include="@(ZeroResolvedLinkLibrary->'--ldflags &quot;%(FullPath)&quot;', ' ')" Condition="'$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'c64' and '@(ZeroResolvedLinkLibrary)' != ''" />
+      <_ZeroArg Include="@(ZeroResolvedLinkLibrary->'--ldflags &quot;%(FullPath)&quot;', ' ')" Condition="'$(ZeroTarget)' != 'osx-arm64' and '$(_ZeroBitcodeTarget)' != 'true' and '@(ZeroResolvedLinkLibrary)' != ''" />
       <!-- Linux: bflat links against its own C library, older than the one a
            system library was built with (SDL built on Ubuntu 24.04 calls
            pthread_create@GLIBC_2.34). lld would check the library's own
@@ -411,15 +456,15 @@
       <_ZeroArg Include="--os uefi --arch arm64" Condition="'$(ZeroTarget)' == 'uefi-arm64'" />
       <_ZeroUefiObject Include="start.obj;runtime.obj;machine.obj;stack.obj;zerocore.obj;libm.lib" />
       <_ZeroArg Include="@(_ZeroUefiObject->'--ldflags &quot;$(ZeroNativeDir)%(Identity)&quot;', ' ')" Condition="'$(ZeroTarget)' == 'uefi-x64' or '$(ZeroTarget)' == 'uefi-arm64'" />
-      <_ZeroArg Include="-O0" Condition="'$(ZeroOptimizeFor)' == 'None' and '$(ZeroTarget)' != 'c64'" />
-      <_ZeroArg Include="-Os" Condition="'$(ZeroOptimizeFor)' == 'Size' and '$(ZeroTarget)' != 'c64'" />
+      <_ZeroArg Include="-O0" Condition="'$(ZeroOptimizeFor)' == 'None' and '$(_ZeroBitcodeTarget)' != 'true'" />
+      <_ZeroArg Include="-Os" Condition="'$(ZeroOptimizeFor)' == 'Size' and '$(_ZeroBitcodeTarget)' != 'true'" />
       <!-- ZeroStripSymbols: no debug information (macOS's stays in bflat's
            object, so the linker drops the symbols that point to it), and lld
            leaves the symbol table out of Linux programs. -->
-      <_ZeroArg Include="--no-debug-info" Condition="'$(ZeroStripSymbols)' == 'true' and '$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'c64'" />
+      <_ZeroArg Include="--no-debug-info" Condition="'$(ZeroStripSymbols)' == 'true' and '$(ZeroTarget)' != 'osx-arm64' and '$(_ZeroBitcodeTarget)' != 'true'" />
       <_ZeroArg Include="--ldflags --strip-all" Condition="'$(ZeroStripSymbols)' == 'true' and ('$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64')" />
-      <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != '' and '$(ZeroTarget)' != 'c64'" />
-      <_ZeroArg Include="-o &quot;$(ZeroBflatOutput)&quot;" Condition="'$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'c64'" />
+      <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != '' and '$(_ZeroBitcodeTarget)' != 'true'" />
+      <_ZeroArg Include="-o &quot;$(ZeroBflatOutput)&quot;" Condition="'$(ZeroTarget)' != 'osx-arm64' and '$(_ZeroBitcodeTarget)' != 'true'" />
       <_ZeroArg Include="-o &quot;$(ZeroNativeObject)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
       <!-- ld64.lld (macOS 12 or newer, arm64: what bflat's objects ask for). zerocore's module list comes
            from the payload's objects (mac/start.c or mac/library.c, mac-arm64.S). Chained
@@ -474,13 +519,16 @@
   <!-- Every target's program and command line that a build may have made. -->
   <Target Name="ZeroNativeFiles">
     <ItemGroup>
-      <_ZeroAnyTarget Include="linux-x64;linux-arm64;win-x64;osx-arm64;uefi-x64;uefi-arm64;c64" />
+      <_ZeroAnyTarget Include="linux-x64;linux-arm64;win-x64;osx-arm64;uefi-x64;uefi-arm64;c64;pico2;r4" />
       <ZeroNativeFile Include="$(OutDir)$(AssemblyName);$(OutDir)$(AssemblyName).exe" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName)')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName).exe')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName).efi')" />
       <!-- The C64: the program, and the linker's copy with symbols. -->
       <ZeroNativeFile Include="$(OutDir)c64/$(AssemblyName).prg;$(OutDir)c64/$(AssemblyName).prg.elf" />
+      <!-- The microcontrollers: the Pico 2's for the board and for QEMU, the
+           Uno R4's for QEMU. -->
+      <ZeroNativeFile Include="$(OutDir)pico2/$(AssemblyName).uf2;$(OutDir)pico2/$(AssemblyName).elf;$(OutDir)pico2/qemu/$(AssemblyName).elf;$(OutDir)r4/$(AssemblyName).elf" />
       <ZeroNativeFile Include="$(IntermediateOutputPath)zero-native*.args" />
       <!-- macOS: bflat's objects (the programs' debug information) and exports
            lists, and the linker's command lines. -->
@@ -509,6 +557,20 @@
     <RunCommand>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(OutDir)$(ZeroTargetFolder)', '$(AssemblyName)'))</RunCommand>
     <RunCommand Condition="'$(ZeroTarget)' == 'win-x64'">$(RunCommand).exe</RunCommand>
     <RunArguments>$(StartArguments)</RunArguments>
+    <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
+  </PropertyGroup>
+
+  <!-- dotnet run of a microcontroller program: in QEMU (qemu-system-arm), on
+       the board that stands in for the real one, as the repository's run.sh
+       runs them. Output, input and the exit code go through semihosting; a
+       terminal's typing reaches the program through the console. -->
+  <PropertyGroup Condition="'$(OutputType)' != 'Library' and ('$(ZeroTarget)' == 'pico2' or '$(ZeroTarget)' == 'r4')">
+    <_ZeroQemuMachine Condition="'$(ZeroTarget)' == 'pico2'">mps2-an505</_ZeroQemuMachine>
+    <_ZeroQemuMachine Condition="'$(ZeroTarget)' == 'r4'">mps2-an386</_ZeroQemuMachine>
+    <_ZeroQemuProgram Condition="'$(ZeroTarget)' == 'pico2'">$(OutDir)pico2/qemu/$(AssemblyName).elf</_ZeroQemuProgram>
+    <_ZeroQemuProgram Condition="'$(ZeroTarget)' == 'r4'">$(OutDir)r4/$(AssemblyName).elf</_ZeroQemuProgram>
+    <RunCommand>qemu-system-arm</RunCommand>
+    <RunArguments>-M $(_ZeroQemuMachine) -nographic -serial none -monitor none -chardev stdio,id=console -semihosting-config enable=on,target=native,chardev=console,arg=$(AssemblyName.Replace(' ', '_').Replace(',', ',,')) -kernel &quot;$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(_ZeroQemuProgram)'))&quot;</RunArguments>
     <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
   </PropertyGroup>
 

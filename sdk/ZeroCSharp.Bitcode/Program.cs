@@ -41,9 +41,11 @@ static class Program
                zero-bitcode wasm2i386 IN.o OUT
                zero-bitcode wasm2arm IN.o OUT
                zero-bitcode elf2uf2 IN.elf OUT.uf2
-               zero-bitcode tools ilc|llvm-mos
                zero-bitcode c64-bitcode IN.dll OUTDIR CORE.dll [REF.dll...]
                zero-bitcode c64-link OBJDIR NAME RUNTIME.c OUT.prg [--llvm-mos DIR]
+               zero-bitcode arm-bitcode IN.dll OUTDIR CORE.dll [REF.dll...]
+               zero-bitcode arm-link OBJDIR NAME RUNTIMEDIR pico2|r4 QEMU.elf [BOARD.elf BOARD.uf2] [--arm DIR]
+               zero-bitcode tools ilc|llvm-mos|arm
         """;
 
     static int Main(string[] args)
@@ -75,6 +77,12 @@ static class Program
                     return 0;
                 case "c64-link":
                     C64.Link(args[1..]);
+                    return 0;
+                case "arm-bitcode":
+                    ArmTarget.Bitcode(args[1..]);
+                    return 0;
+                case "arm-link":
+                    ArmTarget.Link(args[1..]);
                     return 0;
                 default:
                     Console.Error.WriteLine(Usage);

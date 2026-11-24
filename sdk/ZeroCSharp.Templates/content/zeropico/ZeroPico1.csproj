@@ -1,0 +1,16 @@
+<!-- A microcontroller program. dotnet build, for a Raspberry Pi Pico 2
+     (ZeroTarget pico2), makes in bin/Debug/<framework>/pico2/:
+       ZeroPico1.uf2       for the board: hold BOOTSEL while plugging it in,
+                           then copy this file to the RP2350 drive
+       ZeroPico1.elf       the same, for a debug probe (OpenOCD)
+       qemu/ZeroPico1.elf  for QEMU: dotnet run runs it there
+     For an Arduino Uno R4 (r4), it makes r4/ZeroPico1.elf, for QEMU only so
+     far. The first build downloads the compilers it needs (about 400 MB,
+     once). On a Mac, Docker has to be running.
+     Guide: https://onurgumus.github.io/zero-csharp/how-to/build-for-microcontrollers.html -->
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ZeroTarget>ZERO_BOARD</ZeroTarget>
+  </PropertyGroup>
+</Project>

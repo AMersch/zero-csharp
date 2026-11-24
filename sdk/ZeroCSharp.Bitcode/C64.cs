@@ -24,10 +24,12 @@ static class C64
 
     // ---- NativeAOT-LLVM -----------------------------------------------------------
 
-    public static void Bitcode(string[] args)
+    // optimize: --Os for the C64 (50 KB for everything), -O for the
+    // microcontrollers (Arm.cs), whose flash has room for speed.
+    public static void Bitcode(string[] args, string command = "c64-bitcode", string optimize = "--Os")
     {
         if (args.Length < 3)
-            throw Fail("usage: zero-bitcode c64-bitcode IN.dll OUTDIR CORE.dll [REF.dll...]");
+            throw Fail($"usage: zero-bitcode {command} IN.dll OUTDIR CORE.dll [REF.dll...]");
         string input = Path.GetFullPath(args[0]);
         string outDir = Path.GetFullPath(args[1]);
         string core = Path.GetFullPath(args[2]);
@@ -39,14 +41,15 @@ static class C64
             Directory.Delete(outDir, recursive: true);
         Directory.CreateDirectory(outDir);
 
-        // As ./build.sh compiles for the C64 (compile_bitcode): --Os, for
-        // size; [DllImport("libc")] and ("libm.so.6") bound at link time.
+        // As ./build.sh compiles for the C64 and the microcontrollers
+        // (compile_bitcode); [DllImport("libc")] and ("libm.so.6") bound at
+        // link time.
         var ilcArgs = new List<string> { input };
         foreach (string reference in references)
             ilcArgs.AddRange(["-r", reference]);
         ilcArgs.AddRange(["-r", core, "--reflectiondata:none",
             "--generateunmanagedentrypoints:System.Private.CoreLib",
-            "--targetos:wasi", "--targetarch:wasm", "--Os", "--wasm-global-base:1024",
+            "--targetos:wasi", "--targetarch:wasm", optimize, "--wasm-global-base:1024",
             "--codegenopt:Target=wasm32-unknown-wasip2", "--codegenopt:LlvmExceptionHandlingModel=emulated",
             "--directpinvoke:libc", "--directpinvoke:libm.so.6", $"-o:{Path.Combine(outDir, name + ".bc")}"]);
 
@@ -74,7 +77,7 @@ static class C64
         }
     }
 
-    static void CheckDocker()
+    public static void CheckDocker()
     {
         bool running;
         try
@@ -89,14 +92,14 @@ static class C64
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            throw Fail("building for the C64 on a Mac needs Docker, to run NativeAOT-LLVM's Linux build. "
+            throw Fail("building for the C64 or a microcontroller on a Mac needs Docker, to run NativeAOT-LLVM's Linux build. "
                        + "Install Docker Desktop, or a free alternative such as Colima (brew install colima docker) or Podman, and start it.");
         }
         if (!running)
             throw Fail("Docker is installed but not running: start Docker Desktop (or colima start, or podman machine start) and build again.");
     }
 
-    static void RunLogged(string program, IEnumerable<string> arguments, string log, string what)
+    public static void RunLogged(string program, IEnumerable<string> arguments, string log, string what)
     {
         var info = new ProcessStartInfo(program) { RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (string argument in arguments)
@@ -228,7 +231,7 @@ static class C64
         }
     }
 
-    static (int Code, string Log) Capture(string program, IEnumerable<string> arguments)
+    public static (int Code, string Log) Capture(string program, IEnumerable<string> arguments)
     {
         var info = new ProcessStartInfo(program) { RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (string argument in arguments)

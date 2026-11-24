@@ -250,6 +250,8 @@ test_payload_complete() {
              native/uefi-x64/{start,runtime,machine,stack,zerocore}.obj native/uefi-x64/libm.lib \
              native/uefi-arm64/{start,runtime,machine,stack,zerocore}.obj native/uefi-arm64/libm.lib \
              native/c64/System.Private.CoreLib.dll native/c64/runtime.c \
+             native/arm/System.Private.CoreLib.dll native/arm/{runtime,semihost,rp2350}.c native/arm/rp2350.S \
+             native/arm/{an505,an386,rp2350}.ld.in \
              tools/zero-bitcode/zero-bitcode.dll tools/zero-bitcode/zero-bitcode.runtimeconfig.json \
              tools/zero-bitcode/SharpCompress.dll tools/zero-bitcode/THIRD-PARTY-NOTICES.txt; do
         if [ ! -s "$payload/$f" ]; then fail "payload complete" "missing $f"; return; fi
@@ -380,6 +382,47 @@ test_c64_target() {
     # A second build has nothing to do.
     if ! run_in "$dir" c64-again build -p:ZeroTarget=c64 -v:n; then fail "$name" "the second build failed"; return; fi
     if grep -q "c64-bitcode" "$LOG"; then fail "$name" "the second build compiled again"; return; fi
+    pass "$name"
+}
+
+# ZeroTarget=pico2 and r4: the first build downloads NativeAOT-LLVM and Arm
+# Toolchain for Embedded into ZERO_TOOLS_CACHE (zero-bitcode's Tools.cs); a
+# Mac runs both in Docker. The pico2 build makes the real board's UF2 (the
+# RP2350's family, the vector table first and the boot ROM's IMAGE_DEF block
+# at 0x40), its ELF, and QEMU's ELF; the r4's is for QEMU. Where
+# qemu-system-arm is installed, dotnet run runs each there: a C# interrupt
+# handler counts ten ticks and turns the LED over each time.
+test_arm_target() {
+    local name="microcontroller targets" dir out target words
+    can_build "$name" || return
+    if [ "$HOST_RID" = osx-arm64 ] && ! docker info > /dev/null 2>&1; then
+        skip "$name" "on a Mac the microcontrollers need Docker, which isn't running"; return
+    fi
+    dir=$(fixture blinky)
+    if ! run_in "$dir" pico2 build -p:ZeroTarget=pico2; then fail "$name" "the pico2 build failed"; return; fi
+    out=$dir/bin/Debug/$TFM/pico2
+    for file in blinky.uf2 blinky.elf qemu/blinky.elf; do
+        if [ ! -s "$out/$file" ]; then fail "$name" "no pico2/$file"; return; fi
+    done
+    # The first UF2 block: its magic, the family, and the IMAGE_DEF block in
+    # the bytes it carries (at 32 in the block, 0x40 in flash).
+    words=$(od -An -tx4 -N 32 "$out/blinky.uf2" | tr -s ' \n' ' ')
+    if [[ "$words" != " 0a324655 9e5d5157 00002000 10000000 "*" e48bff59 " ]]; then fail "$name" "blinky.uf2's first block isn't an RP2350 one: $words"; return; fi
+    words=$(od -An -tx4 -j $((32 + 0x40)) -N 20 "$out/blinky.uf2" | tr -s ' \n' ' ')
+    if [ "$words" != " ffffded3 10210142 000001ff 00000000 ab123579 " ]; then fail "$name" "no IMAGE_DEF block at 0x40: $words"; return; fi
+    if ! run_in "$dir" r4 build -p:ZeroTarget=r4; then fail "$name" "the r4 build failed"; return; fi
+    if [ ! -s "$dir/bin/Debug/$TFM/r4/blinky.elf" ]; then fail "$name" "no r4/blinky.elf"; return; fi
+    # A second build has nothing to do.
+    if ! run_in "$dir" pico2-again build -p:ZeroTarget=pico2 -v:n; then fail "$name" "the second build failed"; return; fi
+    if grep -q "arm-bitcode" "$LOG"; then fail "$name" "the second build compiled again"; return; fi
+    if command -v qemu-system-arm > /dev/null 2>&1; then
+        for target in pico2 r4; do
+            if ! run_in "$dir" run-$target run -p:ZeroTarget=$target < /dev/null; then fail "$name" "dotnet run in QEMU ($target) failed"; return; fi
+            if ! grep -q "ticks: 10, LED on: false" "$LOG"; then fail "$name" "dotnet run in QEMU ($target) printed something else"; return; fi
+        done
+    else
+        echo "     (no qemu-system-arm: built, not run)"
+    fi
     pass "$name"
 }
 
@@ -1682,14 +1725,14 @@ test_fsharp_native_library_errors() {
 }
 
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
-    native_hello_runs cross_targets c64_target bad_target path_with_spaces compile_items incremental
+    native_hello_runs cross_targets c64_target arm_target bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size strip_symbols debug_unoptimized mac_debug_object_kept windows_debugger macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
     release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0
     long_command_line windows_builds_linux unusual_packages_folder crlf_input
-    artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template sdl_template
+    artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template sdl_template pico_template
     framework_from_property newer_sdk_library
     mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
     trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd mac_target_newer_dylib
@@ -1798,6 +1841,34 @@ test_sdl_template() {
         esac
         if [ "$out" != "30 frames, square at 330,220" ]; then fail "$name" "printed '$out'"; return; fi
     fi
+    pass "$name"
+}
+
+# dotnet new zeropico: a microcontroller program, for the Pico 2 by default and
+# for the Uno R4 with --board r4. Both build; where qemu-system-arm is
+# installed, dotnet run blinks in QEMU and prints its two lines.
+test_pico_template() {
+    local name="pico template" dir=$WORK/picotemplate board out
+    can_build "$name" || return
+    if [ "$HOST_RID" = osx-arm64 ] && ! docker info > /dev/null 2>&1; then
+        skip "$name" "on a Mac the microcontrollers need Docker, which isn't running"; return
+    fi
+    rm -rf "$dir" && mkdir -p "$dir"
+    fixture hello picotemplate-config > /dev/null    # just for its nuget.config
+    cp "$WORK/picotemplate-config/nuget.config" "$dir/"
+    dotnet new uninstall ZeroCSharp.Templates > /dev/null 2>&1 || true
+    if ! run_in "$dir" pico-install new install "$FEED/ZeroCSharp.Templates.$VERSION.nupkg"; then fail "$name" "install failed"; return; fi
+    for board in pico2 r4; do
+        if ! run_in "$dir" pico-new-$board new zeropico -o Blinky-$board --board $board; then fail "$name" "dotnet new zeropico --board $board failed"; return; fi
+        if ! grep -q "<ZeroTarget>$board</ZeroTarget>" "$dir/Blinky-$board/Blinky-$board.csproj"; then fail "$name" "the $board project doesn't target $board"; return; fi
+        if ! run_in "$dir/Blinky-$board" pico-build-$board build; then fail "$name" "the $board program didn't build"; return; fi
+        if command -v qemu-system-arm > /dev/null 2>&1; then
+            if ! run_in "$dir/Blinky-$board" pico-run-$board run < /dev/null; then fail "$name" "dotnet run ($board) failed"; return; fi
+            out=$(grep -E "Hello from C#|Blinked for" "$LOG" | tr -d '\r')
+            if [ "$out" != $'Hello from C# on a microcontroller!\nBlinked for 5 seconds.' ]; then fail "$name" "dotnet run ($board) printed '$out'"; return; fi
+        fi
+    done
+    if [ ! -s "$dir/Blinky-pico2/bin/Debug/$TFM/pico2/Blinky-pico2.uf2" ]; then fail "$name" "no .uf2 for the Pico 2"; return; fi
     pass "$name"
 }
 

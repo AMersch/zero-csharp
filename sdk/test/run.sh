@@ -220,7 +220,10 @@ test_payload_complete() {
              native/osx-arm64/start.o native/osx-arm64/runtime.o native/osx-arm64/library.o native/osx-arm64/zerocore.o \
              native/osx-arm64/libSystem.tbd VERSIONS.txt \
              native/uefi-x64/{start,runtime,machine,stack,zerocore}.obj native/uefi-x64/libm.lib \
-             native/uefi-arm64/{start,runtime,machine,stack,zerocore}.obj native/uefi-arm64/libm.lib; do
+             native/uefi-arm64/{start,runtime,machine,stack,zerocore}.obj native/uefi-arm64/libm.lib \
+             native/c64/System.Private.CoreLib.dll native/c64/runtime.c \
+             tools/zero-bitcode/zero-bitcode.dll tools/zero-bitcode/zero-bitcode.runtimeconfig.json \
+             tools/zero-bitcode/SharpCompress.dll tools/zero-bitcode/THIRD-PARTY-NOTICES.txt; do
         if [ ! -s "$payload/$f" ]; then fail "payload complete" "missing $f"; return; fi
     done
     if ! is_elf "$payload/native/linux-x64/zerocore.o" x86-64; then fail "payload complete" "linux-x64 object isn't x86-64"; return; fi
@@ -319,6 +322,36 @@ test_cross_targets() {
         if ! run_in "$dir" cross-uefi-$other build -p:ZeroTarget=uefi-$other; then fail "$name" "uefi-$other build failed"; return; fi
         if ! is_efi_app "$dir/bin/Debug/$TFM/uefi-$other/native.efi" $other; then fail "$name" "native.efi isn't a UEFI application for $other"; return; fi
     done
+    pass "$name"
+}
+
+# ZeroTarget=c64: the first build downloads NativeAOT-LLVM and llvm-mos into
+# ZERO_TOOLS_CACHE (zero-bitcode's Tools.cs). A .prg starts with the address it
+# loads at, $0801, where BASIC programs start. Linux x64 and Windows x64 run
+# the compiler themselves; a Mac runs it in Docker, and Linux arm64 has no
+# llvm-mos, which the build says.
+test_c64_target() {
+    local name="c64 target" dir prg
+    can_build "$name" || return
+    dir=$(fixture native c64)
+    case "$HOST_RID" in
+        linux-x64|win-x64) ;;
+        osx-arm64)
+            if ! docker info > /dev/null 2>&1; then skip "$name" "on a Mac the C64 needs Docker, which isn't running"; return; fi ;;
+        linux-arm64)
+            if run_in "$dir" c64 build -p:ZeroTarget=c64; then fail "$name" "the build succeeded on linux-arm64"; return; fi
+            if ! grep -q "llvm-mos, the compiler for the 6502, has no build for Linux arm64" "$LOG"; then fail "$name" "no message about Linux arm64"; return; fi
+            pass "$name"
+            return ;;
+        *) skip "$name" "not a host for the C64"; return ;;
+    esac
+    if ! run_in "$dir" c64 build -p:ZeroTarget=c64; then fail "$name" "dotnet build failed"; return; fi
+    prg=$dir/bin/Debug/$TFM/c64/native.prg
+    if [ ! -s "$prg" ]; then fail "$name" "no $prg"; return; fi
+    if [ "$(head -c 2 "$prg" | od -An -tx1 | tr -d ' \n')" != 0108 ]; then fail "$name" "native.prg doesn't load at \$0801"; return; fi
+    # A second build has nothing to do.
+    if ! run_in "$dir" c64-again build -p:ZeroTarget=c64 -v:n; then fail "$name" "the second build failed"; return; fi
+    if grep -q "c64-bitcode" "$LOG"; then fail "$name" "the second build compiled again"; return; fi
     pass "$name"
 }
 
@@ -1308,7 +1341,7 @@ test_native_library_app_recipe() {
 }
 
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
-    native_hello_runs cross_targets bad_target path_with_spaces compile_items incremental
+    native_hello_runs cross_targets c64_target bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size debug_unoptimized mac_debug_object_kept windows_debugger macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild

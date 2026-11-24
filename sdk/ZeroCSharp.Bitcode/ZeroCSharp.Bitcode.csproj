@@ -12,5 +12,12 @@
     <!-- Runs on whichever .NET is installed, 10 or newer. -->
     <RollForward>Major</RollForward>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Run as "dotnet zero-bitcode.dll" on every host: no native launcher. -->
+    <UseAppHost>false</UseAppHost>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SharpCompress" Version="0.50.11" />
+    <!-- Its license travels with the tool (the SDK package's payload). -->
+    <None Include="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

@@ -27,6 +27,11 @@ namespace System.Runtime.Intrinsics.X86
         public static Vector256<sbyte> LoadVector256(sbyte* address) => LoadVector256(address);
         public static void Store(float* address, Vector256<float> source) => Store(address, source);
         public static void Store(int* address, Vector256<int> source) => Store(address, source);
+        public static Vector256<float> And(Vector256<float> left, Vector256<float> right) => And(left, right);
+        public static Vector256<float> Or(Vector256<float> left, Vector256<float> right) => Or(left, right);
+        public static Vector256<float> AndNot(Vector256<float> left, Vector256<float> right) => AndNot(left, right);
+        public static Vector256<float> CompareLessThan(Vector256<float> left, Vector256<float> right) => CompareLessThan(left, right);
+        public static Vector256<float> BlendVariable(Vector256<float> left, Vector256<float> right, Vector256<float> mask) => BlendVariable(left, right, mask);
     }
 
     [Intrinsic]

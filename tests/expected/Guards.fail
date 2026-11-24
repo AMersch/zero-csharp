@@ -16,3 +16,6 @@ debug-fail|Debug.Fail: unreachable state|  in DebugFail at Guards.cs:
 range-too-long|Range: out of range for the length
 bad-base64|Convert.FromBase64String: not valid Base64
 bad-pattern|Regex: missing ) at 0 in the pattern
+scratch-outer-scope|Arena.Scratch: a scope allocated inside a nested Arena.Scratch
+scratch-outer-list|Arena.Scratch: a ScratchList added to inside a nested Arena.Scratch
+scratch-outer-text|Arena.Scratch: a ScratchText appended to inside a nested Arena.Scratch

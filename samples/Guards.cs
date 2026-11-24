@@ -38,6 +38,9 @@ public static class Program
             Out.Line("  range-too-long       an array range that ends past the array");
             Out.Line("  bad-base64           Convert.FromBase64String on text that isn't Base64");
             Out.Line("  bad-pattern          Regex.Create with a pattern that isn't valid");
+            Out.Line("  scratch-outer-scope  an Arena.Scratch scope allocating inside a nested one");
+            Out.Line("  scratch-outer-list   a ScratchList added to inside a nested Arena.Scratch");
+            Out.Line("  scratch-outer-text   a ScratchText appended to inside a nested Arena.Scratch");
             return 0;
         }
 
@@ -61,6 +64,9 @@ public static class Program
             case "range-too-long": RangeTooLong(Opaque(10)); break;
             case "bad-base64": System.Convert.FromBase64String("not base64!"); break;
             case "bad-pattern": Regex.Create(Arena.Create(4096), "(abc"); break;
+            case "scratch-outer-scope": ScratchOuterScope(); break;
+            case "scratch-outer-list": ScratchOuterList(); break;
+            case "scratch-outer-text": ScratchOuterText(); break;
             default:
                 Out.Line("Unknown case");
                 return 0;
@@ -256,8 +262,54 @@ public static class Program
         return numbers[1..end].Length;
     }
 
+    // The compiler accepts these, as the state passed by ref may hold the outer
+    // scope, list or text; what they allocate would be freed with the inner
+    // call's memory, so it stops the program instead.
+    static void ScratchOuterScope()
+    {
+        Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            var outer = new OuterScratch { Scope = scratch };
+            Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref OuterScratch state) =>
+            {
+                state.Scope.AllocSpan<int>(4);
+            });
+        });
+    }
+
+    static void ScratchOuterList()
+    {
+        Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            var outer = new OuterScratch { Items = scratch.List<int>() };
+            Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref OuterScratch state) =>
+            {
+                state.Items.Add(1);
+            });
+        });
+    }
+
+    static void ScratchOuterText()
+    {
+        Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            var outer = new OuterScratch { Text = scratch.Text() };
+            Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref OuterScratch state) =>
+            {
+                state.Text.Append($"{42}");
+            });
+        });
+    }
+
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     static int Opaque(int value) => value;
+}
+
+public ref struct OuterScratch
+{
+    public ScratchScope Scope;
+    public ScratchList<int> Items;
+    public ScratchText Text;
 }
 
 public struct Left { public int Value; }

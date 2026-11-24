@@ -4,7 +4,9 @@
 //
 // Everything a ScratchScope gives out is freed when the callback returns, and
 // the compiler refuses any way to keep it longer: tests/must-not-compile has
-// one program per way, which test.sh checks the compiler rejects. So unlike
+// one program per way, which test.sh checks the compiler rejects. The one way
+// it can't see, an outer scope or list allocating inside a nested call, stops
+// the program (the scratch-outer-* cases in Guards). So unlike
 // Arena.OpenScope, nothing here is unsafe.
 
 using System;
@@ -23,6 +25,46 @@ public ref struct Job
 public struct Growing
 {
     public List<int> Items;
+}
+
+// docs:own-collection
+// A collection of your own for scratch memory: a ref struct built on a
+// ScratchList, so the compiler keeps it inside the callback too, and the
+// list's own checks cover it in nested calls.
+public ref struct ScratchStack<T> where T : unmanaged
+{
+    ScratchList<T> _items;
+
+    public ScratchStack(ScratchScope scratch) => _items = scratch.List<T>();
+
+    public int Count => _items.Count;
+
+    public void Push(T item) => _items.Add(item);
+
+    public T Pop()
+    {
+        int last = _items.Count - 1;
+        T top = _items[last]; // an empty stack stops the program here
+        _items.RemoveAt(last);
+        return top;
+    }
+}
+// docs:end
+
+// docs:own-struct
+// Only unmanaged fields, so the scope can allocate one.
+public struct Particle
+{
+    public float X;
+    public float Y;
+    public float Speed;
+}
+// docs:end
+
+// A scratch list passed to a nested Arena.Scratch.
+public ref struct Outer
+{
+    public ScratchList<int> Items;
 }
 
 public static class Program
@@ -54,6 +96,13 @@ public static class Program
     {
         unsafe { return (nint)Unsafe.AsPointer(ref span[0]); } // SAFETY: the address is only compared.
     }
+
+    // docs:spawn
+    // Scratch memory isn't on the stack: a helper can allocate it and hand it
+    // back, and it lives until the callback that called the helper returns.
+    static Span<Particle> Spawn(ScratchScope scratch, int count)
+        => scratch.AllocSpan<Particle>(count);
+    // docs:end
 
     static int ScratchLength()
         => Arena.Scratch(static (scoped ScratchScope scratch) => scratch.AllocSpan<int>(10).Length);
@@ -122,6 +171,94 @@ public static class Program
         // docs:end
         Arena.DebugChecks = false;
         Section("your arenas");
+
+        // docs:lists
+        // Lists and text from the scope grow as needed and go away with the
+        // rest of the scratch memory. The string to keep is copied out into
+        // an arena of yours.
+        Arena keep = Arena.Create(4096);
+        string report = Arena.Scratch(ref keep,
+            static (scoped ScratchScope scratch, scoped ref Arena target) =>
+            {
+                ScratchList<int> evens = scratch.List<int>(4);
+                for (int i = 18; i >= 0; i -= 2)
+                    evens.Add(i);
+                evens.AsSpan().Sort();
+
+                ScratchText text = scratch.Text();
+                text.Append($"{evens.Count} evens:");
+                foreach (int even in evens)
+                    text.Append($" {even}");
+                return text.ToArenaString(target);
+            });
+        // docs:end
+        Check("a list and text", report == "10 evens: 0 2 4 6 8 10 12 14 16 18");
+        int edited = Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            ScratchList<int> items = scratch.List<int>();
+            items.AddRange(stackalloc int[] { 1, 2, 3, 4 });
+            items[0] = 10;
+            items[1]++;
+            items.RemoveAt(2);
+            return items.Count * 100 + items[0] + items[1] + items[2];
+        });
+        Check("indexing, AddRange, RemoveAt", edited == 300 + 10 + 3 + 4);
+        nint firstList = Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            ScratchList<int> items = scratch.List<int>();
+            for (int i = 0; i < 1000; i++)
+                items.Add(i);
+            return Address(items.AsSpan());
+        });
+        nint secondList = Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            ScratchList<int> items = scratch.List<int>();
+            for (int i = 0; i < 1000; i++)
+                items.Add(i);
+            return Address(items.AsSpan());
+        });
+        Check("their memory is reused", firstList == secondList);
+        // An outer list can be read and changed in a nested call, though not
+        // added to there.
+        int nested = Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            var outer = new Outer { Items = scratch.List<int>() };
+            outer.Items.Add(5);
+            Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref Outer state) =>
+            {
+                ScratchList<int> mine = inner.List<int>();
+                mine.Add(state.Items[0]);
+                state.Items[0] = mine[0] * 2;
+            });
+            outer.Items.Add(1);
+            return outer.Items[0] + outer.Items[1];
+        });
+        Check("an outer list in a nested call", nested == 11);
+        Section("lists and text");
+
+        // docs:own-types
+        int popped = Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            // An unmanaged struct comes from the scope, used through a ref.
+            ref Particle particle = ref scratch.Alloc<Particle>();
+            particle.Speed = 2;
+
+            // A ref struct of scratch pieces is an ordinary local.
+            var stack = new ScratchStack<int>(scratch);
+            for (int i = 1; i <= 3; i++)
+                stack.Push(i * (int)particle.Speed);
+            return stack.Pop() * 10 + stack.Count;
+        });
+        // docs:end
+        Check("a struct and a stack of your own", popped == 62);
+        int moving = Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            Span<Particle> swarm = Spawn(scratch, 100_000);
+            swarm[^1].Speed = 3;
+            return swarm.Length + (int)swarm[^1].Speed;
+        });
+        Check("a helper's scratch memory", moving == 100_003);
+        Section("types of your own");
 
         Out.Line();
         if (s_failures == 0)

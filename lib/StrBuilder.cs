@@ -210,6 +210,13 @@ public struct StrBuilder
             _ok = builder.IsCreated;
         }
 
+        /// <summary>Used by ScratchText.Append: appends to that text.</summary>
+        public InterpolatedHandler(int literalLength, int formattedCount, ScratchText text)
+        {
+            _builder = text.BuilderToAppendTo();
+            _ok = _builder.IsCreated;
+        }
+
         /// <summary>Used by Str.Format: starts a new builder in that arena.</summary>
         public InterpolatedHandler(int literalLength, int formattedCount, Arena arena)
         {

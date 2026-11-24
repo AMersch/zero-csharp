@@ -10,7 +10,8 @@ Silicon, a 64-bit Windows program, a WebAssembly module, a DOS program for a 386
 that the firmware starts with no operating system. WebAssembly and DOS need a different compiler for
 their last step, but all six share the same first step and the same core library. This page explains how each path works and what changes
 along it. A seventh target takes the programs that are small enough: the
-[Commodore 64](#the-commodore-64), an 8-bit machine with 50 KB for a program.
+[Commodore 64](#the-commodore-64), an 8-bit machine with 50 KB for a program. And on an Apple Silicon Mac,
+a program's kernels can also run on [the GPU](#the-gpu-metal).
 
 ## The shared first step
 
@@ -272,3 +273,32 @@ library, so `efi/` supplies the few C functions zerocore and `lib/` call, on top
 ```
 
 [Build for UEFI](../how-to/build-for-uefi.html) covers running it and booting a real PC.
+
+## The GPU (Metal)
+
+`./build.sh --gpu` builds a macOS program whose kernels, its methods marked `[RuntimeExport("Name")]`,
+also run on the GPU of an Apple Silicon Mac. The same C# is compiled twice:
+
+1. **For the CPU**, the whole program, as `--mac` does. `lib/Gpu.cs` calls Metal through
+   `gpu/metal.m`, which the link adds: buffers, launches, and the kernels' built-ins, which on the CPU
+   stand in for the GPU's one thread at a time.
+2. **For the GPU**, through the WebAssembly route: bflat and NativeAOT-LLVM compile the program to
+   bitcode, with its `[RuntimeExport]` methods whether the program calls them or not.
+   **`zero-bitcode ll2air`** turns those into AIR, the LLVM dialect Apple's Metal compiler reads. It
+   drops what only the runtime needs (the shadow stack, null checks, GC polls, the throw paths), turns
+   the `Gpu.*` calls into Metal's built-ins, barriers and atomics, and gives each pointer the address
+   space it points into, since AIR is LLVM from before opaque pointers. Anything else that a GPU can't
+   run, such as a call into the runtime or a `double`, is an error that names it. Xcode's `metal` and
+   `metallib` then make a library of kernels, which the program carries inside it.
+
+```bash
+./build.sh --gpu Gpu     # bin/gpu/Gpu
+./run.sh --gpu Gpu
+```
+
+It needs Xcode with its Metal Toolchain, and Docker for NativeAOT-LLVM, as on the Commodore 64. The
+SDK builds the same way with `<ZeroGpu>Metal</ZeroGpu>`; it links with Xcode's own linker, because the
+package's lld can't read the library descriptions in Xcode's newest SDK. AIR isn't documented by
+Apple, so a new Xcode can break this target.
+
+[Run code on the GPU](../how-to/run-code-on-the-gpu.html) shows how to write and launch kernels.

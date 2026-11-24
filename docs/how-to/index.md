@@ -69,6 +69,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   and the ready-made kernels in `lib/Kernels.cs`.
 - [Run a loop in parallel](run-in-parallel.html): `Parallel.For` over every processor, sharing a total
   with `Interlocked`, and one arena per thread.
+- [Run code on the GPU](run-code-on-the-gpu.html): C# kernels on an Apple Silicon Mac's GPU through
+  Metal, threadgroup memory and barriers, 2D grids, atomics, and when a launch is worth it.
 - [Run a language model](run-a-language-model.html): a small Llama-style model, compiled into the
   program, telling stories on every target, DOS and UEFI included.
 

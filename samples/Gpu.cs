@@ -85,6 +85,7 @@ public static class Kernels
 
     public const int Tile = 16;
 
+    // docs:matmul
     // Tiled: a Tile x Tile threadgroup loads one tile of a and one of b into
     // threadgroup memory together (one element per thread), waits, and works on
     // them from there, so each element of a and b is read from device memory
@@ -94,24 +95,27 @@ public static class Kernels
     public static unsafe void MatMul(float* a, float* b, float* c, int n)
     {
         float* tileA, tileB;
-        unsafe { tileA = (float*)Gpu.Shared(); tileB = tileA + Tile * Tile; } // SAFETY: the launch gives 2 tiles.
+        // SAFETY (every block): the launch gives 2 tiles of shared memory;
+        // x, y < Tile; row, col, t + x, t + y < n.
+        unsafe { tileA = (float*)Gpu.Shared(); tileB = tileA + Tile * Tile; }
         int x = (int)Gpu.LocalX(), y = (int)Gpu.LocalY();
         int col = (int)Gpu.ThreadX(), row = (int)Gpu.ThreadY();
         float sum = 0;
         for (int t = 0; t < n; t += Tile)
         {
-            unsafe // SAFETY: x, y < Tile; row, col, t + x, t + y < n.
+            unsafe
             {
                 tileA[y * Tile + x] = a[row * n + t + x];
                 tileB[y * Tile + x] = b[(t + y) * n + col];
             }
             Gpu.Barrier();
             for (int k = 0; k < Tile; k++)
-                unsafe { sum += tileA[y * Tile + k] * tileB[k * Tile + x]; } // SAFETY: as above.
+                unsafe { sum += tileA[y * Tile + k] * tileB[k * Tile + x]; }
             Gpu.Barrier();
         }
-        unsafe { c[row * n + col] = sum; } // SAFETY: as above.
+        unsafe { c[row * n + col] = sum; }
     }
+    // docs:end
 
     // Atomics. A histogram of bytes, one thread per byte: every thread adds to
     // one of the same 256 counters in device memory.
@@ -129,25 +133,29 @@ public static class Kernels
         unsafe { bins[data[Gpu.ThreadId()]]++; } // SAFETY: as above.
     }
 
-    // Threadgroup atomics first: each threadgroup of 256 counts into its own 256
-    // bins in threadgroup memory, then adds them to the device bins, so device
-    // memory sees 256 atomics per threadgroup instead of one per byte. Needs
-    // threadgroups of 256 and 256 uints of shared memory.
+    // docs:histogram
+    // Threadgroup atomics first: each threadgroup of 256 counts into its own
+    // 256 bins in threadgroup memory, then adds them to the device bins, so
+    // device memory sees 256 atomics per threadgroup instead of one per byte.
+    // Needs threadgroups of 256 and 256 uints of shared memory.
     [RuntimeExport("HistogramShared")]
     public static unsafe void HistogramShared(byte* data, uint* bins)
     {
         uint* local;
-        unsafe { local = (uint*)Gpu.Shared(); } // SAFETY: the launch gives 256 uints.
+        // SAFETY (every block): the launch gives 256 uints of shared memory,
+        // l < 256, and one thread per byte.
+        unsafe { local = (uint*)Gpu.Shared(); }
         uint l = Gpu.LocalId();
-        unsafe { local[l] = 0; } // SAFETY: l < 256.
+        unsafe { local[l] = 0; }
         Gpu.Barrier();
-        unsafe { Gpu.AtomicAdd(local + data[Gpu.ThreadId()], 1u); } // SAFETY: one thread per byte.
+        unsafe { Gpu.AtomicAdd(local + data[Gpu.ThreadId()], 1u); }
         Gpu.Barrier();
         uint count;
-        unsafe { count = local[l]; } // SAFETY: l < 256.
+        unsafe { count = local[l]; }
         if (count != 0)
-            unsafe { Gpu.AtomicAdd(bins + l, count); } // SAFETY: as above.
+            unsafe { Gpu.AtomicAdd(bins + l, count); }
     }
+    // docs:end
 
     // Float atomic add: every element into one total.
     [RuntimeExport("FloatTotal")]
@@ -156,23 +164,27 @@ public static class Kernels
         unsafe { Gpu.AtomicAdd(total, x[Gpu.ThreadId()]); } // SAFETY: one thread per element.
     }
 
-    // Compare-exchange: the largest element. Metal has no atomic max on floats,
-    // so each thread retries until its value isn't larger or it wrote it without
-    // another thread changing the maximum in between.
+    // docs:float-max
+    // Compare-exchange: the largest element. Metal has no atomic max on
+    // floats, so each thread retries until its value isn't larger, or it
+    // wrote it with no other thread changing the maximum in between.
     [RuntimeExport("FloatMax")]
     public static unsafe void FloatMax(float* x, float* max)
     {
         float value;
         int old;
-        unsafe { value = x[Gpu.ThreadId()]; old = *(int*)max; } // SAFETY: one thread per element.
+        // SAFETY (both blocks): one thread per element; max is one float.
+        unsafe { value = x[Gpu.ThreadId()]; old = *(int*)max; }
+        int bits = BitConverter.SingleToInt32Bits(value);
         while (BitConverter.Int32BitsToSingle(old) < value)
         {
             int seen;
-            unsafe { seen = Gpu.CompareExchange((int*)max, BitConverter.SingleToInt32Bits(value), old); } // SAFETY: max is one float.
+            unsafe { seen = Gpu.CompareExchange((int*)max, bits, old); }
             if (seen == old) break;
             old = seen;
         }
     }
+    // docs:end
 }
 
 public static class Program
@@ -343,13 +355,18 @@ public static class Program
         var cpu = GpuBuffer<float>.Allocate(n * n);
         for (int i = 0; i < n * n; i++) { a.Span[i] = i % 5 - 2; b.Span[i] = i % 3 - 1; }
 
+        // docs:matmul-launch
+        // An n x n grid of threads in Tile x Tile threadgroups; the tiled
+        // kernel also gets two tiles of floats of threadgroup memory.
         var naiveLaunch = GpuLaunch.Grid(n, n, tile, tile);
-        var tiledLaunch = GpuLaunch.Grid(n, n, tile, tile, 2 * (int)(tile * tile) * sizeof(float));
+        int tileBytes = (int)(tile * tile) * sizeof(float);
+        var tiledLaunch = GpuLaunch.Grid(n, n, tile, tile, 2 * tileBytes);
+        Gpu.Run(nameof(Kernels.MatMul), tiledLaunch, a, b, tiled, n);
+        // docs:end
         Gpu.Run(nameof(Kernels.MatMulNaive), naiveLaunch, a, b, naive, n);
         long start = Clock.Monotonic;
         double naiveGpuMs = Gpu.Run(nameof(Kernels.MatMulNaive), naiveLaunch, a, b, naive, n);
         double naiveRunMs = Since(start);
-        Gpu.Run(nameof(Kernels.MatMul), tiledLaunch, a, b, tiled, n);
         start = Clock.Monotonic;
         double tiledGpuMs = Gpu.Run(nameof(Kernels.MatMul), tiledLaunch, a, b, tiled, n);
         double tiledRunMs = Since(start);

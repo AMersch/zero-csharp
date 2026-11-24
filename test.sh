@@ -208,6 +208,33 @@ test_gpu() {
     done
 }
 
+# The GPU build up to AIR, with no Mac (CI runs it on Linux): every kernel
+# of a GPU sample must still turn into one, so a change to zerocore, lib/ or
+# the compiler that makes NativeAOT-LLVM's output something ll2air doesn't
+# know fails here rather than on someone's Mac. ./test.sh --gpu goes on to
+# compile the kernels with Metal and run them.
+test_gpu_air() {
+    local name want got
+    echo
+    echo "== GPU kernels up to AIR (no Metal)"
+    if ! ./build.sh --gpu-air > "$TMPDIR_GPU_AIR" 2>&1; then
+        echo "FAIL ./build.sh --gpu-air"
+        tail -8 "$TMPDIR_GPU_AIR" | sed 's/^/       /'
+        failures=$((failures + 1))
+        return
+    fi
+    for name in Gpu; do
+        want=$(grep -c '\[RuntimeExport("' "samples/$name.cs")
+        got=$(grep -c '^define void @' "bin/gpu/obj/$name/kernels.ll")
+        if [ "$got" != "$want" ]; then
+            echo "FAIL $name: $got kernels in AIR, $want in the source"
+            failures=$((failures + 1))
+        else
+            echo "ok   $name ($got kernels)"
+        fi
+    done
+}
+
 test_mac() {
     ./build.sh --mac > /dev/null
     run_all "macOS arm64" mac check
@@ -261,6 +288,7 @@ case "${1:-}" in
     --win)    test_win ;;
     --mac)    test_mac ;;
     --gpu)    test_gpu ;;
+    --gpu-air) TMPDIR_GPU_AIR=$(mktemp); test_gpu_air; rm -f "$TMPDIR_GPU_AIR" ;;
     --uefi)   test_uefi ;;
     --all)
         test_native
@@ -317,7 +345,7 @@ case "${1:-}" in
             echo "(skipping the microcontrollers: run ./setup.sh --arm first)"
         fi
         ;;
-    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --uefi | --all | --update]" >&2; exit 2 ;;
+    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --gpu-air | --uefi | --all | --update]" >&2; exit 2 ;;
 esac
 
 echo

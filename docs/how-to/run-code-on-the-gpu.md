@@ -340,7 +340,12 @@ The repository builds GPU programs without the SDK packages:
 ./build.sh --gpu Gpu       # bin/gpu/Gpu
 ./run.sh --gpu Gpu
 ./test.sh --gpu
+./test.sh --gpu-air        # any machine: the kernels up to AIR, no Metal
 ```
+
+CI runs `--gpu-air`, since its runners have no Metal: it catches a change that the rewriter to AIR
+doesn't understand, but nothing after it. Run `./test.sh --gpu` on a Mac before merging changes to
+zerocore, `lib/` or the compiler.
 
 `samples/Gpu.cs` has eleven kernels: adding, the Collatz sequence, SAXPY, a reduction, a plain and a
 tiled matrix multiply, histograms, and float atomics. Each is checked against the CPU and timed

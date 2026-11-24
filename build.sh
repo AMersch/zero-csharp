@@ -36,7 +36,8 @@
 # bin/mac/obj (from `./build.sh --native-mac-objects <samples>` on Linux), and
 # needs neither bflat nor Docker: that is how CI's macOS job works.
 #
-# Usage:  ./build.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --uefi] [Sample ...]     default: all samples
+# Usage:  ./build.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --uefi] [Sample ...]
+#         ./build.sh --gpu-air [Sample ...]  the GPU build up to AIR, without a Mac (no program)     default: all samples
 #         ./build.sh --sdk-payload <dir>     what the ZeroCSharp.Sdk package carries (sdk/)
 #         ./build.sh --must-not-compile      check that tests/must-not-compile/*.cs are refused
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh),
@@ -714,6 +715,21 @@ build_gpu_bitcode() {
     done
 }
 
+# The GPU build up to AIR, where no Mac is needed (./build.sh --gpu-air; CI's
+# Linux runners): the bitcode as text, by the WASI SDK's clang. ll2air then
+# runs on the host.
+build_gpu_ir() {
+    local name bc
+    check_wasm
+    build_gpu_bitcode "$@"
+    for name in "$@"; do
+        rm -rf "$GPU_OBJ/$name/ll" && mkdir -p "$GPU_OBJ/$name/ll"
+        for bc in "$GPU_OBJ/$name/$name".*.bc; do
+            "$WASI_SDK/bin/clang" -Wno-override-module -S -emit-llvm "$bc" -o "$GPU_OBJ/$name/ll/$(basename "${bc%.bc}").ll"
+        done
+    done
+}
+
 # Apple's Metal compiler, which Xcode downloads separately.
 check_metal() {
     if ! xcrun -f metal > /dev/null 2>&1 || ! xcrun -f metallib > /dev/null 2>&1; then
@@ -899,6 +915,11 @@ if [ "${1:-}" = "--native" ]; then
     build_native "$@"
     exit 0
 fi
+if [ "${1:-}" = "--native-gpu-ir" ]; then
+    shift
+    build_gpu_ir "$@"
+    exit 0
+fi
 if [ "${1:-}" = "--native-gpu-bitcode" ]; then
     shift
     build_gpu_bitcode "$@"
@@ -945,6 +966,7 @@ case "${1:-}" in
     --win)  TARGET=win; shift ;;
     --mac)  TARGET=mac; shift ;;
     --gpu)  TARGET=gpu; shift ;;
+    --gpu-air) TARGET=gpu-air; shift ;;
     --uefi) TARGET=uefi; shift ;;
     --must-not-compile) TARGET=must-not-compile; shift ;;
     --sdk-payload)
@@ -969,14 +991,14 @@ if [ $# -eq 0 ]; then
         set -- "${R4_SAMPLES[@]}"
     elif [ "$TARGET" = uefi ]; then
         set -- "${UEFI_SAMPLES[@]}"
-    elif [ "$TARGET" = gpu ]; then
+    elif [ "$TARGET" = gpu ] || [ "$TARGET" = gpu-air ]; then
         set -- "${GPU_SAMPLES[@]}"
     else
         set -- "${ALL_SAMPLES[@]}"
     fi
 fi
 for name in "$@"; do
-    if [ "$TARGET" = gpu ]; then
+    if [ "$TARGET" = gpu ] || [ "$TARGET" = gpu-air ]; then
         if [[ " ${GPU_SAMPLES[*]} " != *" $name "* ]]; then
             check_sample "$name"
             echo "$name has no GPU kernels; ./build.sh --gpu builds ${GPU_SAMPLES[*]}" >&2
@@ -1023,6 +1045,7 @@ case "$TARGET" in
     win)    output() { echo "bin/win/$1.exe"; } ;;
     mac)    output() { echo "bin/mac/$1"; } ;;
     gpu)    output() { echo "bin/gpu/$1"; } ;;
+    gpu-air) output() { echo "bin/gpu/obj/$1/kernels.ll"; } ;;
     uefi)   output() { echo "bin/uefi/$1.efi"; } ;;
     native) output() { echo "bin/$1"; } ;;
 esac
@@ -1118,6 +1141,16 @@ case "$TARGET" in
         run gpu-bitcode "$@"
         run mac-objects "$@"
         build_gpu_link "${MAC_CC:-clang}" "$@"
+        ;;
+    gpu-air)
+        # Everything but Metal: what can break when zerocore, lib/ or the
+        # compiler change, checked on any machine with ./setup.sh --wasm.
+        build_bitcode_tool
+        run gpu-ir "$@"
+        for name in "$@"; do
+            zero_bitcode ll2air "$GPU_OBJ/$name/kernels.ll" "$name" "$GPU_OBJ/$name"/ll/*.ll
+            echo "[gpu]   $name: $(grep -c '^define void @' "$GPU_OBJ/$name/kernels.ll") kernels -> $GPU_OBJ/$name/kernels.ll"
+        done
         ;;
     win)
         if ! WIN_CLANG=$(find_dos_clang); then

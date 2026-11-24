@@ -134,9 +134,10 @@ screen /dev/cu.usbmodem* 115200     # to type to a program, such as Quiz
 With a Debug Probe wired to the Pico 2's debug pins, `run.sh` writes the program over it with OpenOCD
 (`brew install open-ocd`), and no button is needed.
 
-This part hasn't met a board yet: the boot block, the clocks and the console follow the pico-sdk's
-sources, but nothing here can run them. The chip also runs at 12 MHz until the switch to 150 MHz,
-which needs the flash interface's timing changed too, is tried on one.
+This part hasn't met a real board yet. It has run on [Wokwi](https://wokwi.com)'s simulated Pico 2:
+Blink, Llama and most samples behave exactly as in QEMU. The exceptions are `double` division, which
+the simulator gets wrong in the last bits, and one sort in Collections. The chip runs at 12 MHz until
+the switch to 150 MHz, which needs the flash interface's timing changed too, is tried on a board.
 
 ## float, not double
 

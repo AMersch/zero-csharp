@@ -564,11 +564,12 @@ build_arm_programs() {
             -T "bin/$board/obj/layout.ld" -Wl,--gc-sections -Wl,--wrap=read \
             -o "bin/$board/$name.elf" "bin/$board/obj/runtime.o" "bin/$board/obj/semihost.o" "$out"/*.o
 
-        # The real Pico 2: picolibc's plain startup code, arm/rp2350.c for
+        # The real Pico 2: picolibc's crt0-hosted (the plain crt0 never returns
+        # from main, so it would never exit), arm/rp2350.c for
         # the chip, and the program again as a UF2 file, for copying to the
         # board when it shows up as a USB drive.
         if [ "$board" = pico2 ]; then
-            "$clang" "${ARM_TARGET[@]}" -nostartfiles -lcrt0 \
+            "$clang" "${ARM_TARGET[@]}" -nostartfiles -lcrt0-hosted \
                 -T "bin/$board/obj/rp2350.ld" -Wl,--gc-sections \
                 -o "bin/$board/board/$name.elf" "bin/$board/obj/runtime.o" "bin/$board/obj/rp2350.o" \
                 "bin/$board/obj/rp2350-boot.o" "$out"/*.o

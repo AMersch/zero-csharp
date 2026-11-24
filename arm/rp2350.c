@@ -293,21 +293,32 @@ void _exit(int code)
 
 #define SIO 0xd0000000u
 #define SIO_GPIO_OUT (SIO + 0x10)
-#define SIO_GPIO_OUT_SET (SIO + 0x18)
-#define SIO_GPIO_OUT_CLR (SIO + 0x20)
-#define SIO_GPIO_OE_SET (SIO + 0x38)
+#define SIO_GPIO_OE (SIO + 0x30)
 #define GPIO_FUNC_SIO 5u
 #define LED_PIN 25
+
+// Changes some bits of a register, with interrupts held off so that a tick
+// handler changing the same register can't come in between the read and the
+// write. (SIO also has registers that set or clear bits in one write, but
+// Wokwi's simulator ignores them in secure state, so the tests couldn't
+// check them.)
+static void change_bits(uint32_t address, uint32_t mask, int set)
+{
+    uint32_t primask;
+    __asm__ volatile("mrs %0, primask\n\tcpsid i" : "=r"(primask) :: "memory");
+    REG(address) = set ? (REG(address) | mask) : (REG(address) & ~mask);
+    __asm__ volatile("msr primask, %0" :: "r"(primask) : "memory");
+}
 
 static void start_led(void)
 {
     REG(PAD(LED_PIN)) = (1u << 4) | (1u << 6); // 4 mA, input enabled, not isolated
     REG(GPIO_CTRL(LED_PIN)) = GPIO_FUNC_SIO;
-    REG(SIO_GPIO_OUT_CLR) = 1u << LED_PIN;
-    REG(SIO_GPIO_OE_SET) = 1u << LED_PIN;
+    change_bits(SIO_GPIO_OUT, 1u << LED_PIN, 0);
+    change_bits(SIO_GPIO_OE, 1u << LED_PIN, 1);
 }
 
-void zero_led(int32_t on) { REG(on ? SIO_GPIO_OUT_SET : SIO_GPIO_OUT_CLR) = 1u << LED_PIN; }
+void zero_led(int32_t on) { change_bits(SIO_GPIO_OUT, 1u << LED_PIN, on); }
 int32_t zero_led_is_on(void) { return (int32_t)((REG(SIO_GPIO_OUT) >> LED_PIN) & 1u); }
 
 // The processor runs from the crystal (start_clocks).

@@ -179,8 +179,18 @@ int __managed__Main(int argc, char **argv);
 // Sets up the machine and may change the arguments (semihost.c, rp2350.c).
 void zero_start(int *argc, char ***argv);
 
+// picolibc's vector table: where the processor finds each interrupt's
+// handler (arm_systick_isr among them).
+extern char __interrupt_vector[];
+#define SCB_VTOR (*(volatile uint32_t *)0xE000ED08)
+
 int main(int argc, char **argv)
 {
+    // The processor looks for interrupt handlers where VTOR points, which
+    // isn't necessarily here: the RP2350's boot ROM leaves it at the start of
+    // RAM, and an interrupt would then jump to an address read from data.
+    SCB_VTOR = (uint32_t)__interrupt_vector;
+    __asm__ volatile("dsb\n\tisb" ::: "memory");
     zero_start(&argc, &argv);
     protect_flash();
     return __managed__Main(argc, argv);

@@ -1,6 +1,6 @@
 # F# on zerocore
 
-What F# projects (`.fsproj` with `ZeroCSharp.Sdk`) compile against: a small FSharp.Core, printf, and the few .NET types the F# compiler needs that zerocore lacks. `fsharp/build-core.sh` builds them into the SDK payload's `ref/fsharp/` (`./build.sh --sdk-payload` runs it). It needs only the .NET SDK 10.0.402 (for its F# compiler, see below), not bflat.
+What F# projects (`.fsproj` with `ZeroCSharp.Sdk`) compile against: a small FSharp.Core, printf, and the few .NET types the F# compiler needs that zerocore lacks. `fsharp/build-core.sh` builds them into the SDK payload's `ref/fsharp/` (`./build.sh --sdk-payload` runs it). It needs only a .NET SDK, 10 or newer (its C# and F# compilers), not bflat.
 
 | Path | What |
 |---|---|
@@ -31,4 +31,4 @@ Not there yet: `%A` (the compiler refuses it without reflection), `asin`/`acos`/
 - printf is a library of its own: with its overloads inside FSharp.Core, fsc 10 crashes on a user's `let inline log fmt = printfn fmt`. Each argument count has its own overload, chosen by the format's argument types, so the compiler builds a printf call's curried function at compile time without reflection.
 - fsc treats `abs` (and the other operators it knows) on `decimal` as built in, and expects FSharp.Core's definition to have a `when ^T : decimal` case: without one, compiling `abs 1.5M` never finishes.
 - Inside FSharp.Core, an inline function's `:?>` and a `seq { }` make fsc fail with "Undefined value" (FS0971); the core uses `castclass` and the `Seq` functions there. User code isn't affected.
-- FSharp.Core is built with exactly the F# compiler of SDK 10.0.402. Later ones (10.0.404, 11.0.100) fail on it ("did not contain ... 'Operators'"): they look up `Operators` (its `box`, for the equality code they generate for `Choice` and the other unions) before `ops.fs` defines it, which the real FSharp.Core avoids by declaring everything in `.fsi` signatures first. Programs compile against the result with any F# compiler.
+- F# compilers after SDK 10.0.402 generate a `ToString` for every record and union under `--reflectionfree`, built from `Operators.box` and `Operators.string`. `core.fs` comes before `ops.fs` defines `Operators`, so its records and unions (`Choice`, `Ref`, `Option`, `Result`, `ValueOption`, `list`) write their own; otherwise those compilers fail with "did not contain ... 'Operators'". Any F# compiler from SDK 10 on builds this FSharp.Core.

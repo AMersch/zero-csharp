@@ -9,8 +9,8 @@
 #
 # Usage:  fsharp/build-core.sh <System.Private.CoreLib.dll> <BflatLib.dll> <out dir>
 #         (printf writes through lib/'s Out)
-# Env:    DOTNET_10_SDK   the SDK whose compilers to use (default: .NET SDK
-#                         10.0.402, which must be installed; see below)
+# Env:    ZERO_FSHARP_SDK the .NET SDK whose compilers to use (default: the
+#                         newest one `dotnet --list-sdks` shows; 10 or newer)
 #
 # Only the .NET SDK is needed (its C# and F# compilers), not bflat.
 #
@@ -24,13 +24,9 @@
 # - zerocore's metadata version is empty; fsc would copy it and write ECMA
 #   v1.x metadata tables, which bflat misreads. --metadataversion sets it.
 # - --reflectionfree: records and unions get no sprintf-based ToString.
-# - The F# compiler is exactly the one in SDK 10.0.402. Later ones (10.0.404,
-#   11.0.100) fail on core.fs: "'Microsoft.FSharp.Core' ... did not contain
-#   ... 'Operators'". They look up Operators (box, for the equality code they
-#   generate for Choice and the other unions) before ops.fs defines it; the real
-#   FSharp.Core declares it ahead in its .fsi signatures, which this one lacks.
-#   Programs compile against the result with any F# compiler. Install it with
-#   dotnet-install.sh --version 10.0.402 (or actions/setup-dotnet), beside others.
+# - F# compilers after SDK 10.0.402 generate a ToString for each record and
+#   union under --reflectionfree, from Operators; core.fs comes before ops.fs,
+#   so its records and unions write their own (see core.fs).
 set -euo pipefail
 usage="usage: build-core.sh <System.Private.CoreLib.dll> <BflatLib.dll> <out dir>"
 core=${1:?$usage}
@@ -38,13 +34,11 @@ lib=${2:?$usage}
 out=${3:?$usage}
 here=$(cd "$(dirname "$0")" && pwd)
 
-fsc_sdk=10.0.402
-if [ -z "${DOTNET_10_SDK:-}" ]; then
-    DOTNET_10_SDK=$(dotnet --list-sdks | awk -v want=$fsc_sdk '$1 == want {d = $2; gsub(/[][]/, "", d); print d "/" $1}')
+if [ -z "${ZERO_FSHARP_SDK:-}" ]; then
+    ZERO_FSHARP_SDK=$(dotnet --list-sdks | awk '{v = $1; d = $2} END {if (v != "") {gsub(/[][]/, "", d); print d "/" v}}')
 fi
-if [ -z "$DOTNET_10_SDK" ] || [ ! -f "$DOTNET_10_SDK/FSharp/fsc.dll" ]; then
-    echo "Error: the .NET SDK $fsc_sdk isn't installed (its F# compiler builds FSharp.Core; later ones fail," >&2
-    echo "see fsharp/build-core.sh): dotnet-install.sh --version $fsc_sdk, or set DOTNET_10_SDK" >&2
+if [ -z "$ZERO_FSHARP_SDK" ] || [ ! -f "$ZERO_FSHARP_SDK/FSharp/fsc.dll" ]; then
+    echo "Error: no .NET SDK found (for its C# and F# compilers); install one or set ZERO_FSHARP_SDK" >&2
     exit 1
 fi
 
@@ -52,11 +46,11 @@ mkdir -p "$out"
 cp "$core" "$out/System.Runtime.dll"
 
 echo "[csc]   fsharp/shim/ -> $out/System.Runtime.Extensions.dll"
-dotnet "$DOTNET_10_SDK/Roslyn/bincore/csc.dll" -nologo -noconfig -nostdlib -deterministic -optimize+ \
+dotnet "$ZERO_FSHARP_SDK/Roslyn/bincore/csc.dll" -nologo -noconfig -nostdlib -deterministic -optimize+ \
     -t:library -r:"$out/System.Runtime.dll" -out:"$out/System.Runtime.Extensions.dll" "$here"/shim/*.cs
 
 echo "[fsc]   fsharp/core/ -> $out/FSharp.Core.dll"
-dotnet "$DOTNET_10_SDK/FSharp/fsc.dll" --nologo --noframework --targetprofile:netcore --compiling-fslib \
+dotnet "$ZERO_FSHARP_SDK/FSharp/fsc.dll" --nologo --noframework --targetprofile:netcore --compiling-fslib \
     --reflectionfree --optimize+ --deterministic+ --metadataversion:v4.0.30319 --nowarn:75,3370 \
     --target:library -r:"$out/System.Runtime.dll" -r:"$out/System.Runtime.Extensions.dll" \
     --out:"$out/FSharp.Core.dll" \
@@ -67,7 +61,7 @@ dotnet "$DOTNET_10_SDK/FSharp/fsc.dll" --nologo --noframework --targetprofile:ne
 # printf and the others: a library of their own (see printf/Printf.fs), as
 # any F# library, against FSharp.Core and lib/ (for Out).
 echo "[fsc]   fsharp/printf/ -> $out/FSharp.Printf.dll"
-dotnet "$DOTNET_10_SDK/FSharp/fsc.dll" --nologo --noframework --targetprofile:netcore \
+dotnet "$ZERO_FSHARP_SDK/FSharp/fsc.dll" --nologo --noframework --targetprofile:netcore \
     --reflectionfree --optimize+ --deterministic+ --metadataversion:v4.0.30319 --nowarn:75,3370 \
     --target:library -r:"$out/System.Runtime.dll" -r:"$out/System.Runtime.Extensions.dll" -r:"$out/FSharp.Core.dll" -r:"$lib" \
     --out:"$out/FSharp.Printf.dll" "$here/printf/Printf.fs"

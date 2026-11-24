@@ -54,6 +54,10 @@ namespace Microsoft.FSharp.Core
         let inline mask (n:int) (m:int) = (# "and" n m : int #)
         let inline retype<'T,'U> (x:'T) : 'U = (# "" x : 'U #)
 
+        // How the ToStrings below show a value ("null" for null), without
+        // Operators: see "Their own ToString" below.
+        let showValue (x: 'T) = match box x with null -> "null" | o -> o.ToString()
+
     open BasicInlinedOperations
 
     module TupleUtils =
@@ -519,11 +523,22 @@ namespace Microsoft.FSharp.Core
     open Microsoft.FSharp.Core.LanguagePrimitives.IntrinsicOperators
     open Microsoft.FSharp.Core.LanguagePrimitives.IntrinsicFunctions
 
+    // Their own ToString: under --reflectionfree, F# compilers newer than SDK
+    // 10.0.402's generate one for each record and union, from Operators.box and
+    // Operators.string. Before ops.fs defines Operators, that generated code
+    // can't compile (FS0193, "... did not contain ... 'Operators'"), so each
+    // record and union in this file writes its own: FSharp.Core's text where it
+    // has one (Option, ValueOption, list), the compiler's format otherwise.
     [<StructuralEquality; StructuralComparison>]
     [<CompiledName("FSharpChoice`2")>]
     type Choice<'T1,'T2> =
       | Choice1Of2 of 'T1
       | Choice2Of2 of 'T2
+
+        override x.ToString() =
+            match x with
+            | Choice1Of2 a -> String.Concat("Choice1Of2(", showValue a, ")")
+            | Choice2Of2 b -> String.Concat("Choice2Of2(", showValue b, ")")
 
 
     [<AbstractClass>]
@@ -697,6 +712,8 @@ namespace Microsoft.FSharp.Core
             with get() = x.contents
             and set v = x.contents <- v
 
+        override x.ToString() = String.Concat("{ contents = ", showValue x.contents, " }")
+
     and 'T ref = Ref<'T>
 
     [<DefaultAugmentation(false)>]
@@ -719,6 +736,9 @@ namespace Microsoft.FSharp.Core
         static member None : 'T option = None
         static member Some (value) : 'T option = Some(value)
 
+        // Only Some reaches here: None is null.
+        override x.ToString() = String.Concat("Some(", showValue x.Value, ")")
+
     and 'T option = Option<'T>
 
     [<StructuralEquality; StructuralComparison>]
@@ -727,6 +747,11 @@ namespace Microsoft.FSharp.Core
     type Result<'T,'TError> =
       | Ok of ResultValue:'T
       | Error of ErrorValue:'TError
+
+        override x.ToString() =
+            match x with
+            | Ok v -> String.Concat("Ok(", showValue v, ")")
+            | Error e -> String.Concat("Error(", showValue e, ")")
 
     [<StructuralEquality; StructuralComparison>]
     [<Struct>]
@@ -738,6 +763,8 @@ namespace Microsoft.FSharp.Core
         member x.Value = match x with ValueSome x -> x | ValueNone -> raise (new InvalidOperationException("ValueOption.Value"))
         member x.IsNone = match x with ValueNone -> true | _ -> false
         member x.IsSome = match x with ValueSome _ -> true | _ -> false
+
+        override x.ToString() = match x with ValueNone -> "ValueNone" | ValueSome v -> showValue v
 
     and 'T voption = ValueOption<'T>
 
@@ -761,6 +788,15 @@ namespace Microsoft.FSharp.Collections
 
         interface System.Collections.IEnumerable with
             member l.GetEnumerator() = (new ListEnumerator<'T>(l) :> System.Collections.IEnumerator)
+
+        // As FSharp.Core's: the first three items, then "; ... ]".
+        override l.ToString() =
+            match l with
+            | [] -> "[]"
+            | [h1] -> String.Concat("[", showValue h1, "]")
+            | [h1; h2] -> String.Concat([| "["; showValue h1; "; "; showValue h2; "]" |])
+            | [h1; h2; h3] -> String.Concat([| "["; showValue h1; "; "; showValue h2; "; "; showValue h3; "]" |])
+            | h1 :: h2 :: h3 :: _ -> String.Concat([| "["; showValue h1; "; "; showValue h2; "; "; showValue h3; "; ... ]" |])
 
     and 'T list = List<'T>
 

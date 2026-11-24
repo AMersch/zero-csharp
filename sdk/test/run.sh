@@ -451,6 +451,24 @@ test_size() {
     pass "$name"
 }
 
+# Release builds leave out debug information and the symbol table
+# (ZeroStripSymbols), and changing the setting relinks: on macOS too, where
+# ld64.lld's command line is a file of its own. Both targets build anywhere.
+test_strip_symbols() {
+    local name="strip symbols" dir t out stripped kept
+    can_build "$name" || return
+    for t in linux-x64 osx-arm64; do
+        dir=$(fixture native "strip-$t")
+        out="$dir/bin/Release/$TFM/$t/native"
+        if ! run_in "$dir" "strip-$t" build -c Release -p:ZeroTarget=$t; then fail "$name" "$t: dotnet build -c Release failed"; return; fi
+        stripped=$(wc -c < "$out")
+        if ! run_in "$dir" "strip-$t-kept" build -c Release -p:ZeroTarget=$t -p:ZeroStripSymbols=false; then fail "$name" "$t: the build with ZeroStripSymbols=false failed"; return; fi
+        kept=$(wc -c < "$out")
+        if [ "$kept" -le "$stripped" ]; then fail "$name" "$t: ZeroStripSymbols=false didn't relink with symbols ($stripped, then $kept bytes)"; return; fi
+    done
+    pass "$name"
+}
+
 # Debug builds aren't optimized (-O0), for debuggers; Release and a chosen
 # ZeroOptimizeFor are; an unknown ZeroOptimizeFor is an error.
 test_debug_unoptimized() {
@@ -1626,7 +1644,7 @@ test_fsharp_native_library_errors() {
 
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
     native_hello_runs cross_targets c64_target bad_target path_with_spaces compile_items incremental
-    bflat_failure_fails_the_build size debug_unoptimized mac_debug_object_kept windows_debugger macos_error
+    bflat_failure_fails_the_build size strip_symbols debug_unoptimized mac_debug_object_kept windows_debugger macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder

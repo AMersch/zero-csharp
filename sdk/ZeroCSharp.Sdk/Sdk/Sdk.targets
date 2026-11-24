@@ -67,7 +67,7 @@
   <Target Name="ZeroNativeBuild" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="IncrementalClean"
           Condition="'$(ZeroBuildsNative)' == 'true' and '$(ZeroTarget)' != 'c64'"
           DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand;ZeroFSharpEntry"
-          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);@(ZeroResolvedLinkLibrary);$(ZeroNativeArgsFile);@(ZeroFSharpNativeInput)"
+          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);@(ZeroResolvedLinkLibrary);$(ZeroNativeArgsFile);@(ZeroFSharpNativeInput);$(ZeroLinkArgsInput)"
           Outputs="$(ZeroNativeOutput);$(ZeroDebugObject)">
     <!-- NuGet doesn't keep the executable bit; a packages folder that's
          read-only (shared or mounted) must already have it. -->
@@ -328,6 +328,9 @@
       <!-- The macOS program's debug information stays in bflat's object (the
            program only points at it), so a missing object is a reason to rebuild. -->
       <ZeroDebugObject Condition="'$(ZeroTarget)' == 'osx-arm64'">$(ZeroNativeObject)</ZeroDebugObject>
+      <!-- ld64.lld's command line is an input too (ZeroStripSymbols changes
+           it), on macOS only: elsewhere the file isn't written. -->
+      <ZeroLinkArgsInput Condition="'$(ZeroTarget)' == 'osx-arm64'">$(ZeroLinkArgsFile)</ZeroLinkArgsInput>
     </PropertyGroup>
     <ItemGroup>
       <!-- Zero libraries: every resolved reference that isn't zerocore or lib/

@@ -444,87 +444,15 @@ build_c64_bitcode() {
 }
 
 build_c64_programs() {
-    local name obj out bc method module candidate
-    local whole separate extra remaining
-    local mos=("$LLVM_MOS/bin/mos-c64-clang" -Os -Wall -Wno-override-module -Wno-unused-command-line-argument)
+    local name
     for name in "$@"; do
         echo "[c64]   $name -> bin/c64/$name.prg"
-        obj=bin/c64/obj/$name
-        out=$obj/mos
-        rm -rf "$out"
-        mkdir -p "$out/ir"
-
-        # Bitcode -> text (any target will do for reading it) -> rewritten text.
-        for bc in "$obj/$name".*.bc; do
-            "$LLVM_MOS/bin/clang" --target=wasm32 -Wno-override-module -S -emit-llvm "$bc" \
-                -o "$out/ir/$(basename "${bc%.bc}").ll"
-        done
-        zero_bitcode ll2mos "$out" "$out"/ir/*.ll
-        zero_bitcode wasm2mos "$obj/$name.bc" "$out/data" "$out"/ir/*.ll
-        if [ -f "$obj/$name.external.o" ]; then
-            zero_bitcode wasm2mos "$obj/$name.external.o" "$out/external" "$out"/ir/*.ll
-        fi
-
-        # One compilation of everything: llvm-mos optimizes the whole program
-        # at link time, which is where it decides what can live at fixed
-        # addresses instead of on a stack, and makes it a fifth smaller.
-        # -Os: there are 50 KB for it all.
-        #
-        # The 6502 has three registers, and now and then a method made larger
-        # by that optimization (others get folded into it) is more than
-        # llvm-mos can fit into them: "ran out of registers". The module with
-        # that method is then compiled on its own, where the method stays as
-        # it was written, and the link is tried again.
-        whole=("$out"/*.ll)
-        separate=()
-        extra=("$out"/*.s)
-        [ -f "$out/data.c" ] && extra+=("$out/data.c")
-        [ -f "$out/external.c" ] && extra+=("$out/external.c")
-
-        # save-basic.o: by default an llvm-mos program never returns (it has
-        # overwritten memory BASIC uses). This saves that memory at the start
-        # and puts it back at the end, so the program ends at BASIC's READY.
-        while ! "${mos[@]}" "${whole[@]}" ${separate[@]+"${separate[@]}"} "${extra[@]}" c64/runtime.c \
-                "$LLVM_MOS/mos-platform/commodore/lib/save-basic.o" \
-                -o "bin/c64/$name.prg" 2> "$out/link.log"; do
-            method=$(sed -n "s/.*ran out of registers during register allocation in function '\(.*\)'.*/\1/p" "$out/link.log" | head -1)
-            module=
-            if [ -n "$method" ]; then
-                for candidate in "${whole[@]}"; do
-                    if grep -F -e "@$method(" -e "@\"$method\"(" "$candidate" | grep -q '^define '; then
-                        module=$candidate
-                    fi
-                done
-            fi
-            if [ -n "$module" ]; then
-                echo "[c64]   $name: $method is too much for the 6502's registers once optimized with the rest; compiling its module on its own"
-                "${mos[@]}" -fno-lto -c "$module" -o "$module.o"
-                separate+=("$module.o")
-                remaining=()
-                for candidate in "${whole[@]}"; do
-                    [ "$candidate" = "$module" ] || remaining+=("$candidate")
-                done
-                whole=("${remaining[@]}")
-            elif grep -q "will not fit in region" "$out/link.log"; then
-                echo "Error: $name doesn't fit in a C64's memory:" >&2
-                grep -m1 "will not fit in region" "$out/link.log" | sed 's/^.*overflowed by/  too big by/' >&2
-                exit 1
-            elif grep -q "undefined symbol: cs_" "$out/link.log"; then
-                # What C# imports ([DllImport]) is bound to cs_<name>.
-                echo "Error: $name calls functions the C64's runtime (c64/runtime.c) doesn't have:" >&2
-                sed -n 's/.*undefined symbol: cs_\([A-Za-z0-9_]*\).*/\1/p' "$out/link.log" | sort -u | tr '\n' ' ' | sed 's/^/  /; s/ $//' >&2
-                echo >&2
-                exit 1
-            else
-                if [ -n "$method" ]; then
-                    echo "Error: $method is too complex for llvm-mos (the 6502 has three registers). Split it into smaller methods." >&2
-                fi
-                cat "$out/link.log" >&2
-                exit 1
-            fi
-        done
-        # The linker also leaves bin/c64/$name.prg.elf, with the symbols:
-        # c64/run.sh looks an address up in it.
+        # zero-bitcode (sdk/ZeroCSharp.Bitcode/C64.cs): the bitcode, rewritten
+        # for the 6502 (ll2mos, wasm2mos) and linked by llvm-mos with
+        # c64/runtime.c, retrying a method that runs out of the 6502's
+        # registers on its own. The linker also leaves bin/c64/$name.prg.elf,
+        # with the symbols: c64/run.sh looks an address up in it.
+        zero_bitcode c64-link "bin/c64/obj/$name" "$name" c64/runtime.c "bin/c64/$name.prg" --llvm-mos "$LLVM_MOS"
     done
 }
 
@@ -691,6 +619,11 @@ build_sdk_payload() {
     build_lib
     mkdir -p "$dir/ref"
     cp "$CORE" "$LIB" "$dir/ref/"
+    # The C64: zerocore's build for bitcode targets (single-threaded, 32-bit:
+    # the WebAssembly one), which NativeAOT-LLVM compiles against, and the
+    # native half llvm-mos links in.
+    build_core "$dir/native/c64/System.Private.CoreLib.dll" -d WASM
+    cp c64/runtime.c "$dir/native/c64/"
     for arch in x64 arm64; do
         mkdir -p "$dir/native/linux-$arch"
         BFLAT_ARCH=$arch CORE_NATIVE=$dir/native/linux-$arch/zerocore.o \
@@ -852,6 +785,11 @@ case "$TARGET" in
         done
         "$WIN_CLANG" -target arm64-apple-macos12 -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/osx-arm64/zerocore.o"
         cp mac/libSystem.tbd "$PAYLOAD_DIR/native/osx-arm64/"
+        # zero-bitcode, which builds C64 programs from the IL (a .NET program,
+        # the same on every host).
+        echo "[dotnet] sdk/ZeroCSharp.Bitcode -> $PAYLOAD_DIR/tools/zero-bitcode"
+        dotnet publish sdk/ZeroCSharp.Bitcode -c Release -o "$PAYLOAD_DIR/tools/zero-bitcode" -v q -nologo
+        rm -f "$PAYLOAD_DIR/tools/zero-bitcode/"*.pdb
         # UEFI: efi/'s objects for each architecture, and libm as one library.
         for arch in x64 arm64; do
             BFLAT_ARCH=$arch UEFI_OBJ=$PAYLOAD_DIR/native/uefi-$arch.obj build_uefi_objects "$WIN_CLANG"

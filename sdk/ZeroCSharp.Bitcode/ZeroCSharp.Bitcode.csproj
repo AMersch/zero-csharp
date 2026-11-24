@@ -12,5 +12,7 @@
     <!-- Runs on whichever .NET is installed, 10 or newer. -->
     <RollForward>Major</RollForward>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Run as "dotnet zero-bitcode.dll" on every host: no native launcher. -->
+    <UseAppHost>false</UseAppHost>
   </PropertyGroup>
 </Project>

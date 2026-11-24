@@ -37,6 +37,9 @@ static class Program
         Usage: zero-bitcode ll2mos OUTDIR IN.ll...
                zero-bitcode wasm2mos IN.o OUT MODULE.ll...
                zero-bitcode wasm2i386 IN.o OUT
+               zero-bitcode tools ilc|llvm-mos
+               zero-bitcode c64-bitcode IN.dll OUTDIR CORE.dll [REF.dll...]
+               zero-bitcode c64-link OBJDIR NAME RUNTIME.c OUT.prg [--llvm-mos DIR]
         """;
 
     static int Main(string[] args)
@@ -53,6 +56,15 @@ static class Program
                     return 0;
                 case "wasm2i386" when args.Length == 3:
                     Wasm.Convert(args[1], args[2], new Target());
+                    return 0;
+                case "tools":
+                    Tools.Command(args[1..]);
+                    return 0;
+                case "c64-bitcode":
+                    C64.Bitcode(args[1..]);
+                    return 0;
+                case "c64-link":
+                    C64.Link(args[1..]);
                     return 0;
                 default:
                     Console.Error.WriteLine(Usage);

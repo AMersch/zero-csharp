@@ -41,7 +41,7 @@ which are copyrighted. On Linux, `setup.sh` takes them from VICE's own source re
 A sample that is too big stops the build with how much too big it is:
 
 ```text
-Error: Strings doesn't fit in a C64's memory:
+zero-bitcode: Strings doesn't fit in a C64's memory:
   too big by 99789 bytes
 ```
 

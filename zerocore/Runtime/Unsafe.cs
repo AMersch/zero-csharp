@@ -30,6 +30,14 @@ namespace System.Runtime.CompilerServices
 
         [Intrinsic]
         public static bool AreSame<T>(ref T left, ref T right) => AreSame(ref left, ref right);
+
+        // A T at any address, aligned or not: what BinaryPrimitives reads and
+        // writes file formats with.
+        [Intrinsic]
+        public static T ReadUnaligned<T>(ref readonly byte source) => ReadUnaligned<T>(in source);
+
+        [Intrinsic]
+        public static void WriteUnaligned<T>(ref byte destination, T value) => WriteUnaligned(ref destination, value);
     }
 
     public static unsafe partial class RuntimeHelpers

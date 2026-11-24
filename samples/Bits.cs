@@ -1,6 +1,7 @@
-// Example: Half, BitOperations and BitArray from the core library
-// (zerocore/System/Half.cs, Numerics/BitOperations.cs, Collections/BitArray.cs),
-// under .NET's names and with .NET's results.
+// Example: Half, BitOperations, BitArray, BinaryPrimitives, hex and Base64
+// from the core library (zerocore/System/Half.cs, Numerics/BitOperations.cs,
+// Collections/BitArray.cs, Buffers/, Convert.cs), under .NET's names and with
+// .NET's results.
 // Exit code = number of failed checks.
 // Build: ./build.sh Bits
 //
@@ -9,6 +10,9 @@
 // and cnt on arm64, bsr and bsf on x64, portable code on WebAssembly and DOS.
 
 using System;
+using System.Buffers;
+using System.Buffers.Binary;
+using System.Buffers.Text;
 using System.Collections;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -55,6 +59,14 @@ public static class Program
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     static int Opaque(int value) => value;
+
+    static byte[] Ascii(string text)
+    {
+        byte[] bytes = new byte[text.Length];
+        for (int i = 0; i < text.Length; i++)
+            bytes[i] = (byte)text[i];
+        return bytes;
+    }
 
     static ushort Bits(Half value) => BitConverter.HalfToUInt16Bits(value);
 
@@ -216,6 +228,93 @@ public static class Program
         Check("double", BitConverter.DoubleToInt64Bits(Opaque(1.0)) == 0x3FF0000000000000 && BitConverter.UInt64BitsToDouble(0x4000000000000000) == 2.0);
         Check("Half", BitConverter.HalfToInt16Bits(Half.NegativeOne) == unchecked((short)0xBC00) && BitConverter.Int16BitsToHalf(0x3C00) == Half.One);
         Section("BitConverter");
+
+        // docs:binary-primitives
+        // A BMP file starts with "BM" and its size, little-endian.
+        ReadOnlySpan<byte> header = [0x42, 0x4D, 0x36, 0x00, 0x0C, 0x00];
+        Check("little-endian",
+            BinaryPrimitives.ReadUInt16LittleEndian(header) == 0x4D42
+            && BinaryPrimitives.ReadUInt32LittleEndian(header[2..]) == 0x000C0036);
+        Span<byte> packet = stackalloc byte[8];
+        BinaryPrimitives.WriteInt64BigEndian(packet, 0x0102030405060708);
+        Check("big-endian", packet[0] == 1 && packet[7] == 8);
+        Check("too short: TryRead says so",
+            !BinaryPrimitives.TryReadInt32LittleEndian(header[..3], out _));
+        // docs:end
+        Check("unaligned read",
+            BinaryPrimitives.ReadInt32LittleEndian(header[1..]) == 0x0C00364D);
+        Check("big-endian read",
+            BinaryPrimitives.ReadUInt32BigEndian(header[2..]) == 0x36000C00
+            && BinaryPrimitives.ReadInt16BigEndian(packet[6..]) == 0x0708);
+        ReadOnlySpan<byte> minusTwo = [0xFF, 0xFE];
+        Check("signed", BinaryPrimitives.ReadInt16BigEndian(minusTwo) == -2
+            && BinaryPrimitives.ReadInt16LittleEndian(minusTwo) == -257);
+        Check("ReverseEndianness",
+            BinaryPrimitives.ReverseEndianness(Opaque(0x11223344u)) == 0x44332211u
+            && BinaryPrimitives.ReverseEndianness((ushort)Opaque(0xABCD)) == 0xCDAB
+            && BinaryPrimitives.ReverseEndianness(Opaque(0x0102030405060708UL)) == 0x0807060504030201UL);
+        BinaryPrimitives.WriteDoubleLittleEndian(packet, Opaque(1.0));
+        Check("double, little-endian", packet[7] == 0x3F && packet[6] == 0xF0 && packet[0] == 0);
+        BinaryPrimitives.WriteDoubleBigEndian(packet, Opaque(-2.5));
+        Check("double, big-endian, both ways",
+            packet[0] == 0xC0 && BinaryPrimitives.ReadDoubleBigEndian(packet) == -2.5);
+        BinaryPrimitives.WriteSingleBigEndian(packet, Opaque(0.5f));
+        Check("float, big-endian", packet[0] == 0x3F && BinaryPrimitives.ReadSingleBigEndian(packet) == 0.5f);
+        Check("TryWrite into a span too short",
+            !BinaryPrimitives.TryWriteUInt64LittleEndian(packet[..7], 1));
+        Section("BinaryPrimitives");
+
+        // docs:hex-base64
+        byte[] data = { 0xDE, 0xAD, 0xBE, 0xEF };
+        Check("hex", Convert.ToHexString(data) == "DEADBEEF"
+            && Convert.ToHexStringLower(data) == "deadbeef");
+        Check("from hex",
+            Convert.FromHexString("deadBEEF") is [0xDE, 0xAD, 0xBE, 0xEF]);
+        Check("Base64", Convert.ToBase64String(data) == "3q2+7w==");
+        // Into a span: nothing allocated; whitespace is skipped.
+        Span<byte> decoded = stackalloc byte[16];
+        Check("Base64 into a span",
+            Convert.TryFromBase64String("3q2+\n7w==", decoded, out int written)
+            && written == 4 && decoded[3] == 0xEF);
+        // docs:end
+
+        string[] plain = { "", "f", "fo", "foo", "foob", "fooba", "foobar" };
+        string[] encoded = { "", "Zg==", "Zm8=", "Zm9v", "Zm9vYg==", "Zm9vYmE=", "Zm9vYmFy" };
+        bool vectors = true;
+        for (int i = 0; i < plain.Length; i++)
+        {
+            byte[] text = Ascii(plain[i]);
+            vectors &= Convert.ToBase64String(text) == encoded[i];
+            byte[] back = Convert.FromBase64String(encoded[i]);
+            vectors &= back.Length == text.Length && (text.Length == 0 || back[^1] == text[^1]);
+        }
+        Check("RFC 4648's test vectors, both ways", vectors);
+        Check("invalid Base64 is refused",
+            !Convert.TryFromBase64String("Zm9v!", decoded, out _)
+            && !Convert.TryFromBase64String("Zg=", decoded, out _)
+            && !Convert.TryFromBase64String("Z===", decoded, out _)
+            && !Convert.TryFromBase64String("Zg==Zg==", decoded, out _)
+            && !Convert.TryFromBase64String("Zm9v", decoded[..2], out _));
+
+        Span<byte> utf8 = stackalloc byte[16];
+        OperationStatus status = Base64.EncodeToUtf8(data, utf8, out int consumed, out int produced, isFinalBlock: false);
+        Check("EncodeToUtf8, more to come",
+            status == OperationStatus.NeedMoreData && consumed == 3 && produced == 4 && utf8[0] == (byte)'3');
+        status = Base64.DecodeFromUtf8(utf8[..4], decoded, out consumed, out produced);
+        Check("DecodeFromUtf8", status == OperationStatus.Done && consumed == 4 && produced == 3 && decoded[2] == 0xBE);
+        Check("hex status",
+            Convert.FromHexString("abc", decoded, out consumed, out produced) == OperationStatus.NeedMoreData
+            && consumed == 2 && produced == 1
+            && Convert.FromHexString("0g", decoded, out _, out _) == OperationStatus.InvalidData);
+
+        Span<char> chars = stackalloc char[16];
+        long before = GC.GetTotalAllocatedBytes();
+        bool converted = Convert.TryToHexString(data, chars, out int hexLength)
+            && Convert.TryToBase64Chars(data, chars[8..], out int base64Length)
+            && Convert.TryFromBase64Chars(chars.Slice(8, base64Length), decoded, out _);
+        Check("the Try methods allocate nothing",
+            converted && hexLength == 8 && GC.GetTotalAllocatedBytes() == before);
+        Section("hex and Base64");
 
         Out.Line();
         if (s_failures == 0)

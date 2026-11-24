@@ -37,6 +37,8 @@ With zerocore, as `build.sh` builds it:
 - **`Half`, `BitOperations` and `BitArray`**, with .NET's names and results: half-precision
   numbers, bit counts and scans on the processor's own instructions where it has them, and arrays
   of bits.
+- **`BinaryPrimitives`, hex and Base64**: numbers in a given byte order, `Convert.ToHexString`,
+  `ToBase64String` and the rest, and `System.Buffers.Text.Base64` for UTF-8.
 - **Extension methods**, and C# 14 **extension members**: properties, static members and
   `ref` receivers in `extension(...)` blocks.
 - **Indices and ranges**: `span[^1]`, `span[1..^1]`, and on strings and arrays, where a range
@@ -219,6 +221,49 @@ for (int i = 1; i < 100; i += 2)
 var oddPrimes = new BitArray(primes).And(odd);
 Check("And", !oddPrimes[2] && oddPrimes[3] && !oddPrimes[9]);
 ```
+
+### Binary formats, hex and Base64
+
+`BinaryPrimitives` reads and writes numbers in a byte span in a given byte order, as file formats
+and protocols store them. The span needn't be aligned. Every target is little-endian, so the
+`LittleEndian` methods are a plain load or store; the `BigEndian` ones add a byte swap, one
+instruction where the processor has it:
+
+<!-- sample: samples/Bits.cs binary-primitives -->
+```csharp
+// A BMP file starts with "BM" and its size, little-endian.
+ReadOnlySpan<byte> header = [0x42, 0x4D, 0x36, 0x00, 0x0C, 0x00];
+Check("little-endian",
+    BinaryPrimitives.ReadUInt16LittleEndian(header) == 0x4D42
+    && BinaryPrimitives.ReadUInt32LittleEndian(header[2..]) == 0x000C0036);
+Span<byte> packet = stackalloc byte[8];
+BinaryPrimitives.WriteInt64BigEndian(packet, 0x0102030405060708);
+Check("big-endian", packet[0] == 1 && packet[7] == 8);
+Check("too short: TryRead says so",
+    !BinaryPrimitives.TryReadInt32LittleEndian(header[..3], out _));
+```
+
+`Convert` has .NET's hex and Base64 methods. The ones that return a string or an array allocate it;
+the `Try` ones write into a span you provide and allocate nothing. Text that isn't valid ends the
+program where .NET would throw, or makes a `Try` method return false:
+
+<!-- sample: samples/Bits.cs hex-base64 -->
+```csharp
+byte[] data = { 0xDE, 0xAD, 0xBE, 0xEF };
+Check("hex", Convert.ToHexString(data) == "DEADBEEF"
+    && Convert.ToHexStringLower(data) == "deadbeef");
+Check("from hex",
+    Convert.FromHexString("deadBEEF") is [0xDE, 0xAD, 0xBE, 0xEF]);
+Check("Base64", Convert.ToBase64String(data) == "3q2+7w==");
+// Into a span: nothing allocated; whitespace is skipped.
+Span<byte> decoded = stackalloc byte[16];
+Check("Base64 into a span",
+    Convert.TryFromBase64String("3q2+\n7w==", decoded, out int written)
+    && written == 4 && decoded[3] == 0xEF);
+```
+
+`System.Buffers.Text.Base64` encodes to and decodes from UTF-8 bytes, a piece at a time if the data
+comes in pieces (`isFinalBlock: false`), and says how far it got with an `OperationStatus`.
 
 ### Comparers
 

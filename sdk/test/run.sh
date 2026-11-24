@@ -1099,6 +1099,145 @@ test_native_library_with_zero_exe() {
     pass "$name"
 }
 
+# ZeroLinkLibrary: a zero program linked with a C library (here the nativelib
+# fixture, built as libzlink), by name from ZeroLibraryPath and by path, and
+# the errors for one that isn't there. The program binds the import when it's
+# linked; at run time the system's loader finds the library.
+test_link_library() {
+    local name="link library" lib app native out implib
+    can_build "$name" || return
+    lib=$(fixture nativelib linklib-lib)
+    if ! run_in "$lib" linklib-lib build -p:AssemblyName=libzlink; then fail "$name" "the library didn't build"; return; fi
+    native=$lib/bin/Debug/$TFM/native
+    # What a program links with: the library itself, or on Windows its import library.
+    implib=$native/libzlink$HOST_LIB_EXT
+    [ "$HOST_OS" = Windows ] && implib=$native/libzlink.lib
+    app=$(fixture linklib-app)
+    run_app() {
+        case "$HOST_OS" in
+            Windows) cp "$native/libzlink.dll" "$app/bin/Debug/$TFM/" && "$(exe "$app/bin/Debug/$TFM/linklib-app")" | tr -d '\r' ;;
+            Darwin)  DYLD_LIBRARY_PATH=$native "$app/bin/Debug/$TFM/linklib-app" ;;
+            *)       LD_LIBRARY_PATH=$native "$app/bin/Debug/$TFM/linklib-app" ;;
+        esac
+    }
+    # By path, with the import named by DllImport.
+    if ! run_in "$app" linklib-path build -v:n "-p:ZlinkPath=$(native_path "$implib")"; then fail "$name" "the build by path failed"; return; fi
+    if ! grep -q -- "-i zlink" "$LOG"; then fail "$name" "bflat didn't get -i zlink"; return; fi
+    out=$(run_app); if [ "$out" != "add 5" ]; then fail "$name" "by path, printed '$out'"; return; fi
+    # By name: libzlink.so or .dylib in ZeroLibraryPath (Windows looks for zlink.lib).
+    if [ "$HOST_OS" != Windows ]; then
+        rm -rf "$app/bin" "$app/obj"
+        if ! run_in "$app" linklib-name build "-p:ZeroLibraryPath=$native"; then fail "$name" "the build by name failed"; return; fi
+        out=$(run_app); if [ "$out" != "add 5" ]; then fail "$name" "by name, printed '$out'"; return; fi
+        # The library is an input: rebuilding it relinks the program.
+        touch "$native/libzlink$HOST_LIB_EXT"
+        if ! run_in "$app" linklib-relink build -v:n "-p:ZeroLibraryPath=$native" || ! grep -q "bflat arguments" "$LOG"; then
+            fail "$name" "a newer library didn't relink"; return
+        fi
+    fi
+    # Not found: by name, and by a path that doesn't exist.
+    if run_in "$app" linklib-missing build "-p:ZeroLibraryPath=$WORK/nowhere"; then fail "$name" "built with no zlink anywhere"; return; fi
+    if ! grep -q "ZERO010" "$LOG" || ! grep -q "zlink" "$LOG"; then fail "$name" "no ZERO010 naming zlink"; return; fi
+    if run_in "$app" linklib-badpath build "-p:ZlinkPath=$(native_path "$WORK/nowhere/libzlink.so")"; then fail "$name" "built with a missing file"; return; fi
+    if ! grep -q "ZERO010" "$LOG"; then fail "$name" "no ZERO010 for the missing file"; return; fi
+    # Building for another system searches only ZeroLibraryPath.
+    if run_in "$app" linklib-cross build -p:ZeroTarget=uefi-x64; then fail "$name" "the uefi-x64 build found zlink"; return; fi
+    if ! grep -q "only ZeroLibraryPath is searched" "$LOG"; then fail "$name" "no ZERO010 asking for ZeroLibraryPath"; return; fi
+    pass "$name"
+}
+
+# sdl3_package <dir> <feed>: the SDL 3 bindings (with SDL's Windows files,
+# fetched once into the source folder) copied to <dir>/Sdl3, version filled
+# in, packed into <feed>.
+sdl3_package() {
+    local dir=$1 feed=$2
+    rm -rf "$dir" "$feed" "${NUGET_PACKAGES:-$HOME/.nuget/packages}/zerocsharp.sdl3"
+    mkdir -p "$dir"
+    "$ROOT/sdk/ZeroCSharp.SDL3/fetch-windows-sdl.sh" > "$WORK/sdl3-fetch.log" 2>&1 || { cat "$WORK/sdl3-fetch.log"; return 1; }
+    cp -R "$ROOT/sdk/ZeroCSharp.SDL3" "$dir/Sdl3"
+    sed -i.bak "s|@ZERO_SDK_VERSION@|$VERSION|g" "$dir/Sdl3/ZeroCSharp.SDL3.csproj" && rm -f "$dir/Sdl3/ZeroCSharp.SDL3.csproj.bak"
+    fixture hello "$(basename "$dir")-config" > /dev/null    # just for its nuget.config
+    cp "$WORK/$(basename "$dir")-config/nuget.config" "$dir/"
+    run_in "$dir/Sdl3" "$(basename "$dir")-pack" pack -o "$feed"
+}
+
+# A library's ZeroLinkLibrary items reach the programs using it: packed into
+# its props file (names as they are, files inside the project packed with
+# it, others not, with a warning), and through a ProjectReference.
+test_link_library_passed_on() {
+    local name="link library passed on" dir=$WORK/linklib-pass list props
+    can_build "$name" || return
+    if ! sdl3_package "$dir" "$WORK/linklib-feed"; then fail "$name" "the library didn't pack"; return; fi
+    list=$(zip_list "$WORK/linklib-feed/ZeroCSharp.SDL3.$VERSION.nupkg")
+    for f in buildTransitive/ZeroCSharp.SDL3.props native/win-x64/SDL3.lib native/win-x64/SDL3.dll native/win-x64/SDL-LICENSE.txt; do
+        if ! grep -qx "$f" <<< "$list"; then fail "$name" "the package has no $f"; return; fi
+    done
+    # The props file as packed (the pack wrote it under obj/).
+    props=$(cat "$dir"/Sdl3/obj/*/"$TFM"/zero-pack/ZeroCSharp.SDL3.props)
+    if ! grep -q '<ZeroLinkLibrary Include="SDL3" ' <<< "$props"; then fail "$name" "the props don't name SDL3"; return; fi
+    if ! grep -qF '<ZeroLinkLibrary Include="$(MSBuildThisFileDirectory)../native/win-x64/SDL3.lib" DllImport="SDL3" ZeroTarget="win-x64" RuntimeFile="$(MSBuildThisFileDirectory)../native/win-x64/SDL3.dll" />' <<< "$props"; then
+        fail "$name" "the props don't point at the packed Windows files: $props"; return
+    fi
+    # A file outside the project isn't packed.
+    sed -i.bak 's|<ZeroLinkLibrary Include="SDL3" />|<ZeroLinkLibrary Include="/no/such/libSDL3.so" />|' "$dir/Sdl3/ZeroCSharp.SDL3.csproj" && rm -f "$dir/Sdl3/ZeroCSharp.SDL3.csproj.bak"
+    if ! run_in "$dir/Sdl3" linklib-pack-path pack -o "$WORK/linklib-feed2"; then fail "$name" "the library with a path didn't pack"; return; fi
+    if ! grep -q "ZERO011" "$LOG"; then fail "$name" "no ZERO011 for a path"; return; fi
+    # Through a ProjectReference: on Windows, the package's own files.
+    sed -i.bak 's|<ZeroLinkLibrary Include="/no/such/libSDL3.so" />|<ZeroLinkLibrary Include="SDL3" />|' "$dir/Sdl3/ZeroCSharp.SDL3.csproj" && rm -f "$dir/Sdl3/ZeroCSharp.SDL3.csproj.bak"
+    cp -R "$ROOT/sdk/test/fixtures/sdl3-app" "$dir/App"
+    sed -i.bak 's|<PackageReference Include="ZeroCSharp.SDL3" Version="[^"]*" />|<ProjectReference Include="../Sdl3/ZeroCSharp.SDL3.csproj" />|; s|@ZERO_SDK_VERSION@|'"$VERSION"'|g' "$dir/App/App.csproj" && rm -f "$dir/App/App.csproj.bak"
+    if ! run_in "$dir/App" linklib-projref build -v:n -p:ZeroTarget=win-x64; then fail "$name" "the win-x64 program didn't build through the reference"; return; fi
+    if ! grep -q -- "-i SDL3" "$LOG" || [ ! -f "$dir/App/bin/Debug/$TFM/win-x64/SDL3.dll" ]; then fail "$name" "the program didn't get SDL3 from its reference"; return; fi
+    pass "$name"
+}
+
+# The SDL 3 bindings package on Windows, built from any host: SDL's import
+# library from the package, its DLL next to the program and in the publish
+# folder; run on Windows (SDL's dummy video driver: CI has no display).
+test_sdl3_windows() {
+    local name="sdl3 windows" dir=$WORK/sdl3-win app out
+    can_build "$name" || return
+    if ! sdl3_package "$dir" "$WORK/sdl3-win-feed"; then fail "$name" "the bindings didn't pack"; return; fi
+    app=$(fixture sdl3-app sdl3-win/App)
+    add_source "$app/nuget.config" sdl3 "$WORK/sdl3-win-feed"
+    if ! run_in "$app" sdl3-win-build build -p:ZeroTarget=win-x64; then fail "$name" "the program didn't build"; return; fi
+    if [ ! -f "$app/bin/Debug/$TFM/win-x64/SDL3.dll" ]; then fail "$name" "no SDL3.dll next to the program"; return; fi
+    if ! run_in "$app" sdl3-win-publish publish -p:ZeroTarget=win-x64 -o "$(native_path "$app/pub")"; then fail "$name" "publish failed"; return; fi
+    if [ ! -f "$app/pub/App.exe" ] || [ ! -f "$app/pub/SDL3.dll" ]; then fail "$name" "the publish folder lacks App.exe or SDL3.dll"; return; fi
+    if ! ls "$app/bin/Debug/$TFM" | grep -qx ZeroCSharp.SDL3.dll; then fail "$name" "the bindings' IL isn't ZeroCSharp.SDL3.dll"; return; fi
+    if [ "$HOST_OS" = Windows ]; then
+        out=$(SDL_VIDEO_DRIVER=dummy SDL_RENDER_DRIVER=software "$app/pub/App.exe" --frames 30 2>&1 | tr -d '\r')
+        if [ "$out" != "30 frames, square at 330,220" ]; then fail "$name" "printed '$out'"; return; fi
+    fi
+    pass "$name"
+}
+
+# The SDL 3 bindings package with the system's SDL 3, where it's installed:
+# a program using it builds, and runs a few frames (Linux: offscreen; macOS:
+# a real window).
+test_sdl3() {
+    local name="sdl3" dir=$WORK/sdl3 app out
+    can_build "$name" || return
+    case "$HOST_OS" in
+        Linux)  compgen -G '/usr/lib/*/libSDL3.so' > /dev/null || [ -f /usr/local/lib/libSDL3.so ] || [ -f /usr/lib/libSDL3.so ] \
+                    || { skip "$name" "SDL 3 isn't installed (libsdl3-dev)"; return; } ;;
+        Darwin) [ -f /opt/homebrew/lib/libSDL3.dylib ] || { skip "$name" "SDL 3 isn't installed (brew install sdl3)"; return; } ;;
+        *)      skip "$name" "Windows uses the package's own SDL (sdl3_windows)"; return ;;
+    esac
+    if ! sdl3_package "$dir" "$WORK/sdl3-feed"; then fail "$name" "the bindings didn't pack"; return; fi
+    app=$(fixture sdl3-app sdl3/App)
+    add_source "$app/nuget.config" sdl3 "$WORK/sdl3-feed"
+    if ! run_in "$app" sdl3-app build; then fail "$name" "the program didn't build"; return; fi
+    if ls "$app/bin/Debug/$TFM" | grep -qx SDL3.dll; then fail "$name" "the Windows DLL was copied for $HOST_OS"; return; fi
+    if [ "$HOST_OS" = Linux ]; then
+        out=$(SDL_VIDEO_DRIVER=offscreen "$app/bin/Debug/$TFM/App" --frames 30 2>&1)
+    else
+        out=$("$app/bin/Debug/$TFM/App" --frames 30 2>&1)
+    fi
+    if [ "$out" != "30 frames, square at 330,220" ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
 # Every host builds the library for all four targets. CI runs the results on
 # their own systems with sdk/test/call-native-lib.sh (sdk.yml: mac-programs,
 # windows-built-linux, macos-built), from the folders these are copied to.
@@ -1185,6 +1324,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_not_packable native_library_publish native_library_incremental native_library_clean
     native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name
     native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
+    link_library link_library_passed_on sdl3 sdl3_windows
     native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports

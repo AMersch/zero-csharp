@@ -1,0 +1,34 @@
+<!-- ZeroCSharp.SDL3: SDL 3 bindings as a zero library. The ZeroLinkLibrary
+     items link the programs that use it with SDL 3 and bind its imports;
+     dotnet pack writes them into the package's props file, so a
+     PackageReference does the same.
+     Windows: the package carries SDL's own import library and DLL
+     (fetch-windows-sdl.sh puts them in native/win-x64/), and the DLL is copied
+     next to the program. Linux and macOS: the system's SDL 3 (Homebrew's sdl3,
+     Debian 13's libsdl3-dev), or ZeroLibraryPath. -->
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <!-- Not Sdl3: Windows file names ignore case, and SDL3.dll is copied next to the program. -->
+    <AssemblyName>ZeroCSharp.SDL3</AssemblyName>
+    <PackageId>ZeroCSharp.SDL3</PackageId>
+    <Version>@ZERO_SDK_VERSION@</Version>
+    <Authors>Zero C# contributors</Authors>
+    <Description>SDL 3 for zero-mode C# programs: windows, 2D drawing, keyboard and mouse. Windows programs get SDL's own DLL from the package; Linux and macOS ones link with the SDL 3 installed on the build machine.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/OnurGumus/zero-csharp</RepositoryUrl>
+    <PackageTags>sdl;sdl3;games;native;zero</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ZeroLinkLibrary Include="SDL3" />
+    <ZeroLinkLibrary Include="native/win-x64/SDL3.lib" DllImport="SDL3" ZeroTarget="win-x64" RuntimeFile="native/win-x64/SDL3.dll"
+                     Condition="Exists('native/win-x64/SDL3.lib')" />
+    <!-- SDL's license (zlib) beside its files in the package. -->
+    <None Include="native/win-x64/SDL-LICENSE.txt" Pack="true" PackagePath="native/win-x64/" Condition="Exists('native/win-x64/SDL-LICENSE.txt')" />
+  </ItemGroup>
+  <!-- A package without SDL's Windows files would leave Windows programs
+       looking for SDL3.lib. -->
+  <Target Name="CheckWindowsSdl" BeforeTargets="GenerateNuspec">
+    <Error Condition="!Exists('native/win-x64/SDL3.lib')" Text="SDL's Windows files aren't in native/win-x64/: run fetch-windows-sdl.sh first." />
+  </Target>
+</Project>

@@ -1,0 +1,10 @@
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <!-- ZlinkPath: link with that file; otherwise, by name from ZeroLibraryPath. -->
+  <ItemGroup>
+    <ZeroLinkLibrary Include="$(ZlinkPath)" DllImport="zlink" Condition="'$(ZlinkPath)' != ''" />
+    <ZeroLinkLibrary Include="zlink" Condition="'$(ZlinkPath)' == ''" />
+  </ItemGroup>
+</Project>

@@ -71,6 +71,12 @@
     <PublishRelease Condition="'$(PublishRelease)' == ''">true</PublishRelease>
     <!-- ZeroDllImports: more libraries whose [DllImport]s are bound when the
          program is linked, besides libc and libm.so.6, which always are. -->
+    <!-- ZeroLinkLibrary (item): a C library the program links with, by name
+         (SDL3: libSDL3.so, libSDL3.tbd or .dylib, SDL3.lib, and its
+         [DllImport("SDL3")]s bound) or by path. Referencing projects and
+         packages pass it on. ZeroLibraryPath: folders searched for names
+         first; building for the machine's own system, its usual library
+         folders follow (Homebrew's on macOS). -->
     <!-- ZeroInstructionSet: passed to bflat as -m (x86-64-v3, dotprod, ...). -->
 
     <!-- dotnet pack: the dll goes to lib/<framework>/ by a target in Sdk.targets,

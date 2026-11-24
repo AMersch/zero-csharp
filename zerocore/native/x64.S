@@ -113,4 +113,25 @@ RhpInitialDynamicInterfaceDispatch:
     add     rsp, 200
     jmp     r11
 
+// RhpStackProbe: the compiler calls it in the prolog of a function whose
+// frame is larger than a few pages, to touch each page in turn so the stack
+// grows into them in order (the guard page below the stack is hit before
+// anything past it). As in .NET's runtime for Linux, it moves rsp down as it
+// goes: Linux refuses to grow the stack for an access far below rsp.
+// r11: the lowest address of the frame being allocated (kept)
+// rsp: somewhere on the last page already touched
+    .globl RhpStackProbe
+RhpStackProbe:
+    push    rbp
+    mov     rbp, rsp
+    and     rsp, -4096              # the start of the last page touched
+4:
+    sub     rsp, 4096
+    test    dword ptr [rsp], eax    # touch the next page down
+    cmp     rsp, r11
+    jg      4b
+    mov     rsp, rbp
+    pop     rbp
+    ret
+
     .section .note.GNU-stack, "", @progbits

@@ -1,6 +1,6 @@
 ---
 title: Make a game window
-index: 22
+index: 23
 ---
 
 # Make a game window

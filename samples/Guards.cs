@@ -36,6 +36,8 @@ public static class Program
             Out.Line("  debug-assert         a Debug.Assert whose condition is false");
             Out.Line("  debug-fail           a Debug.Fail");
             Out.Line("  range-too-long       an array range that ends past the array");
+            Out.Line("  bad-base64           Convert.FromBase64String on text that isn't Base64");
+            Out.Line("  bad-pattern          Regex.Create with a pattern that isn't valid");
             return 0;
         }
 
@@ -57,6 +59,8 @@ public static class Program
             case "debug-assert": DebugAssert(Opaque(0)); break;
             case "debug-fail": DebugFail(); break;
             case "range-too-long": RangeTooLong(Opaque(10)); break;
+            case "bad-base64": System.Convert.FromBase64String("not base64!"); break;
+            case "bad-pattern": Regex.Create(Arena.Create(4096), "(abc"); break;
             default:
                 Out.Line("Unknown case");
                 return 0;

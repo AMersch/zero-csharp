@@ -76,6 +76,10 @@ happens, and `Length` is the file's size. `Write` takes bytes, or text, which it
 closed file. The `SAFETY` comment says why it can't be used afterwards. Close each file you open: it
 writes out what is buffered, and a program can only have so many open.
 
+To make sense of a binary file's bytes, `BinaryPrimitives` reads numbers out of them in either byte
+order: `BinaryPrimitives.ReadUInt32LittleEndian(header[4..])` (see
+[Limits](../concepts/limits.html#binary-formats-hex-and-base64)).
+
 ## When something goes wrong
 
 Nothing in `File` ends the program. A file that can't be opened gives a handle whose `IsOpen` is false,

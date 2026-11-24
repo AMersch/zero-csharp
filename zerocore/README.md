@@ -49,6 +49,7 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `Runtime/InterfaceDispatch.cs` | Calling an interface method on an object whose class isn't known at build time, with a small cache per call site |
 | `System/Math.cs` | `Math` and `MathF`: the processor's instruction where there is one, the C math library otherwise |
 | `System/Half.cs` | `Half` (IEEE half precision, as in .NET: conversions round to nearest even, `ToString` gives the shortest text that reads back) and `BitConverter`'s bit conversions for `Half`, `float` and `double` |
+| `System/Buffers/BinaryPrimitives.cs`, `System/Buffers/Base64.cs`, `System/Convert.cs` | `BinaryPrimitives` (numbers in either byte order, `ReverseEndianness`), `Base64` for UTF-8 and `OperationStatus`, and `Convert`'s hex and Base64 methods. `Unsafe.ReadUnaligned`/`WriteUnaligned` (in `Runtime/Unsafe.cs`) do the loads and stores |
 | `System/Numerics/BitOperations.cs` | `BitOperations`: `PopCount`, `LeadingZeroCount`, `TrailingZeroCount`, `Log2`, rotates, `IsPow2`. clz, rbit and cnt on arm64; bsr and bsf on x64, lzcnt, tzcnt and popcnt with `-m x86-64-v3`; portable code on WebAssembly and DOS |
 | `System/Collections/BitArray.cs` | `BitArray`, with .NET's members (`And`, `Or`, `Xor`, `Not`, shifts, `HasAllSet`, `CopyTo`, ...) |
 | `System/Threading.cs` | `Interlocked` (atomic instructions) and `Volatile` |
@@ -57,7 +58,7 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `Runtime/Unsafe.cs` | `Unsafe`, `RuntimeHelpers`, `MemoryMarshal` |
 | `Runtime/Platform.cs` | Everything used from outside: `calloc`, `write`, `abort` |
 | `Intrinsics/*.cs` | `Vector64/128/256<T>` and the NEON, AVX, AVX2 and FMA operations `../lib/Kernels.cs` uses; the bit instructions `BitOperations` uses |
-| `native/arm64.S`, `native/x64.S` | Three routines per architecture that need a calling convention C# can't express: two for storing object references, one for interface calls |
+| `native/arm64.S`, `native/x64.S` | Three routines per architecture that need a calling convention C# can't express: two for storing object references, one for interface calls; and on x64 the stack probe the compiler calls for frames larger than a few pages (arm64 probes inline) |
 | `native/mac-arm64.S` | `arm64.S` as a Mach-O object, for macOS |
 | `native/win-x64.S` | The same for Windows x64's calling convention, plus the stack probe Windows code calls for frames larger than a page. With `../win/start.c` and `../win/runtime.c` (entry point, `write`, `read`) it is all a Windows build adds. UEFI x64 uses it too |
 | `native/win-arm64.S` | `arm64.S` as a COFF object, for UEFI on arm64. Windows' arm64 calling convention agrees with Linux's for every register these routines use |

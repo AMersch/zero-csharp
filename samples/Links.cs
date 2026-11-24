@@ -1,6 +1,9 @@
 // Example: Ptr<T> (lib/Ptr.cs), pointers between items in an arena, for the
 // structures a struct can't hold by itself: a doubly linked list, which is
-// full of cycles, and a tree. Exit code = number of failed checks.
+// full of cycles, and a tree. Then Pool<T> and Handle<T> (lib/Pool.cs), for
+// items removed one by one, handed over with Move, and kept from a
+// ScratchPool, and LinkedList<T> (lib/LinkedList.cs), which is built on them.
+// Exit code = number of failed checks.
 // Build: ./build.sh Links
 //
 // No unsafe anywhere: Ptr.Value gives a ref to the item, a null Ptr stops
@@ -63,6 +66,16 @@ public struct TreeNode
     public int Key;
     public Ptr<TreeNode> Left;
     public Ptr<TreeNode> Right;
+}
+// docs:end
+
+// docs:task
+// A task that waits for another: items in a pool point at each other with
+// handles, which are plain structs too.
+public struct Job
+{
+    public int Id;
+    public Handle<Job> WaitsFor;
 }
 // docs:end
 
@@ -132,6 +145,15 @@ public static class Program
         return InOrder(node.Value.Right, digits);
     }
 
+    // The values as pairs of digits, first to last.
+    static int Digits(LinkedList<int> list)
+    {
+        int digits = 0;
+        foreach (int item in list)
+            digits = digits * 100 + item;
+        return digits;
+    }
+
     static int Height(Ptr<TreeNode> node)
         => node.IsNull ? 0 : 1 + Math.Max(Height(node.Value.Left), Height(node.Value.Right));
 
@@ -186,6 +208,97 @@ public static class Program
         Check("DebugChecks lets a live item through", counter.Value == 42);
         Arena.DebugChecks = false;
         Section("Ptr itself");
+
+        // docs:pool
+        var jobs = Pool<Job>.Create(arena);
+        Handle<Job> build = jobs.Add(new Job { Id = 1 });
+        Handle<Job> test = jobs.Add(new Job { Id = 2, WaitsFor = build });
+        Handle<Job> ship = jobs.Add(new Job { Id = 3, WaitsFor = test });
+        jobs.Remove(test);
+        // ship still holds the handle, but it no longer finds anything,
+        // even once the slot is used again for another job.
+        Handle<Job> docs = jobs.Add(new Job { Id = 4 });
+        bool waiting = jobs.Contains(jobs[ship].WaitsFor);   // false
+        // docs:end
+        Check("a removed item is refused", !waiting && !jobs.TryGet(test, out _) && jobs.Count == 3);
+        Check("its slot was reused", docs != test && jobs[docs].Id == 4);
+        jobs[build].Id += 10;
+        int ids = 0;
+        foreach (Handle<Job> job in jobs)
+            ids += jobs[job].Id;
+        Check("change in place, walk the handles", ids == 11 + 3 + 4);
+        var growing = Pool<int>.Create(arena, 8);
+        Handle<int> firstNumber = growing.Add(1);
+        ref int kept = ref growing[firstNumber];
+        for (int i = 0; i < 100; i++)
+            growing.Add(i);
+        kept = 42;
+        Check("items don't move as the pool grows", growing[firstNumber] == 42 && growing.Count == 101);
+        growing.Clear();
+        Check("Clear refuses every handle", growing.Count == 0 && !growing.Contains(firstNumber));
+        Section("a pool");
+
+        // docs:move
+        Handle<Job> mine = jobs.Add(new Job { Id = 7 });
+        Handle<Job> copy = mine;
+        Handle<Job> theirs = jobs.Move(ref mine);
+        // mine is now null, and every copy of it is refused: only the new
+        // owner reaches the job.
+        // docs:end
+        Check("Move: the new handle finds the item", mine.IsNull && jobs[theirs].Id == 7);
+        Check("Move: old copies are refused", !jobs.Contains(copy));
+        var done = Pool<Job>.Create(arena);
+        Handle<Job> finished = jobs.MoveTo(done, ref theirs);
+        Check("MoveTo: into the other pool", theirs.IsNull && done[finished].Id == 7 && done.Count == 1);
+        Check("MoveTo: gone from the first", jobs.Count == 3);
+        Check("another pool's handles are refused", !done.Contains(build) && !jobs.Contains(finished));
+        Section("moving");
+
+        // docs:scratch-pool
+        // Work in a scratch pool, then move the one result to keep into a
+        // pool of yours; the rest goes with the scratch memory.
+        var results = Pool<Job>.Create(arena);
+        Handle<Job> best = Arena.Scratch(ref results,
+            static (scoped ScratchScope scratch, scoped ref Pool<Job> keep) =>
+            {
+                ScratchPool<Job> tries = scratch.Pool<Job>();
+                Handle<Job> top = default;
+                for (int id = 1; id <= 20; id++)
+                {
+                    Handle<Job> next = tries.Add(new Job { Id = id * 7 % 20 });
+                    if (top.IsNull || tries[next].Id > tries[top].Id)
+                        top = next;
+                }
+                return tries.MoveTo(keep, ref top);
+            });
+        // docs:end
+        Check("the result was kept", results.Count == 1 && results[best].Id == 19);
+        Section("a scratch pool");
+
+        // docs:linked-list
+        var list = LinkedList<int>.Create(arena);
+        var two = list.AddLast(2);
+        list.AddFirst(1);
+        var four = list.AddAfter(two, 4);
+        list.AddBefore(four, 3);
+        list.AddLast(5);
+        list.Remove(two);
+        foreach (ref int item in list)
+            item *= 10;                         // 10, 30, 40, 50
+        // docs:end
+        Check("Add and Remove", Digits(list) == 10304050 && list.Count == 4);
+        Check("a removed node is refused", !list.Remove(two) && !list.Contains(two));
+        int backward = 0;
+        for (var node = list.Last; !node.IsNull; node = list[node].Previous)
+            backward = backward * 100 + list[node].Value;
+        Check("walks backward", backward == 50403010);
+        Check("Find", list[list.Find(40)].Value == 40 && list.Find(20).IsNull && list.Contains(30));
+        list.RemoveFirst();
+        list.RemoveLast();
+        Check("RemoveFirst, RemoveLast", Digits(list) == 3040 && list[list.First].Next == list.Last);
+        list.Clear();
+        Check("Clear", list.Count == 0 && list.First.IsNull && !list.Contains(four));
+        Section("LinkedList");
 
         Out.Line();
         if (s_failures == 0)

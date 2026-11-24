@@ -22,3 +22,7 @@ Usage: Guards <case>, where the case is one of:
   scratch-outer-text   a ScratchText appended to inside a nested Arena.Scratch
   ptr-null             the Value of a null Ptr
   ptr-after-reset      a Ptr used after its arena was reset (DebugChecks)
+  pool-removed         a Pool handle used after its item was removed
+  pool-moved           a copy of a Pool handle used after Move
+  scratch-pool-outer   a ScratchPool added to inside a nested Arena.Scratch
+  pool-other           a Pool handle used with another pool

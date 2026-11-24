@@ -1546,6 +1546,45 @@ test_fsharp_cross_targets() {
     pass "$name"
 }
 
+# The C64 game in F# (samples/Paddles.fs): it builds for the C64 and fits;
+# where VICE and ./setup.sh --c64's tools are, it plays its test match, which
+# must be the C# game's (tests/expected/Paddles.txt): the same score, hits
+# and frames, and nothing allocated while playing.
+test_fsharp_c64() {
+    local name="F# on the C64" dir prg size
+    can_build "$name" || return
+    case "$HOST_RID" in
+        linux-x64|win-x64) ;;
+        osx-arm64)
+            if ! docker info > /dev/null 2>&1; then skip "$name" "on a Mac the C64 needs Docker, which isn't running"; return; fi ;;
+        *) skip "$name" "not a host for the C64"; return ;;
+    esac
+    dir=$(fixture fspaddles)
+    if ! run_in "$dir" fspaddles build -p:ZeroTarget=c64; then fail "$name" "dotnet build failed"; return; fi
+    prg=$dir/bin/Debug/$TFM/c64/fspaddles.prg
+    if [ ! -s "$prg" ]; then fail "$name" "no $prg"; return; fi
+    if [ "$(head -c 2 "$prg" | od -An -tx1 | tr -d ' \n')" != 0108 ]; then fail "$name" "fspaddles.prg doesn't load at \$0801"; return; fi
+    # About 50 KB for the program, its heap and its stack.
+    size=$(wc -c < "$prg" | tr -d ' ')
+    if [ "$size" -gt 45000 ]; then fail "$name" "fspaddles.prg is $size bytes, more than 45000"; return; fi
+    if ! bash -c 'source ./env.sh && find_c64_emulator > /dev/null && [ -x "$LLVM_MOS/bin/llvm-nm" ]' 2> /dev/null; then
+        echo "     (no VICE or ./setup.sh --c64 tools: built, not run)"
+        pass "$name"
+        return
+    fi
+    mkdir -p bin/c64
+    cp "$prg" bin/c64/FsPaddles.prg
+    cp "$prg.elf" bin/c64/FsPaddles.prg.elf
+    LOG=$WORK/fspaddles-run.log
+    if ! c64/run.sh FsPaddles < tests/input/Paddles.txt > "$WORK/fspaddles.out" 2> "$LOG"; then
+        fail "$name" "the test match failed: $(tr '\n' ' ' < "$WORK/fspaddles.out")"; return
+    fi
+    if ! same_output "$WORK/fspaddles.out" tests/expected/Paddles.txt "$WORK/fspaddles.diff"; then
+        fail "$name" "not the C# game's match: $(cat "$WORK/fspaddles.diff")"; return
+    fi
+    pass "$name"
+}
+
 test_fsharp_incremental() {
     local name="F# incremental" dir
     can_build "$name" || return
@@ -1661,7 +1700,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
     link_library link_library_passed_on link_library_newer_glibc sdl3 sdl3_windows
     native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe
-    fsharp_program fsharp_printf fsharp_collections fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish
+    fsharp_program fsharp_printf fsharp_collections fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
     fsharp_native_library fsharp_native_library_cross fsharp_native_library_errors)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports

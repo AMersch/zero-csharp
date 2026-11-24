@@ -98,8 +98,8 @@
   -->
   <Target Name="ZeroC64Build" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="IncrementalClean"
           Condition="'$(ZeroBuildsNative)' == 'true' and '$(ZeroTarget)' == 'c64'"
-          DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand"
-          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);$(ZeroNativeArgsFile)"
+          DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand;ZeroFSharpEntry"
+          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);$(ZeroNativeArgsFile);@(ZeroFSharpNativeInput)"
           Outputs="$(ZeroNativeOutput)">
     <PropertyGroup>
       <_ZeroDotnet>$(DOTNET_HOST_PATH)</_ZeroDotnet>
@@ -110,8 +110,8 @@
     <MakeDir Directories="$(ZeroC64Dir);$([System.IO.Path]::GetDirectoryName('$(ZeroNativeOutput)'))" />
     <Message Text="bflat arguments: $(ZeroNativeArgs)" />
     <Exec Command="&quot;$(ZeroBflatExe)&quot; build-il @&quot;$(ZeroNativeArgsFile)&quot;" />
-    <Exec Command="$(_ZeroBitcode) c64-bitcode &quot;$(ZeroC64Il)&quot; &quot;$(ZeroC64Dir)bitcode&quot; &quot;$(ZeroNativeDir)System.Private.CoreLib.dll&quot; &quot;$(ZeroRefDir)BflatLib.dll&quot; @(ZeroLibraryReference->'&quot;%(FullPath)&quot;', ' ')" />
-    <Exec Command="$(_ZeroBitcode) c64-link &quot;$(ZeroC64Dir)bitcode&quot; &quot;$(AssemblyName)&quot; &quot;$(ZeroNativeDir)runtime.c&quot; &quot;$(ZeroNativeOutput)&quot;" />
+    <Exec Command="$(_ZeroBitcode) c64-bitcode &quot;$(ZeroC64Il)&quot; &quot;$(ZeroC64Dir)bitcode&quot; &quot;$(ZeroNativeDir)System.Private.CoreLib.dll&quot; &quot;$(ZeroRefDir)BflatLib.dll&quot; @(_ZeroC64Reference->'&quot;%(Identity)&quot;', ' ') @(ZeroLibraryReference->'&quot;%(FullPath)&quot;', ' ')" />
+    <Exec Command="$(_ZeroBitcode) c64-link &quot;$(ZeroC64Dir)bitcode&quot; &quot;$([System.IO.Path]::GetFileNameWithoutExtension('$(ZeroC64Il)'))&quot; &quot;$(ZeroNativeDir)runtime.c&quot; &quot;$(ZeroNativeOutput)&quot;" />
     <Message Importance="high" Text="$(MSBuildProjectName) -> $(ZeroNativeOutput)" />
   </Target>
 
@@ -304,6 +304,9 @@
       <!-- The C64: bflat's IL and NativeAOT-LLVM's bitcode, in obj/. -->
       <ZeroC64Dir>$(IntermediateOutputPath)c64/</ZeroC64Dir>
       <ZeroC64Il>$(ZeroC64Dir)$(AssemblyName).dll</ZeroC64Il>
+      <!-- F#: bflat names the assembly it compiles after its file, and the
+           C# entry program must not take the F# program's name. -->
+      <ZeroC64Il Condition="'$(ZeroLanguage)' == 'FSharp'">$(ZeroC64Dir)zero-native.dll</ZeroC64Il>
       <!-- A native library: in native/, as NativeAOT puts it, which keeps a
            Windows .dll apart from the IL .dll of the same name. -->
       <ZeroNativeLibraryExtension Condition="'$(ZeroTarget)' == 'win-x64'">.dll</ZeroNativeLibraryExtension>
@@ -337,6 +340,11 @@
            (project references and packages; NuGet only lets zero ones in). -->
       <_ZeroFrameworkPath Include="@(Reference->'%(FullPath)')" Condition="'%(Reference.ZeroFramework)' == 'true'" />
       <ZeroLibraryReference Include="@(ReferencePath)" Exclude="@(_ZeroFrameworkPath)" />
+      <!-- The C64: what NativeAOT-LLVM compiles besides the entry program,
+           zerocore, lib/ and the zero libraries: for F#, the program's IL,
+           FSharp.Core and the rest of ref/fsharp/. -->
+      <_ZeroC64Reference Include="@(IntermediateAssembly->'%(FullPath)')" Condition="'$(ZeroLanguage)' == 'FSharp'" />
+      <_ZeroC64Reference Include="@(Reference->'%(FullPath)')" Condition="'$(ZeroLanguage)' == 'FSharp' and '%(Reference.ZeroFramework)' == 'true' and '%(Reference.ZeroNative)' != 'false' and '%(Reference.Filename)' != 'BflatLib'" />
       <ZeroNativeInput Include="$(ZeroRefDir)*.dll;$(ZeroNativeDir)*" />
       <_ZeroArg Include="@(Compile->'&quot;%(FullPath)&quot;')" Condition="'$(ZeroLanguage)' == 'CSharp'" />
       <!-- F#: the C# entry program, the F# IL, and zerocore under its own name. -->
@@ -583,7 +591,8 @@
           DependsOnTargets="ZeroNativeCommand"
           Inputs="@(IntermediateAssembly)" Outputs="$(ZeroFSharpEntrySource);$(ZeroFSharpDefFile)">
     <ZeroFSharpNative Assembly="@(IntermediateAssembly->'%(FullPath)')" Source="$(ZeroFSharpEntrySource)"
-                      Library="$(ZeroNativeLibrary)" DefFile="$(ZeroFSharpDefFile)" DllName="$(AssemblyName).dll" />
+                      Library="$(ZeroNativeLibrary)" DefFile="$(ZeroFSharpDefFile)" DllName="$(AssemblyName).dll"
+                      NoArguments="$([System.String]::Equals('$(ZeroTarget)', 'c64'))" />
   </Target>
   <ItemGroup Condition="'$(ZeroLanguage)' == 'FSharp'">
     <ZeroFSharpNativeInput Include="@(IntermediateAssembly)" />

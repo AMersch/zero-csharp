@@ -540,6 +540,94 @@ namespace Microsoft.FSharp.Core
             | Choice1Of2 a -> String.Concat("Choice1Of2(", showValue a, ")")
             | Choice2Of2 b -> String.Concat("Choice2Of2(", showValue b, ")")
 
+    // Choice of 3 to 7: what multi-case active patterns with that many
+    // cases return, as (|Low|Mid|High|) does.
+    [<StructuralEquality; StructuralComparison>]
+    [<CompiledName("FSharpChoice`3")>]
+    type Choice<'T1,'T2,'T3> =
+      | Choice1Of3 of 'T1
+      | Choice2Of3 of 'T2
+      | Choice3Of3 of 'T3
+
+        override x.ToString() =
+            match x with
+            | Choice1Of3 v -> String.Concat("Choice1Of3(", showValue v, ")")
+            | Choice2Of3 v -> String.Concat("Choice2Of3(", showValue v, ")")
+            | Choice3Of3 v -> String.Concat("Choice3Of3(", showValue v, ")")
+
+    [<StructuralEquality; StructuralComparison>]
+    [<CompiledName("FSharpChoice`4")>]
+    type Choice<'T1,'T2,'T3,'T4> =
+      | Choice1Of4 of 'T1
+      | Choice2Of4 of 'T2
+      | Choice3Of4 of 'T3
+      | Choice4Of4 of 'T4
+
+        override x.ToString() =
+            match x with
+            | Choice1Of4 v -> String.Concat("Choice1Of4(", showValue v, ")")
+            | Choice2Of4 v -> String.Concat("Choice2Of4(", showValue v, ")")
+            | Choice3Of4 v -> String.Concat("Choice3Of4(", showValue v, ")")
+            | Choice4Of4 v -> String.Concat("Choice4Of4(", showValue v, ")")
+
+    [<StructuralEquality; StructuralComparison>]
+    [<CompiledName("FSharpChoice`5")>]
+    type Choice<'T1,'T2,'T3,'T4,'T5> =
+      | Choice1Of5 of 'T1
+      | Choice2Of5 of 'T2
+      | Choice3Of5 of 'T3
+      | Choice4Of5 of 'T4
+      | Choice5Of5 of 'T5
+
+        override x.ToString() =
+            match x with
+            | Choice1Of5 v -> String.Concat("Choice1Of5(", showValue v, ")")
+            | Choice2Of5 v -> String.Concat("Choice2Of5(", showValue v, ")")
+            | Choice3Of5 v -> String.Concat("Choice3Of5(", showValue v, ")")
+            | Choice4Of5 v -> String.Concat("Choice4Of5(", showValue v, ")")
+            | Choice5Of5 v -> String.Concat("Choice5Of5(", showValue v, ")")
+
+    [<StructuralEquality; StructuralComparison>]
+    [<CompiledName("FSharpChoice`6")>]
+    type Choice<'T1,'T2,'T3,'T4,'T5,'T6> =
+      | Choice1Of6 of 'T1
+      | Choice2Of6 of 'T2
+      | Choice3Of6 of 'T3
+      | Choice4Of6 of 'T4
+      | Choice5Of6 of 'T5
+      | Choice6Of6 of 'T6
+
+        override x.ToString() =
+            match x with
+            | Choice1Of6 v -> String.Concat("Choice1Of6(", showValue v, ")")
+            | Choice2Of6 v -> String.Concat("Choice2Of6(", showValue v, ")")
+            | Choice3Of6 v -> String.Concat("Choice3Of6(", showValue v, ")")
+            | Choice4Of6 v -> String.Concat("Choice4Of6(", showValue v, ")")
+            | Choice5Of6 v -> String.Concat("Choice5Of6(", showValue v, ")")
+            | Choice6Of6 v -> String.Concat("Choice6Of6(", showValue v, ")")
+
+    [<StructuralEquality; StructuralComparison>]
+    [<CompiledName("FSharpChoice`7")>]
+    type Choice<'T1,'T2,'T3,'T4,'T5,'T6,'T7> =
+      | Choice1Of7 of 'T1
+      | Choice2Of7 of 'T2
+      | Choice3Of7 of 'T3
+      | Choice4Of7 of 'T4
+      | Choice5Of7 of 'T5
+      | Choice6Of7 of 'T6
+      | Choice7Of7 of 'T7
+
+        override x.ToString() =
+            match x with
+            | Choice1Of7 v -> String.Concat("Choice1Of7(", showValue v, ")")
+            | Choice2Of7 v -> String.Concat("Choice2Of7(", showValue v, ")")
+            | Choice3Of7 v -> String.Concat("Choice3Of7(", showValue v, ")")
+            | Choice4Of7 v -> String.Concat("Choice4Of7(", showValue v, ")")
+            | Choice5Of7 v -> String.Concat("Choice5Of7(", showValue v, ")")
+            | Choice6Of7 v -> String.Concat("Choice6Of7(", showValue v, ")")
+            | Choice7Of7 v -> String.Concat("Choice7Of7(", showValue v, ")")
+
+
 
     [<AbstractClass>]
     type FSharpFunc<'T,'Res> [<DebuggerHidden>] () =

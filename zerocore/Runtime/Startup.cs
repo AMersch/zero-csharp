@@ -309,6 +309,18 @@ namespace System.Runtime.CompilerServices
                 RunOrWait((StaticClassConstructionContext*)Unsafe.AsPointer(ref context));
         }
 
+#if WASM
+        // One thread (WebAssembly, DOS, the C64): the constructor runs now.
+        // It's marked as run first, so that its own uses of the type's
+        // statics go on, as in .NET, instead of starting it again.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void RunOrWait(StaticClassConstructionContext* context)
+        {
+            nint constructor = context->cctorMethodAddress;
+            context->cctorMethodAddress = 0;
+            ((delegate*<void>)constructor)();
+        }
+#else
         // Constructors running now, each with the thread running it (its
         // ObjectAllocator record), under a spin lock. The lock is held only
         // to look at or change the list, never while a constructor runs.
@@ -432,6 +444,7 @@ namespace System.Runtime.CompilerServices
                     Platform.sched_yield(); // the other thread is still running it
             }
         }
+#endif
     }
 
     // The address of a type's static constructor; zero once it has run.

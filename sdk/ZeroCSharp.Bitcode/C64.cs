@@ -164,7 +164,11 @@ static class C64
         // by that optimization (others get folded into it) is more than
         // llvm-mos can fit into them: "ran out of registers". The module with
         // that method is then compiled on its own, where the method stays as
-        // it was written, and the link is tried again.
+        // it was written, and the link is tried again. Other failures of the
+        // 6502 backend ("Scavenger spill for register not yet implemented")
+        // don't name the method: the link is then run again with the
+        // compiler saying which method each step works on, and the last one
+        // named is where it stopped.
         var whole = Directory.GetFiles(outDir, "*.ll").Order(StringComparer.Ordinal).ToList();
         var separate = new List<string>();
         var extra = Directory.GetFiles(outDir, "*.s").Order(StringComparer.Ordinal)
@@ -185,6 +189,14 @@ static class C64
 
             Match registers = Regex.Match(log, @"ran out of registers during register allocation in function '(.*?)'");
             string? method = registers.Success ? registers.Groups[1].Value : null;
+            if (method == null && log.Contains("LLVM ERROR", StringComparison.Ordinal))
+            {
+                var (_, trace) = Capture(clang, [.. mos, .. whole, .. separate, .. extra, runtime, saveBasic, "-o", output,
+                    "-Wl,-mllvm,-debug-pass=Executions"]);
+                MatchCollection steps = Regex.Matches(trace, @"Executing Pass '.*?' on Function '(.*?)'");
+                if (steps.Count > 0)
+                    method = steps[^1].Groups[1].Value;
+            }
             string? module = null;
             if (method != null)
             {

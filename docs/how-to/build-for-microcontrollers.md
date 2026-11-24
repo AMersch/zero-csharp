@@ -134,10 +134,21 @@ screen /dev/cu.usbmodem* 115200     # to type to a program, such as Quiz
 With a Debug Probe wired to the Pico 2's debug pins, `run.sh` writes the program over it with OpenOCD
 (`brew install open-ocd`), and no button is needed.
 
-This part hasn't met a real board yet. It has run on [Wokwi](https://wokwi.com)'s simulated Pico 2:
-Blink, Llama and most samples behave exactly as in QEMU. The exceptions are `double` division, which
-the simulator gets wrong in the last bits, and one sort in Collections. The chip runs at 12 MHz until
-the switch to 150 MHz, which needs the flash interface's timing changed too, is tried on a board.
+Without a board, [Wokwi](https://wokwi.com)'s simulated Pico 2 runs the same file. It needs a free
+Wokwi CI token, and the script downloads Wokwi's command-line tool on first use:
+
+```bash
+export WOKWI_CLI_TOKEN=...          # from https://wokwi.com/dashboard/ci
+./run.sh --pico2 --wokwi Blink      # prints the console, exits with the program's exit code
+```
+
+Use it for what QEMU can't check: the boot block, clocks, console, LED and interrupts, where it found
+three bugs. Not for arithmetic: Wokwi gets `double` division wrong in the last bits (and one sort in
+Collections differs), while QEMU runs the same code correctly. Blink, Llama and most samples print
+exactly what they print in QEMU.
+
+This part hasn't met a real board yet. The chip runs at 12 MHz until the switch to 150 MHz, which
+needs the flash interface's timing changed too, is tried on one.
 
 ## float, not double
 

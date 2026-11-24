@@ -7,7 +7,8 @@
 # --c64 --window shows its screen, at its real speed. See c64/run.sh.
 # With --pico2 or --r4, runs bin/<board>/<Sample>.elf in QEMU, on an emulated
 # Cortex-M microcontroller. See arm/run.sh. --pico2 --board runs it on a real
-# Raspberry Pi Pico 2 instead. See arm/board.sh.
+# Raspberry Pi Pico 2 instead (arm/board.sh), and --pico2 --wokwi on Wokwi's
+# simulated one (arm/wokwi.sh).
 # With --win, runs bin/win/<Sample>.exe under Wine, in a container (see
 # docker/wine). On Windows itself, run the .exe directly.
 # With --mac, runs bin/mac/<Sample>, directly (it's a macOS program).
@@ -33,6 +34,11 @@ fi
 if [ "${1:-}" = --pico2 ] && [ "${2:-}" = --board ]; then
     shift 2
     exec arm/board.sh "$@"
+fi
+
+if [ "${1:-}" = --pico2 ] && [ "${2:-}" = --wokwi ]; then
+    shift 2
+    exec arm/wokwi.sh "$@"
 fi
 
 if [ "${1:-}" = --pico2 ] || [ "${1:-}" = --r4 ]; then

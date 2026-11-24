@@ -37,7 +37,7 @@ With zerocore, as `build.sh` builds it:
 - **`Math` and `MathF`**, and `Main(string[] args)` and top-level statements.
 - **`System.Numerics`**: `Complex`, `Vector2`, `Vector3`, `Vector4`, `Matrix3x2`, `Matrix4x4`,
   `Quaternion` and `Plane`, with .NET's members, on every target (see
-  [below](#systemnumerics)).
+  [below](#system.numerics)).
 - **`Half`, `BitOperations` and `BitArray`**, with .NET's names and results: half-precision
   numbers, bit counts and scans on the processor's own instructions where it has them, and arrays
   of bits.

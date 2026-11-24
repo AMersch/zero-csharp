@@ -56,6 +56,7 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `System/Numerics/BitOperations.cs` | `BitOperations`: `PopCount`, `LeadingZeroCount`, `TrailingZeroCount`, `Log2`, rotates, `IsPow2`. clz, rbit and cnt on arm64; bsr and bsf on x64, lzcnt, tzcnt and popcnt with `-m x86-64-v3`; portable code on WebAssembly and DOS |
 | `System/Collections/BitArray.cs` | `BitArray`, with .NET's members (`And`, `Or`, `Xor`, `Not`, shifts, `HasAllSet`, `CopyTo`, ...) |
 | `System/Threading.cs` | `Interlocked` (atomic instructions) and `Volatile` |
+| `Runtime/ThreadStatics.cs` | `[ThreadStatic]` fields: each thread's copies, made from calloc on its first access and kept behind a pthread key, freed when the thread ends |
 | `Runtime/Startup.cs` | What runs before `Main`: storage for static fields that hold references, `string[] args`. Also static constructors |
 | `Runtime/MethodTable.cs` | The layout of the type descriptions the compiler emits |
 | `Runtime/Unsafe.cs` | `Unsafe`, `RuntimeHelpers`, `MemoryMarshal` |

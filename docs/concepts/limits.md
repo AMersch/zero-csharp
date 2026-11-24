@@ -32,7 +32,8 @@ With zerocore, as `build.sh` builds it:
   whose `[UnmanagedCallersOnly]` methods .NET and C programs call
   ([Build a native library](../how-to/build-a-native-library.html)).
 - **Threads**: [`Parallel.For`](../how-to/run-in-parallel.html) runs a loop on every processor, with
-  `Interlocked` and `Volatile` for shared state. There is no `Thread` class or `lock`.
+  `Interlocked` and `Volatile` for shared state, and `[ThreadStatic]` fields for per-thread state.
+  There is no `Thread` class or `lock`.
 - **`Math` and `MathF`**, and `Main(string[] args)` and top-level statements.
 - **`Half`, `BitOperations` and `BitArray`**, with .NET's names and results: half-precision
   numbers, bit counts and scans on the processor's own instructions where it has them, and arrays

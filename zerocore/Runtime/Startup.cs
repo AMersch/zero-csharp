@@ -155,16 +155,19 @@ namespace Internal.Runtime.CompilerHelpers
 
         private static void InitializeModule(ModuleHeader* header)
         {
-            ModuleSection* sections = (ModuleSection*)(header + 1);
-            for (int i = 0; i < header->NumberOfSections; i++)
+            // A pointer walk, not an index: on a 6502 an index into these
+            // 16-byte entries is 32-bit arithmetic, several hundred bytes of it.
+            ModuleSection* section = (ModuleSection*)(header + 1);
+            ModuleSection* end = section + header->NumberOfSections;
+            for (; section < end; section++)
             {
-                if (sections[i].Id == GCStaticRegionSection)
+                if (section->Id == GCStaticRegionSection)
                 {
-                    InitializeStatics(sections[i].Start, sections[i].End);
+                    InitializeStatics(section->Start, section->End);
                     if (s_regionStart == null)
                     {
-                        s_regionStart = sections[i].Start;
-                        s_regionEnd = sections[i].End;
+                        s_regionStart = section->Start;
+                        s_regionEnd = section->End;
                     }
                 }
             }
@@ -223,10 +226,10 @@ namespace Internal.Runtime.CompilerHelpers
                     // Fields the compiler evaluated at build time (string
                     // literals, for instance): copy them over the new object.
                     byte* source = relative ? ReadRelative((int*)slot + 1) : (byte*)slot[1];
-                    ref byte target = ref Unsafe.As<RawData>(statics).Data;
-                    nint size = (nint)type->BaseSize - 2 * sizeof(nint);
-                    for (nint i = 0; i < size; i++)
-                        Unsafe.Add(ref target, i) = source[i];
+                    byte* target = (byte*)Unsafe.AsPointer(ref Unsafe.As<RawData>(statics).Data);
+                    byte* targetEnd = target + ((nint)type->BaseSize - 2 * sizeof(nint));
+                    while (target < targetEnd)
+                        *target++ = *source++;
                 }
                 *slot = Unsafe.As<object, nint>(ref statics);
             }

@@ -45,9 +45,6 @@ static void leave(int code)
 
 int main(void)
 {
-    // llvm-mos's malloc starts with a 4 KB heap. Take all the memory there
-    // is between the program and the stack.
-    __set_heap_limit(__get_heap_max_safe_size());
     leave((int)__managed__Main(0, 0));
     return 0;
 }
@@ -114,38 +111,124 @@ void RhpInitialDynamicInterfaceDispatch(void) { leave(134); }
 
 // ---- memory --------------------------------------------------------------------
 
-// zerocore keeps flags in the two low bits of pointers to what it allocates
-// (an interface call's cache, for one), as every 32-bit system lets it:
-// allocations there are aligned to 4 bytes or more. llvm-mos's malloc aligns
-// to nothing, a 6502 having no use for it. So each block is taken 4 bytes
-// larger and starts at the first multiple of 4 past its first byte; the byte
-// before the start says how far back the real block begins, for free().
-static void *aligned(unsigned char *block)
+// The heap: the memory between the program and the stack, handed out in
+// 4-byte units. zerocore keeps flags in the two low bits of pointers to what
+// it allocates (an interface call's cache, for one), as every 32-bit system
+// lets it, so every block starts on a multiple of 4.
+//
+// llvm-mos's own malloc, with the wrapper it needed (it aligns to nothing),
+// came to 2.1 to 2.7 KB; this one is about half that. Each block has a 4-byte
+// header: its size in units, header included, and, while it is free, the
+// next free block. Free blocks are kept in address order, and one freed next
+// to another becomes part of it, so an arena that grows, is freed and grows
+// again reuses the same memory. A request is served by the first free block
+// big enough, else from memory never used yet.
+typedef struct chunk {
+    struct chunk *next;
+    unsigned units;
+} chunk;
+
+// The heap runs from the end of the program to 1 KB below where the stack
+// is when the first block is asked for, as llvm-mos's own malloc does.
+// __rc0 and __rc1 are llvm-mos's stack pointer, in the zero page.
+extern char __heap_start[], __stack_reserve_size[];
+extern volatile unsigned char __rc0, __rc1;
+static chunk *free_list;
+static chunk *unused, *heap_end;
+
+// The C library's names: anything in it that allocates gets this heap too.
+// llvm-mos's malloc then never comes into the program, which is the point:
+// two allocators would hand out the same memory. (If something ever needs
+// another function from its malloc.cc, such as aligned_alloc, the link
+// fails on a second definition of malloc instead.)
+void *malloc(size_t size)
 {
-    unsigned char *start;
-    if (!block)
+    unsigned units;
+    chunk **link, *block;
+    if (size > 0xFFF0)
         return 0;
-    start = (unsigned char *)(((unsigned)block + 4) & ~3u);
-    start[-1] = (unsigned char)(start - block);
-    return start;
-}
-
-void *cs_calloc(u32 count, u32 size)
-{
-    u32 total = count * size;
-    if (total > 0xFFF0 || (size != 0 && total / size != count))
+    units = (size + 3) / 4 + 1;
+    for (link = &free_list; (block = *link) != 0; link = &block->next) {
+        if (block->units >= units) {
+            if (block->units == units) {
+                *link = block->next;
+            } else { // the block's end is the new block
+                block->units -= units;
+                block += block->units;
+                block->units = units;
+            }
+            return block + 1;
+        }
+    }
+    if (!unused) { // the first request
+        unsigned stack = __rc0 | (unsigned)__rc1 << 8;
+        unused = (chunk *)(((unsigned)__heap_start + 3) & ~3u);
+        heap_end = (chunk *)((stack - (unsigned)__stack_reserve_size) & ~3u);
+        if (heap_end < unused)
+            heap_end = unused;
+    }
+    if ((unsigned)(heap_end - unused) < units)
         return 0;
-    return aligned(calloc(1, (size_t)total + 4));
+    block = unused;
+    unused += units;
+    block->units = units;
+    return block + 1;
 }
 
-void *cs_malloc(u32 size) { return size > 0xFFF0 ? 0 : aligned(malloc((size_t)size + 4)); }
-
-void cs_free(void *block)
+void free(void *pointer)
 {
-    unsigned char *start = block;
-    if (start)
-        free(start - start[-1]);
+    chunk *block, *before = 0, *after = free_list;
+    if (!pointer)
+        return;
+    block = (chunk *)pointer - 1;
+    while (after && after < block) {
+        before = after;
+        after = after->next;
+    }
+    if (after && block + block->units == after) { // joins the one after it
+        block->units += after->units;
+        block->next = after->next;
+    } else {
+        block->next = after;
+    }
+    if (!before)
+        free_list = block;
+    else if (before + before->units == block) { // and the one before it
+        before->units += block->units;
+        before->next = block->next;
+    } else {
+        before->next = block;
+    }
 }
+
+void *calloc(size_t count, size_t size)
+{
+    unsigned long total = (unsigned long)count * size;
+    void *block = total > 0xFFF0 ? 0 : malloc((size_t)total);
+    if (block)
+        memset(block, 0, (size_t)total);
+    return block;
+}
+
+void *realloc(void *pointer, size_t size)
+{
+    void *block;
+    size_t had;
+    if (!pointer)
+        return malloc(size);
+    block = malloc(size);
+    if (block) {
+        had = (((chunk *)pointer - 1)->units - 1) * 4;
+        memcpy(block, pointer, had < size ? had : size);
+        free(pointer);
+    }
+    return block;
+}
+
+// What C# imports, with its 32-bit sizes.
+void *cs_calloc(u32 count, u32 size) { return (count | size) > 0xFFF0 ? 0 : calloc((size_t)count, (size_t)size); }
+void *cs_malloc(u32 size) { return size > 0xFFF0 ? 0 : malloc((size_t)size); }
+void cs_free(void *pointer) { free(pointer); }
 
 void *cs_memset(void *destination, i32 value, u32 count) { return memset(destination, (int)value, (size_t)count); }
 

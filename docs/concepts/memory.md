@@ -134,8 +134,9 @@ grow after it. Its new buffer is then allocated after the mark, so `Restore` fre
 collection still points at it. Later allocations overwrite it, and nothing reports that.
 
 The rule: between `Save()` and `Restore()`, only add to collections created after the mark. When
-temporary work has to add to long-lived collections, give it a separate **scratch arena** instead, and
-copy the result out before freeing the scratch arena. With strings that copy is
+temporary work has to add to long-lived collections, do it in **`Arena.Scratch`** instead (below),
+whose memory is separate from your arenas, or in a separate arena of your own, and copy the result
+out before that memory is freed. With strings that copy is
 `sb.ToArenaString(target)` or `Str.ToArenaString(target, s)`; with collections it is
 `list.Clone(arena)` or `dict.Clone(arena)`. Copies are always explicit: `var b = a` on a `List`, `Dict`
 or `StrBuilder` shares the contents, it doesn't copy them. [Keep a string](../how-to/keep-a-string.html)

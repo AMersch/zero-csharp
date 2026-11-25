@@ -59,6 +59,8 @@ public static class Program
             Console.WriteLine("  native-overflow      NativeMemory.Alloc with a count times size past the address space");
             Console.WriteLine("  native-zeroed-overflow  the same for NativeMemory.AllocZeroed");
             Console.WriteLine("  native-out-of-memory NativeMemory.Alloc of more than the system can give");
+            Console.WriteLine("  native-bad-alignment NativeMemory.AlignedAlloc with an alignment that isn't a power of two");
+            Console.WriteLine("  native-aligned-overflow  NativeMemory.AlignedAlloc of a size that overflows with the alignment");
             return 0;
         }
 
@@ -103,6 +105,8 @@ public static class Program
             case "native-overflow": NativeOverflow(); break;
             case "native-zeroed-overflow": NativeZeroedOverflow(); break;
             case "native-out-of-memory": NativeOutOfMemory(); break;
+            case "native-bad-alignment": NativeBadAlignment(); break;
+            case "native-aligned-overflow": NativeAlignedOverflow(); break;
             default:
                 Console.WriteLine("Unknown case");
                 return 0;
@@ -458,6 +462,17 @@ public static class Program
     {
         // More than half the address space: no system has that much to give.
         unsafe { System.Runtime.InteropServices.NativeMemory.Alloc((nuint)nint.MaxValue + 1); }
+    }
+
+    // .NET throws ArgumentException.
+    static void NativeBadAlignment()
+    {
+        unsafe { System.Runtime.InteropServices.NativeMemory.AlignedAlloc(16, 24); }
+    }
+
+    static void NativeAlignedOverflow()
+    {
+        unsafe { System.Runtime.InteropServices.NativeMemory.AlignedAlloc(~(nuint)0 - 8, 64); }
     }
 
     static void ScratchSetOuter()

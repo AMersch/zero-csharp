@@ -199,7 +199,7 @@ static partial class C64
         var options = new List<string>();
         X16Banks? banks = null;
         if (platform == "cx16")
-            X16ForceBanks(ref banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos), options);
+            X16Prepare(ref banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos), options);
 
         while (true)
         {

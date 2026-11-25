@@ -71,6 +71,34 @@ two frames' time, and the clock, the joysticks and the mouse stand still; the de
 back, and leave those two to a run in a window. The YM2151 FM chip, the PCM audio, the bitmap layers
 have no API yet.
 
+## Files on the disk
+
+`File` (`lib/File.cs`) reads and writes the SD card, or a drive on the serial bus, through the
+KERNAL (llvm-mos's C library does the talking; `cx16/runtime.c` adapts it):
+
+```csharp
+File.WriteAllText("notes.txt", "hello\n");
+File.AppendAllText("notes.txt", "more\n");
+File.WriteAllBytes("#9:data.bin", bytes);       // on device 9
+```
+
+- **Names:** the SD card follows CBM DOS: short names, no folders to speak of. In the emulator, the
+  files are in the folder `run.sh` gives it with `-fsroot` (`bin/cx16/`).
+- **Device:** a path starting with `#` and a number and a colon is on that device (8 to 30):
+  `"#9:data.bin"`. Without it, a file is on the device the program was loaded from, 8 for the SD
+  card. A device that isn't there closes all the program's open files, because the KERNAL can't open
+  anything else until it has.
+- **Binary:** every file is opened as binary: no byte is changed on the way.
+- **Moving about:** a file opened for reading can be moved anywhere with `Seek`, and `Length` and
+  `Position` work, but only by reading (forward) or opening it again (backward): `Length` reads a file
+  through twice. A file opened for writing, or for appending, can only go on from where it is.
+  `File.OpenAppend` adds to a file; `File.Create` replaces one.
+- **Limits:** four files open at once, and names of up to 37 characters. `File.Delete` says false
+  for a file that isn't there.
+
+`samples/DiskFiles.cs` tests all of it (the emulator's host folder stands in for the SD card);
+`samples/Files.cs` is for the other targets: it wants 64 KB arenas and writes into the middle of files.
+
 ## Banked RAM
 
 `lib/Banks.cs` copies bytes to and from the banked RAM, which is 63 banks of 8 KB in the emulator

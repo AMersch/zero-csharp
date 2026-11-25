@@ -656,6 +656,221 @@ float roundevenf(float x) { return (float)roundeven(x); }
 float fabsf(float x) { return x < 0 ? -x : x; }
 float fmodf(float x, float y) { return (float)fmod(x, y); }
 
+#ifdef CX16_FILES
+// ---- files, for lib/File.cs ----------------------------------------------------------
+//
+// Only in a program that uses File (the build defines CX16_FILES then): the C
+// library's stdio is some 3 KB, which no other program should carry.
+//
+// The C library's own stdio, which llvm-mos built on the KERNAL's file calls:
+// a file is on the disk device the program came from (the SD card, or an IEC
+// drive), by the name CBM DOS gives it.
+//
+// What the KERNAL can't do is move around in a file: llvm-mos's fseek wants an
+// lseek that isn't there, and a sequential file has no positions. So a file
+// is a handle (1 to MAX_FILES, in the table below) and this keeps the
+// position itself. A file opened for reading can be moved anywhere: forward
+// by reading and throwing the bytes away, backward by opening it again, and
+// the end by reading to it. That is slow (File.Length reads a file through
+// twice) but it works, and it is all File and TryReadAllText need. A file
+// opened for writing or appending can only "move" to where it is. (A device
+// that isn't there, named in a path, closes all open files: see below.)
+//
+// Files are always opened in binary mode ("rb"): the text mode swaps newline
+// and carriage return, which would change bytes. CBM DOS appends to a file
+// when its name ends in ",a" ("name,a" with mode "ab"); for the rest, a file
+// that is written is removed first, since CBM DOS won't write over one.
+//
+// A path may start with "#" and a device number and a colon ("#9:notes.txt"):
+// the file is then on that device, the way a Commodore disk drive is
+// addressed (8 and up: the SD card is 8, drives on the serial bus 8 to 11).
+// Without it the device is the one the program came from, which llvm-mos
+// keeps in curunit.
+
+#define MAX_FILES 4
+#define MAX_NAME 40
+
+extern unsigned char curunit;       // the device a file is on when its name doesn't say
+
+static struct {
+    FILE *file;
+    unsigned long position;
+    char path[MAX_NAME];
+    unsigned char device;
+    char mode;          // 'r', 'w' or 'a'
+} files[MAX_FILES];
+
+// The path without a "#9:" in front of it, and the device that said: the
+// default one if nothing did. 0 if the device is not a number from 8 to 30.
+static const char *take_device(const char *path, unsigned char *device)
+{
+    *device = curunit;
+    if (path[0] != '#')
+        return path;
+    unsigned number = 0;
+    const char *p = path + 1;
+    while (*p >= '0' && *p <= '9' && number < 100)
+        number = number * 10 + (unsigned)(*p++ - '0');
+    if (p == path + 1 || *p != ':' || number < 8 || number > 30)
+        return 0;
+    *device = (unsigned char)number;
+    return p + 1;
+}
+
+static int file_slot(i32 handle)
+{
+    return handle >= 1 && handle <= MAX_FILES && files[handle - 1].file ? (int)handle - 1 : -1;
+}
+
+// Opening a file on a device that isn't there leaves the KERNAL unable to open
+// anything, on any device, until it has closed everything. So that is what
+// happens: every open file of the program is closed too.
+static void forget_files_if_device_missing(void)
+{
+    if (!(cbm_k_readst() & 0x80))
+        return;
+    cbm_k_clall();
+    for (int i = 0; i < MAX_FILES; i++)
+        files[i].file = 0;
+}
+
+i32 cs_fopen(const char *given, const char *mode)
+{
+    unsigned char device;
+    const char *path = take_device(given, &device);
+    if (path == 0)
+        return 0;
+    int slot = 0;
+    while (slot < MAX_FILES && files[slot].file)
+        slot++;
+    if (slot == MAX_FILES || strlen(path) >= MAX_NAME - 2 || (mode[0] != 'r' && mode[0] != 'w' && mode[0] != 'a'))
+        return 0;
+    char name[MAX_NAME];
+    char binary[3] = { mode[0], 'b', 0 };
+    strcpy(name, path);
+    unsigned char standard = curunit;
+    curunit = device;
+    if (mode[0] == 'w')
+        remove(path);
+    else if (mode[0] == 'a')
+        strcat(name, ",a");
+    FILE *file = fopen(name, binary);
+    curunit = standard;
+    if (file == 0) {
+        forget_files_if_device_missing();
+        return 0;
+    }
+    files[slot].device = device;
+    files[slot].file = file;
+    files[slot].position = 0;
+    strcpy(files[slot].path, path);
+    files[slot].mode = mode[0];
+    return slot + 1;
+}
+
+u32 cs_fread(void *buffer, u32 size, u32 count, i32 handle)
+{
+    int slot = file_slot(handle);
+    if (slot < 0 || size == 0 || count == 0 || size > 0xFFFF || count > 0xFFFF)
+        return 0;
+    u32 items = (u32)fread(buffer, (size_t)size, (size_t)count, files[slot].file);
+    files[slot].position += items * size;
+    return items;
+}
+
+u32 cs_fwrite(const void *buffer, u32 size, u32 count, i32 handle)
+{
+    int slot = file_slot(handle);
+    if (slot < 0 || size == 0 || count == 0 || size > 0xFFFF || count > 0xFFFF)
+        return 0;
+    u32 items = (u32)fwrite(buffer, (size_t)size, (size_t)count, files[slot].file);
+    files[slot].position += items * size;
+    return items;
+}
+
+i32 cs_fclose(i32 handle)
+{
+    int slot = file_slot(handle);
+    if (slot < 0)
+        return -1;
+    int result = fclose(files[slot].file);
+    files[slot].file = 0;
+    return (i32)result;
+}
+
+// Reads and drops bytes until the position is `target`, or the file ends.
+static void skip_to(int slot, unsigned long target)
+{
+    unsigned char scratch[64];
+    while (files[slot].position < target) {
+        unsigned long left = target - files[slot].position;
+        size_t n = fread(scratch, 1, left < sizeof scratch ? (size_t)left : sizeof scratch, files[slot].file);
+        if (n == 0)
+            return;
+        files[slot].position += n;
+    }
+}
+
+i32 cs_fseeko(i32 handle, long long offset, i32 origin)
+{
+    int slot = file_slot(handle);
+    if (slot < 0)
+        return -1;
+    if (files[slot].mode != 'r')
+        return origin == 0 && offset == (long long)files[slot].position ? 0 : -1;
+
+    long long target;
+    if (origin == 2) {      // SEEK_END: the end is where reading stops
+        skip_to(slot, 0xFFFFFFFFul);
+        target = (long long)files[slot].position + offset;
+    } else {
+        target = origin == 1 ? (long long)files[slot].position + offset : offset;
+    }
+    if (target < 0 || target > 0x7FFFFFFFLL)
+        return -1;
+    if ((unsigned long)target < files[slot].position) {     // back: from the start again
+        fclose(files[slot].file);
+        unsigned char standard = curunit;
+        curunit = files[slot].device;
+        files[slot].file = fopen(files[slot].path, "rb");
+        curunit = standard;
+        files[slot].position = 0;
+        if (files[slot].file == 0)
+            return -1;
+    }
+    skip_to(slot, (unsigned long)target);
+    return files[slot].position == (unsigned long)target ? 0 : -1;
+}
+
+long long cs_ftello(i32 handle)
+{
+    int slot = file_slot(handle);
+    return slot < 0 ? -1 : (long long)files[slot].position;
+}
+
+i32 cs_remove(const char *given)
+{
+    unsigned char device;
+    const char *path = take_device(given, &device);
+    if (path == 0)
+        return -1;
+    unsigned char standard = curunit;
+    curunit = device;
+    // The drive's scratch command says nothing about a file that isn't there,
+    // so look first.
+    FILE *file = fopen(path, "rb");
+    i32 result = -1;
+    if (file != 0) {
+        fclose(file);
+        result = (i32)remove(path);
+    } else {
+        forget_files_if_device_missing();
+    }
+    curunit = standard;
+    return result;
+}
+#endif // CX16_FILES
+
 // ---- the machine, for lib/CX16.cs ----------------------------------------------------
 
 i32 cs_cx16_peek(i32 address) { return *(volatile unsigned char *)(unsigned)address; }

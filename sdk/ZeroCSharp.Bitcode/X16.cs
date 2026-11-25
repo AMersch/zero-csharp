@@ -64,7 +64,7 @@ static partial class C64
 
         string measuring = Path.Combine(c.OutDir, "measure.ld");
         File.WriteAllText(measuring, Banking.Script(0, room: true));
-        var (code, _) = Capture(c.Clang, [.. c.Mos, "-T", measuring, .. c.Whole, .. c.Separate, .. c.Extra, c.Runtime, c.SaveBasic, "-o", c.Output]);
+        var (code, _) = Capture(c.Clang, [.. c.Mos, .. X16Defines(c.Whole), "-T", measuring, .. c.Whole, .. c.Separate, .. c.Extra, c.Runtime, c.SaveBasic, "-o", c.Output]);
         if (code != 0)
             return null;
         var defined = Banking.Defined(Directory.GetFiles(plain, "*.ll"));
@@ -91,6 +91,7 @@ static partial class C64
         banks.Count = count;
         options.Clear();
         options.AddRange(["-T", script, $"-DCX16_CODE_BANKS={count}", $"-DCX16_BANK_FILE=\"{Banking.FileName(c.Name)}\""]);
+        options.AddRange(X16Defines(c.Whole));
     }
 
     /// <summary>
@@ -136,12 +137,24 @@ static partial class C64
     }
 
     /// <summary>
-    /// For measuring and testing: ZERO_CX16_BANK=name,name moves every function
-    /// whose name contains one of those into banks, whether the program needs it
-    /// or not. Nothing happens when it isn't set.
+    /// What the runtime has to be compiled with for this program: the file functions
+    /// (the C library's stdio, 3 KB) only if the program calls them.
     /// </summary>
-    static void X16ForceBanks(ref X16Banks? banks, X16Context c, List<string> options)
+    static IEnumerable<string> X16Defines(IEnumerable<string> irFiles)
     {
+        if (irFiles.Any(f => Regex.IsMatch(Files.ReadText(f), @"@cell\.(fopen|fread|fwrite|fclose|fseeko|ftello|remove)\b", RegexOptions.CultureInvariant)))
+            yield return "-DCX16_FILES";
+    }
+
+    /// <summary>
+    /// Before the first link: the options this program's runtime needs. And, for
+    /// measuring and testing, ZERO_CX16_BANK=name,name moves every function whose
+    /// name contains one of those into banks, whether the program needs it or
+    /// not; nothing happens when that isn't set.
+    /// </summary>
+    static void X16Prepare(ref X16Banks? banks, X16Context c, List<string> options)
+    {
+        options.AddRange(X16Defines(c.Whole));
         string? wanted = Environment.GetEnvironmentVariable("ZERO_CX16_BANK");
         if (string.IsNullOrEmpty(wanted))
             return;
@@ -161,9 +174,22 @@ static partial class C64
     {
         string file = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, Banking.FileName(name));
         if (banks == null)
+        {
             File.Delete(file);
-        else
-            Banking.Extract(llvmMos, output + ".elf", banks.Count, outDir, file);
+            return;
+        }
+        Banking.Extract(llvmMos, output + ".elf", banks.Count, outDir, file);
+
+        // What the heap and the stack have is what the code leaves: say if it isn't much.
+        var (code, log) = Capture(Path.Combine(llvmMos, "bin", OperatingSystem.IsWindows() ? "llvm-nm.exe" : "llvm-nm"),
+            ["--radix=d", output + ".elf"]);
+        Match heap = Regex.Match(log, @"^\s*(\d+)\s+\w\s+__heap_start\s*$", RegexOptions.Multiline);
+        if (code == 0 && heap.Success)
+        {
+            int free = 0x9F00 - 1024 - int.Parse(heap.Groups[1].Value);     // 1 KB of it is the stack's
+            if (free < 3072)
+                Console.Error.WriteLine($"[cx16]   {name}: only {Math.Max(free, 0)} bytes are left for the heap; a program that allocates a lot will run out of memory");
+        }
     }
 
     static class Banking

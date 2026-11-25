@@ -134,7 +134,7 @@ leaves a second file, `bin/cx16/NAME.BNK`, which has to stay next to the `.prg`;
 take care of it. `ZERO_CX16_BANK=Name` forces the functions whose names contain `Name` into banks even
 when the program fits, to test banking or to measure what a call costs (about 33 cycles, in
 `x16emu`, with the jiffy clock: run it without `-testbench`, which has no frame interrupt).
-`BanksWithCode`, `BanksDemo`, `BankedDemo`, `BankedListDemo` and `CX16Demo` are for the X16 only.
+`BanksWithCode`, `BanksDemo`, `BankedDemo`, `BankedListDemo`, `DiskFiles`, `Mouse` and `CX16Demo` are for the X16 only.
 [Build for the Commander X16](docs/how-to/build-for-cx16.md) has the rest.
 
 The guards are tested the other way round. `lib/` stops the program when it catches a mistake, and

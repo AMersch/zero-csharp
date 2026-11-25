@@ -1,0 +1,14 @@
+option: Some 7 None
+result: Ok 12; Error width must be positive; Error height must be positive
+finally
+dispose r
+log: start, step 1, step 2, step 3, left 2, left 1, inside, many
+counter: 14
+created: false
+computing
+value: 42
+again: 42, made 1 time(s)
+created: true
+from value: ready, created true
+pattern: 3
+chain: 43

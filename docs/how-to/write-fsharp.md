@@ -193,6 +193,61 @@ let numbers = seq {
         printfn "finally" }
 ```
 
+## Write computation expressions
+
+Builders you write work as in .NET: `let!`, `and!`, `return`, `yield`, `for`, `while`, `use`,
+`try ... finally` and custom operations become calls to your builder's methods, with no reflection:
+
+<!-- sample: sdk/test/fixtures/fsbuilders/Program.fs option-builder -->
+```fsharp
+type OptionBuilder() =
+    member _.Bind(x, f) = match x with Some v -> f v | None -> None
+    member _.Return v = Some v
+    member _.ReturnFrom(o: 'T option) = o
+    member _.Zero() = Some()
+
+let option = OptionBuilder()
+
+let digit (c: char) =
+    if c >= '0' && c <= '9' then Some(int c - int '0') else None
+
+let addDigits a b = option {
+    let! x = digit a
+    let! y = digit b
+    return x + y }
+```
+
+`addDigits '3' '4'` is `Some 7` and `addDigits '3' 'x'` is `None`. Each `let!` passes the rest of the
+expression to `Bind` as a closure, an object like any other: in a loop that runs for long, open an
+object scope around it ([Free F# values with a scope](#free-f-values-with-a-scope)).
+
+`async` and `task` aren't there: they need a scheduler and threads zero mode doesn't have.
+
+## Delay a value with lazy
+
+`lazy` makes a value the first time it's read, then keeps it. `Force()` and `.Value` read it, and
+`IsValueCreated` says whether it's made yet:
+
+<!-- sample: sdk/test/fixtures/fsbuilders/Program.fs lazy -->
+```fsharp
+let mutable made = 0
+
+let expensive = lazy (
+    made <- made + 1
+    printfn "computing"
+    6 * 7)
+
+let useExpensive () =
+    printfn "created: %b" expensive.IsValueCreated
+    printfn "value: %d" (expensive.Force())
+    printfn "again: %d, made %d time(s)" expensive.Value made
+    printfn "created: %b" expensive.IsValueCreated
+```
+
+As in .NET, it's safe to read from several threads (`Parallel.For`): the first runs the expression,
+and the others wait for its value. Reading a lazy value from inside its own expression ends the
+program, where .NET would throw. C# programs have the same `Lazy<T>`.
+
 ## Count money with decimal
 
 `decimal` works as in .NET, with the same results: 28 digits after the point, rounding half to even,
@@ -613,7 +668,7 @@ one with a `bool`) is an error, ZERO005, that names it.
 ## What's missing
 
 - **`%A`**, as above, and anything else that needs reflection.
-- **`async`, `task`, `lazy`** and computation expressions other than `seq`.
+- **`async` and `task`.** Computation expressions with your own builders work.
 - **`asin`, `acos`, `atan`, `sinh`, `cosh` and `tanh`.** The other math functions are there.
 - **Catching exceptions.** `try ... with` compiles, but a raised exception ends the program with its
   message, as `throw` does in C# zero mode ([Limits](../concepts/limits.html)). `try ... finally` and

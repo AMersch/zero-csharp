@@ -136,7 +136,7 @@ was freed. See [Memory without a GC](https://onurgumus.github.io/zero-csharp/con
 | Folder | What |
 |---|---|
 | [`zerocore/`](zerocore/README.md) | The core library: `object`, `string`, casts, allocation. About 2,400 lines of C#, MIT licensed |
-| [`lib/`](lib/) | Arenas, collections, strings, input and output, files, the clock, random numbers, SIMD kernels, `Parallel.For`, fibers (green threads) and channels, DOS and UEFI graphics, the Commodore 64's screen and sprites, a microcontroller board's LED, registers and timer interrupt, GPU buffers and kernel launches ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
+| [`lib/`](lib/) | Arenas, collections, strings, input and output, files, the clock, random numbers, SIMD kernels, `Parallel.For`, fibers (green threads) and channels, timers on fibers (`System.Timers.Timer`, `System.Threading.Timer`, `PeriodicTimer`), DOS and UEFI graphics, the Commodore 64's screen and sprites, a microcontroller board's LED, registers and timer interrupt, GPU buffers and kernel launches ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
 | [`samples/`](samples/) | The programs below |
 | [`sdk/`](sdk/) | The `ZeroCSharp.*` NuGet packages |
 | [`docs/`](docs/) | The documentation site |
@@ -166,6 +166,7 @@ nothing AGPL is linked into them.
 | `Queries` | LINQ-style queries with `lib/Seq.cs`, checked to allocate nothing | 44 KB |
 | `Threads` | `Parallel.For` with one arena per thread | 28 KB |
 | `Fibers` | `lib/Fibers.cs`: green threads taking turns, channels, sleeping, 2,000 fibers at once (6 on DOS or a microcontroller), and the cost of a switch | 52 KB |
+| `Timers` | `lib/Timers.cs`: `System.Timers.Timer`, `System.Threading.Timer` and `PeriodicTimer` on fibers, and `TimeSpan`: repeating and one-shot timers, stopping and restarting from a handler, changing the interval | 84 KB |
 | `Files` | `lib/File.cs`: whole files, and an open file read, written and moved through | 31 KB |
 | `Dice` | `lib/Random.cs` and `lib/Clock.cs`: seeded dice rolls that match on every target, durations, the date | 29 KB |
 | `Env` | `System.Environment`: variables, `Exit` from anywhere (writing what `Console` holds), the processor count | 20 KB |

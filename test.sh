@@ -82,6 +82,7 @@ SAMPLES=(
     Queries
     Threads
     Fibers
+    Timers
     Records
     Shapes
     Refs
@@ -100,7 +101,7 @@ SAMPLES=(
 )
 
 # Samples WebAssembly can't run (as in build.sh): the fiber samples switch stacks.
-NOT_WASM=" Fibers SmallFibers SmallChannels "
+NOT_WASM=" Fibers Timers SmallFibers SmallChannels "
 # Simd and Kernels print timings, so only their exit code is checked.
 TIMED=" Simd Kernels Fibers "
 # Arena and Collections print byte counts that depend on the pointer size, so
@@ -136,6 +137,7 @@ DOS_SAMPLES=(
     Refs
     Patterns
     Fibers
+    Timers
     Scratch
     Links
     Llama
@@ -189,6 +191,7 @@ ARM_SAMPLES=(
     Queries
     Threads
     Fibers
+    Timers
     Records
     Shapes
     Refs
@@ -367,6 +370,20 @@ run_all() {
             failures=$((failures + 1))
         else
             echo "ok   Fibers overflow (stopped, as it must be)"
+        fi
+    fi
+
+    # Main returning with a timer still running, never given Fiber.Run, must
+    # stop the program with a message. (A C64 program gets no arguments.)
+    if [[ " ${samples[*]} " == *" Timers "* ]] && [ "$target" != c64 ]; then
+        status=0
+        out=$("${run[@]}" Timers forgotten < /dev/null 2>&1) || status=$?
+        if [ "$status" = 0 ] || [[ "$out" != *"Main returned with a timer still running"* ]]; then
+            echo "FAIL Timers forgotten: not stopped with the message (exit code $status)"
+            echo "$out" | tail -3 | sed 's/^/       /'
+            failures=$((failures + 1))
+        else
+            echo "ok   Timers forgotten (stopped, as it must be)"
         fi
     fi
 }

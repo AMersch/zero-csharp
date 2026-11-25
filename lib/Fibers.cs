@@ -401,6 +401,26 @@ public static class Fiber
         }
     }
 
+    // Ends a sleeping fiber's Sleep early: it goes back in the run queue now.
+    // Does nothing to a fiber that isn't sleeping (running, ready, or waiting
+    // on a channel). System.Timers.Timer's Stop uses it, so a stopped timer's
+    // fiber ends at once rather than when its interval would have.
+    internal static void WakeEarly(Record* f)
+    {
+        Scheduler* s = This;
+        unsafe
+        {
+            // SAFETY: the sleepers are live fibers' records.
+            Record** link = &s->Sleepers;
+            while (*link != null && *link != f)
+                link = &(*link)->Next;
+            if (*link == null)
+                return;
+            *link = f->Next;
+            Enqueue(s, f);
+        }
+    }
+
     internal static Record* CurrentRecord { get { unsafe { return This->Current; } } } // SAFETY: the thread's scheduler
 
     static void Enqueue(Scheduler* s, Record* f)

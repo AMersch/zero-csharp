@@ -40,6 +40,12 @@ namespace System
         // and returning from Main (StartupCodeHelpers.Shutdown), write it first.
         internal static delegate*<void> s_beforeExit;
 
+        // Set by lib/ to check, once Main has returned, for work a program
+        // started and never let run (lib/Timers.cs: a timer started without
+        // Fiber.Run). Called after s_beforeExit, so output comes first, and
+        // not by Exit, which ends the program on purpose.
+        internal static delegate*<void> s_atMainReturn;
+
         /// <summary>
         /// Ends the program with <paramref name="exitCode"/>, as returning it from Main
         /// would. Text Out holds is written first; so are files the C library buffers.

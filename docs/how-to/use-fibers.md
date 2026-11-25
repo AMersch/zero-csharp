@@ -148,6 +148,58 @@ Fiber.Run();
 long took = (Clock.Monotonic - start) / 1_000_000;
 ```
 
+## Fire on a timer
+
+`System.Timers.Timer` (`lib/Timers.cs`) raises `Elapsed` every `Interval` milliseconds, as in .NET,
+but on a fiber of its own rather than a thread pool thread. So a timer fires only while the thread
+is in `Fiber.Run`, and `Run` returns once every timer has stopped and every other fiber has ended:
+
+<!-- sample: samples/Timers.cs timer -->
+```csharp
+// Fires every 20 ms, on a fiber of its own, until its handler
+// stops it. Fiber.Run returns once every timer has stopped.
+var timer = new Timer(20);
+int ticks = 0;
+timer.Elapsed += (sender, e) =>
+{
+    Console.WriteLine($"tick {++ticks}");
+    if (ticks == 5)
+        timer.Stop();
+};
+timer.Start();
+Fiber.Run();
+```
+
+`System.Threading.Timer` works the same way, with a callback, a due time and a period
+(`Timeout.Infinite` for a timer that fires once, or `Change(Timeout.Infinite, Timeout.Infinite)` to
+stop it).
+
+`PeriodicTimer` has `WaitForNextTick()`, which blocks, in place of .NET's `WaitForNextTickAsync()`
+(zero mode has no `async`). In a fiber it lets the other fibers run; outside one it sleeps the thread,
+so it needs no `Fiber.Run`.
+
+A handler runs on the same thread as everything else, so it needs no locks, and two calls of one
+timer's handlers never overlap. It can use `Console`, `Fiber.Sleep` and channels. `AutoReset = false`
+makes a timer fire once: it is stopped before its handlers run, so a handler can start it again.
+`Stop` ends the timer's fiber at once, even in the middle of a long interval.
+
+Where it differs from .NET:
+
+- Nothing fires outside `Fiber.Run`. A program that waits in `Console.ReadLine` while its timers
+  fire, as .NET programs often do, has to call `Fiber.Run` instead. Reading input blocks every
+  fiber, the timers' included. So that the .NET way doesn't go quietly wrong, `Main` returning
+  while a timer is still running stops the program with a message saying to call `Fiber.Run`.
+  `Environment.Exit` doesn't check.
+- A handler that takes longer than the interval delays the next tick. The timer then fires once
+  straight away and keeps its rhythm from there, rather than making up every tick it missed.
+- `SignalTime` is a `CalendarTime` in UTC, not a local `DateTime`. Each timer reuses one
+  `ElapsedEventArgs`, so a tick allocates nothing.
+- `-=` removes the same delegate object that `+=` added: delegates here can't be combined, so the
+  timer keeps a list.
+- `StackSize` sets the size of the timer's fiber's stack (0, the default, is
+  `Fiber.DefaultStackSize`). There's no `SynchronizingObject`, and `System.Threading.Timer` has no
+  `TimeSpan` overloads, `Dispose(WaitHandle)` or `ActiveCount`.
+
 ## Use scratch memory and arenas
 
 Each fiber has its own `Arena.Scratch` arena, made on its first `Scratch` call and destroyed when the

@@ -1,0 +1,14 @@
+tick 1
+tick 2
+tick 3
+tick 4
+tick 5
+PASS Repeat (3 checks)
+PASS Once (4 checks)
+PASS Stop (2 checks)
+PASS Together (2 checks)
+PASS Changes (7 checks)
+PASS Threading (4 checks)
+PASS Periodic (5 checks)
+PASS Periodic in a fiber (2 checks)
+PASS TimeSpan (6 checks)

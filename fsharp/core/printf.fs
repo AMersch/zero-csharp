@@ -418,4 +418,5 @@ namespace Microsoft.FSharp.Core
         [<assembly: AutoOpen("Microsoft.FSharp.Core.LanguagePrimitives.IntrinsicOperators")>]
         [<assembly: AutoOpen("Microsoft.FSharp.Core")>]
         [<assembly: AutoOpen("Microsoft.FSharp.Collections")>]
+        [<assembly: AutoOpen("Microsoft.FSharp.Control")>]
         do ()

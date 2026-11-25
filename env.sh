@@ -223,3 +223,26 @@ find_uefi_firmware() {
     esac
     return 1
 }
+
+# Commander X16 (./build.sh --cx16, ./run.sh --cx16): the same toolchain as the
+# C64 (llvm-mos, with its cx16 platform), run in x16emu, the X16 community's
+# emulator (https://github.com/X16Community/x16-emulator; release 49 is the
+# one this was written against).
+#
+# X16_EMULATOR  x16emu. Default: the one on the PATH, or in a folder named in
+#               X16_HOME (/Applications/X16 and ~/X16 are tried too)
+# X16_ROM       its ROM, if it isn't next to the emulator
+find_x16_emulator() {
+    local candidate
+    for candidate in "${X16_EMULATOR:-}" x16emu "${X16_HOME:-/nonexistent}/x16emu" /Applications/X16/x16emu "$HOME/X16/x16emu"; do
+        [ -n "$candidate" ] || continue
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        elif command -v "$candidate" >/dev/null 2>&1; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}

@@ -5,6 +5,7 @@
 # (./setup.sh --dos); --dos --window shows the DOS screen. See dos/run.sh.
 # With --c64, runs bin/c64/<Sample>.prg on an emulated Commodore 64 (VICE);
 # --c64 --window shows its screen, at its real speed. See c64/run.sh.
+# With --cx16, runs bin/cx16/<Sample>.prg on an emulated Commander X16 (x16emu); see cx16/run.sh.
 # With --pico2 or --r4, runs bin/<board>/<Sample>.elf in QEMU, on an emulated
 # Cortex-M microcontroller. See arm/run.sh. --pico2 --board runs it on a real
 # Raspberry Pi Pico 2 instead (arm/board.sh), and --pico2 --wokwi on Wokwi's
@@ -15,7 +16,7 @@
 # With --gpu, runs bin/gpu/<Sample>, a macOS program whose kernels run on the GPU.
 # With --uefi, runs bin/uefi/<Sample>.efi in QEMU on UEFI firmware, x64 or
 # arm64; --uefi --window shows the screen. See efi/run.sh.
-# Usage: ./run.sh [--wasm | --dos [--window] | --c64 [--window] | --pico2 | --r4 | --win | --mac | --gpu | --uefi [--window]] Arena
+# Usage: ./run.sh [--wasm | --dos [--window] | --c64 [--window] | --cx16 [--window] | --pico2 | --r4 | --win | --mac | --gpu | --uefi [--window]] Arena
 # Standard input reaches the program on every target (on DOS, from a file or a pipe).
 # Env:   BFLAT_ARCH (see env.sh): on macOS, runs a cross-compiled binary under emulation
 set -euo pipefail
@@ -30,6 +31,11 @@ fi
 if [ "${1:-}" = --c64 ]; then
     shift
     exec c64/run.sh "$@"
+fi
+
+if [ "${1:-}" = --cx16 ]; then
+    shift
+    exec cx16/run.sh "$@"
 fi
 
 if [ "${1:-}" = --pico2 ] && [ "${2:-}" = --board ]; then
@@ -95,7 +101,7 @@ if [ "${1:-}" = --wasm ]; then
     shift
 fi
 if [ $# -lt 1 ]; then
-    echo "Usage: ./run.sh [--wasm | --dos [--window] | --c64 [--window] | --pico2 | --r4 | --win | --mac | --gpu | --uefi [--window]] <Sample> [args...]" >&2
+    echo "Usage: ./run.sh [--wasm | --dos [--window] | --c64 [--window] | --cx16 [--window] | --pico2 | --r4 | --win | --mac | --gpu | --uefi [--window]] <Sample> [args...]" >&2
     exit 1
 fi
 name=$1

@@ -53,6 +53,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   and reading the keyboard under DOS.
 - [Build for the Commodore 64](build-for-c64.html): the toolchain, what fits in 50 KB and what each
   feature costs, the screen and sprites, a game, and running a program in VICE.
+- [Build for the Commander X16](build-for-cx16.html): the same pipeline for a 65C02 with 38 KB of directly
+  addressable RAM, and running a program in x16emu.
 - [Build for UEFI](build-for-uefi.html): programs the firmware starts with no operating system, running
   them in QEMU, and booting a real PC from a USB stick.
 - [Build for microcontrollers](build-for-microcontrollers.html): the Raspberry Pi Pico 2 and the

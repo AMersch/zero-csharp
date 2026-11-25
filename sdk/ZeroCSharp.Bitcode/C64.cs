@@ -124,7 +124,9 @@ static class C64
 
     // ---- llvm-mos -----------------------------------------------------------------
 
-    public static void Link(string[] args)
+    // platform: "c64", or "cx16" for the Commander X16 (llvm-mos has a config for
+    // each, and cx16 is c64 with another memory map, in cx16/runtime.c).
+    public static void Link(string[] args, string platform = "c64")
     {
         string? llvmMos = null;
         var positional = new List<string>();
@@ -136,7 +138,7 @@ static class C64
                 positional.Add(args[i]);
         }
         if (positional.Count != 4)
-            throw Fail("usage: zero-bitcode c64-link OBJDIR NAME RUNTIME.c OUT.prg [--llvm-mos DIR]");
+            throw Fail($"usage: zero-bitcode {platform}-link OBJDIR NAME RUNTIME.c OUT.prg [--llvm-mos DIR]");
         string obj = positional[0], name = positional[1], runtime = positional[2], output = positional[3];
         llvmMos ??= Tools.LlvmMosFolder();
         string clang = Path.Combine(llvmMos, "bin", OperatingSystem.IsWindows() ? "clang.exe" : "clang");
@@ -186,7 +188,7 @@ static class C64
         var extra = Directory.GetFiles(outDir, "*.s").Order(StringComparer.Ordinal)
             .Concat(new[] { "data.c", "external.c" }.Select(f => Path.Combine(outDir, f)).Where(File.Exists))
             .ToList();
-        string[] mos = ["--config", "mos-c64.cfg", "-Os", "-Wall", "-Wno-override-module", "-Wno-unused-command-line-argument"];
+        string[] mos = ["--config", $"mos-{platform}.cfg", "-Os", "-Wall", "-Wno-override-module", "-Wno-unused-command-line-argument"];
         // save-basic.o: by default an llvm-mos program never returns (it has
         // overwritten memory BASIC uses). This saves that memory at the start
         // and puts it back at the end, so the program ends at BASIC's READY.
@@ -221,7 +223,7 @@ static class C64
             }
             if (module != null)
             {
-                Console.Error.WriteLine($"[c64]   {name}: {method} is too much for the 6502's registers once optimized with the rest; compiling its module on its own");
+                Console.Error.WriteLine($"[{platform}]   {name}: {method} is too much for the 6502's registers once optimized with the rest; compiling its module on its own");
                 Tools.Run(clang, [.. mos, "-fno-lto", "-c", module, "-o", module + ".o"], $"compiling {Path.GetFileName(module)}");
                 separate.Add(module + ".o");
                 whole.Remove(module);
@@ -230,10 +232,10 @@ static class C64
 
             Match tooBig = Regex.Match(log, @"will not fit in region.*?overflowed by (.*)");
             if (tooBig.Success)
-                throw Fail($"{name} doesn't fit in a C64's memory:\n  too big by {tooBig.Groups[1].Value.Trim()}");
+                throw Fail($"{name} doesn't fit in {(platform == "c64" ? "a C64's" : "the " + platform + "'s")} memory:\n  too big by {tooBig.Groups[1].Value.Trim()}");
             var missing = Regex.Matches(log, @"undefined symbol: cs_([A-Za-z0-9_]*)").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal).ToList();
             if (missing.Count > 0)
-                throw Fail($"{name} calls functions the C64's runtime (c64/runtime.c) doesn't have:\n  {string.Join(" ", missing)}");
+                throw Fail($"{name} calls functions the runtime ({platform}/runtime.c) doesn't have:\n  {string.Join(" ", missing)}");
             if (method != null)
                 throw Fail($"{method} is too complex for llvm-mos (the 6502 has three registers). Split it into smaller methods.\n{log}");
             throw Fail($"linking {name} failed:\n{log}");

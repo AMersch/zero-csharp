@@ -16,6 +16,8 @@
 #         ./test.sh --dos      DOS, on an emulated 386 with 4 MB (needs ./setup.sh --dos)
 #         ./test.sh --c64      Commodore 64, in VICE (needs ./setup.sh --c64): the
 #                              samples that fit in it, which the Small ones are made to
+#         ./test.sh --cx16     Commander X16, in x16emu (needs ./setup.sh --c64 and x16emu,
+#                              see env.sh): the samples that fit in it
 #         ./test.sh --pico2    Raspberry Pi Pico 2 (Cortex-M33), in QEMU (needs ./setup.sh --arm)
 #         ./test.sh --r4       Arduino Uno R4 (Cortex-M4, 32 KB of RAM), in QEMU: the
 #                              samples that fit in it
@@ -155,6 +157,32 @@ C64_SAMPLES=(
     C64Demo
     Paddles
 )
+# A Commander X16 has 38 KB of fixed RAM for a program and its memory, 12 KB
+# less than a C64: these fit. SmallBuilders, SmallDoubles, SmallFloats,
+# SmallFormats and SmallDoubleFormats don't, by 0.6 to 3.4 KB. Nothing here
+# uses the X16's banked RAM yet. CX16Demo is for the X16 only (lib/CX16.cs: the
+# screen, sprites, sound, keyboard); it checks itself, at the key tests/input types.
+CX16_SAMPLES=(
+    Tiny
+    Minimal
+    VirtualTest
+    QuizStep1
+    QuizStep2
+    Refs
+    SmallStrings
+    SmallIntegers
+    SmallObjects
+    SmallArena
+    SmallLists
+    SmallDicts
+    SmallStrDicts
+    SmallText
+    SmallUnicode
+    SmallEncoding
+    SmallDecimalFormats
+    SmallKeys
+    CX16Demo
+)
 # Microcontrollers: no SIMD to benchmark, no PC screen for Vga. Blink is
 # theirs only, and checks itself. The Uno R4
 # has 32 KB of RAM for a program's data, stacks and heap: these fit.
@@ -244,6 +272,10 @@ run_all() {
         run+=(--c64)
         samples=("${C64_SAMPLES[@]}")
     fi
+    if [ "$target" = cx16 ]; then
+        run+=(--cx16)
+        samples=("${CX16_SAMPLES[@]}")
+    fi
     if [ "$target" = pico2 ]; then
         run+=(--pico2)
         samples=("${ARM_SAMPLES[@]}")
@@ -289,8 +321,8 @@ run_all() {
         fi
     done
 
-    # Guards and Files don't fit in a C64.
-    [ "$target" = c64 ] && return
+    # Guards and Files don't fit in a C64 or an X16.
+    { [ "$target" = c64 ] || [ "$target" = cx16 ]; } && return
 
     while IFS= read -r line; do
         [ -n "$line" ] || continue
@@ -424,6 +456,11 @@ test_dos() {
     run_all "DOS ($emulator, ${DOS_CPU:-$cpu}, ${DOS_MEMORY:-4} MB)" dos check
 }
 
+test_cx16() {
+    ./build.sh --cx16 > /dev/null
+    run_all "Commander X16 (x16emu)" cx16 check
+}
+
 test_c64() {
     ./build.sh --c64 > /dev/null
     run_all "Commodore 64 (VICE)" c64 check
@@ -445,6 +482,7 @@ case "${1:-}" in
     --wasm)   test_wasm ;;
     --dos)    test_dos ;;
     --c64)    test_c64 ;;
+    --cx16)   test_cx16 ;;
     --pico2)  test_pico2 ;;
     --r4)     test_r4 ;;
     --win)    test_win ;;
@@ -499,6 +537,12 @@ case "${1:-}" in
             echo
             echo "(skipping the Commodore 64: run ./setup.sh --c64 first)"
         fi
+        if [ -x "$WASM_ILC" ] && [ -x "$LLVM_MOS/bin/mos-cx16-clang" ] && find_x16_emulator > /dev/null; then
+            test_cx16
+        else
+            echo
+            echo "(skipping the Commander X16: needs ./setup.sh --c64 and x16emu, see env.sh)"
+        fi
         if [ -x "$WASM_ILC" ] && [ -x "$ARM_TOOLCHAIN/bin/clang" ] && command -v qemu-system-arm > /dev/null; then
             test_pico2
             test_r4
@@ -507,7 +551,7 @@ case "${1:-}" in
             echo "(skipping the microcontrollers: run ./setup.sh --arm first)"
         fi
         ;;
-    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --gpu-air | --uefi | --all | --update]" >&2; exit 2 ;;
+    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --cx16 | --pico2 | --r4 | --win | --mac | --gpu | --gpu-air | --uefi | --all | --update]" >&2; exit 2 ;;
 esac
 
 echo

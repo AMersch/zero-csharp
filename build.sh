@@ -15,6 +15,9 @@
 # With --c64, builds Commodore 64 programs (bin/c64/*.prg), with NativeAOT-LLVM
 # and llvm-mos, a compiler for the 6502 (./setup.sh --c64).
 #
+# With --cx16, builds Commander X16 programs (bin/cx16/*.prg), the same way: an
+# X16 is a 65C02 with 38 KB of fixed RAM (./setup.sh --c64 fetches llvm-mos).
+#
 # With --pico2 or --r4, builds programs for a Cortex-M microcontroller: the
 # Raspberry Pi Pico 2 or the Arduino Uno R4 (bin/pico2/*.elf, bin/r4/*.elf),
 # with NativeAOT-LLVM and Arm Toolchain for Embedded (./setup.sh --arm).
@@ -36,7 +39,7 @@
 # bin/mac/obj (from `./build.sh --native-mac-objects <samples>` on Linux), and
 # needs neither bflat nor Docker: that is how CI's macOS job works.
 #
-# Usage:  ./build.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --uefi] [Sample ...]
+# Usage:  ./build.sh [--wasm | --dos | --c64 | --cx16 | --pico2 | --r4 | --win | --mac | --gpu | --uefi] [Sample ...]
 #         ./build.sh --gpu-air [Sample ...]  the GPU build up to AIR, without a Mac (no program)     default: all samples
 #         ./build.sh --sdk-payload <dir>     what the ZeroCSharp.Sdk package carries (sdk/)
 #         ./build.sh --must-not-compile      check that tests/must-not-compile/*.cs are refused
@@ -165,6 +168,32 @@ C64_SAMPLES=(
     "${SMALL_SAMPLES[@]}"
     C64Demo
     Paddles
+)
+# A Commander X16 has 38 KB of fixed RAM for a program and its memory, 12 KB
+# less than a C64: these fit. SmallBuilders, SmallDoubles, SmallFloats,
+# SmallFormats and SmallDoubleFormats don't, by 0.6 to 3.4 KB. Nothing here
+# uses the X16's banked RAM yet. CX16Demo is for the X16 only (lib/CX16.cs: the
+# screen, sprites, sound, keyboard); it checks itself, at the key tests/input types.
+CX16_SAMPLES=(
+    Tiny
+    Minimal
+    VirtualTest
+    QuizStep1
+    QuizStep2
+    Refs
+    SmallStrings
+    SmallIntegers
+    SmallObjects
+    SmallArena
+    SmallLists
+    SmallDicts
+    SmallStrDicts
+    SmallText
+    SmallUnicode
+    SmallEncoding
+    SmallDecimalFormats
+    SmallKeys
+    CX16Demo
 )
 # A microcontroller has no SIMD to benchmark, and Vga is a PC game. Blink is
 # for microcontrollers only (lib/Board.cs: the LED, registers, a timer). The Uno R4
@@ -649,6 +678,41 @@ build_c64_programs() {
     done
 }
 
+# ---- Commander X16 -----------------------------------------------------------
+#
+# The Commodore 64's pipeline with another config for llvm-mos (mos-cx16.cfg)
+# and another runtime (cx16/runtime.c); the bitcode is the same.
+
+CX16_CORE=bin/cx16/System.Private.CoreLib.dll
+
+check_cx16() {
+    if [ ! -x "$LLVM_MOS/bin/mos-cx16-clang" ]; then
+        echo "Error: no llvm-mos in $C64_TOOLS. Run ./setup.sh --c64" >&2
+        exit 1
+    fi
+}
+
+build_cx16_bitcode() {
+    local name
+    check_bflat
+    check_dos_ilc
+    build_core "$CORE"
+    build_core "$CX16_CORE" -d WASM
+    build_lib
+    for name in "$@"; do
+        echo "[cx16]  $name -> bitcode"
+        compile_bitcode "$name" "bin/cx16/obj/$name" "$CX16_CORE" --Os
+    done
+}
+
+build_cx16_programs() {
+    local name
+    for name in "$@"; do
+        echo "[cx16]  $name -> bin/cx16/$name.prg"
+        zero_bitcode cx16-link "bin/cx16/obj/$name" "$name" cx16/runtime.c "bin/cx16/$name.prg" --llvm-mos "$LLVM_MOS"
+    done
+}
+
 # ---- Cortex-M microcontrollers -----------------------------------------------
 #
 # The same bitcode once more, for a 32-bit Arm microcontroller (see env.sh for
@@ -1079,6 +1143,11 @@ if [ "${1:-}" = "--native-c64-bitcode" ]; then
     build_c64_bitcode "$@"
     exit 0
 fi
+if [ "${1:-}" = "--native-cx16-bitcode" ]; then
+    shift
+    build_cx16_bitcode "$@"
+    exit 0
+fi
 if [ "${1:-}" = "--native-arm-bitcode" ]; then
     shift
     build_arm_bitcode "$@"
@@ -1135,6 +1204,7 @@ case "${1:-}" in
     --wasm) TARGET=wasm; shift ;;
     --dos)  TARGET=dos; shift ;;
     --c64)  TARGET=c64; shift ;;
+    --cx16) TARGET=cx16; shift ;;
     --pico2) TARGET=pico2; shift ;;
     --r4)   TARGET=r4; shift ;;
     --win)  TARGET=win; shift ;;
@@ -1159,6 +1229,8 @@ if [ $# -eq 0 ]; then
         set -- "${DOS_SAMPLES[@]}"
     elif [ "$TARGET" = c64 ]; then
         set -- "${C64_SAMPLES[@]}"
+    elif [ "$TARGET" = cx16 ]; then
+        set -- "${CX16_SAMPLES[@]}"
     elif [ "$TARGET" = pico2 ]; then
         set -- "${ARM_SAMPLES[@]}"
     elif [ "$TARGET" = r4 ]; then
@@ -1191,6 +1263,8 @@ for name in "$@"; do
         :
     elif [ "$TARGET" = c64 ] && [[ " ${C64_SAMPLES[*]} " == *" $name "* ]]; then
         :
+    elif [ "$TARGET" = cx16 ] && [[ " ${CX16_SAMPLES[*]} " == *" $name "* ]]; then
+        :
     elif { [ "$TARGET" = pico2 ] || [ "$TARGET" = r4 ]; } && [[ " ${ARM_SAMPLES[*]} " == *" $name "* ]]; then
         :
     elif [ "$TARGET" = pico2 ] || [ "$TARGET" = r4 ]; then
@@ -1215,6 +1289,7 @@ case "$TARGET" in
     wasm)   output() { echo "bin/wasm/$1.wasm"; } ;;
     dos)    output() { echo "bin/dos/$1.exe"; } ;;
     c64)    output() { echo "bin/c64/$1.prg"; } ;;
+    cx16)   output() { echo "bin/cx16/$1.prg"; } ;;
     pico2 | r4) output() { echo "bin/$TARGET/$1.elf"; } ;;
     win)    output() { echo "bin/win/$1.exe"; } ;;
     mac)    output() { echo "bin/mac/$1"; } ;;
@@ -1366,6 +1441,12 @@ case "$TARGET" in
         build_bitcode_tool
         run c64-bitcode "$@"
         build_c64_programs "$@"
+        ;;
+    cx16)
+        check_cx16
+        build_bitcode_tool
+        run cx16-bitcode "$@"
+        build_cx16_programs "$@"
         ;;
     pico2 | r4)
         check_arm

@@ -16,6 +16,15 @@
 //   it compiles, not of the ones it references. On Windows also a .def file
 //   for the import library, which names the DLL.
 //
+// With Check, for every F# project, it writes nothing and checks the IL
+// instead: ZERO006 for an Arena.Scratch callback whose state is a ref struct.
+// C# keeps scratch memory inside the callback with `scoped`, which F# ignores;
+// F#'s own rules cover the rest (a ref struct can't be returned through a
+// generic result, captured, or kept in a field), but they let the callback
+// store a span from the scope into a ref struct state, through which it
+// outlives the callback. An input passed by value (ScratchActionIn,
+// ScratchFuncIn) is a copy, so those may be ref structs.
+//
 // System.Reflection.Metadata isn't available to inline tasks, so the tables
 // are read here; only what these files need.
 using System;
@@ -28,7 +37,12 @@ using Microsoft.Build.Utilities;
 public class ZeroFSharpNative : Task
 {
     [Required] public string Assembly { get; set; }
-    [Required] public string Source { get; set; }
+    public string Source { get; set; }
+    /// <summary>Check the IL (ZERO006) instead of writing C#.</summary>
+    public bool Check { get; set; }
+    /// <summary>For Check: the assemblies the project references, where the
+    /// types its IL names from other assemblies are defined.</summary>
+    public ITaskItem[] References { get; set; }
     public bool Library { get; set; }
     /// <summary>Windows libraries: where to write the .def file.</summary>
     public string DefFile { get; set; }
@@ -47,7 +61,7 @@ public class ZeroFSharpNative : Task
     private readonly int[][] _columnSizes = new int[64][];
 
     private const int TypeRef = 0x01, TypeDef = 0x02, MethodDef = 0x06, MemberRef = 0x0A,
-        CustomAttribute = 0x0C, NestedClass = 0x29;
+        CustomAttribute = 0x0C, TypeSpec = 0x1B, AssemblyTable = 0x20, AssemblyRef = 0x23, NestedClass = 0x29;
 
     // Coded indexes (II.24.2.6): the tag bits and the tables they select.
     private static readonly int[] TypeDefOrRef = { 0x02, 0x01, 0x1B };
@@ -124,6 +138,8 @@ public class ZeroFSharpNative : Task
     {
         _pe = File.ReadAllBytes(Assembly);
         int cli = ReadHeaders();
+        if (Check)
+            return CheckScratchStates();
         string code;
         if (Library)
         {
@@ -267,6 +283,240 @@ public class ZeroFSharpNative : Task
             File.WriteAllText(DefFile, def.ToString());
         }
         return cs.ToString();
+    }
+
+    // ---- Check: Arena.Scratch states (ZERO006) ------------------------------
+
+    private bool CheckScratchStates()
+    {
+        bool ok = true;
+        for (int row = 1; row <= _rows[TypeSpec]; row++)
+        {
+            int p = _blobs + Cell(TypeSpec, row, 0);
+            CompressedLength(p, out p);
+            // GENERICINST CLASS ScratchAction`1<TState> or ScratchFunc`2<TState, TResult>
+            if (_pe[p] != 0x15 || _pe[p + 1] != 0x12) continue;
+            p += 2;
+            int coded = CompressedInt(ref p);
+            if (TypeDefOrRef[coded % 4] != TypeRef) continue;
+            int delegateRow = coded >> 2;
+            string name = Str(Cell(TypeRef, delegateRow, 1));
+            if ((name != "ScratchAction`1" && name != "ScratchFunc`2") || Str(Cell(TypeRef, delegateRow, 2)) != ""
+                || ReferencedAssembly(delegateRow) != "BflatLib")
+                continue;
+            CompressedInt(ref p);    // the argument count
+            int state = p;
+            string refStruct = RefStructName(ref p);
+            if (refStruct == null) continue;
+            refStruct = refStruct.Split('`')[0];
+            string where = StateUser(state, p - state);
+            Log.LogError(null, "ZERO006", null, Assembly, 0, 0, 0, 0,
+                "An Arena.Scratch callback" + (where != null ? " (" + where + ")" : "") + " has a ref struct, " + refStruct
+                + ", as its state. F# doesn't check what the callback stores in it, so a span from the scope could outlive"
+                + " the callback. Pass it by value instead, Arena.Scratch(input, ScratchFuncIn<...>(fun scratch input -> ...)):"
+                + " the callback then gets a copy. Or use a state that isn't a ref struct.");
+            ok = false;
+        }
+        return ok;
+    }
+
+    // The name of the ref struct at signature p (moved past the type), or null.
+    private string RefStructName(ref int p)
+    {
+        int element = _pe[p];
+        if (element == 0x11 || (element == 0x15 && _pe[p + 1] == 0x11))
+        {
+            bool generic = element == 0x15;
+            p += generic ? 2 : 1;
+            int coded = CompressedInt(ref p);
+            if (generic)
+            {
+                int count = CompressedInt(ref p);
+                for (int i = 0; i < count; i++) SkipType(ref p);
+            }
+            int table = TypeDefOrRef[coded % 4], row = coded >> 2;
+            if (table == TypeDef)
+                return HasAttribute(row, "IsByRefLikeAttribute") ? Str(Cell(TypeDef, row, 1)) : null;
+            if (table == TypeRef)
+            {
+                string name = Str(Cell(TypeRef, row, 1));
+                return IsRefStructRef(row) ? name : null;
+            }
+            return null;
+        }
+        SkipType(ref p);
+        return null;
+    }
+
+    // A type another assembly defines: whether it's a ref struct, read from
+    // that assembly (one of References, found by its assembly name).
+    private bool IsRefStructRef(int row)
+    {
+        var path = new List<string>();
+        int r = row;
+        while (true)
+        {
+            path.Insert(0, Str(Cell(TypeRef, r, 1)));
+            int scope = Cell(TypeRef, r, 0);
+            if (ResolutionScope[scope % 4] != TypeRef) break;
+            r = scope >> 2;
+        }
+        string ns = Str(Cell(TypeRef, r, 2));
+        ZeroFSharpNative other = ReferenceNamed(ReferencedAssembly(row));
+        if (other == null) return false;
+        int type = other.FindType(ns, path);
+        return type != 0 && other.HasAttribute(type, "IsByRefLikeAttribute");
+    }
+
+    private readonly Dictionary<string, ZeroFSharpNative> _references = new Dictionary<string, ZeroFSharpNative>();
+
+    private ZeroFSharpNative ReferenceNamed(string assemblyName)
+    {
+        if (assemblyName == null || References == null) return null;
+        if (_references.Count == 0)
+        {
+            foreach (ITaskItem item in References)
+            {
+                string file = item.GetMetadata("FullPath");
+                if (!File.Exists(file)) continue;
+                var reference = new ZeroFSharpNative { Assembly = file };
+                try
+                {
+                    reference._pe = File.ReadAllBytes(file);
+                    reference.ReadHeaders();
+                }
+                catch (Exception) { continue; }    // not an assembly this reader handles
+                if (reference._rows[AssemblyTable] == 0) continue;
+                string name = reference.Str(reference.Cell(AssemblyTable, 1, 7));
+                if (!_references.ContainsKey(name)) _references.Add(name, reference);
+            }
+        }
+        _references.TryGetValue(assemblyName, out ZeroFSharpNative found);
+        return found;
+    }
+
+    // The assembly a TypeRef (or the type it's nested in) comes from, or null.
+    private string ReferencedAssembly(int row)
+    {
+        while (true)
+        {
+            int scope = Cell(TypeRef, row, 0);
+            int table = ResolutionScope[scope % 4];
+            if (table == AssemblyRef) return Str(Cell(AssemblyRef, scope >> 2, 6));
+            if (table != TypeRef) return null;
+            row = scope >> 2;
+        }
+    }
+
+    // The TypeDef named namespace + path (outer type first), or 0.
+    private int FindType(string ns, List<string> path)
+    {
+        int found = 0;
+        for (int i = 0; i < path.Count; i++)
+        {
+            int match = 0;
+            for (int t = 1; t <= _rows[TypeDef] && match == 0; t++)
+            {
+                if (Str(Cell(TypeDef, t, 1)) != path[i] || EnclosingType(t) != found) continue;
+                if (i == 0 && Str(Cell(TypeDef, t, 2)) != ns) continue;
+                match = t;
+            }
+            if (match == 0) return 0;
+            found = match;
+        }
+        return found;
+    }
+
+    // Whether the TypeDef has an attribute of this name (any namespace).
+    private bool HasAttribute(int type, string attribute)
+    {
+        int parent = type << 5 | 3;    // HasCustomAttribute: TypeDef is tag 3
+        for (int row = 1; row <= _rows[CustomAttribute]; row++)
+        {
+            if (Cell(CustomAttribute, row, 0) != parent) continue;
+            int typeToken = AttributeType(Cell(CustomAttribute, row, 1));
+            int table = typeToken >> 24, typeRow = typeToken & 0xFFFFFF;
+            if ((table == TypeRef || table == TypeDef) && Str(Cell(table, typeRow, 1)) == attribute)
+                return true;
+        }
+        return false;
+    }
+
+    // The method that takes the state (the callback F# made of the lambda),
+    // as Type.method, for the message; null if none is found. The state's
+    // signature is the bytes [start, start + length) of the blob heap; the
+    // callback takes it by reference: BYREF, then the same bytes.
+    private string StateUser(int start, int length)
+    {
+        for (int method = 1; method <= _rows[MethodDef]; method++)
+        {
+            int p = _blobs + Cell(MethodDef, method, 4);
+            int size = CompressedLength(p, out p);
+            for (int i = p; i + length < p + size; i++)
+            {
+                if (_pe[i] != 0x10) continue;
+                bool same = true;
+                for (int j = 0; j < length && same; j++) same = _pe[i + 1 + j] == _pe[start + j];
+                if (same) return RuntimeTypeName(OwningType(method)).Replace("+", ".") + "." + MethodName(method);
+            }
+        }
+        return null;
+    }
+
+    // Moves p past a type in a signature (II.23.2.12).
+    private void SkipType(ref int p)
+    {
+        int element = _pe[p++];
+        switch (element)
+        {
+            case 0x11: case 0x12:    // VALUETYPE, CLASS
+                CompressedInt(ref p);
+                break;
+            case 0x13: case 0x1E:    // VAR, MVAR
+                CompressedInt(ref p);
+                break;
+            case 0x0F: case 0x10: case 0x1D: case 0x45:    // PTR, BYREF, SZARRAY, PINNED
+                SkipType(ref p);
+                break;
+            case 0x1F: case 0x20:    // a custom modifier, then the type
+                CompressedInt(ref p);
+                SkipType(ref p);
+                break;
+            case 0x15:    // GENERICINST
+                p++;
+                CompressedInt(ref p);
+                int count = CompressedInt(ref p);
+                for (int i = 0; i < count; i++) SkipType(ref p);
+                break;
+            case 0x14:    // ARRAY: type, rank, sizes, lower bounds
+                SkipType(ref p);
+                CompressedInt(ref p);
+                int sizes = CompressedInt(ref p);
+                for (int i = 0; i < sizes; i++) CompressedInt(ref p);
+                int bounds = CompressedInt(ref p);
+                for (int i = 0; i < bounds; i++) CompressedInt(ref p);
+                break;
+            case 0x1B:    // FNPTR: a method signature
+                p++;
+                int parameters = CompressedInt(ref p);
+                for (int i = 0; i <= parameters; i++) SkipType(ref p);
+                break;
+            default:    // a primitive type: one byte
+                break;
+        }
+    }
+
+    private int AttributeType(int attributeType)
+    {
+        int table = CustomAttributeType[attributeType % 8], row = attributeType >> 3;
+        if (table == MemberRef)
+        {
+            int parent = Cell(MemberRef, row, 0);
+            return (MemberRefParent[parent % 8] << 24) | (parent >> 3);
+        }
+        if (table == MethodDef)
+            return (TypeDef << 24) | OwningType(row);
+        return 0;
     }
 
     private bool IsUnmanagedCallersOnly(int attributeType)

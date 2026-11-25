@@ -334,7 +334,7 @@ namespace System.Runtime.CompilerServices
         {
             nint constructor = context->cctorMethodAddress;
             context->cctorMethodAddress = 0;
-            ((delegate*<void>)constructor)();
+            ObjectAllocator.RunStaticConstructor(constructor);
         }
 #else
         // Constructors running now, each with the thread running it (its
@@ -428,7 +428,7 @@ namespace System.Runtime.CompilerServices
                     ObjectAllocator.SetWaitingFor(me, null);
                     Unlock();
 
-                    ((delegate*<void>)constructor)();
+                    ObjectAllocator.RunStaticConstructor(constructor);
 
                     Lock();
                     Volatile.Write(ref context->cctorMethodAddress, 0);

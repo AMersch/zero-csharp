@@ -1613,6 +1613,70 @@ test_fsharp_decimal() {
     pass "$name"
 }
 
+# Memory lifetimes from F#: an arena, F# lists and closures in an object
+# scope (static constructors that first run inside it allocate outside it,
+# or DebugChecks stops the program), Arena.Scratch. Both ways fsc optimizes.
+test_fsharp_memory() {
+    local name="F# memory" dir exe opt
+    can_build "$name" || return
+    dir=$(fixture fsmemory)
+    for opt in true false; do
+        rm -rf "$dir/bin" "$dir/obj"
+        if ! run_in "$dir" fsmemory build -p:Optimize=$opt; then fail "$name" "dotnet build failed (Optimize=$opt)"; return; fi
+        exe=$(exe "$dir/bin/Debug/$TFM/fsmemory")
+        "$exe" > "$WORK/fsmemory.out" 2>&1
+        if ! same_output "$WORK/fsmemory.out" "$dir/expected.txt" "$WORK/fsmemory.diff"; then
+            fail "$name" "printed (Optimize=$opt): $(head -c 300 "$WORK/fsmemory.diff")"; return
+        fi
+    done
+    pass "$name"
+}
+
+# sdk/test/fixtures/fs-must-not-compile/cases/*.fs: F# programs the build
+# must refuse, each with the error it must give on its first line
+# (// expect: FS0406). They check that nothing from an Arena.Scratch scope
+# can outlive the callback: by fsc's rules for ref structs, and, for a ref
+# struct as the by-ref state, where F# ignores C#'s `scoped`, by the SDK's
+# own check (ZERO006).
+test_fsharp_must_not_compile() {
+    local name="F# must not compile" dir file case expected failures=""
+    dir=$(fixture fs-must-not-compile)
+    for file in "$dir"/cases/*.fs; do
+        case=$(basename "$file" .fs)
+        expected=$(sed -n '1s|^// expect: ||p' "$file")
+        cp "$file" "$dir/Program.fs"
+        if run_in "$dir" "fs-must-not-compile-$case" build; then
+            failures+=" $case (it built)"
+        elif [ -z "$expected" ] || ! grep -q "error $expected" "$LOG"; then
+            failures+=" $case (not refused with ${expected:-an // expect: line})"
+        fi
+    done
+    if [ -n "$failures" ]; then fail "$name" "$failures"; return; fi
+    pass "$name"
+}
+
+# ZERO006 is for libraries too: the check runs after every F# compile.
+test_fsharp_scratch_ref_struct_state() {
+    local name="F# Scratch ref struct state in a library" dir
+    dir=$(fixture fsmemory fsmemory-own-state)
+    sed -i.bak 's|<OutputType>Exe</OutputType>|<OutputType>Library</OutputType>|' "$dir/fsmemory.fsproj" && rm -f "$dir/fsmemory.fsproj.bak"
+    cat > "$dir/Program.fs" <<'EOF'
+module Leak
+// Not a record: fsc after 10.0.402 gives records a ToString that boxes them,
+// which a ref struct can't be (FS0412).
+[<Struct; System.Runtime.CompilerServices.IsByRefLike>]
+type Holder =
+    val mutable Kept: System.Span<int>
+let leak () =
+    let mutable h = Holder()
+    Arena.Scratch(&h, ScratchAction<Holder>(fun scratch state -> state.Kept <- scratch.AllocSpan<int>(4)))
+    h.Kept.Length
+EOF
+    if run_in "$dir" fsmemory-own-state build; then fail "$name" "a library with a ref struct state built"; return; fi
+    if ! grep -q 'ZERO006.*Holder, as its state' "$LOG"; then fail "$name" "no ZERO006 for the library's Holder state"; return; fi
+    pass "$name"
+}
+
 # An F# program referencing a C# zero library and an F# one.
 test_fsharp_libraries() {
     local name="F# with libraries" dir out
@@ -1794,7 +1858,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
     link_library link_library_passed_on link_library_newer_glibc sdl3 sdl3_windows
     native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe
-    fsharp_program fsharp_printf fsharp_collections fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
+    fsharp_program fsharp_printf fsharp_collections fsharp_memory fsharp_must_not_compile fsharp_scratch_ref_struct_state fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
     fsharp_native_library fsharp_native_library_cross fsharp_native_library_errors)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports

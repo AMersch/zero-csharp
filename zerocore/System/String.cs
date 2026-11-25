@@ -142,6 +142,12 @@ namespace System
 
         public static bool operator !=(string a, string b) => !Equals(a, b);
 
+        // As .NET's: the string's characters, without a copy (null: an empty
+        // span). C# converts a string to a span by itself; F# calls this, so
+        // that a string can be passed where a ReadOnlySpan<char> is taken.
+        public static implicit operator ReadOnlySpan<char>(string value)
+            => value is null ? default : new ReadOnlySpan<char>(ref value._firstChar, value._stringLength);
+
         // A new string holding a copy of these characters; text[a..b] calls it.
         // text.AsSpan(start, length) gives the same characters without a copy.
         public string Substring(int startIndex) => Substring(startIndex, _stringLength - startIndex);

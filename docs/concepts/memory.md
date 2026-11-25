@@ -179,6 +179,24 @@ The price is the callback. Data goes in and out through a state passed by `ref` 
 `ref struct` holding spans of yours) and through the callback's return value, so the lambda can be
 `static` and allocates nothing after its first call.
 
+When the data only goes in, or is a span the callback fills, pass it by value instead: the callback
+gets a copy, which for a span still points at your items:
+
+<!-- sample: samples/Scratch.cs input -->
+```csharp
+// An input passed by value: the callback gets a copy of the span,
+// which points at the same items, so it can fill them.
+Span<int> squares = stackalloc int[4];
+Arena.Scratch(squares,
+    static (scoped ScratchScope scratch, Span<int> output) =>
+    {
+        ScratchList<int> work = scratch.List<int>();
+        for (int i = 1; i <= output.Length; i++)
+            work.Add(i * i);
+        work.AsSpan().CopyTo(output);
+    });
+```
+
 Besides spans, the scope makes lists and text that grow as needed, `ScratchList<T>` and
 `ScratchText`. They are `ref struct`s too, so the same rules keep them inside the callback, and a
 string to keep is copied out into an arena of yours:
@@ -358,11 +376,12 @@ In this sample, a thousand rounds add nothing to it, and the arena keeps a singl
 The scope is `unsafe` for the same reason `Reset` is: objects made inside it die with the arena, so
 nothing may keep a reference to one. The compiler can break that rule for you in two ways:
 
-- **Cached lambdas and static constructors.** A lambda that captures nothing is created the first time
-  it runs and kept in a hidden static field, and a static constructor runs the first time its type is
-  used. If that first time is inside the scope, a static field ends up pointing into the arena. Run
-  such code once before opening a scope. With `Arena.DebugChecks` on when the arena was created,
-  closing the scope checks every static field and stops the program if one points into the arena.
+- **Cached lambdas.** A lambda that captures nothing is created the first time it runs and kept in a
+  hidden static field. If that first time is inside the scope, the static field ends up pointing into
+  the arena. Run such code once before opening a scope. With `Arena.DebugChecks` on when the arena
+  was created, closing the scope checks every static field and stops the program if one points into
+  the arena. Static constructors are safe: whatever one creates is allocated outside every scope, since
+  it's kept for the rest of the program.
 - **Captured variables from outside.** A lambda that captures a variable declared outside the scope is
   cached in the object that holds that variable, which the check can't see. Declare what a lambda
   captures inside the scope, or in a method called from it, as here:

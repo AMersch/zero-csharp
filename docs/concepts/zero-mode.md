@@ -88,6 +88,8 @@ passes it to bflat with `--stdlib:none`, so nothing AGPL-licensed ends up in the
   `Main(string[] args)`;
 - `Math`, `MathF`, `Interlocked`, `Volatile`, and the SIMD types `lib/Kernels.cs` uses;
 - `Half`, `BitOperations`, `BitArray` and `BitConverter`'s bit conversions;
+- `NativeMemory`, on `calloc` and `free`, and the `SupportedOSPlatform`, `UnsupportedOSPlatform`
+  and `ConstantExpected` attributes for code shared with .NET;
 - `System.Numerics`: `Complex`, the vectors, `Matrix3x2`, `Matrix4x4`, `Quaternion` and `Plane`;
   `TensorPrimitives` for spans of `float`; `Tensor<T>`, `TensorSpan<T>` and the `Tensor` class,
   with math for `float`.

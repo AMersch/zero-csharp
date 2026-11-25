@@ -54,6 +54,9 @@ With zerocore, as `build.sh` builds it:
   `ref` receivers in `extension(...)` blocks.
 - **Indices and ranges**: `span[^1]`, `span[1..^1]`, and on strings and arrays, where a range
   makes a copy.
+- **`NativeMemory`**: `Alloc`, `AllocZeroed` and `Free`, for memory you free yourself, and the
+  `SupportedOSPlatform`, `UnsupportedOSPlatform` and `ConstantExpected` attributes, so code
+  shared with .NET builds compiles (see [below](#nativememory)).
 - **`char`'s methods and `System.Text.Encoding`**, with .NET's results for every character:
   `char.IsLetter`, `IsDigit`, `ToUpper`, `GetUnicodeCategory` and the rest (Unicode 16.0), and UTF-8,
   ASCII, Latin-1, UTF-16 and UTF-32 encodings (see [Strings without a GC](strings.html#characters-and-encodings)).
@@ -520,6 +523,52 @@ Check("GetOffsetAndLength", middle.GetOffsetAndLength(5) == (1, 3));
 
 `lib/`'s `List<T>` has no indexer, so `list[^1]` doesn't compile; `list.AsSpan()[^1]` does.
 
+### NativeMemory
+
+`NativeMemory.Alloc`, `AllocZeroed` and `Free` work as in .NET, on the target's `calloc` and `free`,
+so they work on every target, the C64 included (where one block can't be larger than 65,520 bytes).
+It is the one way to free memory by hand, for code shared with .NET that already does: a buffer
+handed to C, or one whose size is known only when the program runs. In new code, prefer an
+[arena](memory.html), which frees many blocks at once and catches mistakes with `Arena.DebugChecks`.
+
+<!-- sample: samples/Core.cs native-memory -->
+```csharp
+// The attributes are for .NET's analyzers; zero mode ignores them.
+[SupportedOSPlatform("linux"), SupportedOSPlatform("windows")]
+[UnsupportedOSPlatform("browser")]
+static bool AllocatesAndFrees(int count)
+{
+    unsafe
+    {
+        // SAFETY: items is freed once, after its last use.
+        int* items =
+            (int*)NativeMemory.Alloc((nuint)count, sizeof(int));
+        for (int i = 0; i < count; i++)
+            items[i] = i * 3;
+        bool kept = true;
+        for (int i = 0; i < count; i++)
+            kept &= items[i] == i * 3;
+        NativeMemory.Free(items);
+        return kept;
+    }
+}
+```
+
+`calloc` zeroes what it returns, so `Alloc` hands out zeroed memory too, unlike .NET's. `Alloc(0)`
+returns a valid pointer that `Free` takes, and `Free(null)` does nothing. Where .NET throws
+`OutOfMemoryException`, for a size the system can't give or a count times size that overflows, zero
+mode ends the program:
+
+```text
+NativeMemory: the size overflows
+```
+
+Nothing checks a block after it is freed: using it then, or freeing it twice, is the same mistake
+it is in C.
+
+`[SupportedOSPlatform]`, `[UnsupportedOSPlatform]` and `[ConstantExpected]` are there for code
+shared with .NET builds, whose analyzers read them. In zero mode they compile and do nothing.
+
 ## Choosing how to dispatch
 
 Interfaces and virtual methods both work, but they don't cost the same. An interface call the compiler
@@ -558,7 +607,8 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
 ## What doesn't work
 
 - **Freeing memory.** Nothing allocated with `new`, boxing or `+` is ever freed. Use
-  [arenas](memory.html) for anything short-lived.
+  [arenas](memory.html) for anything short-lived, or [`NativeMemory`](#nativememory) for a
+  block you free yourself.
 - **Catching exceptions.** `throw` is a panic, like Rust's `panic!` built with `panic = "abort"`:
   it prints the exception's message and ends the program. Nothing unwinds, so no `catch` block runs,
   and neither do the `finally` blocks and `using` disposals between the `throw` and `Main`. A failure

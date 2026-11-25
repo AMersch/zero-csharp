@@ -250,12 +250,17 @@ public static class Program
 
     static byte ByteOf<T>(ref T value, int index) => Unsafe.Add(ref Unsafe.As<T, byte>(ref value), index);
 
-    [SupportedOSPlatform("linux"), SupportedOSPlatform("windows"), UnsupportedOSPlatform("browser")]
+    // docs:native-memory
+    // The attributes are for .NET's analyzers; zero mode ignores them.
+    [SupportedOSPlatform("linux"), SupportedOSPlatform("windows")]
+    [UnsupportedOSPlatform("browser")]
     static bool AllocatesAndFrees(int count)
     {
         unsafe
         {
-            int* items = (int*)NativeMemory.Alloc((nuint)count, sizeof(int));
+            // SAFETY: items is freed once, after its last use.
+            int* items =
+                (int*)NativeMemory.Alloc((nuint)count, sizeof(int));
             for (int i = 0; i < count; i++)
                 items[i] = i * 3;
             bool kept = true;
@@ -265,6 +270,7 @@ public static class Program
             return kept;
         }
     }
+    // docs:end
 
     static bool AllocatesZeroed([ConstantExpected(Min = 1)] int count)
     {

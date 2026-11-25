@@ -49,6 +49,10 @@ Two objects allocated once are not a problem. The same two allocated per request
 line of input are: the program grows until memory runs out. The same goes for boxing and for `a + b` on
 strings, which also call `calloc`.
 
+`NativeMemory.Alloc` and `Free` also work, for a block you free yourself, as in C (see
+[Limits](limits.html#nativememory)). They suit code shared with .NET that already uses them;
+otherwise an arena is the better tool.
+
 ## Arenas free by lifetime
 
 An arena, `lib/Arena.cs`, hands out memory by moving a pointer forward, and frees everything it handed

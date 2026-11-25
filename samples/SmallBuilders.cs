@@ -3,7 +3,8 @@
 // SmallStrings.cs; Strings.cs checks more and doesn't fit in a Commodore 64
 // (./build.sh --c64). Its holes have no format strings ({x:x4}): the first
 // one in a program costs a C64 about 12 KB, and SmallText.cs and
-// SmallFormats.cs check them. It runs on every target.
+// SmallFormats.cs check them. Hex.Of prints hex without that cost. It runs on
+// every target.
 // Exit code = number of failed checks.
 // Build: ./build.sh SmallBuilders
 
@@ -77,6 +78,15 @@ public static class Program
         Check("64-bit numbers", big == "-9223372036854775808|18446744073709551615|-1");
         Check("alignment", Str.Format(arena, $"[{"ab",-4}][{"ab",4}][{7,3}]") == "[ab  ][  ab][  7]");
         Check("characters and booleans", Str.Format(arena, $"{'x'}{true}{false}") == "xTrueFalse");
+        // docs:hex
+        // Hex.Of(x, 4) prints what {x:X4} does, without .NET's
+        // formatting: a negative value at its type's width, .Lower for
+        // lower case, and an alignment as for any hole.
+        string hex = Str.Format(arena,
+            $"{Hex.Of(255, 4)}|{Hex.Of(-1)}|{Hex.Of((sbyte)-2)}|"
+            + $"{Hex.Of(171).Lower}|{Hex.Of(10, 4),6}");
+        Check("Hex.Of", hex == "00FF|FFFFFFFF|FE|ab|  000A");
+        // docs:end
         nuint before = arena.Used;
         string copy = Str.ToArenaString(arena, hello.AsSpan(1, 3));
         Check("ToArenaString", copy == "ell" && arena.Used > before);

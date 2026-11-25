@@ -239,6 +239,15 @@ public static class Out
         public void AppendFormatted(ulong value) => Whole(value, 0);
         public void AppendFormatted(ulong value, int alignment) => Whole(value, alignment);
 
+        // Hex.Of(x, 4): hex without .NET's formatting (see lib/Hex.cs).
+        public void AppendFormatted(Hex value) => AppendFormatted(value, 0);
+
+        public void AppendFormatted(Hex value, int alignment)
+        {
+            Span<char> buffer = stackalloc char[Fmt.MaxChars];
+            Aligned(buffer.Slice(0, value.Format(buffer)), alignment);
+        }
+
         // Any number with a format, {x:X4} or {x,8:F2}, and double, float,
         // Half and decimal with or without one: .NET's format strings.
         public void AppendFormatted<T>(T value) where T : ISpanFormattable => Formatted(value, 0, null);

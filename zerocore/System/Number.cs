@@ -2,11 +2,9 @@ namespace System
 {
     // Numbers as text, for the primitives' ToString (and so for `"n=" + 5`,
     // string.Format and records). Each call allocates the string it returns.
-    //
-    // Doubles get up to 15 significant digits and floats 7, as .NET did
-    // before .NET Core 3.0: always readable and right to 15 digits, but not the shortest text
-    // that reads back to the same bits. lib's Fmt and Out do that.
-    internal static unsafe class Number
+    // Integers without a format take the short path here; everything else,
+    // and the standard format strings, is in Number.Formatting.cs.
+    internal static unsafe partial class Number
     {
         internal static string FormatInt64(long value)
         {
@@ -30,97 +28,106 @@ namespace System
             return FromChars(digits + start, 21 - start);
         }
 
-        // scientificFrom: the decimal exponent from which the text switches to
-        // 1.5E+20 form; by default precision.
-        internal static string FormatDouble(double value, int precision = 15, int scientificFrom = 0)
+        // ToString(format) and TryFormat for the numbers; the formatting itself
+        // is in Number.Formatting.cs. A string is formatted on the stack first
+        // and copied; one too long for that is formatted again into a string
+        // of its exact length.
+        private const int StackChars = 64;
+
+        internal static string IntegerToString(ulong raw, bool signed, int bits, string format)
         {
-            if (scientificFrom == 0)
-                scientificFrom = precision;
-            if (value != value)
-                return "NaN";
-            if (value == 1.0 / 0.0)
-                return "∞";
-            if (value == -1.0 / 0.0)
-                return "-∞";
-            if (value == 0)
-                return (1 / value) < 0 ? "-0" : "0";
-
-            char* text = stackalloc char[32];
-            int length = 0;
-            if (value < 0)
+            char letter = ParseFormat(AsSpan(format), out int precision);
+            char* chars = stackalloc char[StackChars];
+            var sink = new Sink(chars, StackChars);
+            FormatInteger(raw, signed, bits, letter, precision, ref sink);
+            if (sink.Fits)
+                return FromChars(chars, sink.Length);
+            string result = string.Allocate(sink.Length);
+            fixed (char* target = &result.FirstChar)
             {
-                text[length++] = '-';
-                value = -value;
+                sink = new Sink(target, result.Length);
+                FormatInteger(raw, signed, bits, letter, precision, ref sink);
             }
-
-            // precision significant digits: value = digits * 10^(exponent - precision + 1).
-            long low = 1;
-            for (int i = 1; i < precision; i++)
-                low *= 10;
-            long high = low * 10;
-            int exponent = (int)Math.Floor(Math.Log10(value));
-            long digits = (long)Math.Round(value / Math.Pow(10, exponent - precision + 1));
-            if (digits >= high)
-            {
-                digits /= 10;
-                exponent++;
-            }
-            else if (digits < low)
-            {
-                digits = (long)Math.Round(value / Math.Pow(10, exponent - precision));
-                exponent--;
-            }
-
-            char* d = stackalloc char[15];
-            for (int i = precision - 1; i >= 0; i--)
-            {
-                d[i] = (char)('0' + (int)(digits % 10));
-                digits /= 10;
-            }
-            int count = precision;
-            while (count > 1 && d[count - 1] == '0')
-                count--;
-
-            if (exponent >= scientificFrom || exponent < -4)
-            {
-                // 1.5E+20, 1E-05: .NET's scientific form.
-                text[length++] = d[0];
-                if (count > 1)
-                {
-                    text[length++] = '.';
-                    for (int i = 1; i < count; i++)
-                        text[length++] = d[i];
-                }
-                text[length++] = 'E';
-                text[length++] = exponent < 0 ? '-' : '+';
-                int e = exponent < 0 ? -exponent : exponent;
-                if (e >= 100)
-                    text[length++] = (char)('0' + e / 100);
-                text[length++] = (char)('0' + e / 10 % 10);
-                text[length++] = (char)('0' + e % 10);
-            }
-            else if (exponent >= 0)
-            {
-                for (int i = 0; i <= exponent; i++)
-                    text[length++] = i < count ? d[i] : '0';
-                if (count > exponent + 1)
-                {
-                    text[length++] = '.';
-                    for (int i = exponent + 1; i < count; i++)
-                        text[length++] = d[i];
-                }
-            }
-            else
-            {
-                text[length++] = '0';
-                text[length++] = '.';
-                for (int i = -1; i > exponent; i--)
-                    text[length++] = '0';
-                for (int i = 0; i < count; i++)
-                    text[length++] = d[i];
-            }
-            return FromChars(text, length);
+            return result;
         }
+
+        internal static bool TryFormatInteger(ulong raw, bool signed, int bits, Span<char> destination, out int charsWritten, ReadOnlySpan<char> format)
+        {
+            char letter = ParseFormat(format, out int precision);
+            fixed (char* chars = destination)
+            {
+                var sink = new Sink(chars, destination.Length);
+                FormatInteger(raw, signed, bits, letter, precision, ref sink);
+                return Done(ref sink, out charsWritten);
+            }
+        }
+
+        // double, float and Half by their bits (see FormatIeee).
+        internal static string IeeeToString(ulong bits, int fractionBits, int exponentBits, int roundTripDigits, string format)
+        {
+            char letter = ParseFormat(AsSpan(format), out int precision);
+            char* chars = stackalloc char[StackChars];
+            var sink = new Sink(chars, StackChars);
+            FormatIeee(bits, fractionBits, exponentBits, roundTripDigits, letter, precision, ref sink);
+            if (sink.Fits)
+                return FromChars(chars, sink.Length);
+            string result = string.Allocate(sink.Length);
+            fixed (char* target = &result.FirstChar)
+            {
+                sink = new Sink(target, result.Length);
+                FormatIeee(bits, fractionBits, exponentBits, roundTripDigits, letter, precision, ref sink);
+            }
+            return result;
+        }
+
+        internal static bool TryFormatIeee(ulong bits, int fractionBits, int exponentBits, int roundTripDigits, Span<char> destination, out int charsWritten, ReadOnlySpan<char> format)
+        {
+            char letter = ParseFormat(format, out int precision);
+            fixed (char* chars = destination)
+            {
+                var sink = new Sink(chars, destination.Length);
+                FormatIeee(bits, fractionBits, exponentBits, roundTripDigits, letter, precision, ref sink);
+                return Done(ref sink, out charsWritten);
+            }
+        }
+
+        internal static string DecimalToString(ulong lo64, uint hi32, int scale, bool negative, string format)
+        {
+            char letter = ParseFormat(AsSpan(format), out int precision);
+            char* chars = stackalloc char[StackChars];
+            var sink = new Sink(chars, StackChars);
+            FormatDecimal(lo64, hi32, scale, negative, letter, precision, ref sink);
+            if (sink.Fits)
+                return FromChars(chars, sink.Length);
+            string result = string.Allocate(sink.Length);
+            fixed (char* target = &result.FirstChar)
+            {
+                sink = new Sink(target, result.Length);
+                FormatDecimal(lo64, hi32, scale, negative, letter, precision, ref sink);
+            }
+            return result;
+        }
+
+        internal static bool TryFormatDecimal(ulong lo64, uint hi32, int scale, bool negative, Span<char> destination, out int charsWritten, ReadOnlySpan<char> format)
+        {
+            char letter = ParseFormat(format, out int precision);
+            fixed (char* chars = destination)
+            {
+                var sink = new Sink(chars, destination.Length);
+                FormatDecimal(lo64, hi32, scale, negative, letter, precision, ref sink);
+                return Done(ref sink, out charsWritten);
+            }
+        }
+
+        // TryFormat's result: false, and nothing written, if it didn't fit.
+        private static bool Done(ref Sink sink, out int charsWritten)
+        {
+            charsWritten = sink.Fits ? sink.Length : 0;
+            return sink.Fits;
+        }
+
+        internal static ReadOnlySpan<char> AsSpan(string text) =>
+            text == null ? default : new ReadOnlySpan<char>(ref text.FirstChar, text.Length);
 
         internal static string FromChars(char* chars, int length)
         {

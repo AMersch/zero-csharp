@@ -1,6 +1,8 @@
 // The primitive types. The compiler knows their sizes; they need no fields.
 // Each gets Equals, GetHashCode and ToString, which records, anonymous types,
-// EqualityComparer<T> and `"n=" + 5` call.
+// EqualityComparer<T> and `"n=" + 5` call. The numbers also take .NET's
+// standard format strings, ToString("X4") and TryFormat (Number.Formatting.cs),
+// which string.Format and $"{x:F2}" use.
 
 namespace System
 {
@@ -19,7 +21,7 @@ namespace System
 
     // Char is in Char.cs.
 
-    public struct SByte : IEquatable<sbyte>, IComparable<sbyte>, IComparable
+    public struct SByte : IEquatable<sbyte>, IComparable<sbyte>, IComparable, ISpanFormattable
     {
         public int CompareTo(object obj) => obj is sbyte other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type SByte.");
 
@@ -32,9 +34,14 @@ namespace System
         public override bool Equals(object obj) => obj is sbyte other && (sbyte)this == other;
         public override int GetHashCode() => unchecked((int)this);
         public override string ToString() => Number.FormatInt64((long)this);
+        public string ToString(string format) => Number.IntegerToString((ulong)(long)(sbyte)this, true, 8, format);
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null) =>
+            Number.TryFormatInteger((ulong)(long)(sbyte)this, true, 8, destination, out charsWritten, format);
     }
 
-    public struct Byte : IEquatable<byte>, IComparable<byte>, IComparable
+    public struct Byte : IEquatable<byte>, IComparable<byte>, IComparable, ISpanFormattable
     {
         public int CompareTo(object obj) => obj is byte other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Byte.");
 
@@ -47,9 +54,14 @@ namespace System
         public override bool Equals(object obj) => obj is byte other && (byte)this == other;
         public override int GetHashCode() => unchecked((int)this);
         public override string ToString() => Number.FormatUInt64((ulong)this);
+        public string ToString(string format) => Number.IntegerToString((ulong)(byte)this, false, 8, format);
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null) =>
+            Number.TryFormatInteger((ulong)(byte)this, false, 8, destination, out charsWritten, format);
     }
 
-    public struct Int16 : IEquatable<short>, IComparable<short>, IComparable
+    public struct Int16 : IEquatable<short>, IComparable<short>, IComparable, ISpanFormattable
     {
         public int CompareTo(object obj) => obj is short other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Int16.");
 
@@ -62,9 +74,14 @@ namespace System
         public override bool Equals(object obj) => obj is short other && (short)this == other;
         public override int GetHashCode() => unchecked((int)this);
         public override string ToString() => Number.FormatInt64((long)this);
+        public string ToString(string format) => Number.IntegerToString((ulong)(long)(short)this, true, 16, format);
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null) =>
+            Number.TryFormatInteger((ulong)(long)(short)this, true, 16, destination, out charsWritten, format);
     }
 
-    public struct UInt16 : IEquatable<ushort>, IComparable<ushort>, IComparable
+    public struct UInt16 : IEquatable<ushort>, IComparable<ushort>, IComparable, ISpanFormattable
     {
         public int CompareTo(object obj) => obj is ushort other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type UInt16.");
 
@@ -77,9 +94,14 @@ namespace System
         public override bool Equals(object obj) => obj is ushort other && (ushort)this == other;
         public override int GetHashCode() => unchecked((int)this);
         public override string ToString() => Number.FormatUInt64((ulong)this);
+        public string ToString(string format) => Number.IntegerToString((ulong)(ushort)this, false, 16, format);
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null) =>
+            Number.TryFormatInteger((ulong)(ushort)this, false, 16, destination, out charsWritten, format);
     }
 
-    public struct Int32 : IEquatable<int>, IComparable<int>, IComparable
+    public struct Int32 : IEquatable<int>, IComparable<int>, IComparable, ISpanFormattable
     {
         public int CompareTo(object obj) => obj is int other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Int32.");
 
@@ -92,9 +114,14 @@ namespace System
         public override bool Equals(object obj) => obj is int other && (int)this == other;
         public override int GetHashCode() => unchecked((int)this);
         public override string ToString() => Number.FormatInt64((long)this);
+        public string ToString(string format) => Number.IntegerToString((ulong)(long)(int)this, true, 32, format);
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null) =>
+            Number.TryFormatInteger((ulong)(long)(int)this, true, 32, destination, out charsWritten, format);
     }
 
-    public struct UInt32 : IEquatable<uint>, IComparable<uint>, IComparable
+    public struct UInt32 : IEquatable<uint>, IComparable<uint>, IComparable, ISpanFormattable
     {
         public int CompareTo(object obj) => obj is uint other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type UInt32.");
 
@@ -107,9 +134,14 @@ namespace System
         public override bool Equals(object obj) => obj is uint other && (uint)this == other;
         public override int GetHashCode() => unchecked((int)this);
         public override string ToString() => Number.FormatUInt64((ulong)this);
+        public string ToString(string format) => Number.IntegerToString((ulong)(uint)this, false, 32, format);
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null) =>
+            Number.TryFormatInteger((ulong)(uint)this, false, 32, destination, out charsWritten, format);
     }
 
-    public struct Int64 : IEquatable<long>, IComparable<long>, IComparable
+    public struct Int64 : IEquatable<long>, IComparable<long>, IComparable, ISpanFormattable
     {
         public int CompareTo(object obj) => obj is long other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Int64.");
 
@@ -122,9 +154,14 @@ namespace System
         public override bool Equals(object obj) => obj is long other && (long)this == other;
         public override int GetHashCode() => unchecked((int)this ^ (int)((long)this >> 32));
         public override string ToString() => Number.FormatInt64((long)this);
+        public string ToString(string format) => Number.IntegerToString((ulong)(long)this, true, 64, format);
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null) =>
+            Number.TryFormatInteger((ulong)(long)this, true, 64, destination, out charsWritten, format);
     }
 
-    public struct UInt64 : IEquatable<ulong>, IComparable<ulong>, IComparable
+    public struct UInt64 : IEquatable<ulong>, IComparable<ulong>, IComparable, ISpanFormattable
     {
         public int CompareTo(object obj) => obj is ulong other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type UInt64.");
 
@@ -137,9 +174,14 @@ namespace System
         public override bool Equals(object obj) => obj is ulong other && (ulong)this == other;
         public override int GetHashCode() => unchecked((int)this ^ (int)((ulong)this >> 32));
         public override string ToString() => Number.FormatUInt64((ulong)this);
+        public string ToString(string format) => Number.IntegerToString((ulong)this, false, 64, format);
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null) =>
+            Number.TryFormatInteger((ulong)this, false, 64, destination, out charsWritten, format);
     }
 
-    public unsafe struct IntPtr : IEquatable<nint>, IComparable<nint>, IComparable
+    public unsafe struct IntPtr : IEquatable<nint>, IComparable<nint>, IComparable, ISpanFormattable
     {
         public int CompareTo(object obj) => obj is nint other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type IntPtr.");
 
@@ -155,9 +197,14 @@ namespace System
         public override bool Equals(object obj) => obj is nint other && (nint)this == other;
         public override int GetHashCode() => unchecked((int)(long)(nint)this ^ (int)((long)(nint)this >> 32));
         public override string ToString() => Number.FormatInt64((nint)this);
+        public string ToString(string format) => Number.IntegerToString((ulong)(long)(nint)this, true, sizeof(nint) * 8, format);
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null) =>
+            Number.TryFormatInteger((ulong)(long)(nint)this, true, sizeof(nint) * 8, destination, out charsWritten, format);
     }
 
-    public unsafe struct UIntPtr : IEquatable<nuint>, IComparable<nuint>, IComparable
+    public unsafe struct UIntPtr : IEquatable<nuint>, IComparable<nuint>, IComparable, ISpanFormattable
     {
         public int CompareTo(object obj) => obj is nuint other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type UIntPtr.");
 
@@ -173,6 +220,11 @@ namespace System
         public override bool Equals(object obj) => obj is nuint other && (nuint)this == other;
         public override int GetHashCode() => unchecked((int)(ulong)(nuint)this ^ (int)((ulong)(nuint)this >> 32));
         public override string ToString() => Number.FormatUInt64((nuint)this);
+        public string ToString(string format) => Number.IntegerToString((ulong)(nuint)this, false, sizeof(nuint) * 8, format);
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null) =>
+            Number.TryFormatInteger((ulong)(nuint)this, false, sizeof(nuint) * 8, destination, out charsWritten, format);
     }
 
     // float and double have .NET's constants (NaN, PositiveInfinity, MaxValue,
@@ -180,7 +232,7 @@ namespace System
     //
     // Equals here is bit equality, so NaN equals NaN, as .NET's Equals has
     // it (unlike ==); 0.0 and -0.0 are equal, as in .NET.
-    public unsafe struct Single : IEquatable<float>, IComparable<float>, IComparable
+    public unsafe struct Single : IEquatable<float>, IComparable<float>, IComparable, ISpanFormattable
     {
         public int CompareTo(object obj) => obj is float other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Single.");
 
@@ -233,10 +285,22 @@ namespace System
             float value = (float)this == 0 ? 0 : (float)this;
             return *(int*)&value;
         }
-        public override string ToString() => Number.FormatDouble((float)this, 7);
+        public override string ToString() => ToString((string)null);
+        public string ToString(string format)
+        {
+            float value = (float)this;
+            return Number.IeeeToString(*(uint*)&value, 23, 8, 9, format);
+        }
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null)
+        {
+            float value = (float)this;
+            return Number.TryFormatIeee(*(uint*)&value, 23, 8, 9, destination, out charsWritten, format);
+        }
     }
 
-    public unsafe struct Double : IEquatable<double>, IComparable<double>, IComparable
+    public unsafe struct Double : IEquatable<double>, IComparable<double>, IComparable, ISpanFormattable
     {
         public int CompareTo(object obj) => obj is double other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Double.");
 
@@ -290,6 +354,18 @@ namespace System
             long bits = *(long*)&value;
             return unchecked((int)bits ^ (int)(bits >> 32));
         }
-        public override string ToString() => Number.FormatDouble((double)this);
+        public override string ToString() => ToString((string)null);
+        public string ToString(string format)
+        {
+            double value = (double)this;
+            return Number.IeeeToString(*(ulong*)&value, 52, 11, 17, format);
+        }
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null)
+        {
+            double value = (double)this;
+            return Number.TryFormatIeee(*(ulong*)&value, 52, 11, 17, destination, out charsWritten, format);
+        }
     }
 }

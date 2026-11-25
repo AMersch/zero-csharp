@@ -95,7 +95,7 @@ passes it to bflat with `--stdlib:none`, so nothing AGPL-licensed ends up in the
 Much of it is a contract with the compiler, which looks types, methods and fields up by name. Those
 names can't be changed. Compared with zerolib, zerocore adds casts to interfaces, interface calls the
 compiler can't resolve at build time, boxing, `Main(string[] args)`, `BitOperations` and `BitArray`,
-and leaves out `Console`.
+and leaves out `Console` (`lib/` has it).
 
 **`lib/` is the library programs use.** It is ordinary C# built on top of zerocore, and it is where
 zero mode gets what .NET's base class library would otherwise provide:

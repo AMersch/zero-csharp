@@ -1,8 +1,9 @@
 // Buffered stdout writer for zero mode.
 //
-// zerocore has no Console, and bflat's zerolib has one that makes a syscall
-// per character. This writer buffers output, encodes it as UTF-8, prints numbers,
-// bools and spans, and hands each line to libc write() in one call.
+// bflat's zerolib has a Console that makes a syscall per character. This
+// writer buffers output, encodes it as UTF-8, prints numbers, bools and spans,
+// and hands each line to libc write() in one call. Console.WriteLine
+// (lib/Console.cs) writes through it.
 //
 // Out.Line($"x = {x}, name = {name,-8}, ratio = {r:F2}") formats every hole
 // straight into the buffer: no string is built. See Fmt (lib/Str.cs) for the
@@ -237,6 +238,15 @@ public static class Out
         public void AppendFormatted(long value, int alignment) => Whole(value, alignment);
         public void AppendFormatted(ulong value) => Whole(value, 0);
         public void AppendFormatted(ulong value, int alignment) => Whole(value, alignment);
+
+        // Hex.Of(x, 4): hex without .NET's formatting (see lib/Hex.cs).
+        public void AppendFormatted(Hex value) => AppendFormatted(value, 0);
+
+        public void AppendFormatted(Hex value, int alignment)
+        {
+            Span<char> buffer = stackalloc char[Fmt.MaxChars];
+            Aligned(buffer.Slice(0, value.Format(buffer)), alignment);
+        }
 
         // Any number with a format, {x:X4} or {x,8:F2}, and double, float,
         // Half and decimal with or without one: .NET's format strings.

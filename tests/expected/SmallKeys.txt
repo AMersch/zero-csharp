@@ -1,0 +1,8 @@
+Keys, then q:
+key 65 char 97 shift False
+key 90 char 90 shift True
+key 53 char 53 shift False
+key 32 char 32 shift False
+key 190 char 46 shift False
+key 13 char 13 shift False
+done

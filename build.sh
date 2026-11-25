@@ -68,6 +68,7 @@ SMALL_SAMPLES=(
     SmallFormats
     SmallDoubleFormats
     SmallDecimalFormats
+    SmallKeys
 )
 ALL_SAMPLES=(
     Tiny
@@ -102,6 +103,7 @@ ALL_SAMPLES=(
     Unicode
     Numerics
     Formats
+    Keys
     Tensors
     TensorsAvx
     TensorTypes
@@ -142,6 +144,7 @@ DOS_SAMPLES=(
     Unicode
     Numerics
     Formats
+    Keys
     Tensors
     TensorTypes
     "${SMALL_SAMPLES[@]}"
@@ -196,6 +199,7 @@ ARM_SAMPLES=(
     Unicode
     Numerics
     Formats
+    Keys
     Tensors
     TensorTypes
     "${SMALL_SAMPLES[@]}"

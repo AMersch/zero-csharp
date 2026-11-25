@@ -215,9 +215,9 @@ test_hello_compiles() {
 test_console_is_an_error() {
     local dir
     dir=$(fixture console)
-    if run_in "$dir" console build; then fail "console is an error" "the build succeeded"; return; fi
-    if ! grep -qE 'CS0103|CS0234' "$LOG"; then fail "console is an error" "no CS0103/CS0234"; return; fi
-    pass "console is an error"
+    if run_in "$dir" console build; then fail "Console.Error is an error" "the build succeeded"; return; fi
+    if ! grep -q 'CS0117' "$LOG"; then fail "Console.Error is an error" "no CS0117"; return; fi
+    pass "Console.Error is an error"
 }
 
 test_unions_compile() {

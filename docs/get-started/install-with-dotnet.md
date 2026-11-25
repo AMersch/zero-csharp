@@ -164,7 +164,7 @@ needs nothing next to it, unless a C library it links with has a file for run ti
 ## What dotnet build does
 
 It compiles your code twice. First the C# compiler compiles it against zerocore and `lib/`, the way
-your editor sees it, into an IL `.dll`: this is where C# errors come from, and `Console` or any other
+your editor sees it, into an IL `.dll`: this is where C# errors come from, and `DateTime` or any other
 .NET API that zero mode doesn't have is an error here. Then bflat compiles the same sources into the
 native program, with zerocore, `lib/` and any [zero libraries](../how-to/create-a-library.html) the
 project references. Both compile with the project's `LangVersion`, `Features` and `DefineConstants`.

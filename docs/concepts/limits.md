@@ -568,7 +568,7 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
   Return errors as values instead, for example with a union (see above).
 - **Variance.** Casting or dispatching through it (`IEnumerable<string>` as `IEnumerable<object>`,
   `string[]` as `object[]`) aborts with a message saying so, instead of answering wrongly.
-- **Most of the base class library.** No `Console` (use `Out` and `In`), no .NET collections (use
+- **Most of the base class library.** No .NET collections (use
   [`lib/`'s](../how-to/choose-a-collection.html)), no LINQ (use [`lib/Seq.cs`](../how-to/query-data.html)),
   no `System.IO` (use [`File`](../how-to/read-and-write-files.html)), `DateTime`, `Stopwatch` or
   `Random` (use [`Clock` and `Random`](../how-to/use-the-clock-and-random-numbers.html)), no
@@ -600,7 +600,7 @@ These are the issues you may hit with zerocore, as `build.sh` builds:
 | `[DllImport]` of a library not passed with `-i` fails to compile ("Expected type 'Internal.Runtime.CompilerHelpers.InteropHelpers' not found") | Pass `-i <library>`; `build.sh` passes `-i libc -i libm.so.6` |
 | Building without `--no-reflection` fails ("Failed to load type 'Internal.Metadata.NativeFormat.TypeDefinition'") | Pass `--no-reflection`; `build.sh` does |
 | Non-baseline instruction sets (AVX2, FMA, dotprod) report `IsSupported == false` | Build with `-m x86-64-v3` or `-m dotprod`; `build.sh` does this for Simd and Kernels |
-| No `Console`, `Thread` | `lib/Out.cs` for output, `lib/In.cs` for input; `Parallel.For` (`lib/Threads.cs`) for threads |
+| No `Thread` | `Parallel.For` (`lib/Threads.cs`) for threads |
 | `"n=" + 5`, `ToString()` and `string.Format` allocate a string that's never freed | Fine once; in a loop, `Str.Format(arena, $"n={5}")` |
 | Casts and interface calls that need variance abort at run time | Not supported |
 | Windows: x64 only, built from Linux or macOS | `./build.sh --win`; building on Windows (`build.ps1`) is untested |

@@ -241,5 +241,7 @@ its stack the copy takes.
 - A fiber that never yields keeps the others waiting. Long loops should call `Fiber.Yield`.
 - Fibers spawned on a system thread run on that thread, inside its `Fiber.Run`. To use several
   processors, give each `Parallel.For` part its own fibers and its own `Run`.
-- Reading a file or standard input blocks the whole thread, every fiber on it included.
+- Reading a file or standard input blocks the whole thread, every fiber on it included. That holds
+  for a fiber that feeds a `Pipe` from a file too: only `Pipe`'s own `Read` and `Write` let the other
+  fibers run while one waits.
 - A `throw` ends the program, as it does everywhere in zero mode.

@@ -27,7 +27,9 @@ dotnet build
 That gives you a native program in `bin/Debug/zero03/`. The template's `Program.cs`:
 
 ```csharp
-Out.Write("What's your name? ");
+using System;
+
+Console.Write("What's your name? ");
 Span<char> buffer = stackalloc char[64];
 int length = In.ReadLine(buffer);
 ReadOnlySpan<char> name = length switch
@@ -36,9 +38,9 @@ ReadOnlySpan<char> name = length switch
     _ when length > buffer.Length => buffer,
     _ => buffer.Slice(0, length),
 };
-Out.Write("Hello, ");
-Out.Write(name);
-Out.Line("!");
+Console.Write("Hello, ");
+Console.Write(name);
+Console.WriteLine("!");
 ```
 
 Add `-p:ZeroTarget=win-x64` (or `linux-x64`, `linux-arm64`, `osx-arm64`, `uefi-x64`, `uefi-arm64`) to
@@ -150,6 +152,7 @@ nothing AGPL is linked into them.
 |---|---|---|
 | `Tiny` | The smallest program (`-Os`) | 12 KB |
 | `Minimal` | Hello world through `puts` | 12 KB |
+| `Hello` | Hello world through `Console.WriteLine` | 13 KB |
 | `Arena` | The arena allocator: growth, alignment, `Save`/`Restore`, scopes, objects in an arena, debug checks | 35 KB |
 | `Collections` | `List`, `Dict`, `RefList`, `StrDict`, `RefDict`: word counts, sorting, `foreach`, `Clone` | 84 KB |
 | `VirtualTest` | Polymorphism three ways: function-pointer vtables, static abstract interfaces, virtual methods | 15 KB |
@@ -164,7 +167,7 @@ nothing AGPL is linked into them.
 | `Threads` | `Parallel.For` with one arena per thread | 28 KB |
 | `Files` | `lib/File.cs`: whole files, and an open file read, written and moved through | 31 KB |
 | `Dice` | `lib/Random.cs` and `lib/Clock.cs`: seeded dice rolls that match on every target, durations, the date | 29 KB |
-| `Env` | `System.Environment`: variables, `Exit` from anywhere (writing what `Out` holds), the processor count | 20 KB |
+| `Env` | `System.Environment`: variables, `Exit` from anywhere (writing what `Console` holds), the processor count | 20 KB |
 | `Pipe` | `In.Read`: standard input as bytes, checked byte for byte through a pipe | 19 KB |
 | `Records` | `record struct` and `record class`, `with`, `ToString`, `typeof`, anonymous types | 34 KB |
 | `Refs` | Structs in an arena passed and returned by `ref` | 24 KB |

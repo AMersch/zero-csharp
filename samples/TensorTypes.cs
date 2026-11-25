@@ -13,29 +13,29 @@ using System.Numerics.Tensors;
 
 // docs:create
 Tensor<float> a = Tensor.Create(new float[] { 1, 2, 3, 4, 5, 6 }, [2, 3]);
-Out.Line(a.ToString([2, 3]));
-Out.Line("a[1, 2] = " + a[1, 2].ToString());
+Console.WriteLine(a.ToString([2, 3]));
+Console.WriteLine("a[1, 2] = " + a[1, 2].ToString());
 // docs:end
 
 // docs:broadcast
 Tensor<float> row = Tensor.Create(new float[] { 10, 20, 30 }, [3]);
 Tensor<float> sum = a + row; // [3] broadcasts over both rows of [2, 3]
-Out.Line(sum.ToString([2, 3]));
+Console.WriteLine(sum.ToString([2, 3]));
 Tensor<float> scaled = Tensor.Multiply(a, 0.5f);
-Out.Line(scaled.ToString([2, 3]));
+Console.WriteLine(scaled.ToString([2, 3]));
 // docs:end
 
 // docs:views
 // A column is a view with stride 3: no copy, and writes go to a.
 TensorSpan<float> column = a.AsTensorSpan().Slice([NRange.All, 1..2]);
-Out.Line("column sum = " + Tensor.Sum<float>(column).ToString());
+Console.WriteLine("column sum = " + Tensor.Sum<float>(column).ToString());
 column.Fill(0);
-Out.Line(a.ToString([2, 3]));
+Console.WriteLine(a.ToString([2, 3]));
 // Transpose is a view too, with the strides swapped: [3, 2].
 Tensor<float> t = Tensor.Transpose(a);
-Out.Line(t.ToString([3, 2]));
+Console.WriteLine(t.ToString([3, 2]));
 Tensor<float> flat = Tensor.Reshape(a, [6]); // a view of the same 6 floats
-Out.Line(flat.ToString([6]));
+Console.WriteLine(flat.ToString([6]));
 // docs:end
 
 // docs:matmul
@@ -44,7 +44,7 @@ Out.Line(flat.ToString([6]));
 Tensor<float> x = Tensor.Create(new float[] { 1, 2, 3, 4, 5, 6 }, [2, 3]);
 Tensor<float> y = Tensor.Create(new float[] { 1, 0, 0, 1, 2, 2 }, [3, 2]);
 Tensor<float> c = MatMul(x, y);
-Out.Line(c.ToString([2, 2]));
+Console.WriteLine(c.ToString([2, 2]));
 // docs:end
 
 // docs:relu
@@ -52,7 +52,7 @@ Out.Line(c.ToString([2, 2]));
 float[] values = { -2, -0.5f, 0, 0.5f, 2, -1 };
 Tensor<float> h = Tensor.Create(values, [2, 3]);
 Tensor.FilteredUpdate<float>(h, Tensor.LessThan<float>(h, 0f), 0f);
-Out.Line(h.ToString([2, 3]));
+Console.WriteLine(h.ToString([2, 3]));
 // docs:end
 
 // docs:softmax
@@ -67,21 +67,21 @@ for (int i = 0; i < rows.Length; i++)
 // docs:end
 for (int i = 0; i < 2; i++)
 {
-    Out.Write("row " + i.ToString() + ":");
+    Console.Write("row " + i.ToString() + ":");
     for (int j = 0; j < 3; j++)
-        Out.Write(" " + logits[i, j].ToString("F4"));
-    Out.Line("");
+        Console.Write(" " + logits[i, j].ToString("F4"));
+    Console.WriteLine("");
 }
 
 // docs:stack
 Tensor<float> stacked = Tensor.Stack<float>([row, row]);
-Out.Line(stacked.ToString([2, 3]));
+Console.WriteLine(stacked.ToString([2, 3]));
 Tensor<float> joined = Tensor.Concatenate<float>([a, stacked]);
-Out.Line(joined.ToString([4, 3]));
+Console.WriteLine(joined.ToString([4, 3]));
 float max = Tensor.Max<float>(joined);
 nint at = Tensor.IndexOfMax<float>(joined);
 float mean = Tensor.Average<float>(joined);
-Out.Line("max " + max.ToString() + " at " + at.ToString()
+Console.WriteLine("max " + max.ToString() + " at " + at.ToString()
     + ", mean " + mean.ToString());
 // docs:end
 
@@ -103,7 +103,7 @@ for (int step = 0; step < 1000; step++)
     }
 }
 long leaked = GC.GetTotalAllocatedBytes() - before;
-Out.Line("1000 steps: total " + total.ToString()
+Console.WriteLine("1000 steps: total " + total.ToString()
     + ", heap bytes " + leaked.ToString());
 // docs:end
 

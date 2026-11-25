@@ -58,6 +58,7 @@ SMALL_SAMPLES=(
 SAMPLES=(
     Tiny
     Minimal
+    Hello
     Arena
     Collections
     VirtualTest
@@ -106,6 +107,7 @@ POINTER_SIZED=" Arena Collections "
 DOS_SAMPLES=(
     Tiny
     Minimal
+    Hello
     Arena
     Collections
     VirtualTest
@@ -146,6 +148,7 @@ DOS_SAMPLES=(
 C64_SAMPLES=(
     Tiny
     Minimal
+    Hello
     VirtualTest
     QuizStep1
     QuizStep2
@@ -160,6 +163,7 @@ C64_SAMPLES=(
 ARM_SAMPLES=(
     Tiny
     Minimal
+    Hello
     Arena
     Collections
     VirtualTest
@@ -199,6 +203,7 @@ ARM_SAMPLES=(
 R4_SAMPLES=(
     Tiny
     Minimal
+    Hello
     VirtualTest
     Casts
     Core

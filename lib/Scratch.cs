@@ -368,8 +368,11 @@ public delegate TResult ScratchFuncIn<TInput, TResult>(scoped ScratchScope scrat
 
 public partial struct Arena
 {
-    // Each thread's ScratchThread, behind a pthread key (zero mode has no
-    // [ThreadStatic]). The key's destructor frees its arena when the thread ends.
+    // Each thread's ScratchThread, behind a pthread key, whose destructor frees
+    // its arena when the thread ends. Not [ThreadStatic]: that has no hook for
+    // the end of a thread, so each thread's arena would leak (Parallel.For
+    // starts new threads every call), and it is a pthread key underneath
+    // anyway, so it wouldn't be faster.
     static nuint s_scratchKey;
     static int s_scratchKeyState; // 0 none, 1 being created, 2 ready
 

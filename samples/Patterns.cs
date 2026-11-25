@@ -16,7 +16,7 @@ public static class Program
 
     static void Section(string section)
     {
-        Out.Line($"{(s_sectionFailures == 0 ? "PASS" : "FAIL")} {section} ({s_sectionChecks} checks)");
+        Console.WriteLine($"{(s_sectionFailures == 0 ? "PASS" : "FAIL")} {section} ({s_sectionChecks} checks)");
         s_sectionChecks = 0;
         s_sectionFailures = 0;
     }
@@ -28,7 +28,7 @@ public static class Program
         {
             s_failures++;
             s_sectionFailures++;
-            Out.Line($"  FAIL: {name}");
+            Console.WriteLine($"  FAIL: {name}");
         }
     }
 
@@ -39,11 +39,49 @@ public static class Program
 
     static bool Is(ReadOnlySpan<char> actual, string expected) => actual.SequenceEqual(expected);
 
+    // R(pattern).Replace, checked against what .NET gives.
+    static bool Replaced(string pattern, string input, string replacement, string expected, int count = -1)
+    {
+        string actual = R(pattern).Replace(s_arena, input, replacement, count);
+        if (actual != expected)
+            Console.WriteLine($"  {pattern} on {input} with {replacement}: {actual}, not {expected}");
+        return actual == expected;
+    }
+
+    // The pieces of R(pattern).Split as [a|b|c], checked against .NET.
+    static bool SplitInto(string pattern, string input, string expected, int count = 0)
+    {
+        StrBuilder joined = StrBuilder.Create(s_arena);
+        joined.Append('[');
+        bool first = true;
+        foreach (ReadOnlySpan<char> piece in R(pattern).Split(input, count))
+        {
+            if (!first)
+                joined.Append('|');
+            joined.Append(piece);
+            first = false;
+        }
+        joined.Append(']');
+        bool ok = joined.AsSpan().SequenceEqual(expected);
+        if (!ok)
+            Console.WriteLine($"  {pattern} on {input}: {joined.AsSpan()}, not {expected}");
+        return ok;
+    }
+
+    // docs:evaluator
+    // A MatchEvaluator: appends what replaces each match.
+    static void Doubled(RegexMatch match, StrBuilder output)
+    {
+        Str.TryParse(match.Value, out long number);
+        output.Append(2 * number);
+    }
+    // docs:end
+
     static bool Refused(string pattern, string reason, int position)
     {
         bool ok = !Regex.TryCreate(s_arena, pattern, RegexOptions.None, out _, out string error, out int at);
         if (ok && (error != reason || at != position))
-            Out.Line($"  {pattern}: \"{error}\" at {at}");
+            Console.WriteLine($"  {pattern}: \"{error}\" at {at}");
         return ok && error == reason && at == position;
     }
 
@@ -167,11 +205,54 @@ public static class Program
             words == 400 && arena.Used == used && GC.GetTotalAllocatedBytes() == allocated);
         Section("cost");
 
-        Out.Line();
+        // docs:replace
+        string swapped = date.Replace(arena,
+            "on 2026-11-25 and 2025-01-02", "$3/$2/$1");
+        // "on 25/11/2026 and 02/01/2025"
+        // docs:end
+        Check("groups in the replacement", swapped == "on 25/11/2026 and 02/01/2025");
+        Check("${n} and $$", Replaced(@"(\w)(\d)?", "a1b", "[${1}${2}$$]", "[a1$][b$]"));
+        Check("$` $& $' $_", Replaced("b", "abc", "<$`|$&|$'|$_>", "a<a|b|c|abc>c"));
+        Check("$+, the last group", Replaced("(a)(b)?", "ab a", "$+;", "b; ;"));
+        Check("not substitutions", Replaced("(a)", "a", "$10|$01|$2|${2}|${x}|$x|$", "$10|a|$2|${2}|${x}|$x|$"));
+        Check("more edges", Replaced("b", "abc", "<$+>", "a<b>c")
+            && Replaced("(b)", "abc", "<${01}|$0|${}|${1|$>", "a<b|b|${}|${1|$>c")
+            && Replaced("(x)?b", "abc", "<$1|$+>", "a<|>c"));
+        Check("twelve groups",
+            Replaced("(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)(l)", "abcdefghijkl", "$12$13|${12}", "l$13|l"));
+        Check("empty matches", Replaced("x*", "abc", "-", "-a-b-c-") && Replaced("a*", "baaa", "<$&>", "<>b<aaa><>"));
+        Check("a count", Replaced(@"\d", "1 2 3 4", "#", "# # 3 4", 2) && Replaced(@"\d", "1 2", "#", "1 2", 0));
+        // docs:evaluator-use
+        string doubled = R(@"\d+").Replace(arena, "3 apples, 12 pears", &Doubled);
+        // docs:end
+        Check("an evaluator", doubled == "6 apples, 24 pears");
+        int scratchLength = Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            ScratchText text = scratch.Text();
+            R(@"\s+").Replace(text, "a  b \t c", " ");
+            return text.AsSpan().SequenceEqual("a b c") ? text.Length : -1;
+        });
+        Check("into a ScratchText", scratchLength == 5);
+        Section("replace");
+
+        // docs:split
+        int fields = 0;
+        foreach (ReadOnlySpan<char> field in R(@"\s*,\s*").Split("a , b,c,,d"))
+            fields++;           // "a", "b", "c", "", "d"
+        // docs:end
+        Check("pieces", fields == 5 && SplitInto(@"\s*,\s*", "a , b,c,,d", "[a|b|c||d]"));
+        Check("groups between the pieces", SplitInto(@"(-)|(\+)", "1-2+3", "[1|-|2|+|3]"));
+        Check("empty matches", SplitInto("", "abc", "[|a|b|c|]") && SplitInto(@"\d*", "a1b", "[|a||b|]"));
+        Check("a count", SplitInto(",", "a,b,c,d", "[a|b,c,d]", 2) && SplitInto(",", "a,b,c", "[a,b,c]", 1)
+            && SplitInto("(,)", "a,b,c", "[a|,|b,c]", 2));
+        Check("no match, and the ends", SplitInto("x", "abc", "[abc]") && SplitInto(",", ",a,", "[|a|]"));
+        Section("split");
+
+        Console.WriteLine();
         if (s_failures == 0)
-            Out.Line("All checks passed.");
+            Console.WriteLine("All checks passed.");
         else
-            Out.Line($"{s_failures} checks FAILED.");
+            Console.WriteLine($"{s_failures} checks FAILED.");
         return s_failures;
     }
 }

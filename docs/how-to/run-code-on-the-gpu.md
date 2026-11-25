@@ -90,7 +90,7 @@ int wrong = 0;
 for (int i = 0; i < N; i++)
     if (y.Span[i] != 2f * (i % 100) + 1) wrong++;
 long us = (long)(ms * 1000);
-Out.Line($"Saxpy: {N} elements, {us} us on the GPU, {wrong} wrong");
+Console.WriteLine($"Saxpy: {N} elements, {us} us on the GPU, {wrong} wrong");
 ```
 
 - `GpuBuffer<T>.Allocate(n)` makes a buffer of `n` elements that the CPU and the GPU share: on Apple
@@ -269,10 +269,11 @@ static int CheckTensors()
             var columnSlice = tb.Slice([NRange.All, new NRange(j, j + 1)]);
             ReadOnlyTensorSpan<float> bj = Tensor.Reshape(columnSlice, [n]);
             if (Tensor.Dot(ai, bj) != tc[i, j] && failures++ < 5)
-                Out.Line($"Tensors: c[{i}, {j}] differs");
+                Console.WriteLine($"Tensors: c[{i}, {j}] differs");
         }
     }
-    Out.Line($"Tensors: {n} x {n} on the GPU, checked with Tensor.Dot");
+    Console.WriteLine(
+        $"Tensors: {n} x {n} on the GPU, checked with Tensor.Dot");
     a.Free(); b.Free(); c.Free();
     return failures;
 }

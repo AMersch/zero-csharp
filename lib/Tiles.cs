@@ -23,9 +23,10 @@
 // follow it, in the 75 KB below the sprites' part of the video memory ($13000), the
 // same as the bitmap's; see the how-to for the whole plan.
 //
-// Measured, in processor cycles at 8 MHz (a frame is 133,000): Fill 120,000 for a map of
-// 64 by 64; Set and Get about 1,000 a tile; Scroll 400; SetTile 2,700 for 32 bytes. So
-// a frame can change a hundred tiles and scroll; a whole map is refilled about once a frame.
+// Measured, in processor cycles at 8 MHz (a frame is 133,000): Fill 13,000 for a map of
+// 64 by 64 (120,000 on a chip without VERA FX, which fills four bytes at a time with its
+// cache); Set and Get about 1,000 a tile; Scroll 400; SetTile 2,700 for 32 bytes. So a
+// frame can change a hundred tiles and scroll, and a whole map is refilled in a tenth of one.
 
 using System;
 using System.Runtime.InteropServices;

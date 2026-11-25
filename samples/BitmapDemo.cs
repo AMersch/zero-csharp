@@ -27,6 +27,88 @@ public static class Program
     // A pixel, read straight from the video memory: row after row, 320 to a row.
     static int Pixel(int x, int y) => CX16.VPeek(y * 320 + x);
 
+    // Fills of every width from 1 to 9 at every position in a group of 8 pixels: tall, so that the video
+    // chip's cache fills them four pixels at a time with the ends cut off by a mask; short, so that
+    // they are written one by one. Each is checked along one row, with a pixel on either side.
+    static bool FillsAreRight()
+    {
+        bool aligned = true;
+        for (int tall = 0; tall < 2; tall++)
+            for (int x = 100; x < 108; x++)
+                for (int w = 1; w <= 9; w++)
+                {
+                    Bitmap.Fill(x, 62, w, tall == 1 ? 130 : 3, 77);
+                    int row = tall == 1 ? 120 : 63;
+                    bool right = Pixel(x - 1, row) == 0 && Pixel(x + w, row) == 0 && Pixel(x - 1, 62) == 0 && Pixel(x + w, 62) == 0;
+                    for (int i = 0; i < w; i++)
+                        right &= Pixel(x + i, row) == 77 && Pixel(x + i, 62) == 77;
+                    if (tall == 1)
+                        right &= Pixel(x, 191) == 77 && Pixel(x + w - 1, 191) == 77 && Pixel(x, 192) == 0 && Pixel(x, 61) == 0;
+                    aligned &= right;
+                    Bitmap.Fill(x - 1, 61, w + 2, 133, 0);
+                }
+        return aligned;
+    }
+
+    // A line drawn between two points, in an empty part of the picture, checked pixel by pixel: both
+    // ends are set, and in every step along the longer side there is exactly one pixel, at most one
+    // away from the exact line (the video chip's line helper rounds the slope to 9 bits).
+    static bool LineIsRight(int x0, int y0, int x1, int y1)
+    {
+        Bitmap.Fill(0, 60, 320, 140, 0);
+        Bitmap.Line(x0, y0, x1, y1, 77);
+        int dx = x1 - x0, dy = y1 - y0;
+        int adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
+        bool ok = Pixel(x0, y0) == 77 && Pixel(x1, y1) == 77;
+        bool alongX = adx >= ady;
+        int major = alongX ? adx : ady, minor = alongX ? ady : adx;
+        for (int i = 0; i <= major && ok; i++)
+        {
+            int q = major == 0 ? 0 : (2 * minor * i + major) / (2 * major);        // the exact line, rounded
+            int along = i, across = q;
+            int px = x0 + (alongX ? (dx < 0 ? -along : along) : (dx < 0 ? -across : across));
+            int py = y0 + (alongX ? (dy < 0 ? -across : across) : (dy < 0 ? -along : along));
+            int found = 0, off = 0;
+            for (int k = -2; k <= 2; k++)
+            {
+                int cx = alongX ? px : px + k, cy = alongX ? py + k : py;
+                if (Pixel(cx, cy) == 77)
+                {
+                    found++;
+                    off = k < 0 ? -k : k;
+                }
+            }
+            ok = found == 1 && off <= 1;
+        }
+        return ok;
+    }
+
+    // Lines in every direction: the eight octants, long and short, through (160, 130).
+    static bool LinesAreRight()
+    {
+        bool lines = true;
+        lines &= LineIsRight(160, 130, 260, 160);    // right and down, shallow
+        lines &= LineIsRight(160, 130, 260, 100);    // right and up, shallow
+        lines &= LineIsRight(160, 130, 60, 160);     // left and down, shallow
+        lines &= LineIsRight(160, 130, 60, 100);     // left and up, shallow
+        lines &= LineIsRight(160, 130, 190, 190);    // down and right, steep
+        lines &= LineIsRight(160, 130, 190, 70);     // up and right, steep
+        lines &= LineIsRight(160, 130, 130, 190);    // down and left, steep
+        lines &= LineIsRight(160, 130, 130, 70);     // up and left, steep
+        lines &= LineIsRight(160, 130, 220, 190);    // the diagonals
+        lines &= LineIsRight(160, 130, 100, 70);
+        lines &= LineIsRight(160, 130, 100, 190);
+        lines &= LineIsRight(160, 130, 220, 70);
+        lines &= LineIsRight(160, 70, 160, 190);     // straight down
+        lines &= LineIsRight(160, 190, 160, 70);     // and up
+        lines &= LineIsRight(160, 130, 163, 131);    // very short ones
+        lines &= LineIsRight(160, 130, 161, 132);
+        lines &= LineIsRight(60, 100, 319, 190);     // long, to the edge of the picture
+        lines &= LineIsRight(0, 61, 319, 198);       // and across all of it
+        Bitmap.Fill(0, 60, 320, 140, 0);
+        return lines;
+    }
+
     // docs:picture
     static void Draw()
     {
@@ -76,6 +158,14 @@ public static class Program
 
         // The shapes, one by one, in an empty part of the picture.
         Bitmap.Fill(0, 60, 320, 140, 0);
+
+        bool aligned = FillsAreRight();
+        Check("fills of every width at every alignment, tall and short", aligned);
+        Check("a fill across the middle of the picture", Bitmap.Get(0, 100) == 0 && Bitmap.Get(319, 100) == 0);
+        Bitmap.Fill(0, 100, 320, 40, 21);
+        Check("the whole width, tall enough for the chip's cache", Pixel(0, 100) == 21 && Pixel(319, 139) == 21 && Pixel(160, 120) == 21
+            && Pixel(0, 99) == 0 && Pixel(0, 140) == 0 && Pixel(319, 140) == 0);
+        Bitmap.Fill(0, 100, 320, 40, 0);
         Bitmap.Plot(10, 70, 200);
         Check("Plot and Get", Pixel(10, 70) == 200 && Bitmap.Get(10, 70) == 200 && Bitmap.Get(11, 70) == 0);
         Bitmap.Plot(-1, 70, 9); Bitmap.Plot(320, 70, 9); Bitmap.Plot(5, -1, 9); Bitmap.Plot(5, 240, 9);
@@ -114,6 +204,9 @@ public static class Program
         Bitmap.Line(-5, 195, 5, 199, 7);
         Check("a line that starts outside", Pixel(0, 197) == 7 && Pixel(5, 199) == 7);
 
+        bool lines = LinesAreRight();
+        Check("lines in every direction have both ends, one pixel a step, and stay within one pixel of the exact line", lines);
+
         Bitmap.Rectangle(200, 120, 30, 20, 10);
         Check("Rectangle", Pixel(200, 120) == 10 && Pixel(229, 120) == 10 && Pixel(200, 139) == 10 && Pixel(229, 139) == 10
             && Pixel(214, 120) == 10 && Pixel(200, 130) == 10 && Pixel(229, 130) == 10 && Pixel(210, 130) == 0);
@@ -140,6 +233,19 @@ public static class Program
                 if (Pixel(40 + bit, 175 + row) == 1)
                     strokes++;
         Check("Text without one lets the picture show", see && strokes > 8 && strokes < 40);
+
+        // The same without the video chip's helpers, the way an older chip works (and the way the
+        // emulator is tested against: the results must be as right either way).
+        CX16.UseVeraFx = false;
+        Check("without FX: the helpers are off", !CX16.UseVeraFx);
+        Bitmap.Fill(0, 60, 320, 140, 0);
+        Check("without FX: fills at every alignment", FillsAreRight());
+        Check("without FX: lines in every direction", LinesAreRight());
+        Bitmap.Clear(0);
+        Check("without FX: Clear", Pixel(0, 0) == 0 && Pixel(319, 239) == 0 && Pixel(160, 120) == 0);
+        CX16.UseVeraFx = true;
+        Check("with FX again", CX16.UseVeraFx == CX16.HasVeraFx);
+        Bitmap.Fill(0, 60, 320, 140, 0);
 
         // The palette.
         CX16.SetColor(77, 15, 9, 3);

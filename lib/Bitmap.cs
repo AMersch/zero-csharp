@@ -14,13 +14,17 @@
 // above ($13000), and the text, in 40 by 30 characters, in front of the picture:
 // text color 0 doesn't hide it. Everything here does nothing in another screen
 // mode (see CX16.SetMode), and what is outside the picture is cut off. Drawing is
-// done by C routines on the video chip's data port. Measured, in processor cycles at 8
-// MHz (a frame is 133,000): Clear 460,000; Fill 650,000 for the whole picture, 2,000
-// for a row of 100 (it writes 8 pixels at a time); Line 116,000 across the picture,
-// about 360 a pixel; Circle 133,000 for a radius of 100; Text 12,000 a character with
-// a background, 15,000 without; Plot 1,500 (most of it the call from C#: a lot of
-// pixels want Fill, Line or Text). So a frame holds a few hundred pixels of lines and
-// some of fill; a whole picture is redrawn a few times a second, not 60.
+// done by C routines on the video chip's data port, and where the chip has VERA FX (see
+// CX16.HasVeraFx) with its helpers: Clear and Fill write four pixels at a time with its
+// cache, and a line is stepped along by its line helper. Measured, in processor cycles
+// at 8 MHz (a frame is 133,000), with FX / without it: Clear 127,000 / 460,000; Fill of
+// the whole picture 133,000 / 650,000, of 100 by 50 pixels 25,000 / 100,000; Line across
+// the picture 6,700 / 116,000 (a line from the helper is within a pixel of the exact one,
+// both ends exact; a line that leaves the picture is drawn without it); Circle 133,000
+// for a radius of 100; Text 12,000 a character with a background, 15,000 without; Plot
+// 1,500, most of it the call from C#: a lot of pixels want Fill, Line or Text. So a
+// frame holds a whole picture's fill, or a few dozen lines; the whole picture can be
+// cleared and redrawn about once a frame.
 
 using System;
 using System.Runtime.InteropServices;

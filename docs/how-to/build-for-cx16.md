@@ -159,10 +159,39 @@ anything from $00000 to $1F9BF is free):
 | $1F000 to $1F7FF | the character set |
 | $1F9C0 to $1FFFF | the video chip's own registers: sound, palette, sprite attributes |
 
-Speed, measured at 8 MHz (a frame is 133,000 cycles): `Clear` 460,000; `Fill` of the whole picture 650,000, of a
-row of 100 pixels 2,000; `Line` across the picture 116,000; `Circle` of radius 100 133,000; `Text` 12,000 a
-character; `Plot` 1,500 (mostly the call). A picture is redrawn a few times a second, not 60. `samples/BitmapDemo.cs`
-draws one and checks every function against the video memory.
+Speed, measured at 8 MHz (a frame is 133,000 cycles), with the video chip's FX helpers (see below) and without
+them:
+
+| | with FX | without |
+|-|---------|---------|
+| `Clear` (76,800 pixels) | 127,000 | 460,000 |
+| `Fill`, the whole picture | 133,000 | 650,000 |
+| `Fill`, 100 by 50 pixels | 25,000 | 100,000 |
+| `Line` across the picture | 6,700 | 116,000 |
+| `Circle` of radius 100 | 133,000 | 133,000 |
+| `Text`, a character | 12,000 | 12,000 |
+| `Plot` | 1,500 | 1,500 |
+
+`Plot` is mostly the call from C#: a lot of pixels want `Fill`, `Line` or `Text`. With FX a frame holds a whole
+picture's fill or a few dozen lines. `samples/BitmapDemo.cs` draws a picture and checks every function against the
+video memory, with the helpers and again without them.
+
+### VERA FX
+
+From VERA 0.3.1 on, the video chip has helpers (FX) for drawing. `CX16.HasVeraFx` says whether this one has them (the
+emulator does; the chip says so in its version registers, DCSEL 63, whose first byte is "V"). `Bitmap` and `Tiles` use
+them where they pay, and do the same without them, slower; `CX16.UseVeraFx = false` switches them off, to compare the
+two ways.
+
+- **Cache fills:** `Bitmap.Clear`, `Fill` (from 16 pixels wide, or 32 tall) and `Tiles.Fill`. A write to the data port
+  with the cache on writes four bytes, with a mask for the ends of a row (a bit for each nibble, both of a byte's bits
+  set to leave it alone), so a row of any width and position is whole groups of four.
+- **Lines:** `Bitmap.Line`, for a line that is wholly on the picture. The line helper steps one address along the longer
+  axis and another along the shorter one when its slope accumulator carries. The slope has 9 fractional bits, so a pixel
+  in the middle of a long line can be one off Bresenham's, and the two ends are always exact.
+- FX is switched on only while a call needs it, with the interrupts off (the KERNAL's own writes to the video memory,
+  those of the mouse pointer, must not become cache writes): so a long `Clear` delays the mouse by its 127,000 cycles.
+- Not used yet: the polygon filler, the affine helper for tiles and bitmaps, and the 32-bit multiplier.
 
 ## Tiles
 

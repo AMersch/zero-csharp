@@ -75,6 +75,8 @@ public static class CX16
     [DllImport("libc")] static safe extern int cx16_mouse(int field);
     [DllImport("libc")] static safe extern void cx16_set_date_time(int year, int month, int day, int hour, int minute, int second);
     [DllImport("libc")] static safe extern int cx16_entropy();
+    [DllImport("libc")] static safe extern int cx16_has_fx();
+    [DllImport("libc")] static safe extern int cx16_use_fx(int on);
     [DllImport("libc")] static safe extern void cx16_set_color(int index, int red, int green, int blue);
     [DllImport("libc")] static safe extern int cx16_get_color(int index);
     [DllImport("libc")] static safe extern void cx16_voice(int voice, int frequency, int volume, int waveform);
@@ -183,6 +185,18 @@ public static class CX16
         int columns = cx16_columns();
         return column >= 0 && column < columns && row >= 0 && row < cx16_rows()
             && row * columns + column + count <= columns * cx16_rows();
+    }
+
+    // ---- the video chip's helpers ----------------------------------------------------------
+
+    /// <summary>Whether the video chip has VERA FX (from VERA 0.3.1 on, and in the emulator): helpers that draw faster. Bitmap uses them when they are there, and does the same without them, slower.</summary>
+    public static bool HasVeraFx => cx16_has_fx() != 0;
+
+    /// <summary>Whether Bitmap and Tiles use the video chip's helpers: true if it has them, unless a program says false, to compare the two ways or to test the one that works without them. Setting it true on a chip without them has no effect.</summary>
+    public static bool UseVeraFx
+    {
+        get => cx16_use_fx(-1) != 0;
+        set => cx16_use_fx(value ? 1 : 0);
     }
 
     // ---- the palette ------------------------------------------------------------------

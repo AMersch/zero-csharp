@@ -994,12 +994,36 @@ void cs_cx16_vpoke2(u32 address, i32 first, i32 second)
     VERA.data0 = (unsigned char)second;
 }
 
-// `count` pairs of bytes, from an address: a whole tile map of one tile.
+static char has_fx(void);
+static void fx_begin4(unsigned char a, unsigned char b, unsigned char c, unsigned char d);
+static void fx_end(void);
+
+// `count` pairs of bytes, from an address: a whole tile map of one tile. With the video chip's
+// cache (see fx_begin) four bytes, two pairs, go in a write; the address must then be a
+// multiple of 4.
 void cs_cx16_vfill2(u32 address, i32 count, i32 first, i32 second)
 {
     unsigned char a = (unsigned char)first, b = (unsigned char)second;
+    unsigned n = (unsigned)count;
+    if (n >= 16 && (address & 3) == 0 && has_fx()) {
+        unsigned groups = n / 2;
+        fx_begin4(a, b, a, b);
+        vera_at(address, 3);                        // up by 4
+        unsigned g = groups;
+        for (; g >= 8; g -= 8) {
+            VERA.data0 = 0; VERA.data0 = 0; VERA.data0 = 0; VERA.data0 = 0;
+            VERA.data0 = 0; VERA.data0 = 0; VERA.data0 = 0; VERA.data0 = 0;
+        }
+        while (g-- != 0)
+            VERA.data0 = 0;
+        fx_end();
+        address += (u32)groups * 4;
+        n -= groups * 2;
+        if (n == 0)
+            return;
+    }
     vera_at(address, 1);
-    for (unsigned n = (unsigned)count; n != 0; n--) {
+    for (; n != 0; n--) {
         VERA.data0 = a;
         VERA.data0 = b;
     }
@@ -1084,6 +1108,85 @@ i32 cs_cx16_get_color(i32 index)        // 12 bits: red, green, blue, 4 each
 #define BITMAP_WIDTH 320
 #define BITMAP_HEIGHT 240
 
+// ---- VERA FX: the video chip's helpers (from VERA 0.3.1 on) -------------------------------
+//
+// A video chip that has them says so in its version registers (DCSEL 63): the first byte
+// is "V". The helper used here is the cache: a write to the data port with "cache write"
+// on writes four bytes, the ones in the cache, to the address (rounded down to 4) in place
+// of the one byte written, and the address goes on by 4 (increment code 3): a fill four
+// times faster, 2 cycles a pixel. FX is switched off again after every use, and the
+// interrupts are off meanwhile: the KERNAL's own writes to the video memory (the mouse
+// pointer) must not be turned into cache writes.
+
+static signed char fx_known = -1;
+
+static char has_fx_chip(void)
+{
+    if (fx_known < 0) {
+        VERA.control = 63 << 1;
+        fx_known = VERA.display.dcver0 == 'V';
+        VERA.control = 0;
+    }
+    return fx_known;
+}
+
+i32 cs_cx16_has_fx(void) { return has_fx_chip(); }
+
+static signed char fx_switched_off;                 // the program asked for no FX
+
+static char has_fx(void) { return has_fx_chip() && !fx_switched_off; }
+
+// Whether the helpers are used: they are, if the chip has them, until a program says no (to compare, or to
+// test the way that works without them). on: 1 or 0 to say, -1 to ask. Returns 1 if they are in use.
+i32 cs_cx16_use_fx(i32 on)
+{
+    if (on >= 0)
+        fx_switched_off = on == 0;
+    return has_fx_chip() && !fx_switched_off;
+}
+
+// Switches the cache on, holding four bytes of one value. Until fx_end, the interrupts are
+// off and every write to the data port is a cache write: its value says which of the four
+// bytes are left alone. It has a bit for each nibble, 8 in all, bit 0 for the low nibble of
+// the byte at the address: a byte is left alone entirely when both of its bits are set (3 for
+// the first byte, 12 for the second, 48, 192), and half of it when one is. 0 writes all four.
+static void fx_begin4(unsigned char a, unsigned char b, unsigned char c, unsigned char d)
+{
+    __asm__ volatile("sei" ::: "memory");
+    VERA.control = 6 << 1;                          // DCSEL 6: the cache
+    VERA.display.fxcachel = a;
+    VERA.display.fxcachem = b;
+    VERA.display.fxcacheh = c;
+    VERA.display.fxcacheu = d;
+    VERA.control = 2 << 1;                          // DCSEL 2: FX_CTRL
+    VERA.display.fxctrl = 0x40;                     // cache write enable
+    VERA.control = 0;
+}
+
+static void fx_begin(unsigned char value) { fx_begin4(value, value, value, value); }
+
+static void fx_end(void)
+{
+    VERA.control = 2 << 1;
+    VERA.display.fxctrl = 0;
+    VERA.control = 0;
+    __asm__ volatile("cli" ::: "memory");
+}
+
+// Fills `groups` times 4 bytes of the video memory from `address` (a multiple of 4) with a value.
+static void fx_fill_groups(u32 address, unsigned groups, unsigned char value)
+{
+    fx_begin(value);
+    vera_at(address, 3);                            // up by 4
+    for (; groups >= 8; groups -= 8) {
+        VERA.data0 = 0; VERA.data0 = 0; VERA.data0 = 0; VERA.data0 = 0;
+        VERA.data0 = 0; VERA.data0 = 0; VERA.data0 = 0; VERA.data0 = 0;
+    }
+    while (groups-- != 0)
+        VERA.data0 = 0;
+    fx_end();
+}
+
 static char in_bitmap(void)
 {
     if (current_mode < 0)
@@ -1106,6 +1209,10 @@ void cs_cx16_bitmap_clear(i32 color)
     if (!in_bitmap())
         return;
     unsigned char value = (unsigned char)color;
+    if (has_fx()) {
+        fx_fill_groups(0, 19200u, value);           // 76,800 pixels, 4 at a time
+        return;
+    }
     vera_at(0, 1);
     for (unsigned i = 0; i < 9600u; i++) {          // 76,800 pixels, 8 at a time (an int has 16 bits: no 320 * 240)
         VERA.data0 = value; VERA.data0 = value; VERA.data0 = value; VERA.data0 = value;
@@ -1154,9 +1261,35 @@ void cs_cx16_bitmap_fill(i32 x, i32 y, i32 width, i32 height, i32 color)
     if (x >= x1 || y >= y1)
         return;
     unsigned count = (unsigned)(x1 - x);
+    unsigned char value = (unsigned char)color;
+    if (has_fx() && (count >= 16 || (y1 - y) >= 32)) {
+        // Whole groups of 4 pixels, the first and the last cut by the mask: the cache's
+        // write value says which of the four bytes to leave alone. A small one isn't faster
+        // this way, only about as fast: the call from C# costs more than it.
+        static const unsigned char before[4] = { 0x00, 0x03, 0x0F, 0x3F };   // none | byte 0 | 0 and 1 | 0 to 2
+        static const unsigned char after[4] = { 0xFC, 0xF0, 0xC0, 0x00 };    // bytes 1 to 3 | 2 and 3 | 3 | none
+        unsigned first = (unsigned)x & ~3u, last = (unsigned)(x1 - 1) & ~3u;
+        unsigned char headMask = before[(unsigned)x & 3];
+        unsigned char tailMask = after[(unsigned)(x1 - 1) & 3];
+        unsigned middle = (last - first) / 4;           // groups between the first and the last
+        fx_begin(value);
+        for (i32 row = y; row < y1; row++) {
+            vera_at_pixel(first, (unsigned)row, 3);     // up by 4 a write
+            if (middle == 0) {
+                VERA.data0 = headMask | tailMask;
+            } else {
+                VERA.data0 = headMask;
+                for (unsigned n = middle - 1; n != 0; n--)
+                    VERA.data0 = 0;
+                VERA.data0 = tailMask;
+            }
+        }
+        fx_end();
+        return;
+    }
     for (i32 row = y; row < y1; row++) {
         vera_at_pixel((unsigned)x, (unsigned)row, 1);
-        run_of((unsigned char)color, count);
+        run_of(value, count);
     }
 }
 
@@ -1173,7 +1306,54 @@ static void plot_checked(int x, int y, unsigned char color)
 // bits: a point that far off the picture is as good as any other for what is drawn.
 static int near_screen(i32 v) { return v < -8000 ? -8000 : v > 8000 ? 8000 : (int)v; }
 
-// A line from one point to another (Bresenham), cut to the screen pixel by pixel.
+// A line by the video chip's line helper (FX): it steps ADDR1 along the longer axis of the
+// line (its increment) and, when its slope accumulator carries, also by ADDR0's increment, the
+// step along the shorter one. So there is one write to DATA1 for each pixel, about 10 cycles,
+// where Bresenham's plot takes 360. The slope is the shorter side over the longer, 0 to 1,
+// in 9 fractional bits, and the accumulator starts at a half: pixel k is k * slope + 1/2 down.
+// The slope is rounded, which can move a pixel in the middle by one, but the end is exact:
+// 0.5 + N * slope stays within 0.31 of the true value for N up to 319. Only for lines
+// that are wholly on the screen (the helper doesn't cut), and 3 or more pixels long.
+static void fx_line(int ax, int ay, int bx, int by, unsigned char color)
+{
+    int dx = bx - ax, dy = by - ay;
+    unsigned adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
+    char alongX = adx >= ady;
+    unsigned major = alongX ? adx : ady, minor = alongX ? ady : adx;
+    // Steps, as the increment byte of ADDRx_H wants them: code in bits 7:4 (1 is 1, 14 is 320),
+    // 8 for "minus". The major step goes along the longer axis, the minor one along the other.
+    unsigned char one = (unsigned char)((1 << 4) | (dx < 0 ? 8 : 0)), row = (unsigned char)((14 << 4) | (dy < 0 ? 8 : 0));
+    unsigned char rowByX = (unsigned char)((14 << 4) | (dy < 0 ? 8 : 0)), colByY = (unsigned char)((1 << 4) | (dx < 0 ? 8 : 0));
+    unsigned char majorStep = alongX ? one : row, minorStep = alongX ? rowByX : colByY;
+    unsigned slope = (unsigned)(((u32)minor * 512ul + major / 2) / major);      // 0 to 512
+    u32 start = ((u32)(unsigned)ay << 8) + ((u32)(unsigned)ay << 6) + (unsigned)ax;
+    unsigned count = major + 1;
+
+    __asm__ volatile("sei" ::: "memory");
+    VERA.control = 2 << 1;                          // DCSEL 2
+    VERA.display.fxctrl = 1;                        // address 1 works as the line helper
+    VERA.control = 3 << 1;                          // DCSEL 3: the slope (writing its high byte also starts the accumulator at a half)
+    VERA.display.fxxincrl = (unsigned char)slope;
+    VERA.display.fxxincrh = (unsigned char)(slope >> 8);
+    VERA.control = 0;                               // ADDR0: its step is the one along the shorter axis
+    VERA.address = 0;
+    VERA.address_hi = minorStep;
+    VERA.control = 1;                               // ADDR1: the start, and the step along the longer axis
+    VERA.address = (unsigned)start;
+    VERA.address_hi = (unsigned char)(majorStep | (unsigned char)(start >> 16));
+    for (; count >= 8; count -= 8) {
+        VERA.data1 = color; VERA.data1 = color; VERA.data1 = color; VERA.data1 = color;
+        VERA.data1 = color; VERA.data1 = color; VERA.data1 = color; VERA.data1 = color;
+    }
+    while (count-- != 0)
+        VERA.data1 = color;
+    VERA.control = 2 << 1;
+    VERA.display.fxctrl = 0;
+    VERA.control = 0;
+    __asm__ volatile("cli" ::: "memory");
+}
+
+// A line from one point to another, cut to the screen pixel by pixel.
 void cs_cx16_bitmap_line(i32 x0, i32 y0, i32 x1, i32 y1, i32 color)
 {
     if (!in_bitmap())
@@ -1182,6 +1362,14 @@ void cs_cx16_bitmap_line(i32 x0, i32 y0, i32 x1, i32 y1, i32 color)
         i32 left = x0 < x1 ? x0 : x1, right = x0 < x1 ? x1 : x0;
         cs_cx16_bitmap_fill(left, y0, right - left + 1, 1, color);
         return;
+    }
+    if (has_fx() && (unsigned long)x0 < BITMAP_WIDTH && (unsigned long)x1 < BITMAP_WIDTH
+        && (unsigned long)y0 < BITMAP_HEIGHT && (unsigned long)y1 < BITMAP_HEIGHT) {
+        i32 w = x1 > x0 ? x1 - x0 : x0 - x1, h = y1 > y0 ? y1 - y0 : y0 - y1;
+        if ((w > h ? w : h) >= 3) {
+            fx_line((int)x0, (int)y0, (int)x1, (int)y1, (unsigned char)color);
+            return;
+        }
     }
     int ax = near_screen(x0), ay = near_screen(y0), bx = near_screen(x1), by = near_screen(y1);
     int dx = bx > ax ? bx - ax : ax - bx, dy = by > ay ? ay - by : by - ay;     // dy is minus the height

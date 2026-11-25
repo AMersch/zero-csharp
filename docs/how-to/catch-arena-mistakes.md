@@ -105,6 +105,7 @@ repository:
 | `list-grew-in-place` | the same, grown in place | yes |
 | `builder-grew-in-place` | the same for a `StrBuilder` | yes |
 | `list-index` | a list index out of range | no |
+| `builder-index` | a `StrBuilder` index out of range | no |
 | `out-of-memory` | an allocation the system can't satisfy, in a `stopOnOutOfMemory` arena | no |
 
 `Guards.fail` holds each case's message. A named arena's name goes to standard output, the message to

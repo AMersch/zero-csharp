@@ -66,6 +66,7 @@ public ref struct Outer
 {
     public ScratchList<int> Items;
     public ScratchDict<int, int> Counts;
+    public ScratchText Text;
 }
 
 public static class Program
@@ -249,6 +250,31 @@ public static class Program
             return outer.Items[0] + outer.Items[1];
         });
         Check("an outer list in a nested call", nested == 11);
+        bool textEdited = Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            ScratchText text = scratch.Text();
+            text.Append("2026-11-25");
+            text.Replace("-", " / ");
+            text.Insert(0, "on ");
+            text.Remove(0, 3);
+            text[0] = '3';
+            return text.AsSpan().SequenceEqual("3026 / 11 / 25");
+        });
+        Check("text: Replace, Insert, Remove, indexer", textEdited);
+        // Remove and a char Replace never need more memory, so an outer text
+        // takes them in a nested call; Insert and Replace with text don't.
+        bool outerText = Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            var outer = new Outer { Text = scratch.Text() };
+            outer.Text.Append("a.b.c!");
+            Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref Outer state) =>
+            {
+                state.Text.Remove(5, 1);
+                state.Text.Replace('.', '/');
+            });
+            return outer.Text.AsSpan().SequenceEqual("a/b/c");
+        });
+        Check("an outer text in a nested call", outerText);
         Section("lists and text");
 
         // docs:own-types

@@ -1,8 +1,10 @@
 // Test: TensorPrimitives (System.Numerics.Tensors), operations on whole
-// spans of floats. Element-wise arithmetic and sums use NEON on arm64 and
-// AVX on x64 (this sample is built with -m x86-64-v3 there); the other
-// targets run the scalar loops. Lengths like 37 cover both a vector loop and
-// its scalar tail. scripts/tensor-fuzz compares the same code with .NET's.
+// spans of floats. Element-wise arithmetic, sums and the fast functions use
+// NEON on arm64, and on x64 SSE2, or AVX when built with -m x86-64-v3:
+// build.sh builds this file twice there, as Tensors (SSE2) and TensorsAvx.
+// The other targets run the scalar loops. Lengths like 37 cover both a
+// vector loop and its scalar tail. scripts/tensor-fuzz compares the same
+// code with .NET's.
 // Exit code = number of failed checks.
 // Build: ./build.sh Tensors
 

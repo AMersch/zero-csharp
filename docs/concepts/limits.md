@@ -39,7 +39,7 @@ With zerocore, as `build.sh` builds it:
   `Quaternion` and `Plane`, with .NET's members, on every target (see
   [below](#system.numerics)).
 - **`TensorPrimitives`** (`System.Numerics.Tensors`): sums, dot products, softmax and the rest on
-  whole spans of `float`, on NEON and AVX where the target has them (see
+  whole spans of `float`, on NEON, SSE2 or AVX where the target has them (see
   [below](#tensorprimitives)).
 - **`Half`, `BitOperations` and `BitArray`**, with .NET's names and results: half-precision
   numbers, bit counts and scans on the processor's own instructions where it has them, and arrays
@@ -318,20 +318,20 @@ Check("in place", v[0] == 10 && v[4] == 50);
 ```
 
 Element-wise arithmetic, the sums and the functions neural networks spend their time in (`Exp`,
-`Sigmoid`, `Tanh` and `SoftMax`) use NEON on arm64, and AVX on x64 built with `-m x86-64-v3`;
-other targets run a scalar loop. Compiled by .NET's own compiler on arm64 and run on 1M floats,
-they take 1.0–1.5× the time of .NET's.
+`Sigmoid`, `Tanh` and `SoftMax`) work on 4 or 8 values at once: with NEON on arm64, and on x64 with
+SSE2, which every x64 processor has, or AVX in a program built for it; WebAssembly, DOS and the
+microcontrollers run a scalar loop. Run on 1M floats, the four functions take 1.0–1.5× the time of
+.NET's on arm64, and 1.2–1.7× with SSE2 (an x64 build under Rosetta, against .NET's own SSE code).
 
-**On x64, set the instruction set, or all of it runs one element at a time.** Zero mode doesn't
-check the processor at run time, so AVX is used only in a program built for it: `-m x86-64-v3`
-with bflat, or with the SDK
+**On x64, AVX doubles the width.** Zero mode doesn't check the processor at run time, so it uses AVX
+only in a program built for it: `-m x86-64-v3` with bflat, or with the SDK
 
 ```xml
 <ZeroInstructionSet Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'win-x64'">x86-64-v3</ZeroInstructionSet>
 ```
 
 Such a program needs AVX2 and FMA (Haswell, 2013, or newer); see [Use SIMD](../how-to/use-simd.html).
-arm64 needs nothing: NEON is always there.
+Without it, the SSE2 code runs. arm64 needs nothing: NEON is always there.
 
 - **Arithmetic gives the same bits** as .NET's and the plain loop's: each element is still one IEEE
   operation. Sums can differ in the last digits, since they add in another order, as .NET's do from

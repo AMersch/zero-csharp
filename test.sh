@@ -35,7 +35,7 @@ source ./env.sh
 # The Small samples are tests sized for a machine with little memory: what the
 # larger ones check, in pieces that each fit in a Commodore 64.
 SMALL_SAMPLES=(SmallStrings SmallBuilders SmallIntegers SmallDoubles SmallObjects SmallArena SmallLists SmallDicts SmallStrDicts SmallText SmallFloats SmallUnicode SmallEncoding)
-SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Tensors "${SMALL_SAMPLES[@]}")
+SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Tensors TensorsAvx "${SMALL_SAMPLES[@]}")
 
 # Simd and Kernels print timings, so only their exit code is checked.
 TIMED=" Simd Kernels "

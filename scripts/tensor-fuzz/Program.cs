@@ -140,6 +140,9 @@ static class Program
     static int Main(string[] args)
     {
         System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+        Console.WriteLine("Vector path: " + (System.Runtime.Intrinsics.Arm.AdvSimd.Arm64.IsSupported ? "NEON"
+            : System.Runtime.Intrinsics.X86.Avx2.IsSupported && System.Runtime.Intrinsics.X86.Fma.IsSupported ? "AVX2 + FMA"
+            : System.Runtime.Intrinsics.X86.Sse2.IsSupported ? "SSE2" : "none (scalar)"));
         int iterations = args.Length > 0 ? int.Parse(args[0]) : 20000;
         s_random = new Random(args.Length > 1 ? int.Parse(args[1]) : 12345);
 

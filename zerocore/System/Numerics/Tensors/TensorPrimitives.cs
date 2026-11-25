@@ -20,10 +20,11 @@ namespace System.Numerics.Tensors
     // processor to another).
     //
     // Element-wise arithmetic, the sums and the four fast functions use the
-    // processor's vectors where the target has them: NEON on arm64, AVX on
-    // x64 built with -m x86-64-v3 (AVX2 and FMA for the functions). The
-    // arithmetic gives the same bits as the scalar loop, since each element is
-    // still one IEEE operation; sums add in another order.
+    // processor's vectors: NEON on arm64; on x64 AVX when built with
+    // -m x86-64-v3 (AVX2 and FMA for the functions), SSE2 otherwise, since
+    // every x64 processor has it. WebAssembly, DOS and the rest run scalar
+    // loops. The arithmetic gives the same bits as the scalar loop, since each
+    // element is still one IEEE operation; sums add in another order.
     //
     // A destination may be the same span as an input (the operation is then
     // done in place) but not overlap one partly; that, a destination shorter
@@ -63,7 +64,7 @@ namespace System.Numerics.Tensors
 
         // ---- operators ---------------------------------------------------------
 
-        // An operation on one element, and on 4 (NEON) or 8 (AVX) at once.
+        // An operation on one element, and on 4 (NEON, SSE) or 8 (AVX) at once.
         // The vector forms are only called when that instruction set is there.
         private interface IBinary
         {
@@ -77,7 +78,7 @@ namespace System.Numerics.Tensors
         {
             public static bool Vectorizable => true;
             public static float Invoke(float x, float y) => x + y;
-            public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => AdvSimd.Add(x, y);
+            public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => V.Add(x, y);
             public static Vector256<float> Invoke(Vector256<float> x, Vector256<float> y) => Avx.Add(x, y);
         }
 
@@ -85,7 +86,7 @@ namespace System.Numerics.Tensors
         {
             public static bool Vectorizable => true;
             public static float Invoke(float x, float y) => x - y;
-            public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => AdvSimd.Subtract(x, y);
+            public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => V.Subtract(x, y);
             public static Vector256<float> Invoke(Vector256<float> x, Vector256<float> y) => Avx.Subtract(x, y);
         }
 
@@ -93,7 +94,7 @@ namespace System.Numerics.Tensors
         {
             public static bool Vectorizable => true;
             public static float Invoke(float x, float y) => x * y;
-            public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => AdvSimd.Multiply(x, y);
+            public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => V.Multiply(x, y);
             public static Vector256<float> Invoke(Vector256<float> x, Vector256<float> y) => Avx.Multiply(x, y);
         }
 
@@ -101,7 +102,7 @@ namespace System.Numerics.Tensors
         {
             public static bool Vectorizable => true;
             public static float Invoke(float x, float y) => x / y;
-            public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => AdvSimd.Arm64.Divide(x, y);
+            public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => V.Divide(x, y);
             public static Vector256<float> Invoke(Vector256<float> x, Vector256<float> y) => Avx.Divide(x, y);
         }
 
@@ -264,22 +265,22 @@ namespace System.Numerics.Tensors
         private static void Binary<TOp>(float* x, int xStep, float* y, int yStep, float* d, int n) where TOp : IBinary
         {
             int i = 0;
-            if (TOp.Vectorizable && AdvSimd.Arm64.IsSupported)
-            {
-                for (; i + 4 <= n; i += 4)
-                {
-                    Vector128<float> vx = xStep == 0 ? AdvSimd.DuplicateToVector128(*x) : AdvSimd.LoadVector128(x + i);
-                    Vector128<float> vy = yStep == 0 ? AdvSimd.DuplicateToVector128(*y) : AdvSimd.LoadVector128(y + i);
-                    AdvSimd.Store(d + i, TOp.Invoke(vx, vy));
-                }
-            }
-            else if (TOp.Vectorizable && Avx.IsSupported)
+            if (TOp.Vectorizable && Avx.IsSupported)
             {
                 for (; i + 8 <= n; i += 8)
                 {
                     Vector256<float> vx = xStep == 0 ? Vector256.Create(*x) : Avx.LoadVector256(x + i);
                     Vector256<float> vy = yStep == 0 ? Vector256.Create(*y) : Avx.LoadVector256(y + i);
                     Avx.Store(d + i, TOp.Invoke(vx, vy));
+                }
+            }
+            else if (TOp.Vectorizable && V.IsSupported)
+            {
+                for (; i + 4 <= n; i += 4)
+                {
+                    Vector128<float> vx = xStep == 0 ? V.Create(*x) : V.Load(x + i);
+                    Vector128<float> vy = yStep == 0 ? V.Create(*y) : V.Load(y + i);
+                    V.Store(d + i, TOp.Invoke(vx, vy));
                 }
             }
             for (; i < n; i++)
@@ -334,17 +335,7 @@ namespace System.Numerics.Tensors
             where TFirst : IBinary where TSecond : IBinary
         {
             int i = 0;
-            if (AdvSimd.Arm64.IsSupported)
-            {
-                for (; i + 4 <= n; i += 4)
-                {
-                    Vector128<float> vx = xStep == 0 ? AdvSimd.DuplicateToVector128(*x) : AdvSimd.LoadVector128(x + i);
-                    Vector128<float> vy = yStep == 0 ? AdvSimd.DuplicateToVector128(*y) : AdvSimd.LoadVector128(y + i);
-                    Vector128<float> vz = zStep == 0 ? AdvSimd.DuplicateToVector128(*z) : AdvSimd.LoadVector128(z + i);
-                    AdvSimd.Store(d + i, TSecond.Invoke(TFirst.Invoke(vx, vy), vz));
-                }
-            }
-            else if (Avx.IsSupported)
+            if (Avx.IsSupported)
             {
                 for (; i + 8 <= n; i += 8)
                 {
@@ -352,6 +343,16 @@ namespace System.Numerics.Tensors
                     Vector256<float> vy = yStep == 0 ? Vector256.Create(*y) : Avx.LoadVector256(y + i);
                     Vector256<float> vz = zStep == 0 ? Vector256.Create(*z) : Avx.LoadVector256(z + i);
                     Avx.Store(d + i, TSecond.Invoke(TFirst.Invoke(vx, vy), vz));
+                }
+            }
+            else if (V.IsSupported)
+            {
+                for (; i + 4 <= n; i += 4)
+                {
+                    Vector128<float> vx = xStep == 0 ? V.Create(*x) : V.Load(x + i);
+                    Vector128<float> vy = yStep == 0 ? V.Create(*y) : V.Load(y + i);
+                    Vector128<float> vz = zStep == 0 ? V.Create(*z) : V.Load(z + i);
+                    V.Store(d + i, TSecond.Invoke(TFirst.Invoke(vx, vy), vz));
                 }
             }
             for (; i < n; i++)
@@ -459,9 +460,9 @@ namespace System.Numerics.Tensors
                 }
                 float sum = 0;
                 int i = 0;
-                if (AdvSimd.Arm64.IsSupported)
+                if (!(Avx2.IsSupported && Fma.IsSupported))
                 {
-                    Vector128<float> vmax = AdvSimd.DuplicateToVector128(max), negMax = AdvSimd.DuplicateToVector128(-max);
+                    Vector128<float> vmax = V.Create(max), negMax = V.Create(-max);
                     Vector128<float> vsum = default;
                     for (; i + 4 <= n; i += 4)
                     {
@@ -471,16 +472,18 @@ namespace System.Numerics.Tensors
                                 sum += pd[j] = (float)Math.Exp((double)px[j] - max);
                             continue;
                         }
-                        Vector128<float> v = AdvSimd.LoadVector128(px + i);
-                        Vector128<float> d = AdvSimd.Subtract(v, vmax);
-                        Vector128<float> bb = AdvSimd.Subtract(d, v);
-                        Vector128<float> error = AdvSimd.Add(AdvSimd.Subtract(v, AdvSimd.Subtract(d, bb)), AdvSimd.Subtract(negMax, bb));
-                        Vector128<float> e = ExpVector(d);
-                        e = AdvSimd.FusedMultiplyAdd(e, e, error);
-                        AdvSimd.Store(pd + i, e);
-                        vsum = AdvSimd.Add(vsum, e);
+                        // d + error = x - max exactly (TwoSum), and
+                        // e^(d + error) = e^d (1 + error) to float precision.
+                        Vector128<float> v = V.Load(px + i);
+                        Vector128<float> d = V.Subtract(v, vmax);
+                        Vector128<float> bb = V.Subtract(d, v);
+                        Vector128<float> error = V.Add(V.Subtract(v, V.Subtract(d, bb)), V.Subtract(negMax, bb));
+                        Vector128<float> e = V.Exp(d);
+                        e = V.MultiplyAdd(e, error, e);
+                        V.Store(pd + i, e);
+                        vsum = V.Add(vsum, e);
                     }
-                    sum += HorizontalSum(vsum);
+                    sum += V.Sum(vsum);
                 }
                 else
                 {
@@ -498,7 +501,7 @@ namespace System.Numerics.Tensors
                         Vector256<float> d = Avx.Subtract(v, vmax);
                         Vector256<float> bb = Avx.Subtract(d, v);
                         Vector256<float> error = Avx.Add(Avx.Subtract(v, Avx.Subtract(d, bb)), Avx.Subtract(negMax, bb));
-                        Vector256<float> e = ExpVector(d);
+                        Vector256<float> e = Exp256(d);
                         e = Fma.MultiplyAdd(e, error, e);
                         Avx.Store(pd + i, e);
                         vsum = Avx.Add(vsum, e);
@@ -532,19 +535,7 @@ namespace System.Numerics.Tensors
             int i = 0;
             float finite = 0; // stays 0 while x * 0 does: NaN for an infinity or a NaN
             max = x[0];
-            if (AdvSimd.Arm64.IsSupported)
-            {
-                Vector128<float> vmax = AdvSimd.DuplicateToVector128(x[0]), check = default;
-                for (; i + 4 <= n; i += 4)
-                {
-                    Vector128<float> v = AdvSimd.LoadVector128(x + i);
-                    vmax = AdvSimd.Max(vmax, v);
-                    check = AdvSimd.Add(check, AdvSimd.Multiply(v, default));
-                }
-                max = AdvSimd.Arm64.MaxAcross(vmax).ToScalar();
-                finite = HorizontalSum(check);
-            }
-            else if (Avx.IsSupported)
+            if (Avx.IsSupported)
             {
                 Vector256<float> vmax = Vector256.Create(x[0]), check = default;
                 for (; i + 8 <= n; i += 8)
@@ -558,6 +549,18 @@ namespace System.Numerics.Tensors
                 for (int j = 0; j < 8; j++)
                     max = lanes[j] > max ? lanes[j] : max;
                 finite = HorizontalSum(check);
+            }
+            else if (V.IsSupported)
+            {
+                Vector128<float> vmax = V.Create(x[0]), check = default;
+                for (; i + 4 <= n; i += 4)
+                {
+                    Vector128<float> v = V.Load(x + i);
+                    vmax = V.Max(vmax, v);
+                    check = V.Add(check, V.Multiply(v, default));
+                }
+                max = V.MaxAcross(vmax);
+                finite = V.Sum(check);
             }
             for (; i < n; i++)
             {
@@ -595,19 +598,7 @@ namespace System.Numerics.Tensors
         {
             int i = 0;
             float sum = 0;
-            if (AdvSimd.Arm64.IsSupported)
-            {
-                Vector128<float> s0 = default, s1 = default, s2 = default, s3 = default;
-                for (; i + 16 <= n; i += 16)
-                {
-                    s0 = AdvSimd.Add(s0, AdvSimd.LoadVector128(x + i));
-                    s1 = AdvSimd.Add(s1, AdvSimd.LoadVector128(x + i + 4));
-                    s2 = AdvSimd.Add(s2, AdvSimd.LoadVector128(x + i + 8));
-                    s3 = AdvSimd.Add(s3, AdvSimd.LoadVector128(x + i + 12));
-                }
-                sum = HorizontalSum(AdvSimd.Add(AdvSimd.Add(s0, s1), AdvSimd.Add(s2, s3)));
-            }
-            else if (Avx.IsSupported)
+            if (Avx.IsSupported)
             {
                 Vector256<float> s0 = default, s1 = default;
                 for (; i + 16 <= n; i += 16)
@@ -616,6 +607,18 @@ namespace System.Numerics.Tensors
                     s1 = Avx.Add(s1, Avx.LoadVector256(x + i + 8));
                 }
                 sum = HorizontalSum(Avx.Add(s0, s1));
+            }
+            else if (V.IsSupported)
+            {
+                Vector128<float> s0 = default, s1 = default, s2 = default, s3 = default;
+                for (; i + 16 <= n; i += 16)
+                {
+                    s0 = V.Add(s0, V.Load(x + i));
+                    s1 = V.Add(s1, V.Load(x + i + 4));
+                    s2 = V.Add(s2, V.Load(x + i + 8));
+                    s3 = V.Add(s3, V.Load(x + i + 12));
+                }
+                sum = V.Sum(V.Add(V.Add(s0, s1), V.Add(s2, s3)));
             }
             for (; i < n; i++)
                 sum += x[i];
@@ -635,19 +638,7 @@ namespace System.Numerics.Tensors
         {
             int i = 0;
             float sum = 0;
-            if (AdvSimd.Arm64.IsSupported)
-            {
-                Vector128<float> s0 = default, s1 = default, s2 = default, s3 = default;
-                for (; i + 16 <= n; i += 16)
-                {
-                    s0 = AdvSimd.Add(s0, AdvSimd.Multiply(AdvSimd.LoadVector128(x + i), AdvSimd.LoadVector128(y + i)));
-                    s1 = AdvSimd.Add(s1, AdvSimd.Multiply(AdvSimd.LoadVector128(x + i + 4), AdvSimd.LoadVector128(y + i + 4)));
-                    s2 = AdvSimd.Add(s2, AdvSimd.Multiply(AdvSimd.LoadVector128(x + i + 8), AdvSimd.LoadVector128(y + i + 8)));
-                    s3 = AdvSimd.Add(s3, AdvSimd.Multiply(AdvSimd.LoadVector128(x + i + 12), AdvSimd.LoadVector128(y + i + 12)));
-                }
-                sum = HorizontalSum(AdvSimd.Add(AdvSimd.Add(s0, s1), AdvSimd.Add(s2, s3)));
-            }
-            else if (Avx.IsSupported)
+            if (Avx.IsSupported)
             {
                 Vector256<float> s0 = default, s1 = default;
                 for (; i + 16 <= n; i += 16)
@@ -656,6 +647,18 @@ namespace System.Numerics.Tensors
                     s1 = Avx.Add(s1, Avx.Multiply(Avx.LoadVector256(x + i + 8), Avx.LoadVector256(y + i + 8)));
                 }
                 sum = HorizontalSum(Avx.Add(s0, s1));
+            }
+            else if (V.IsSupported)
+            {
+                Vector128<float> s0 = default, s1 = default, s2 = default, s3 = default;
+                for (; i + 16 <= n; i += 16)
+                {
+                    s0 = V.Add(s0, V.Multiply(V.Load(x + i), V.Load(y + i)));
+                    s1 = V.Add(s1, V.Multiply(V.Load(x + i + 4), V.Load(y + i + 4)));
+                    s2 = V.Add(s2, V.Multiply(V.Load(x + i + 8), V.Load(y + i + 8)));
+                    s3 = V.Add(s3, V.Multiply(V.Load(x + i + 12), V.Load(y + i + 12)));
+                }
+                sum = V.Sum(V.Add(V.Add(s0, s1), V.Add(s2, s3)));
             }
             for (; i < n; i++)
                 sum += x[i] * y[i];
@@ -783,7 +786,11 @@ namespace System.Numerics.Tensors
         // Exp, Sigmoid, Tanh and SoftMax are the ones neural networks spend
         // their time in, so they have vector forms, built on Cephes' expf
         // (as lib/Kernels.cs): reduce by ln 2, a degree-6 polynomial, scale by
-        // 2^n through the exponent bits. A few ulps, like .NET's. A block of 4
+        // 2^n through the exponent bits. A few ulps, like .NET's. SSE2 has no
+        // fused multiply-add and no rounding instruction: there the polynomial
+        // rounds after each step and fx is rounded through a conversion to
+        // int (to nearest, ties to even); ln 2's high part has 9 bits, so
+        // fx * ln2Hi is exact either way. A block of 4
         // or 8 with a value outside the range where that works (a NaN, or a
         // result that overflows or is subnormal) is done by the scalar
         // function instead, so special values come out exactly as MathF's.
@@ -794,7 +801,7 @@ namespace System.Numerics.Tensors
         private const float P0 = 1.9875691500e-4f, P1 = 1.3981999507e-3f, P2 = 8.3334519073e-3f;
         private const float P3 = 4.1665795894e-2f, P4 = 1.6666665459e-1f, P5 = 5.0000001201e-1f;
 
-        private static bool FastExpAvailable => AdvSimd.Arm64.IsSupported || (Avx2.IsSupported && Fma.IsSupported);
+        private static bool FastExpAvailable => V.IsSupported || (Avx2.IsSupported && Fma.IsSupported);
 
         private interface IVectorUnary
         {
@@ -808,8 +815,8 @@ namespace System.Numerics.Tensors
         {
             public static float Invoke(float x) => MathF.Exp(x);
             public static bool InRange(float x) => x >= ExpLo && x <= ExpHi;
-            public static Vector128<float> Invoke(Vector128<float> x) => ExpVector(x);
-            public static Vector256<float> Invoke(Vector256<float> x) => ExpVector(x);
+            public static Vector128<float> Invoke(Vector128<float> x) => V.Exp(x);
+            public static Vector256<float> Invoke(Vector256<float> x) => Exp256(x);
         }
 
         // 1 / (1 + e^-x). The scalar form is in double, where e^-x doesn't
@@ -821,14 +828,14 @@ namespace System.Numerics.Tensors
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public static Vector128<float> Invoke(Vector128<float> x)
             {
-                Vector128<float> one = AdvSimd.DuplicateToVector128(1f);
-                return AdvSimd.Arm64.Divide(one, AdvSimd.Add(one, ExpVector(AdvSimd.Subtract(default, x))));
+                Vector128<float> one = V.Create(1f);
+                return V.Divide(one, V.Add(one, V.Exp(V.Subtract(default, x))));
             }
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public static Vector256<float> Invoke(Vector256<float> x)
             {
                 Vector256<float> one = Vector256.Create(1f);
-                return Avx.Divide(one, Avx.Add(one, ExpVector(Avx.Subtract(default, x))));
+                return Avx.Divide(one, Avx.Add(one, Exp256(Avx.Subtract(default, x))));
             }
         }
 
@@ -846,22 +853,22 @@ namespace System.Numerics.Tensors
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public static Vector128<float> Invoke(Vector128<float> x)
             {
-                Vector128<float> a = AdvSimd.Abs(x);
-                Vector128<float> z = AdvSimd.Multiply(a, a);
-                Vector128<float> p = AdvSimd.DuplicateToVector128(T0);
-                p = AdvSimd.FusedMultiplyAdd(AdvSimd.DuplicateToVector128(T1), p, z);
-                p = AdvSimd.FusedMultiplyAdd(AdvSimd.DuplicateToVector128(T2), p, z);
-                p = AdvSimd.FusedMultiplyAdd(AdvSimd.DuplicateToVector128(T3), p, z);
-                p = AdvSimd.FusedMultiplyAdd(AdvSimd.DuplicateToVector128(T4), p, z);
-                Vector128<float> small = AdvSimd.FusedMultiplyAdd(a, AdvSimd.Multiply(p, z), a);
+                Vector128<float> a = V.Abs(x);
+                Vector128<float> z = V.Multiply(a, a);
+                Vector128<float> p = V.Create(T0);
+                p = V.MultiplyAdd(p, z, V.Create(T1));
+                p = V.MultiplyAdd(p, z, V.Create(T2));
+                p = V.MultiplyAdd(p, z, V.Create(T3));
+                p = V.MultiplyAdd(p, z, V.Create(T4));
+                Vector128<float> small = V.MultiplyAdd(V.Multiply(p, z), a, a);
 
-                Vector128<float> one = AdvSimd.DuplicateToVector128(1f);
-                Vector128<float> capped = AdvSimd.Min(a, AdvSimd.DuplicateToVector128(40f));
-                Vector128<float> e = ExpVector(AdvSimd.Add(capped, capped));
-                Vector128<float> large = AdvSimd.Subtract(one, AdvSimd.Arm64.Divide(AdvSimd.DuplicateToVector128(2f), AdvSimd.Add(e, one)));
+                Vector128<float> one = V.Create(1f);
+                Vector128<float> capped = V.Min(a, V.Create(40f));
+                Vector128<float> e = V.Exp(V.Add(capped, capped));
+                Vector128<float> large = V.Subtract(one, V.Divide(V.Create(2f), V.Add(e, one)));
 
-                Vector128<float> t = AdvSimd.BitwiseSelect(AdvSimd.CompareLessThan(a, AdvSimd.DuplicateToVector128(0.625f)), small, large);
-                return AdvSimd.BitwiseSelect(AdvSimd.DuplicateToVector128(-0f), x, t);
+                Vector128<float> t = V.Select(V.LessThan(a, V.Create(0.625f)), small, large);
+                return V.Select(V.Create(-0f), x, t); // x's sign bit, t's others
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -879,7 +886,7 @@ namespace System.Numerics.Tensors
 
                 Vector256<float> one = Vector256.Create(1f);
                 Vector256<float> capped = Avx.Min(a, Vector256.Create(40f));
-                Vector256<float> e = ExpVector(Avx.Add(capped, capped));
+                Vector256<float> e = Exp256(Avx.Add(capped, capped));
                 Vector256<float> large = Avx.Subtract(one, Avx.Divide(Vector256.Create(2f), Avx.Add(e, one)));
 
                 Vector256<float> t = Avx.BlendVariable(large, small, Avx.CompareLessThan(a, Vector256.Create(0.625f)));
@@ -895,18 +902,7 @@ namespace System.Numerics.Tensors
             fixed (float* px = x)
             fixed (float* pd = destination)
             {
-                if (AdvSimd.Arm64.IsSupported)
-                {
-                    for (; i + 4 <= n; i += 4)
-                    {
-                        if (AllInRange<TOp>(px + i, 4))
-                            AdvSimd.Store(pd + i, TOp.Invoke(AdvSimd.LoadVector128(px + i)));
-                        else
-                            for (int j = i; j < i + 4; j++)
-                                pd[j] = TOp.Invoke(px[j]);
-                    }
-                }
-                else if (Avx2.IsSupported && Fma.IsSupported)
+                if (Avx2.IsSupported && Fma.IsSupported)
                 {
                     for (; i + 8 <= n; i += 8)
                     {
@@ -914,6 +910,17 @@ namespace System.Numerics.Tensors
                             Avx.Store(pd + i, TOp.Invoke(Avx.LoadVector256(px + i)));
                         else
                             for (int j = i; j < i + 8; j++)
+                                pd[j] = TOp.Invoke(px[j]);
+                    }
+                }
+                else if (V.IsSupported)
+                {
+                    for (; i + 4 <= n; i += 4)
+                    {
+                        if (AllInRange<TOp>(px + i, 4))
+                            V.Store(pd + i, TOp.Invoke(V.Load(px + i)));
+                        else
+                            for (int j = i; j < i + 4; j++)
                                 pd[j] = TOp.Invoke(px[j]);
                     }
                 }
@@ -938,27 +945,9 @@ namespace System.Numerics.Tensors
             return all;
         }
 
-        // e^x for x in [ExpLo, ExpHi].
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static Vector128<float> ExpVector(Vector128<float> x)
-        {
-            Vector128<float> fx = AdvSimd.RoundToNearest(AdvSimd.Multiply(x, AdvSimd.DuplicateToVector128(Log2E)));
-            Vector128<float> r = AdvSimd.FusedMultiplyAdd(x, fx, AdvSimd.DuplicateToVector128(NegLn2Hi));
-            r = AdvSimd.FusedMultiplyAdd(r, fx, AdvSimd.DuplicateToVector128(NegLn2Lo));
-            Vector128<float> p = AdvSimd.DuplicateToVector128(P0);
-            p = AdvSimd.FusedMultiplyAdd(AdvSimd.DuplicateToVector128(P1), p, r);
-            p = AdvSimd.FusedMultiplyAdd(AdvSimd.DuplicateToVector128(P2), p, r);
-            p = AdvSimd.FusedMultiplyAdd(AdvSimd.DuplicateToVector128(P3), p, r);
-            p = AdvSimd.FusedMultiplyAdd(AdvSimd.DuplicateToVector128(P4), p, r);
-            p = AdvSimd.FusedMultiplyAdd(AdvSimd.DuplicateToVector128(P5), p, r);
-            Vector128<float> y = AdvSimd.FusedMultiplyAdd(AdvSimd.Add(r, AdvSimd.DuplicateToVector128(1f)), p, AdvSimd.Multiply(r, r));
-            // 2^n: fx is a whole number, so fx + 127 is the exponent field.
-            Vector128<int> n = AdvSimd.ConvertToInt32RoundToEven(AdvSimd.Add(fx, AdvSimd.DuplicateToVector128(127f)));
-            return AdvSimd.Multiply(y, AdvSimd.ShiftLeftLogical(n.AsUInt32(), 23).AsSingle());
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static Vector256<float> ExpVector(Vector256<float> x)
+        // e^x for x in [ExpLo, ExpHi], 8 at once.
+        private static Vector256<float> Exp256(Vector256<float> x)
         {
             Vector256<float> fx = Avx.RoundToNearestInteger(Avx.Multiply(x, Vector256.Create(Log2E)));
             Vector256<float> r = Fma.MultiplyAdd(fx, Vector256.Create(NegLn2Hi), x);
@@ -976,18 +965,109 @@ namespace System.Numerics.Tensors
 
         // ---- helpers -------------------------------------------------------------
 
-        private static float HorizontalSum(Vector128<float> v)
-        {
-            v = AdvSimd.Arm64.AddPairwise(v, v);
-            v = AdvSimd.Arm64.AddPairwise(v, v); // every lane now holds the total
-            return *(float*)&v;
-        }
-
         private static float HorizontalSum(Vector256<float> v)
         {
             float* lanes = stackalloc float[8];
             Avx.Store(lanes, v);
             return ((lanes[0] + lanes[4]) + (lanes[1] + lanes[5])) + ((lanes[2] + lanes[6]) + (lanes[3] + lanes[7]));
+        }
+
+        // 4 floats at once, with NEON on arm64 and SSE/SSE2 on x64: each
+        // method is one instruction (or a few), picked at compile time, since
+        // IsSupported is a constant there.
+        private static class V
+        {
+            public static bool IsSupported => AdvSimd.Arm64.IsSupported || Sse2.IsSupported;
+            private static bool Neon => AdvSimd.Arm64.IsSupported;
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> Load(float* p) => Neon ? AdvSimd.LoadVector128(p) : Sse.LoadVector128(p);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static void Store(float* p, Vector128<float> v)
+            {
+                if (Neon)
+                    AdvSimd.Store(p, v);
+                else
+                    Sse.Store(p, v);
+            }
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> Create(float value) => Neon ? AdvSimd.DuplicateToVector128(value) : Vector128.Create(value);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> Add(Vector128<float> x, Vector128<float> y) => Neon ? AdvSimd.Add(x, y) : Sse.Add(x, y);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> Subtract(Vector128<float> x, Vector128<float> y) => Neon ? AdvSimd.Subtract(x, y) : Sse.Subtract(x, y);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> Multiply(Vector128<float> x, Vector128<float> y) => Neon ? AdvSimd.Multiply(x, y) : Sse.Multiply(x, y);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> Divide(Vector128<float> x, Vector128<float> y) => Neon ? AdvSimd.Arm64.Divide(x, y) : Sse.Divide(x, y);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> Max(Vector128<float> x, Vector128<float> y) => Neon ? AdvSimd.Max(x, y) : Sse.Max(x, y);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> Min(Vector128<float> x, Vector128<float> y) => Neon ? AdvSimd.Min(x, y) : Sse.Min(x, y);
+
+            // a * b + c: fused (one rounding) on NEON, two roundings on SSE.
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> MultiplyAdd(Vector128<float> a, Vector128<float> b, Vector128<float> c) =>
+                Neon ? AdvSimd.FusedMultiplyAdd(c, a, b) : Sse.Add(Sse.Multiply(a, b), c);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> Abs(Vector128<float> x) => Neon ? AdvSimd.Abs(x) : Sse.AndNot(Create(-0f), x);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> LessThan(Vector128<float> x, Vector128<float> y) =>
+                Neon ? AdvSimd.CompareLessThan(x, y) : Sse.CompareLessThan(x, y);
+
+            // The bits of a where mask has 1s, of b elsewhere.
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> Select(Vector128<float> mask, Vector128<float> a, Vector128<float> b) =>
+                Neon ? AdvSimd.BitwiseSelect(mask, a, b) : Sse.Or(Sse.And(mask, a), Sse.AndNot(mask, b));
+
+            public static float Sum(Vector128<float> v)
+            {
+                if (Neon)
+                {
+                    v = AdvSimd.Arm64.AddPairwise(v, v);
+                    v = AdvSimd.Arm64.AddPairwise(v, v); // every lane now holds the total
+                    return *(float*)&v;
+                }
+                float* lanes = (float*)&v;
+                return (lanes[0] + lanes[2]) + (lanes[1] + lanes[3]);
+            }
+
+            // The largest lane, for values without NaN.
+            public static float MaxAcross(Vector128<float> v)
+            {
+                if (Neon)
+                    return AdvSimd.Arm64.MaxAcross(v).ToScalar();
+                float* lanes = (float*)&v;
+                float a = lanes[0] > lanes[1] ? lanes[0] : lanes[1];
+                float b = lanes[2] > lanes[3] ? lanes[2] : lanes[3];
+                return a > b ? a : b;
+            }
+
+            // e^x for x in [ExpLo, ExpHi].
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector128<float> Exp(Vector128<float> x)
+            {
+                Vector128<float> scaled = Multiply(x, Create(Log2E));
+                Vector128<float> fx = Neon
+                    ? AdvSimd.RoundToNearest(scaled)
+                    : Sse2.ConvertToVector128Single(Sse2.ConvertToVector128Int32(scaled));
+                Vector128<float> r = MultiplyAdd(fx, Create(NegLn2Hi), x);
+                r = MultiplyAdd(fx, Create(NegLn2Lo), r);
+                Vector128<float> p = Create(P0);
+                p = MultiplyAdd(p, r, Create(P1));
+                p = MultiplyAdd(p, r, Create(P2));
+                p = MultiplyAdd(p, r, Create(P3));
+                p = MultiplyAdd(p, r, Create(P4));
+                p = MultiplyAdd(p, r, Create(P5));
+                Vector128<float> y = MultiplyAdd(p, Multiply(r, r), Add(r, Create(1f)));
+                // 2^n: fx is a whole number, so fx + 127 is the exponent field.
+                Vector128<float> biased = Add(fx, Create(127f));
+                Vector128<float> pow2 = Neon
+                    ? AdvSimd.ShiftLeftLogical(AdvSimd.ConvertToInt32RoundToEven(biased).AsUInt32(), 23).AsSingle()
+                    : Sse2.ShiftLeftLogical(Sse2.ConvertToVector128Int32(biased), 23).AsSingle();
+                return Multiply(y, pow2);
+            }
         }
     }
 }

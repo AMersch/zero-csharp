@@ -44,7 +44,7 @@ source ./env.sh
 # Strings, Casts, Collections and the others check, in pieces that each fit
 # in a Commodore 64. They run on every target.
 SMALL_SAMPLES=(SmallStrings SmallBuilders SmallIntegers SmallDoubles SmallObjects SmallArena SmallLists SmallDicts SmallStrDicts SmallText SmallFloats SmallUnicode SmallEncoding)
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Tensors "${SMALL_SAMPLES[@]}")
+ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Tensors TensorsAvx "${SMALL_SAMPLES[@]}")
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
 # Vga is a game for DOS and UEFI (lib/Dos.cs, lib/Uefi.cs: graphics, keyboard, clock).
 DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Tensors "${SMALL_SAMPLES[@]}" Vga)
@@ -103,7 +103,9 @@ bflat_flags() {
         # Zero mode has no runtime CPU detection, so SIMD extensions must be part of
         # the baseline. x64: AVX2/FMA (Haswell, 2013, or newer). arm64 always has
         # NEON; dotprod (SDOT, for int8) needs ARMv8.2+, e.g. Apple M1 or Cortex-A76.
-        Simd | Kernels | Llama | Tensors)
+        # TensorsAvx is Tensors built for AVX, so both of TensorPrimitives' x64
+        # paths are tested: SSE2 (Tensors) and AVX (TensorsAvx).
+        Simd | Kernels | Llama | TensorsAvx)
             if [ "$BFLAT_ARCH" = x64 ]; then echo -m x86-64-v3; else echo -m dotprod; fi ;;
     esac
 }
@@ -128,10 +130,15 @@ if [ -z "${KEEP_SYMBOLS:-}" ]; then
     LINK_FLAGS+=(--no-debug-info --no-pie --ldflags --strip-all)
 fi
 
-# The sources of a sample: samples/<name>.cs, plus anything generated for it.
+# The sources of a sample: samples/<name>.cs, plus anything generated for it;
+# TensorsAvx is samples/Tensors.cs again, built with other flags.
 # Llama compiles its model and tokenizer in as byte literals, generated from
 # models/ into bin/gen/Stories260K.cs (scripts/llama-model-cs.sh).
 sample_sources() {
+    if [ "$1" = TensorsAvx ]; then
+        echo samples/Tensors.cs
+        return
+    fi
     echo "samples/$1.cs"
     if [ "$1" = Llama ]; then
         scripts/llama-model-cs.sh bin/gen/Stories260K.cs

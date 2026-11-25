@@ -10,6 +10,10 @@
 # Usage:  scripts/tensor-fuzz/fuzz-tensors.sh [iterations] [seed]
 #         (default 20000 iterations; seed 12345)
 # Needs:  the .NET 10 SDK (or newer) and nuget.org for the package.
+#
+# The vector paths that run are the host's: NEON on arm64; AVX on an x64
+# with AVX2 and FMA, SSE2 with DOTNET_EnableAVX=0. On an Apple silicon Mac,
+# DOTNET=/path/to/x64/dotnet runs the x64 paths under Rosetta.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
@@ -34,4 +38,4 @@ cat > "$work/fuzz.csproj" <<'PROJ'
   </ItemGroup>
 </Project>
 PROJ
-dotnet run --project "$work/fuzz.csproj" -c Release -- "${1:-20000}" "${2:-12345}"
+"${DOTNET:-dotnet}" run --project "$work/fuzz.csproj" -c Release -- "${1:-20000}" "${2:-12345}"

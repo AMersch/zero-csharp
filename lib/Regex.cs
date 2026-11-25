@@ -10,12 +10,14 @@
 // A subset of .NET's syntax, with .NET's results where the two overlap:
 // literals and escapes (\t \n \r \f \v \e \xHH \uHHHH, \ before punctuation);
 // . and classes ([a-z], [^...], \d \w \s and their negations, ASCII only);
-// anchors ^ $ \A \z \Z \b \B; capturing groups (...) and (?:...); |; and the
+// anchors ^ $ \A \z \Z \b \B; capturing groups (...), named ones (?<name>...)
+// and (?'name'...), numbered after the others as in .NET, and (?:...); |; and the
 // quantifiers * + ? {n} {n,} {n,m}, greedy or lazy (with a ? after). Options:
 // IgnoreCase (ASCII letters), Multiline (^ and $ at every line), Singleline
 // (. matches \n too). Not supported, and refused with an error: backreferences
-// (\1), lookaround ((?=...) and the like), named groups, inline options,
-// atomic groups. At most 15 capturing groups.
+// (\1), lookaround ((?=...) and the like), numbered names ((?<2>...)), inline
+// options, atomic groups. At most 15 capturing groups; names are ASCII
+// letters, digits and _.
 //
 // The pattern is compiled into a small program that a Pike VM runs: every
 // possible way of matching advances through the input together, one character
@@ -24,7 +26,7 @@
 // ages, as (a+)+b can in a backtracking engine. When several matches start at
 // the same place, the one chosen is the one .NET's engine would find first.
 //
-// Replace takes .NET's substitutions: $1 and ${1} for a group, $$ for a $,
+// Replace takes .NET's substitutions: $1, ${1} and ${name} for a group, $$ for a $,
 // $& for the match, $` and $' for the input before and after it, $+ for the
 // last group and $_ for the whole input; anything else after a $ is kept as
 // it is. It writes into an arena, a StrBuilder or a ScratchText you pass, or
@@ -100,6 +102,7 @@ public struct Regex
         public int* Caps0, Caps1; // 2 * Groups slots per entry
         public int* Stack;     // 3 ints per entry, 4 * Length + 8 entries
         public int* Work;      // 2 * Groups slots
+        public nint* Names;    // per group, its name (a string in Arena), or 0
     }
 
     Header* _header;
@@ -163,9 +166,17 @@ public struct Regex
         int* caps1 = arena.AllocArray<int>(length * slots);
         int* stack = arena.AllocArray<int>(3 * (4 * length + 8));
         int* work = arena.AllocArray<int>(slots);
+        nint* names = arena.AllocArray<nint>(groups);
         if (header == null || program == null || ranges == null || marks == null || pcs0 == null || pcs1 == null
-            || caps0 == null || caps1 == null || stack == null || work == null)
+            || caps0 == null || caps1 == null || stack == null || work == null || names == null)
             return default;
+        for (int i = 0; i < compiler.NameCount; i++)
+        {
+            string name = Str.ToArenaString(arena, compiler.NameAt(i));
+            if (name == null)
+                return default;
+            unsafe { names[compiler.FirstNamed + i] = Unsafe.As<string, nint>(ref name); } // SAFETY: groups slots.
+        }
 
         unsafe
         {
@@ -179,6 +190,7 @@ public struct Regex
             header->Length = length;
             header->Ranges = ranges;
             header->Groups = groups;
+            header->Names = names;
             header->Options = compiler.Options;
             header->Marks = marks;
             header->Pcs0 = pcs0;
@@ -201,6 +213,42 @@ public struct Regex
             if (_header == null)
                 return 0;
             unsafe { return _header->Groups - 1; }
+        }
+    }
+
+    /// <summary>The number of the group named <paramref name="name"/>, or -1 if there is none.</summary>
+    public int GroupNumberFromName(ReadOnlySpan<char> name)
+    {
+        if (_header == null)
+            return -1;
+        unsafe
+        {
+            // SAFETY: a live header; Names has Groups slots.
+            for (int i = 1; i < _header->Groups; i++)
+            {
+                nint slot = _header->Names[i];
+                if (slot != 0 && Unsafe.As<nint, string>(ref slot).AsSpan().SequenceEqual(name))
+                    return i;
+            }
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// The name of group <paramref name="number"/>, or null if it has none (or
+    /// doesn't exist). .NET gives an unnamed group's number as text instead.
+    /// </summary>
+    public string GroupNameFromNumber(int number)
+    {
+        if (_header == null)
+            return null;
+        unsafe
+        {
+            // SAFETY: a live header; number is checked against Groups.
+            if ((uint)number >= (uint)_header->Groups)
+                return null;
+            nint slot = _header->Names[number];
+            return slot == 0 ? null : Unsafe.As<nint, string>(ref slot);
         }
     }
 
@@ -381,6 +429,21 @@ public struct Regex
                 {
                     group = number;
                     end = braced ? j + 1 : j;
+                }
+                else if (braced && j == digits)
+                {
+                    // ${name}: a named group's name.
+                    int close = replacement.Slice(digits).IndexOf('}');
+                    if (close > 0)
+                    {
+                        int named = match.Regex.GroupNumberFromName(replacement.Slice(digits, close));
+                        substituted = named > 0;
+                        if (substituted)
+                        {
+                            group = named;
+                            end = digits + close + 1;
+                        }
+                    }
                 }
             }
             if (!substituted)
@@ -673,6 +736,8 @@ public ref struct RegexMatch
     // The pattern's groups, group 0 included (0 for no match).
     internal int GroupsInMatch => _groups;
 
+    internal Regex Regex => _regex;
+
     /// <summary>Where the match starts in the input (0 if there is none).</summary>
     public int Index => Success ? _captures[0] : 0;
 
@@ -718,6 +783,9 @@ public readonly ref struct RegexGroups
 
     /// <summary>Group <paramref name="number"/>; Success false if it didn't take part, or doesn't exist.</summary>
     public RegexGroup this[int number] => _match.Group(number);
+
+    /// <summary>The group named <paramref name="name"/>; Success false if it didn't take part, or doesn't exist.</summary>
+    public RegexGroup this[ReadOnlySpan<char> name] => _match.Group(_match.Regex.GroupNumberFromName(name));
 }
 
 /// <summary>One group of a match.</summary>
@@ -888,6 +956,15 @@ internal ref struct RegexCompiler
     string _error;
     int _errorPosition;
 
+    // Named groups: while parsing, a named group's Group is NamedBase + the
+    // name's index; once every unnamed group is counted, the names are
+    // numbered after them, in order of first appearance, as .NET does.
+    const int NamedBase = 1 << 20;
+    List<int> _names;      // start and length in the pattern, per name
+    public int FirstNamed;  // the number of the first named group
+    public int NameCount => _names.Count / 2;
+    public ReadOnlySpan<char> NameAt(int index) => _pattern.Slice(_names.Get(2 * index), _names.Get(2 * index + 1));
+
     public RegexCompiler(Arena scratch, ReadOnlySpan<char> pattern, RegexOptions options)
     {
         _pattern = pattern;
@@ -895,6 +972,8 @@ internal ref struct RegexCompiler
         _nodes = List<Node>.Create(scratch, 64);
         Program = List<Regex.Inst>.Create(scratch, 64);
         Ranges = List<Regex.CharRange>.Create(scratch, 16);
+        _names = List<int>.Create(scratch, 8);
+        FirstNamed = 0;
         Groups = 1;
         Options = options;
         _error = null;
@@ -903,13 +982,15 @@ internal ref struct RegexCompiler
 
     public bool Run(out string error, out int position)
     {
-        if (!_nodes.IsCreated || !Program.IsCreated || !Ranges.IsCreated)
+        if (!_nodes.IsCreated || !Program.IsCreated || !Ranges.IsCreated || !_names.IsCreated)
             Fail("the arena is full", -1);
         int root = _error == null ? ParseAlternation() : -1;
         if (_error == null && _pos < _pattern.Length)
             Fail("too many )'s", _pos);
         if (_error == null)
         {
+            FirstNamed = Groups;
+            Groups += NameCount;
             Emit(Regex.Op.Save, 0, 0);
             Compile(root);
             Emit(Regex.Op.Save, 1, 0);
@@ -1117,23 +1198,29 @@ internal ref struct RegexCompiler
         int group = -1;
         if (!AtEnd && _pattern[_pos] == '?')
         {
-            if (_pos + 1 < _pattern.Length && _pattern[_pos + 1] == ':')
+            char kind = _pos + 1 < _pattern.Length ? _pattern[_pos + 1] : '\0';
+            bool lookbehind = kind == '<' && _pos + 2 < _pattern.Length && (_pattern[_pos + 2] == '=' || _pattern[_pos + 2] == '!');
+            if (kind == ':')
             {
                 _pos += 2;
             }
+            else if ((kind == '<' || kind == '\'') && !lookbehind)
+            {
+                group = ParseGroupName(open, kind == '<' ? '>' : '\'');
+                if (group < 0)
+                    return NewNode(Kind.Empty);
+            }
             else
             {
-                char kind = _pos + 1 < _pattern.Length ? _pattern[_pos + 1] : '\0';
-                Fail(kind == '=' || kind == '!' || (kind == '<' && _pos + 2 < _pattern.Length && (_pattern[_pos + 2] == '=' || _pattern[_pos + 2] == '!'))
+                Fail(kind == '=' || kind == '!' || lookbehind
                     ? "lookaround isn't supported"
-                    : kind == '<' || kind == '\'' || kind == 'P' ? "named groups aren't supported"
                     : "this kind of group isn't supported", open);
                 return NewNode(Kind.Empty);
             }
         }
         else
         {
-            if (Groups >= Regex.MaxGroups)
+            if (Groups + NameCount >= Regex.MaxGroups)
             {
                 Fail("too many capturing groups (15 at most)", open);
                 return NewNode(Kind.Empty);
@@ -1154,6 +1241,47 @@ internal ref struct RegexCompiler
         At(node).Group = group;
         return node;
     }
+
+    // (?<name> or (?'name': returns NamedBase + the name's index, the same for
+    // a name seen before, or -1 after a Fail. _pos is at the ?.
+    int ParseGroupName(int open, char close)
+    {
+        int start = _pos + 2;
+        int end = start;
+        while (end < _pattern.Length && IsNameChar(_pattern[end]))
+            end++;
+        if (end == start || end == _pattern.Length || _pattern[end] != close)
+        {
+            Fail("invalid group name: letters, digits and _ only, starting with a letter or _", start);
+            return -1;
+        }
+        if (_pattern[start] >= '0' && _pattern[start] <= '9')
+        {
+            Fail("numbered group names aren't supported", start);
+            return -1;
+        }
+        ReadOnlySpan<char> name = _pattern.Slice(start, end - start);
+        _pos = end + 1;
+        for (int i = 0; i < NameCount; i++)
+        {
+            if (NameAt(i).SequenceEqual(name))
+                return NamedBase + i;
+        }
+        if (Groups + NameCount >= Regex.MaxGroups)
+        {
+            Fail("too many capturing groups (15 at most)", open);
+            return -1;
+        }
+        if (!_names.Add(start) || !_names.Add(end - start))
+        {
+            Fail("the arena is full", -1);
+            return -1;
+        }
+        return NamedBase + NameCount - 1;
+    }
+
+    static bool IsNameChar(char c)
+        => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 
     int ParseEscape()
     {
@@ -1427,6 +1555,8 @@ internal ref struct RegexCompiler
                     Compile(child);
                 break;
             case Kind.Group:
+                if (node.Group >= NamedBase)
+                    node.Group = FirstNamed + node.Group - NamedBase;
                 if (node.Group >= 0)
                     Emit(Regex.Op.Save, 2 * node.Group, 0);
                 Compile(node.Child);

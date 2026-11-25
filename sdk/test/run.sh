@@ -1583,6 +1583,105 @@ EOF
     pass "$name"
 }
 
+# ZERO007: F# calls to members C# marks `unsafe` are warned about unless the
+# function is marked [<Safety "why">] or [<RequiresUnsafe>]. The fixture tags
+# each line that must warn with "// warns"; exactly those are reported, with
+# their file and line, whichever way fsc optimizes (a small marked function
+# isn't copied into its callers), and the program builds and runs. A build
+# with nothing changed warns again: warnings stay until they're dealt with.
+test_fsharp_unsafe_calls() {
+    local name="F# unsafe calls" dir exe opt want got
+    can_build "$name" || return
+    dir=$(fixture fsunsafe)
+    want=$(grep -n '// warns' "$dir/Program.fs" | cut -d: -f1 | tr '\n' ' ')
+    for opt in true false; do
+        rm -rf "$dir/bin" "$dir/obj"
+        if ! run_in "$dir" fsunsafe build -p:Optimize=$opt; then fail "$name" "dotnet build failed (Optimize=$opt)"; return; fi
+        got=$(tr -d '\r' < "$LOG" | sed -n 's/.*Program\.fs(\([0-9]*\),[0-9]*): warning ZERO007.*/\1/p' | sort -un | tr '\n' ' ')
+        if [ "$got" != "$want" ]; then fail "$name" "warned for lines $got, not $want (Optimize=$opt)"; return; fi
+        if ! grep -q 'warning ZERO007: Program.callsUnsafeFunction calls Program.endFrames, which is unsafe' "$LOG"; then
+            fail "$name" "the call to an F# [<RequiresUnsafe>] function isn't named (Optimize=$opt)"; return
+        fi
+        if ! grep -q 'warning ZERO007: Program.unmarkedLambda calls Arena.OpenScope (in a lambda' "$LOG"; then
+            fail "$name" "a lambda's call isn't reported for its function (Optimize=$opt)"; return
+        fi
+        exe=$(exe "$dir/bin/Debug/$TFM/fsunsafe")
+        "$exe" > "$WORK/fsunsafe.out" 2>&1
+        if ! same_output "$WORK/fsunsafe.out" "$dir/expected.txt" "$WORK/fsunsafe.diff"; then
+            fail "$name" "printed (Optimize=$opt): $(head -c 300 "$WORK/fsunsafe.diff")"; return
+        fi
+    done
+    if ! run_in "$dir" fsunsafe-again build; then fail "$name" "the second build failed"; return; fi
+    if ! grep -q 'warning ZERO007' "$LOG"; then fail "$name" "a build with nothing changed didn't warn again"; return; fi
+    # As an error, it fails every build, not only the first.
+    if run_in "$dir" fsunsafe-error build -p:WarningsAsErrors=ZERO007; then fail "$name" "built with WarningsAsErrors=ZERO007"; return; fi
+    if run_in "$dir" fsunsafe-error-again build -p:WarningsAsErrors=ZERO007; then fail "$name" "the second build with WarningsAsErrors=ZERO007 passed"; return; fi
+    pass "$name"
+}
+
+# ZERO007 across libraries: a C# zero library's own `unsafe` method, and an
+# F# library's [<RequiresUnsafe>] function, are unsafe to call from F#; an F#
+# library's function with [<Safety>] is not, and the library itself builds
+# without warnings.
+test_fsharp_unsafe_calls_libraries() {
+    local name="F# unsafe calls into libraries" dir out
+    can_build "$name" || return
+    dir=$(fixture fs-with-libs fs-unsafe-libs)
+    cat > "$dir/CsLib/Raw.cs" <<'EOF'
+namespace CsLib;
+
+public static class Raw
+{
+    /// <safety>index must be inside the array.</safety>
+    public static unsafe int At(int[] items, int index)
+    {
+        unsafe { fixed (int* p = items) return p[index]; } // SAFETY: the caller's promise.
+    }
+
+    public static int First(int[] items) => items[0];
+}
+EOF
+    cat >> "$dir/FsLib/Tree.fs" <<'EOF'
+
+module Frames =
+    let frame = Arena.Create(1024un)
+
+    // Not small: fsc would copy a small one into the caller.
+    [<RequiresUnsafe>]
+    let reset (times: int) =
+        for _ in 1 .. times do
+            frame.Reset()
+        for _ in 1 .. times do
+            frame.Reset()
+
+    [<Safety "the frame is this module's own and holds nothing">]
+    let clear () = frame.Reset()
+EOF
+    cat > "$dir/App/Program.fs" <<'EOF'
+module Program
+
+[<Safety "index 0 of an array of one">]
+let marked () = CsLib.Raw.At([| 7 |], 0)
+
+[<EntryPoint>]
+let main _ =
+    let second = CsLib.Raw.At([| 1; 2 |], 1)
+    FsLib.Frames.reset 1
+    FsLib.Frames.clear ()
+    Out.Line("libraries: ", int64 (second + marked () + CsLib.Raw.First([| 3 |])))
+    0
+EOF
+    if ! run_in "$dir/App" fs-unsafe-libs run; then fail "$name" "dotnet run failed"; return; fi
+    out=$(tr -d '\r' < "$LOG" | tail -1)
+    if [ "$out" != "libraries: 12" ]; then fail "$name" "printed: $out"; return; fi
+    if ! grep -q 'Program\.fs(8,.*warning ZERO007: Program.main calls Raw.At, which is unsafe' "$LOG"; then fail "$name" "no ZERO007 for the C# library's unsafe method"; return; fi
+    if ! grep -q 'Program\.fs(9,.*warning ZERO007: Program.main calls Frames.reset, which is unsafe' "$LOG"; then fail "$name" "no ZERO007 for the F# library's [<RequiresUnsafe>] function"; return; fi
+    if [ "$(grep -c 'warning ZERO007' "$LOG")" != "$(grep -c 'Program\.fs([89],.*warning ZERO007' "$LOG")" ]; then
+        fail "$name" "other ZERO007 warnings: $(grep 'warning ZERO007' "$LOG" | grep -v 'Program\.fs([89],' | head -c 300)"; return
+    fi
+    pass "$name"
+}
+
 # An F# program referencing a C# zero library and an F# one.
 test_fsharp_libraries() {
     local name="F# with libraries" dir out
@@ -1764,7 +1863,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
     link_library link_library_passed_on link_library_newer_glibc sdl3 sdl3_windows
     native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe
-    fsharp_program fsharp_printf fsharp_collections fsharp_memory fsharp_must_not_compile fsharp_scratch_ref_struct_state fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
+    fsharp_program fsharp_printf fsharp_collections fsharp_memory fsharp_must_not_compile fsharp_scratch_ref_struct_state fsharp_unsafe_calls fsharp_unsafe_calls_libraries fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
     fsharp_native_library fsharp_native_library_cross fsharp_native_library_errors)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports

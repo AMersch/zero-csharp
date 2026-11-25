@@ -247,6 +247,7 @@ A loop that would leak on every round then leaks nothing:
 // Each round's lists, closures and options go into the frame arena, and
 // closing the scope frees them: a thousand rounds leave nothing behind.
 let frame = Arena.Create(4096un, "frame")
+[<Safety "a round returns an int, and keeps nothing it made">]
 let round (n: int) =
     use _ = frame.OpenObjectScope()
     let evens =
@@ -278,8 +279,70 @@ lambda that captures something is a new object each time, in the arena, and noth
 it. Set `Arena.DebugChecks <- true` while testing: closing a scope then stops the program if a static
 field points into the arena.
 
-`OpenObjectScope` is `unsafe` in C#, and F# has no `unsafe` to ask for, so the rule above is yours
-to keep without the compiler's reminder.
+`OpenObjectScope` is one of the members C# marks `unsafe`: the compiler can't check that rule, so
+a C# caller has to wrap the call in an `unsafe` block. F# has no such block, and `round` carries a
+`[<Safety "...">]` attribute instead. The next section is about that.
+
+### Say why an unsafe call is safe
+
+When an F# function calls a member C# marks `unsafe`, such as an arena's `Reset`, `Restore`,
+`Destroy`, `OpenScope` and `OpenObjectScope`, or an `unsafe` method of a C# zero library of yours,
+the build warns:
+
+```text
+Program.fs(63,19): warning ZERO007: Program.unmarked calls Arena.Reset, which is unsafe: ...
+```
+
+Read the member's safety rules (the [Arena reference](../reference/arena.html) has them), then mark
+the function with `[<Safety "...">]` and the reason this use is correct. It is the
+[SAFETY comment](../concepts/safety-rules.html#safety-comments) C# code here writes on an `unsafe`
+block, made part of the code:
+
+<!-- sample: sdk/test/fixtures/fsunsafe/Program.fs safety -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// OpenObjectScope is unsafe: nothing made inside it may be used after it.
+// [<Safety>] says why this use is correct, as a SAFETY comment does in C#.
+[<Safety "the round's values are summed into an int; nothing else is kept">]
+let round (n: int) =
+    use _ = frame.OpenObjectScope()
+    [ 1 .. n ] |> List.map (fun x -> x * 2) |> List.sum
+```
+
+A function that can't promise that by itself passes the duty on with `[<RequiresUnsafe>]`. It is
+then unsafe to call, as an `unsafe` method is in C#, and the build warns about its callers instead:
+
+<!-- sample: sdk/test/fixtures/fsunsafe/Program.fs requires-unsafe -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// [<RequiresUnsafe>] passes the duty on instead: the function is unsafe to
+// call, as an `unsafe` method is in C#, and its callers are the ones to mark.
+[<RequiresUnsafe>]
+let endFrame () = frame.Reset()
+
+[<Safety "nothing from the frame is in use between frames">]
+let playFrame (n: int) =
+    let total = round n
+    endFrame ()
+    total
+```
+
+How the marks work:
+
+- **A mark covers the whole function**, with the lambdas and inner functions in it. It goes on a
+  function, a member or a property, not on a type or a module. On a top-level `do`, it covers the
+  file's top-level code.
+- **The reason is required.** `[<Safety "">]` isn't a mark.
+- **A marked function is never copied into its callers.** The F# compiler does that with small
+  functions, which would put the unsafe call in a function nobody marked. `Safety` is F#'s
+  `NoCompilerInlining` attribute with a reason, so it can't go on an `inline` function (FS3151). A
+  small function with `[<RequiresUnsafe>]` may be copied, and the warning for its caller then names
+  the member it calls.
+- **It's a warning, and it stays.** The program builds and runs. The warning is shown in every build
+  until the function is marked; `<WarningsAsErrors>ZERO007</WarningsAsErrors>` in the project makes
+  it an error, and `<NoWarn>$(NoWarn);ZERO007</NoWarn>` turns it off.
+
+As in C#, the mark is a claim: the build checks that it's there, not that it's true.
+[Catch arena mistakes](catch-arena-mistakes.html) shows what catches a wrong one when the program
+runs.
 
 ### Temporary memory F# checks
 

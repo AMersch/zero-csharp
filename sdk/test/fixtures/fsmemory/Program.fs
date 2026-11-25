@@ -21,6 +21,7 @@ printfn "%d scores, first %d" scores.Count (scores.Get 0)
 // Each round's lists, closures and options go into the frame arena, and
 // closing the scope frees them: a thousand rounds leave nothing behind.
 let frame = Arena.Create(4096un, "frame")
+[<Safety "a round returns an int, and keeps nothing it made">]
 let round (n: int) =
     use _ = frame.OpenObjectScope()
     let evens =

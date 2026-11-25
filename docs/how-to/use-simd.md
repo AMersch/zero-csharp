@@ -47,6 +47,10 @@ Simd | Kernels)
     if [ "$BFLAT_ARCH" = x64 ]; then echo -m x86-64-v3; else echo -m dotprod; fi ;;
 ```
 
+`TensorPrimitives` (`System.Numerics.Tensors`) follows the same flags: its arithmetic, sums, `Exp`,
+`Sigmoid`, `Tanh` and `SoftMax` use NEON on arm64 always, and AVX on x64 only with `-m x86-64-v3`
+(see [What works](../concepts/limits.html#tensorprimitives)).
+
 `lib/` itself is built once as IL. Each program's build compiles the parts it uses for its own `-m`
 flags, so one `BflatLib.dll` gives NEON code on arm64 and AVX2 code on x64.
 

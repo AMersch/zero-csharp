@@ -322,6 +322,17 @@ Element-wise arithmetic, the sums and the functions neural networks spend their 
 other targets run a scalar loop. Compiled by .NET's own compiler on arm64 and run on 1M floats,
 they take 1.0–1.5× the time of .NET's.
 
+**On x64, set the instruction set, or all of it runs one element at a time.** Zero mode doesn't
+check the processor at run time, so AVX is used only in a program built for it: `-m x86-64-v3`
+with bflat, or with the SDK
+
+```xml
+<ZeroInstructionSet Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'win-x64'">x86-64-v3</ZeroInstructionSet>
+```
+
+Such a program needs AVX2 and FMA (Haswell, 2013, or newer); see [Use SIMD](../how-to/use-simd.html).
+arm64 needs nothing: NEON is always there.
+
 - **Arithmetic gives the same bits** as .NET's and the plain loop's: each element is still one IEEE
   operation. Sums can differ in the last digits, since they add in another order, as .NET's do from
   one processor to another.

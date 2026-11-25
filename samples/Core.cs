@@ -473,9 +473,12 @@ public static class Program
                 block[i] = (byte)(i * 5);
             int size = count;
             bool grow = true;
-            for (nuint alignment = 4096; alignment >= 1; alignment /= 2)
+            // Up to 1 KB: an aligned block takes up to its alignment more,
+            // and realloc may hold the old and the new block at once, in the
+            // Uno R4's 32 KB.
+            for (nuint alignment = 1024; alignment >= 1; alignment /= 2)
             {
-                // Grows and shrinks in turn, alignment from a page down to 1.
+                // Grows and shrinks in turn, alignment from 1 KB down to 1.
                 int next = grow ? size * 3 : size / 2 + 1;
                 grow = !grow;
                 int kept = Math.Min(size, next);
@@ -487,10 +490,10 @@ public static class Program
                     block[i] = (byte)(i * 5);
                 size = next;
             }
-            block = (byte*)NativeMemory.AlignedRealloc(block, (nuint)size, 4096);
+            block = (byte*)NativeMemory.AlignedRealloc(block, (nuint)size, 1024);
             for (int i = 0; i < size; i++)
                 ok &= block[i] == (byte)(i * 5);
-            ok &= ((nuint)block & 4095) == 0;
+            ok &= ((nuint)block & 1023) == 0;
             NativeMemory.AlignedFree(block);
             return ok;
         }

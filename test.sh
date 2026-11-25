@@ -182,6 +182,7 @@ CX16_SAMPLES=(
     SmallDecimalFormats
     SmallKeys
     CX16Demo
+    BanksDemo
 )
 # Microcontrollers: no SIMD to benchmark, no PC screen for Vga. Blink is
 # theirs only, and checks itself. The Uno R4

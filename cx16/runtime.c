@@ -770,3 +770,48 @@ void cs_cx16_voice(i32 voice, i32 frequency, i32 volume, i32 waveform)
     bytes[3] = (unsigned char)(waveform << 6 | 63);
     cs_cx16_vcopy(0x1F9C0u + (unsigned)voice * 4, bytes, 4);
 }
+
+// ---- banked RAM, for lib/Banks.cs --------------------------------------------------
+//
+// The 8 KB window at $A000, and the register at $00 that says which bank is in
+// it. Bank 0 is the KERNAL's, so lib/Banks.cs only asks for banks 1 and up.
+// Each call switches the bank, moves its bytes and puts the old bank back,
+// with interrupts off: a handler that runs in between must find the bank it
+// left.
+
+// The number of RAM banks, from the KERNAL's MEMTOP (called with carry set to
+// read it, as on the C64; 0 stands for 256).
+i32 cs_cx16_bank_count(void)
+{
+    static unsigned count;
+    if (count == 0) {
+        unsigned char banks;
+        __asm__ volatile("sec\n\tjsr $FF99" : "=a"(banks) : : "x", "y", "c", "memory");
+        count = banks == 0 ? 256 : banks;
+    }
+    return (i32)count;
+}
+
+#define WITH_BANK(bank, body) do { \
+    unsigned char saved = RAM_BANK; \
+    __asm__ volatile("sei" ::: "memory"); \
+    RAM_BANK = (unsigned char)(bank); \
+    body; \
+    RAM_BANK = saved; \
+    __asm__ volatile("cli" ::: "memory"); \
+} while (0)
+
+void cs_cx16_bank_read(i32 bank, i32 offset, void *destination, i32 count)
+{
+    WITH_BANK(bank, memcpy(destination, (const void *)(0xA000u + (unsigned)offset), (size_t)count));
+}
+
+void cs_cx16_bank_write(i32 bank, i32 offset, const void *source, i32 count)
+{
+    WITH_BANK(bank, memcpy((void *)(0xA000u + (unsigned)offset), source, (size_t)count));
+}
+
+void cs_cx16_bank_fill(i32 bank, i32 offset, i32 value, i32 count)
+{
+    WITH_BANK(bank, memset((void *)(0xA000u + (unsigned)offset), (int)value, (size_t)count));
+}

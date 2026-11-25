@@ -14,8 +14,8 @@ platform. [Build for the Commodore 64](build-for-c64.html) explains the pipeline
 The X16 has far more memory than a C64 (512 KB of banked RAM as the emulator starts, up to 2 MB), but a
 program's pointers are 16 bits, so what it can address directly is the fixed RAM from $0801 to $9EFF:
 38 KB, against about 50 KB on the C64. The rest is banked through an 8 KB window at $A000, which the
-compiled code doesn't use yet: the heap and the program's data can't span banks, and a bank-switching
-API in `lib/` for explicit use is future work.
+compiled code doesn't use: the heap and the program's data can't span banks. `lib/Banks.cs` is for
+explicit use of the rest, below.
 
 ## Get the tools
 
@@ -61,7 +61,25 @@ while (CX16.ReadKey() == 0)
 (`./test.sh --cx16`) draw nothing and have no frame interrupt, so there `WaitFrame` gives up after about
 two frames' time, and the clock and the joysticks stand still; the demo's checks read the video memory
 back, and leave those two to a run in a window. The YM2151 FM chip, the PCM audio, the bitmap layers
-and the banked RAM have no API yet.
+have no API yet.
+
+## Banked RAM
+
+`lib/Banks.cs` copies bytes to and from the banked RAM, which is 63 banks of 8 KB in the emulator
+(512 KB; the KERNAL keeps bank 0) and up to 255 on a machine with 2 MB:
+
+```csharp
+Banks.Write(100000, tile);         // an address in all the banks, one after another
+Banks.Read(100000, tile);
+Banks.Fill(0, Banks.Size, 0);
+int b = Banks.Peek(5);             // -1 outside the banks
+```
+
+A program's pointers are 16 bits, so nothing it uses, not an object or an array, can be in a bank; the
+processor sees one bank at a time in a window at $A000, and `Banks` switches the bank (the register at
+$00), copies, and switches back, with interrupts off. Addresses run over the banks without a gap, so a
+copy can cross from one into the next. A copy that doesn't fit in the banks returns false and does
+nothing. The banks hold whatever was in them at startup. `samples/BanksDemo.cs` checks all of it.
 
 ## Build and run
 

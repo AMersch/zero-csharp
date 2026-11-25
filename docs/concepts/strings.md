@@ -115,26 +115,30 @@ lives exactly as long as its arena**.
 
 ## Keeping a string past its arena
 
-That rule decides where a string should be built. If it is temporary, build it in a scratch arena, or
-after a `Save()`, and free it with the rest. If it has to be kept, build it in the arena that lives
-long enough, or copy it there.
+That rule decides where a string should be built. If it is temporary, build it in `Arena.Scratch`
+(a `ScratchText`), whose memory the compiler keeps you from using after the callback, or in an arena
+you free yourself. If it has to be kept, build it in the arena that lives long enough, or copy it
+there.
 
 Copying is explicit. `Str.ToArenaString(keep, s)` copies any string or span into the arena `keep`, and
-`sb.ToArenaString(keep)` copies a builder's text. A common shape is to do the messy work in a scratch
-arena and copy out only the result:
+`ToArenaString(keep)` on a `ScratchText` or `StrBuilder` copies its text. A common shape is to do the
+messy work in scratch memory and copy out only the result:
 
 <!-- sample: samples/Strings.cs scratch -->
 ```csharp
-// Or build in a scratch arena and copy only the result out.
-Arena scratch = Arena.Create(256);
-StrBuilder draft = StrBuilder.Create(scratch);
-for (int i = 0; i < 50; i++)
-    draft.Append($"{i} ");
-usedBefore = s_arena.Used;
-string kept = draft.ToArenaString(s_arena);
+// Or build in scratch memory and copy only the result out: the
+// draft goes when the callback returns, the copy stays in s_arena.
+string kept = Arena.Scratch(ref s_arena,
+    static (scoped ScratchScope scratch, scoped ref Arena keep) =>
+    {
+        ScratchText draft = scratch.Text();
+        for (int i = 0; i < 50; i++)
+            draft.Append($"{i} ");
+        return draft.ToArenaString(keep);
+    });
 ```
 
-After this, the scratch arena can be destroyed and `kept` still holds the text, in `s_arena`.
+The draft is freed when the callback returns, and `kept` still holds the text, in `s_arena`.
 
 Collections of strings follow the same rule. `RefList<string>` and `RefDict` hold references, not
 copies, so the strings they hold must live in an arena that outlives the collection's use of them. The

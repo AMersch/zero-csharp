@@ -179,7 +179,9 @@ public static class Program
         Check("backreference", Refused(@"(a)\1", "backreferences aren't supported", 3));
         Check("lookahead", Refused("(?=a)", "lookaround isn't supported", 0));
         Check("lookbehind", Refused("(?<=a)b", "lookaround isn't supported", 0));
-        Check("named group", Refused("(?<n>a)", "named groups aren't supported", 0));
+        Check("numbered name", Refused("(?<2>a)", "numbered group names aren't supported", 3));
+        Check("bad name", Refused("(?<>a)", "invalid group name: letters, digits and _ only, starting with a letter or _", 3)
+            && Refused("(?P<n>a)", "this kind of group isn't supported", 0));
         Check("nothing to repeat", Refused("*a", "quantifier following nothing", 0));
         Check("nested quantifier", Refused("a**", "nested quantifier", 2));
         Check("unclosed class", Refused("[a", "missing ]", 0));
@@ -247,6 +249,27 @@ public static class Program
             && SplitInto("(,)", "a,b,c", "[a|,|b,c]", 2));
         Check("no match, and the ends", SplitInto("x", "abc", "[abc]") && SplitInto(",", ",a,", "[|a|]"));
         Section("split");
+
+        // docs:named
+        Regex stamp = R(@"(?<year>\d{4})-(?<month>\d\d)");
+        RegexMatch when = stamp.Match("since 2026-11");
+        ReadOnlySpan<char> year = when.Groups["year"].Value;     // "2026"
+        string swappedNamed = stamp.Replace(arena, "2026-11", "${month}/${year}");
+        // docs:end
+        Check("by name", Is(year, "2026") && Is(when.Groups["month"].Value, "11") && !when.Groups["day"].Success);
+        Check("${name}", swappedNamed == "11/2026"
+            && Replaced(@"(?<year>\d{4})-(?<mon>\d\d)", "2026-11", "${mon}/${year} $2 $1 ${nope} $+", "11/2026 11 2026 ${nope} 11"));
+        // Numbered as .NET does: the unnamed groups first, then the named ones.
+        Regex mixed = R(@"(?<y>\d)(\d)(?'m'x)?(?<y>z)?");
+        RegexMatch both = mixed.Match("12");
+        Check("named after unnamed", Is(both.Groups[1].Value, "2") && Is(both.Groups[2].Value, "1")
+            && Is(both.Groups["y"].Value, "1") && !both.Groups["m"].Success && mixed.GroupCount == 3);
+        Check("the same name twice", Is(R("(?<y>a)(?<y>b)").Match("ab").Groups["y"].Value, "b"));
+        Check("names and numbers", R("(a)(?<y>b)(c)").GroupNumberFromName("y") == 3
+            && mixed.GroupNameFromNumber(2) == "y" && mixed.GroupNameFromNumber(1) == null
+            && mixed.GroupNumberFromName("nope") == -1);
+        Check("split", SplitInto("(?<sep>[a-z])", "1a2", "[1|a|2]"));
+        Section("named groups");
 
         Console.WriteLine();
         if (s_failures == 0)

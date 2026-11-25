@@ -92,6 +92,7 @@ SAMPLES=(
     Keys
     Tensors
     TensorsAvx
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
 )
 
@@ -137,6 +138,7 @@ DOS_SAMPLES=(
     Formats
     Keys
     Tensors
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
     Vga
 )
@@ -192,6 +194,7 @@ ARM_SAMPLES=(
     Formats
     Keys
     Tensors
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
     Blink
 )

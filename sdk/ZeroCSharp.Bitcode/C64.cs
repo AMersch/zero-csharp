@@ -25,8 +25,10 @@ static class C64
     // ---- NativeAOT-LLVM -----------------------------------------------------------
 
     // optimize: --Os for the C64 (50 KB for everything), -O for the
-    // microcontrollers (Arm.cs), whose flash has room for speed.
-    public static void Bitcode(string[] args, string command = "c64-bitcode", string optimize = "--Os")
+    // microcontrollers (Arm.cs), whose flash has room for speed, and for the
+    // GPU; entryPoints: also compile IN.dll's [RuntimeExport] methods, called
+    // or not (the GPU's kernels).
+    public static void Bitcode(string[] args, string command = "c64-bitcode", string optimize = "--Os", bool entryPoints = false)
     {
         if (args.Length < 3)
             throw Fail($"usage: zero-bitcode {command} IN.dll OUTDIR CORE.dll [REF.dll...]");
@@ -37,9 +39,13 @@ static class C64
         string name = Path.GetFileNameWithoutExtension(input);
         string ilcFolder = Tools.Ilc();
 
-        if (Directory.Exists(outDir))
-            Directory.Delete(outDir, recursive: true);
+        // Emptied rather than deleted: Docker Desktop can briefly hold a folder
+        // it mounted for the last build, and then refuses to let it go.
         Directory.CreateDirectory(outDir);
+        foreach (string file in Directory.GetFiles(outDir))
+            File.Delete(file);
+        foreach (string folder in Directory.GetDirectories(outDir))
+            Directory.Delete(folder, recursive: true);
 
         // As ./build.sh compiles for the C64 and the microcontrollers
         // (compile_bitcode); [DllImport("libc")] and ("libm.so.6") bound at
@@ -51,7 +57,10 @@ static class C64
             "--generateunmanagedentrypoints:System.Private.CoreLib",
             "--targetos:wasi", "--targetarch:wasm", optimize, "--wasm-global-base:1024",
             "--codegenopt:Target=wasm32-unknown-wasip2", "--codegenopt:LlvmExceptionHandlingModel=emulated",
-            "--directpinvoke:libc", "--directpinvoke:libm.so.6", $"-o:{Path.Combine(outDir, name + ".bc")}"]);
+            "--directpinvoke:libc", "--directpinvoke:libm.so.6"]);
+        if (entryPoints)
+            ilcArgs.Add($"--generateunmanagedentrypoints:{name}");
+        ilcArgs.Add($"-o:{Path.Combine(outDir, name + ".bc")}");
 
         if (OperatingSystem.IsMacOS())
         {
@@ -92,7 +101,7 @@ static class C64
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            throw Fail("building for the C64 or a microcontroller on a Mac needs Docker, to run NativeAOT-LLVM's Linux build. "
+            throw Fail("building for the C64, a microcontroller or the GPU on a Mac needs Docker, to run NativeAOT-LLVM's Linux build. "
                        + "Install Docker Desktop, or a free alternative such as Colima (brew install colima docker) or Podman, and start it.");
         }
         if (!running)

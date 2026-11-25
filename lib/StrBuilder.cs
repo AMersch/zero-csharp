@@ -105,6 +105,20 @@ public struct StrBuilder
         return Append(buffer.Slice(0, Fmt.Int(value, buffer)));
     }
 
+    // For F#, where a whole number would fit both the long and the double
+    // overload: C# widens an int to long by itself.
+    public bool Append(int value) => Append((long)value);
+
+    /// <summary>Appends a number as $"{value}" writes it.</summary>
+    public bool Append(double value)
+    {
+        Span<char> buffer = stackalloc char[Fmt.MaxChars];
+        return Append(buffer.Slice(0, Fmt.Double(value, null, buffer)));
+    }
+
+    /// <summary>Appends True or False.</summary>
+    public bool Append(bool value) => Append(Fmt.Bool(value));
+
     /// <summary>Appends $"..." directly, without an intermediate string.</summary>
     public bool Append([InterpolatedStringHandlerArgument("")] ref InterpolatedHandler handler) => handler.Ok;
 

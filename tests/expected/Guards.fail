@@ -23,3 +23,7 @@ ptr-null|Ptr: Value of a null Ptr
 ptr-after-reset|Arena "links":|Arena.DebugChecks: Ptr used after its item was freed
 custom-format|Unhandled exception: Custom numeric formats such as "0.00" aren't supported in zero mode
 bad-format-item|Unhandled exception: Input string was not in a correct format.
+pool-removed|Pool: the handle's item was removed or moved
+pool-moved|Pool: the handle's item was removed or moved
+scratch-pool-outer|Arena.Scratch: a ScratchPool added to inside a nested Arena.Scratch
+pool-other|Pool: the handle is from another pool

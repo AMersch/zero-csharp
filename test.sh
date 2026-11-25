@@ -35,7 +35,7 @@ source ./env.sh
 # The Small samples are tests sized for a machine with little memory: what the
 # larger ones check, in pieces that each fit in a Commodore 64.
 SMALL_SAMPLES=(SmallStrings SmallBuilders SmallIntegers SmallDoubles SmallObjects SmallArena SmallLists SmallDicts SmallStrDicts SmallText SmallFloats SmallUnicode SmallEncoding SmallFormats SmallDoubleFormats SmallDecimalFormats)
-SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Formats "${SMALL_SAMPLES[@]}")
+SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Formats "${SMALL_SAMPLES[@]}")
 
 # Simd and Kernels print timings, so only their exit code is checked.
 TIMED=" Simd Kernels "
@@ -45,7 +45,7 @@ POINTER_SIZED=" Arena Collections "
 # Simd and Kernels aren't built for DOS: they benchmark SIMD instructions,
 # which a 386 doesn't have.
 # Vga is a game for DOS and UEFI; "Vga test" plays by itself and reports.
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Formats "${SMALL_SAMPLES[@]}" Vga)
+DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Formats "${SMALL_SAMPLES[@]}" Vga)
 # A C64 has 50 KB for a program and its memory: these fit. C64Demo and Paddles
 # are for the C64 only; they check themselves, at the key tests/input types.
 # (QuizStep3 fits too, but its input has bytes no C64 keyboard can type.)
@@ -53,7 +53,7 @@ C64_SAMPLES=(Tiny Minimal VirtualTest QuizStep1 QuizStep2 Refs "${SMALL_SAMPLES[
 # Microcontrollers: no SIMD to benchmark, no PC screen for Vga. Blink is
 # theirs only, and checks itself. The Uno R4
 # has 32 KB of RAM for a program's data, stacks and heap: these fit.
-ARM_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Formats "${SMALL_SAMPLES[@]}" Blink)
+ARM_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Formats "${SMALL_SAMPLES[@]}" Blink)
 # Arena, Collections, Files, Strings, Queries, Threads, Patterns, Scratch and
 # Unicode need more (Arena, for one, allocates a 16 KB array).
 R4_SAMPLES=(Tiny Minimal VirtualTest Casts Core Bits Dice Pipe Env QuizStep1 QuizStep2 QuizStep3 Quiz Guards Records Shapes Refs "${SMALL_SAMPLES[@]}" Blink)
@@ -188,6 +188,53 @@ test_wasm() {
     run_all "WebAssembly" wasm check
 }
 
+# The GPU samples print timings, so their output isn't compared with a file:
+# each checks its kernels against the CPU itself and ends with OK or FAILED.
+test_gpu() {
+    local name out status
+    ./build.sh --gpu > /dev/null
+    echo
+    echo "== GPU (Metal), macOS arm64"
+    for name in Gpu; do
+        status=0
+        out=$(./run.sh --gpu "$name" < /dev/null 2>&1) || status=$?
+        if [ "$status" != 0 ] || [[ "$out" != *"OK: GPU matches CPU"* ]]; then
+            echo "FAIL $name: exit code $status"
+            echo "$out" | tail -8 | sed 's/^/       /'
+            failures=$((failures + 1))
+        else
+            echo "ok   $name (its own checks)"
+        fi
+    done
+}
+
+# The GPU build up to AIR, with no Mac (CI runs it on Linux): every kernel
+# of a GPU sample must still turn into one, so a change to zerocore, lib/ or
+# the compiler that makes NativeAOT-LLVM's output something ll2air doesn't
+# know fails here rather than on someone's Mac. ./test.sh --gpu goes on to
+# compile the kernels with Metal and run them.
+test_gpu_air() {
+    local name want got
+    echo
+    echo "== GPU kernels up to AIR (no Metal)"
+    if ! ./build.sh --gpu-air > "$TMPDIR_GPU_AIR" 2>&1; then
+        echo "FAIL ./build.sh --gpu-air"
+        tail -8 "$TMPDIR_GPU_AIR" | sed 's/^/       /'
+        failures=$((failures + 1))
+        return
+    fi
+    for name in Gpu; do
+        want=$(grep -c '\[RuntimeExport("' "samples/$name.cs")
+        got=$(grep -c '^define void @' "bin/gpu/obj/$name/kernels.ll")
+        if [ "$got" != "$want" ]; then
+            echo "FAIL $name: $got kernels in AIR, $want in the source"
+            failures=$((failures + 1))
+        else
+            echo "ok   $name ($got kernels)"
+        fi
+    done
+}
+
 test_mac() {
     ./build.sh --mac > /dev/null
     run_all "macOS arm64" mac check
@@ -240,6 +287,8 @@ case "${1:-}" in
     --r4)     test_r4 ;;
     --win)    test_win ;;
     --mac)    test_mac ;;
+    --gpu)    test_gpu ;;
+    --gpu-air) TMPDIR_GPU_AIR=$(mktemp); test_gpu_air; rm -f "$TMPDIR_GPU_AIR" ;;
     --uefi)   test_uefi ;;
     --all)
         test_native
@@ -257,6 +306,12 @@ case "${1:-}" in
         fi
         if [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then
             test_mac
+            if [ -x "$WASM_ILC" ] && xcrun -f metal > /dev/null 2>&1; then
+                test_gpu
+            else
+                echo
+                echo "(skipping the GPU: run ./setup.sh --wasm and xcodebuild -downloadComponent MetalToolchain first)"
+            fi
         fi
         if command -v docker >/dev/null 2>&1 && find_dos_clang > /dev/null; then
             test_win
@@ -290,7 +345,7 @@ case "${1:-}" in
             echo "(skipping the microcontrollers: run ./setup.sh --arm first)"
         fi
         ;;
-    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --uefi | --all | --update]" >&2; exit 2 ;;
+    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --gpu-air | --uefi | --all | --update]" >&2; exit 2 ;;
 esac
 
 echo

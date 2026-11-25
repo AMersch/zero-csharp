@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Zero C# contributors",
+  "classifications": ["Native", "GPU", "Metal"],
+  "identity": "ZeroCSharp.Templates.Gpu",
+  "name": "Zero C# GPU kernels (Metal)",
+  "description": "A native macOS program whose C# kernels run on the GPU of an Apple Silicon Mac, through Metal, and are checked against the CPU. No .NET runtime, no garbage collector.",
+  "shortName": "zerogpu",
+  "sourceName": "ZeroGpu1",
+  "preferNameDirectory": true,
+  "tags": { "language": "C#", "type": "project" }
+}

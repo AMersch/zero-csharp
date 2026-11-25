@@ -24,9 +24,11 @@
 //
 // To pass data in and out without a closure (which would allocate), use the
 // overloads with a state passed by ref; it may be a ref struct holding spans
-// of the caller's.
+// of the caller's. For data that only goes in, or spans the callback fills,
+// there are overloads with an input passed by value.
 //
-// Besides spans, the scope makes growable lists and text that live as long:
+// Besides spans, the scope makes growable lists and text, and pools (items
+// found by a Handle<T>, removed one by one), that live as long:
 //
 //   ScratchList<int> evens = s.List<int>();
 //   ScratchText line = s.Text();
@@ -36,7 +38,7 @@
 // the callback. One rule the compiler can't check: a scope, and the lists and
 // text it made, allocate only while their callback is the innermost one
 // running. Inside a nested Arena.Scratch (reached through a state passed by
-// ref) the outer ones can still be read and written, but allocating from the
+// ref, or an input) the outer ones can still be read and written, but allocating from the
 // scope, adding to a list or appending to text stops the program: that
 // memory would be freed when the inner callback returns.
 
@@ -117,6 +119,10 @@ public ref struct ScratchScope
     public ScratchList<T> List<T>(int initialCapacity = 16) where T : unmanaged
         => new ScratchList<T>(global::List<T>.Create(Allocator(), initialCapacity), _thread, _depth);
 
+    /// <summary>An empty pool whose items live until the callback returns.</summary>
+    public ScratchPool<T> Pool<T>(int chunkSize = 64) where T : unmanaged
+        => new ScratchPool<T>(global::Pool<T>.Create(Allocator(), chunkSize), _thread, _depth);
+
     /// <summary>Empty text, for building a string that lives until the callback returns.</summary>
     public ScratchText Text(int initialCapacity = 64)
         => new ScratchText(StrBuilder.Create(Allocator(), initialCapacity), _thread, _depth);
@@ -194,6 +200,67 @@ public ref struct ScratchList<T> where T : unmanaged
 }
 
 /// <summary>
+/// A pool from <see cref="ScratchScope.Pool{T}"/>, freed when the Arena.Scratch
+/// callback returns: items found by a Handle&lt;T&gt;, removed one by one, and
+/// moved out with MoveTo into a pool you keep. Copies share the same items.
+/// </summary>
+/// <remarks>
+/// A handle is a plain struct and can outlive the callback, but it finds
+/// nothing without its pool, which can't.
+/// </remarks>
+public ref struct ScratchPool<T> where T : unmanaged
+{
+    readonly Pool<T> _pool;
+    readonly ScratchThread* _thread;
+    readonly int _depth;
+
+    internal ScratchPool(Pool<T> pool, ScratchThread* thread, int depth)
+    {
+        _pool = pool;
+        _thread = thread;
+        _depth = depth;
+    }
+
+    /// <summary>How many items the pool holds.</summary>
+    public int Count => _pool.Count;
+
+    /// <summary>Adds an item and returns its handle.</summary>
+    public Handle<T> Add(T item)
+    {
+        ScratchThread.CheckInnermost(_thread, _depth,
+            "Arena.Scratch: a ScratchPool added to inside a nested Arena.Scratch, which would free its memory early");
+        return _pool.Add(item); // the scratch arena stops the program rather than fail
+    }
+
+    /// <summary>The item the handle finds; one removed or moved stops the program.</summary>
+    public ref T this[Handle<T> handle] => ref _pool[handle];
+
+    /// <summary>Whether the handle finds an item.</summary>
+    public bool Contains(Handle<T> handle) => _pool.Contains(handle);
+
+    /// <summary>The item the handle finds, if it finds one.</summary>
+    public bool TryGet(Handle<T> handle, out T item) => _pool.TryGet(handle, out item);
+
+    /// <summary>Removes the item the handle finds. False if it finds none.</summary>
+    public bool Remove(Handle<T> handle) => _pool.Remove(handle);
+
+    /// <summary>Gives the item a new handle; the old one and its copies are refused from then on.</summary>
+    public Handle<T> Move(ref Handle<T> handle) => _pool.Move(ref handle);
+
+    /// <summary>
+    /// Moves the item into <paramref name="target"/>, a pool you keep, and
+    /// returns its handle there: how a result leaves the callback.
+    /// </summary>
+    public Handle<T> MoveTo(Pool<T> target, ref Handle<T> handle) => _pool.MoveTo(target, ref handle);
+
+    /// <summary>Removes every item.</summary>
+    public void Clear() => _pool.Clear();
+
+    /// <summary>For foreach: the handle of each item.</summary>
+    public Pool<T>.Enumerator GetEnumerator() => _pool.GetEnumerator();
+}
+
+/// <summary>
 /// Growable text from <see cref="ScratchScope.Text"/>, with $"..." support,
 /// freed when the Arena.Scratch callback returns. Copies share the same text.
 /// </summary>
@@ -237,6 +304,23 @@ public ref struct ScratchText
         _builder.Append(value);
     }
 
+    /// <summary>Appends a number in decimal.</summary>
+    public void Append(int value) => Append((long)value);
+
+    /// <summary>Appends a number as $"{value}" writes it.</summary>
+    public void Append(double value)
+    {
+        CheckInnermost();
+        _builder.Append(value);
+    }
+
+    /// <summary>Appends True or False.</summary>
+    public void Append(bool value)
+    {
+        CheckInnermost();
+        _builder.Append(value);
+    }
+
     /// <summary>Appends $"..." directly, without an intermediate string.</summary>
     public void Append([InterpolatedStringHandlerArgument("")] ref StrBuilder.InterpolatedHandler handler)
     {
@@ -271,6 +355,16 @@ public delegate TResult ScratchFunc<TResult>(scoped ScratchScope scratch);
 
 public delegate TResult ScratchFunc<TState, TResult>(scoped ScratchScope scratch, scoped ref TState state)
     where TState : allows ref struct;
+
+// The same with an input passed by value: the callback gets a copy, so nothing
+// it puts in the copy reaches the caller. That makes a ref struct input (a span
+// of the caller's, or a struct of several) safe in F# too, which doesn't know
+// `scoped` (the SDK refuses a ref struct as the by-ref state there: ZERO006).
+public delegate void ScratchActionIn<TInput>(scoped ScratchScope scratch, TInput input)
+    where TInput : allows ref struct;
+
+public delegate TResult ScratchFuncIn<TInput, TResult>(scoped ScratchScope scratch, TInput input)
+    where TInput : allows ref struct;
 
 public partial struct Arena
 {
@@ -315,6 +409,30 @@ public partial struct Arena
     {
         ScratchThread* thread = EnterScratch(out Mark mark);
         TResult result = func(new ScratchScope(thread), ref state);
+        LeaveScratch(thread, mark);
+        return result;
+    }
+
+    /// <summary>
+    /// The same, with an input the action gets a copy of: for a span of yours,
+    /// or a ref struct of several, that the action reads or fills. What it
+    /// writes into a span's items the caller sees; a change to the copy itself
+    /// it doesn't.
+    /// </summary>
+    public static void Scratch<TInput>(TInput input, ScratchActionIn<TInput> action)
+        where TInput : allows ref struct
+    {
+        ScratchThread* thread = EnterScratch(out Mark mark);
+        action(new ScratchScope(thread), input);
+        LeaveScratch(thread, mark);
+    }
+
+    /// <summary>The same, returning the action's result.</summary>
+    public static TResult Scratch<TInput, TResult>(TInput input, ScratchFuncIn<TInput, TResult> func)
+        where TInput : allows ref struct
+    {
+        ScratchThread* thread = EnterScratch(out Mark mark);
+        TResult result = func(new ScratchScope(thread), input);
         LeaveScratch(thread, mark);
         return result;
     }

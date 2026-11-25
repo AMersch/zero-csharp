@@ -69,8 +69,8 @@
        FileWrites: dotnet clean then removes the native program too. -->
   <Target Name="ZeroNativeBuild" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="IncrementalClean"
           Condition="'$(ZeroBuildsNative)' == 'true' and '$(_ZeroBitcodeTarget)' != 'true'"
-          DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand;ZeroFSharpEntry"
-          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);@(ZeroResolvedLinkLibrary);$(ZeroNativeArgsFile);@(ZeroFSharpNativeInput);$(ZeroLinkArgsInput)"
+          DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand;ZeroFSharpEntry;ZeroGpuKernels"
+          Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);@(ZeroResolvedLinkLibrary);$(ZeroNativeArgsFile);@(ZeroFSharpNativeInput);$(ZeroLinkArgsInput);$(ZeroGpuObjects)"
           Outputs="$(ZeroNativeOutput);$(ZeroDebugObject)">
     <!-- NuGet doesn't keep the executable bit; a packages folder that's
          read-only (shared or mounted) must already have it. -->
@@ -87,17 +87,61 @@
           Condition="'$(ZeroBflatOutput)' != '$(ZeroNativeOutput)' and '$(ZeroTarget)' == 'win-x64' and Exists('$([System.IO.Path]::ChangeExtension($(ZeroBflatOutput), `.pdb`))')" />
     <!-- macOS: bflat only compiles (it has no Mach-O linker); the package's
          lld links, as ld64.lld, against the payload's libSystem.tbd. -->
-    <Message Text="ld64.lld arguments: $(ZeroLinkArgs)" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+    <Message Text="ld64 arguments: $(ZeroLinkArgs)" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
     <!-- lld's errors and warnings as MSBuild's, except "<dylib> has version
          27.2.0, which is newer than target minimum of 12.0": a library on the
          build machine (Homebrew's SDL, say) is built for its own macOS, and
          the program uses whichever one the machine it runs on has. That line
          stays in the log (-v:n), as a message. -->
-    <Exec Command="&quot;$(ZeroLldExe)&quot; -flavor darwin @&quot;$(ZeroLinkArgsFile)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64'"
+    <Exec Command="&quot;$(ZeroLldExe)&quot; -flavor darwin @&quot;$(ZeroLinkArgsFile)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64' and '$(ZeroGpu)' != 'Metal'"
           IgnoreStandardErrorWarningFormat="true" StandardErrorImportance="normal"
           CustomErrorRegularExpression="^lld: error: "
           CustomWarningRegularExpression="^lld: warning: (?!.*, which is newer than target minimum of )" />
+    <!-- ZeroGpu: Xcode's own linker, with the same arguments: the frameworks
+         come from Xcode's macOS SDK, whose .tbd files name architectures
+         (arm64e.x1) that the package's lld can't read. -->
+    <Exec Command="xcrun ld @&quot;$(ZeroLinkArgsFile)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64' and '$(ZeroGpu)' == 'Metal'"
+          IgnoreStandardErrorWarningFormat="true" StandardErrorImportance="normal"
+          CustomErrorRegularExpression="^ld: error|^Undefined symbols" CustomWarningRegularExpression="^ld: warning: " />
     <Message Importance="high" Text="$(MSBuildProjectName) -> $(ZeroNativeOutput)" />
+  </Target>
+
+  <!--
+    ZeroGpu=Metal: the program's kernels, its [RuntimeExport("Name")] methods,
+    for the GPU. NativeAOT-LLVM compiles the IL to bitcode, with the kernels
+    whether the program calls them or not (zero-bitcode gpu-bitcode; on a Mac
+    in Docker, downloaded on the first such build, as for the C64); then
+    zero-bitcode gpu-kernels makes Metal kernels of them with Xcode's Metal
+    compiler, a metallib in kernels.o, and compiles metal.m (Metal behind the
+    C functions lib/Gpu.cs calls) to metal.o. ZeroNativeBuild links both.
+  -->
+  <Target Name="ZeroGpuKernels" Condition="'$(ZeroGpu)' == 'Metal' and '$(ZeroBuildsNative)' == 'true'"
+          DependsOnTargets="ZeroNativeCommand"
+          Inputs="@(IntermediateAssembly);@(ZeroLibraryReference);$(ZeroSdkRoot)payload/native/gpu/metal.m"
+          Outputs="$(ZeroGpuObjects)">
+    <PropertyGroup>
+      <_ZeroDotnet>$(DOTNET_HOST_PATH)</_ZeroDotnet>
+      <_ZeroDotnet Condition="'$(_ZeroDotnet)' == ''">dotnet</_ZeroDotnet>
+      <_ZeroBitcode>&quot;$(_ZeroDotnet)&quot; &quot;$(ZeroSdkRoot)payload/tools/zero-bitcode/zero-bitcode.dll&quot;</_ZeroBitcode>
+    </PropertyGroup>
+    <MakeDir Directories="$(ZeroGpuDir)" />
+    <!-- Against zerocore's build for bitcode targets, the C64's. -->
+    <Exec Command="$(_ZeroBitcode) gpu-bitcode &quot;@(IntermediateAssembly->'%(FullPath)')&quot; &quot;$(ZeroGpuDir)bitcode&quot; &quot;$(ZeroSdkRoot)payload/native/c64/System.Private.CoreLib.dll&quot; &quot;$(ZeroRefDir)BflatLib.dll&quot; @(ZeroLibraryReference->'&quot;%(FullPath)&quot;', ' ')" />
+    <Exec Command="$(_ZeroBitcode) gpu-kernels &quot;$(ZeroGpuDir)bitcode&quot; &quot;$(AssemblyName)&quot; &quot;$(ZeroSdkRoot)payload/native/gpu/metal.m&quot; &quot;$(ZeroGpuDir)&quot;" />
+    <ItemGroup>
+      <FileWrites Include="$(ZeroGpuDir)**" />
+    </ItemGroup>
+  </Target>
+
+  <!-- ZeroGpu: Xcode's macOS SDK, whose frameworks (Metal, Foundation) the
+       program links with. -->
+  <Target Name="_ZeroGpuMacSdk" Condition="'$(ZeroGpu)' == 'Metal' and '$(ZeroTarget)' == 'osx-arm64' and $([MSBuild]::IsOSPlatform('OSX'))">
+    <Exec Command="xcrun --sdk macosx --show-sdk-path" ConsoleToMSBuild="true" StandardOutputImportance="low" ContinueOnError="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_ZeroMacSdk" />
+      <Output TaskParameter="ExitCode" PropertyName="_ZeroXcrunExit" />
+    </Exec>
+    <Error Condition="'$(_ZeroXcrunExit)' != '0'"
+           Text="ZeroGpu=Metal needs Xcode (its macOS SDK and Metal compiler): install it from the App Store, then run xcodebuild -downloadComponent MetalToolchain." />
   </Target>
 
   <!--
@@ -211,6 +255,16 @@
            Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64, osx-arm64, uefi-x64, uefi-arm64, c64, pico2, r4." />
     <Error Condition="'$(ZeroTarget)' == 'c64' and '$(ZeroHostRid)' == 'linux-arm64'"
            Text="ZeroTarget c64 builds on Linux x64, Windows x64 or an Apple Silicon Mac: llvm-mos, the compiler for the 6502, has no build for Linux arm64." />
+    <Error Condition="'$(ZeroGpu)' != '' and '$(ZeroGpu)' != 'Metal'"
+           Text="ZeroGpu '$(ZeroGpu)' isn't supported. Use Metal (an Apple Silicon Mac's GPU)." />
+    <Error Condition="'$(ZeroGpu)' == 'Metal' and '$(ZeroTarget)' != 'osx-arm64'"
+           Text="ZeroGpu=Metal builds for ZeroTarget osx-arm64: the kernels run on an Apple Silicon Mac's GPU, through Metal." />
+    <Error Condition="'$(ZeroGpu)' == 'Metal' and '$(ZeroHostRid)' != 'osx-arm64'"
+           Text="ZeroGpu=Metal builds on an Apple Silicon Mac: the kernels are compiled by Xcode's Metal compiler." />
+    <Error Condition="'$(ZeroGpu)' == 'Metal' and '$(ZeroLanguage)' == 'FSharp'"
+           Text="ZeroGpu=Metal takes kernels written in C#; an F# project can reference a C# library that has them." />
+    <Error Condition="'$(ZeroGpu)' == 'Metal' and '$(ZeroNativeLibrary)' == 'true'"
+           Text="ZeroGpu=Metal builds programs; a native library (NativeLib=Shared) can't have GPU kernels." />
     <Error Condition="'$(ZeroOptimizeFor)' != 'None' and '$(ZeroOptimizeFor)' != 'Speed' and '$(ZeroOptimizeFor)' != 'Size'"
            Text="ZeroOptimizeFor '$(ZeroOptimizeFor)' isn't supported. Use one of: None, Speed, Size." />
   </Target>
@@ -330,7 +384,7 @@
     </Copy>
   </Target>
 
-  <Target Name="ZeroNativeCommand" DependsOnTargets="ZeroNativeFiles;ZeroResolveLinkLibraries">
+  <Target Name="ZeroNativeCommand" DependsOnTargets="ZeroNativeFiles;ZeroResolveLinkLibraries;_ZeroGpuMacSdk">
     <PropertyGroup>
       <!-- NuGetPackageRoot is the folder as configured, maybe without a trailing
            slash; package folders are lower-case. -->
@@ -344,6 +398,9 @@
       <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'win-x64'">$(ZeroNativeOutput).exe</ZeroNativeOutput>
       <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'uefi-x64' or '$(ZeroTarget)' == 'uefi-arm64'">$(ZeroNativeOutput).efi</ZeroNativeOutput>
       <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'c64'">$(ZeroNativeOutput).prg</ZeroNativeOutput>
+      <!-- ZeroGpu: the kernels' bitcode, AIR, metallib and objects, in obj/. -->
+      <ZeroGpuDir>$(IntermediateOutputPath)gpu/</ZeroGpuDir>
+      <ZeroGpuObjects Condition="'$(ZeroGpu)' == 'Metal'">$(ZeroGpuDir)kernels.o;$(ZeroGpuDir)metal.o</ZeroGpuObjects>
       <!-- Microcontrollers: one runtime folder for both boards. The pico2's
            output is the real board's .uf2, with its .elf beside it and the
            QEMU build in qemu/; the r4's is the QEMU build. -->
@@ -482,7 +539,14 @@
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)library.o').Replace('\', '/'))&quot;" Condition="'$(ZeroNativeLibrary)' == 'true'" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)runtime.o').Replace('\', '/'))&quot;" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)zerocore.o').Replace('\', '/'))&quot;" />
-      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)libSystem.tbd').Replace('\', '/'))&quot;" />
+      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)libSystem.tbd').Replace('\', '/'))&quot;" Condition="'$(ZeroGpu)' != 'Metal'" />
+      <!-- ZeroGpu: the kernels (a metallib, in kernels.o), Metal behind lib/Gpu.cs
+           (metal.o), and the frameworks that uses, from Xcode's macOS SDK, whose
+           libSystem then stands in for the payload's. Xcode's ld links them
+           (ZeroNativeBuild). -->
+      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$(ZeroGpuDir)kernels.o'))').Replace('\', '/'))&quot;" Condition="'$(ZeroGpu)' == 'Metal'" />
+      <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$(ZeroGpuDir)metal.o'))').Replace('\', '/'))&quot;" Condition="'$(ZeroGpu)' == 'Metal'" />
+      <_ZeroLinkArg Include="-syslibroot &quot;$(_ZeroMacSdk)&quot; -lSystem -lobjc -framework Metal -framework Foundation" Condition="'$(ZeroGpu)' == 'Metal'" />
       <!-- A project's own .tbd or .dylib (ZeroNativeInput), for libraries
            beyond libSystem, and its C libraries (ZeroLinkLibrary). -->
       <_ZeroMacLibrary Include="@(ZeroNativeInput->WithMetadataValue('Extension', '.tbd'));@(ZeroNativeInput->WithMetadataValue('Extension', '.dylib'))" />
@@ -667,6 +731,28 @@
   <ItemGroup Condition="'$(ZeroLanguage)' == 'FSharp'">
     <ZeroFSharpNativeInput Include="@(IntermediateAssembly)" />
   </ItemGroup>
+  <!--
+    F#, programs and libraries alike: ZERO006 for an Arena.Scratch callback
+    whose state is a ref struct, which C# checks with `scoped` and F# can't
+    (Sdk/ZeroFSharpNative.cs.txt, CheckScratchStates), and the warning ZERO007
+    for a call to a member C# marks `unsafe` from a function without
+    [<Safety>] or [<RequiresUnsafe>] (CheckUnsafeCalls). Read from the IL, with
+    the references for the types and members it names from other assemblies.
+  -->
+  <Target Name="ZeroFSharpCheck" Condition="'$(ZeroLanguage)' == 'FSharp'" AfterTargets="CoreCompile"
+          Inputs="@(IntermediateAssembly);@(ReferencePath)" Outputs="$(IntermediateOutputPath)zero-fsharp-check.stamp">
+    <ZeroFSharpNative Assembly="@(IntermediateAssembly->'%(FullPath)')" Check="true" References="@(ReferencePath)">
+      <Output TaskParameter="Clean" PropertyName="_ZeroFSharpCheckClean" />
+    </ZeroFSharpNative>
+    <!-- Checked, until it changes, only if nothing was reported: warnings are
+         shown in every build until they're dealt with (and one made an error
+         by WarningsAsErrors fails every build, not just the first). -->
+    <Touch Files="$(IntermediateOutputPath)zero-fsharp-check.stamp" AlwaysCreate="true" Condition="'$(_ZeroFSharpCheckClean)' == 'true'" />
+    <Delete Files="$(IntermediateOutputPath)zero-fsharp-check.stamp" Condition="'$(_ZeroFSharpCheckClean)' != 'true'" />
+    <ItemGroup>
+      <FileWrites Include="$(IntermediateOutputPath)zero-fsharp-check.stamp" />
+    </ItemGroup>
+  </Target>
   <UsingTask TaskName="ZeroFSharpNative" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
     <Task>
       <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)ZeroFSharpNative.cs.txt" />

@@ -249,7 +249,7 @@ test_payload_complete() {
              native/osx-arm64/libSystem.tbd VERSIONS.txt \
              native/uefi-x64/{start,runtime,machine,stack,zerocore}.obj native/uefi-x64/libm.lib \
              native/uefi-arm64/{start,runtime,machine,stack,zerocore}.obj native/uefi-arm64/libm.lib \
-             native/c64/System.Private.CoreLib.dll native/c64/runtime.c \
+             native/c64/System.Private.CoreLib.dll native/c64/runtime.c native/gpu/metal.m \
              native/arm/System.Private.CoreLib.dll native/arm/{runtime,semihost,rp2350}.c native/arm/rp2350.S \
              native/arm/{an505,an386,rp2350}.ld.in \
              tools/zero-bitcode/zero-bitcode.dll tools/zero-bitcode/zero-bitcode.runtimeconfig.json \
@@ -382,6 +382,57 @@ test_c64_target() {
     # A second build has nothing to do.
     if ! run_in "$dir" c64-again build -p:ZeroTarget=c64 -v:n; then fail "$name" "the second build failed"; return; fi
     if grep -q "c64-bitcode" "$LOG"; then fail "$name" "the second build compiled again"; return; fi
+    pass "$name"
+}
+
+# ZeroGpu=Metal: dotnet new zerogpu makes a program whose C# kernels run on
+# the GPU, and which checks them against the CPU itself (exit code 0). It
+# builds on an Apple Silicon Mac with Xcode's Metal Toolchain and Docker
+# (NativeAOT-LLVM, as for the C64). The project's name has a dot, which
+# NativeAOT's symbol names turn into _, where the build finds the kernels.
+test_gpu_template() {
+    local name="gpu template" dir=$WORK/gputemplate app out
+    can_build "$name" || return
+    if [ "$HOST_RID" != osx-arm64 ]; then skip "$name" "needs an Apple Silicon Mac"; return; fi
+    if ! xcrun -f metal > /dev/null 2>&1; then skip "$name" "no Metal compiler (xcodebuild -downloadComponent MetalToolchain)"; return; fi
+    if ! docker info > /dev/null 2>&1; then skip "$name" "on a Mac the kernels need Docker, which isn't running"; return; fi
+    rm -rf "$dir" && mkdir -p "$dir"
+    fixture hello gputemplate-config > /dev/null    # just for its nuget.config
+    cp "$WORK/gputemplate-config/nuget.config" "$dir/"
+    dotnet new uninstall ZeroCSharp.Templates > /dev/null 2>&1 || true
+    if ! run_in "$dir" gpu-install new install "$FEED/ZeroCSharp.Templates.$VERSION.nupkg"; then fail "$name" "install failed"; return; fi
+    if ! run_in "$dir" gpu-new new zerogpu -o Gpu.Kernels; then fail "$name" "dotnet new zerogpu failed"; return; fi
+    app=$dir/Gpu.Kernels
+    if ! grep -q "ZeroCSharp.Sdk/$VERSION" "$app/Gpu.Kernels.csproj"; then fail "$name" "the project isn't filled in"; return; fi
+    if ! run_in "$app" gpu-build build; then fail "$name" "dotnet build failed"; return; fi
+    if ! out=$("$app/bin/Debug/$TFM/Gpu.Kernels" 2>&1); then fail "$name" "the program failed: $out"; return; fi
+    if [[ "$out" != *"Saxpy: 1048576 elements"*", 0 wrong"* ]] || [[ "$out" != *"Sum:   4718580 (the CPU says 4718580)"* ]]; then
+        fail "$name" "printed '$out'"; return
+    fi
+    # A second build has nothing to compile; a changed kernel compiles again.
+    if ! run_in "$app" gpu-again build -v:n; then fail "$name" "the second build failed"; return; fi
+    if grep -q "gpu-bitcode" "$LOG"; then fail "$name" "the second build compiled the kernels again"; return; fi
+    sed -i.bak 's/y\[i\] = a \* x\[i\] + y\[i\]/y[i] = a * x[i] + y[i] + 1/' "$app/Program.cs" && rm -f "$app/Program.cs.bak"
+    if ! run_in "$app" gpu-changed build -v:n; then fail "$name" "the build after a change failed"; return; fi
+    if ! grep -q "gpu-bitcode" "$LOG"; then fail "$name" "a changed kernel wasn't compiled again"; return; fi
+    out=$("$app/bin/Debug/$TFM/Gpu.Kernels" 2>&1)
+    if [[ "$out" != *"Saxpy: 1048576 elements"*", 1048576 wrong"* ]]; then fail "$name" "the changed kernel printed '$out'"; return; fi
+    pass "$name"
+}
+
+# What ZeroGpu=Metal says where it can't build, on any host.
+test_gpu_errors() {
+    local name="gpu errors" dir
+    can_build "$name" || return
+    dir=$(fixture native gpuerrors)
+    if run_in "$dir" gpu-vulkan build -p:ZeroGpu=Vulkan; then fail "$name" "ZeroGpu=Vulkan built"; return; fi
+    if ! grep -q "ZeroGpu 'Vulkan' isn't supported. Use Metal" "$LOG"; then fail "$name" "no message about Vulkan"; return; fi
+    if run_in "$dir" gpu-linux build -p:ZeroGpu=Metal -p:ZeroTarget=linux-x64; then fail "$name" "ZeroGpu=Metal built for linux-x64"; return; fi
+    if ! grep -q "ZeroGpu=Metal builds for ZeroTarget osx-arm64" "$LOG"; then fail "$name" "no message about the target"; return; fi
+    if [ "$HOST_RID" != osx-arm64 ]; then
+        if run_in "$dir" gpu-host build -p:ZeroGpu=Metal -p:ZeroTarget=osx-arm64; then fail "$name" "ZeroGpu=Metal built off a Mac"; return; fi
+        if ! grep -q "ZeroGpu=Metal builds on an Apple Silicon Mac" "$LOG"; then fail "$name" "no message about the host"; return; fi
+    fi
     pass "$name"
 }
 
@@ -1562,6 +1613,169 @@ test_fsharp_decimal() {
     pass "$name"
 }
 
+# Memory lifetimes from F#: an arena, F# lists and closures in an object
+# scope (static constructors that first run inside it allocate outside it,
+# or DebugChecks stops the program), Arena.Scratch. Both ways fsc optimizes.
+test_fsharp_memory() {
+    local name="F# memory" dir exe opt
+    can_build "$name" || return
+    dir=$(fixture fsmemory)
+    for opt in true false; do
+        rm -rf "$dir/bin" "$dir/obj"
+        if ! run_in "$dir" fsmemory build -p:Optimize=$opt; then fail "$name" "dotnet build failed (Optimize=$opt)"; return; fi
+        exe=$(exe "$dir/bin/Debug/$TFM/fsmemory")
+        "$exe" > "$WORK/fsmemory.out" 2>&1
+        if ! same_output "$WORK/fsmemory.out" "$dir/expected.txt" "$WORK/fsmemory.diff"; then
+            fail "$name" "printed (Optimize=$opt): $(head -c 300 "$WORK/fsmemory.diff")"; return
+        fi
+    done
+    pass "$name"
+}
+
+# sdk/test/fixtures/fs-must-not-compile/cases/*.fs: F# programs the build
+# must refuse, each with the error it must give on its first line
+# (// expect: FS0406). They check that nothing from an Arena.Scratch scope
+# can outlive the callback: by fsc's rules for ref structs, and, for a ref
+# struct as the by-ref state, where F# ignores C#'s `scoped`, by the SDK's
+# own check (ZERO006).
+test_fsharp_must_not_compile() {
+    local name="F# must not compile" dir file case expected failures=""
+    dir=$(fixture fs-must-not-compile)
+    for file in "$dir"/cases/*.fs; do
+        case=$(basename "$file" .fs)
+        expected=$(sed -n '1s|^// expect: ||p' "$file")
+        cp "$file" "$dir/Program.fs"
+        if run_in "$dir" "fs-must-not-compile-$case" build; then
+            failures+=" $case (it built)"
+        elif [ -z "$expected" ] || ! grep -q "error $expected" "$LOG"; then
+            failures+=" $case (not refused with ${expected:-an // expect: line})"
+        fi
+    done
+    if [ -n "$failures" ]; then fail "$name" "$failures"; return; fi
+    pass "$name"
+}
+
+# ZERO006 is for libraries too: the check runs after every F# compile.
+test_fsharp_scratch_ref_struct_state() {
+    local name="F# Scratch ref struct state in a library" dir
+    dir=$(fixture fsmemory fsmemory-own-state)
+    sed -i.bak 's|<OutputType>Exe</OutputType>|<OutputType>Library</OutputType>|' "$dir/fsmemory.fsproj" && rm -f "$dir/fsmemory.fsproj.bak"
+    cat > "$dir/Program.fs" <<'EOF'
+module Leak
+// Not a record: fsc after 10.0.402 gives records a ToString that boxes them,
+// which a ref struct can't be (FS0412).
+[<Struct; System.Runtime.CompilerServices.IsByRefLike>]
+type Holder =
+    val mutable Kept: System.Span<int>
+let leak () =
+    let mutable h = Holder()
+    Arena.Scratch(&h, ScratchAction<Holder>(fun scratch state -> state.Kept <- scratch.AllocSpan<int>(4)))
+    h.Kept.Length
+EOF
+    if run_in "$dir" fsmemory-own-state build; then fail "$name" "a library with a ref struct state built"; return; fi
+    if ! grep -q 'ZERO006.*Holder, as its state' "$LOG"; then fail "$name" "no ZERO006 for the library's Holder state"; return; fi
+    pass "$name"
+}
+
+# ZERO007: F# calls to members C# marks `unsafe` are warned about unless the
+# function is marked [<Safety "why">] or [<RequiresUnsafe>]. The fixture tags
+# each line that must warn with "// warns"; exactly those are reported, with
+# their file and line, whichever way fsc optimizes (a small marked function
+# isn't copied into its callers), and the program builds and runs. A build
+# with nothing changed warns again: warnings stay until they're dealt with.
+test_fsharp_unsafe_calls() {
+    local name="F# unsafe calls" dir exe opt want got
+    can_build "$name" || return
+    dir=$(fixture fsunsafe)
+    want=$(grep -n '// warns' "$dir/Program.fs" | cut -d: -f1 | tr '\n' ' ')
+    for opt in true false; do
+        rm -rf "$dir/bin" "$dir/obj"
+        if ! run_in "$dir" fsunsafe build -p:Optimize=$opt; then fail "$name" "dotnet build failed (Optimize=$opt)"; return; fi
+        got=$(tr -d '\r' < "$LOG" | sed -n 's/.*Program\.fs(\([0-9]*\),[0-9]*): warning ZERO007.*/\1/p' | sort -un | tr '\n' ' ')
+        if [ "$got" != "$want" ]; then fail "$name" "warned for lines $got, not $want (Optimize=$opt)"; return; fi
+        if ! grep -q 'warning ZERO007: Program.callsUnsafeFunction calls Program.endFrames, which is unsafe' "$LOG"; then
+            fail "$name" "the call to an F# [<RequiresUnsafe>] function isn't named (Optimize=$opt)"; return
+        fi
+        if ! grep -q 'warning ZERO007: Program.unmarkedLambda calls Arena.OpenScope (in a lambda' "$LOG"; then
+            fail "$name" "a lambda's call isn't reported for its function (Optimize=$opt)"; return
+        fi
+        exe=$(exe "$dir/bin/Debug/$TFM/fsunsafe")
+        "$exe" > "$WORK/fsunsafe.out" 2>&1
+        if ! same_output "$WORK/fsunsafe.out" "$dir/expected.txt" "$WORK/fsunsafe.diff"; then
+            fail "$name" "printed (Optimize=$opt): $(head -c 300 "$WORK/fsunsafe.diff")"; return
+        fi
+    done
+    if ! run_in "$dir" fsunsafe-again build; then fail "$name" "the second build failed"; return; fi
+    if ! grep -q 'warning ZERO007' "$LOG"; then fail "$name" "a build with nothing changed didn't warn again"; return; fi
+    # As an error, it fails every build, not only the first.
+    if run_in "$dir" fsunsafe-error build -p:WarningsAsErrors=ZERO007; then fail "$name" "built with WarningsAsErrors=ZERO007"; return; fi
+    if run_in "$dir" fsunsafe-error-again build -p:WarningsAsErrors=ZERO007; then fail "$name" "the second build with WarningsAsErrors=ZERO007 passed"; return; fi
+    pass "$name"
+}
+
+# ZERO007 across libraries: a C# zero library's own `unsafe` method, and an
+# F# library's [<RequiresUnsafe>] function, are unsafe to call from F#; an F#
+# library's function with [<Safety>] is not, and the library itself builds
+# without warnings.
+test_fsharp_unsafe_calls_libraries() {
+    local name="F# unsafe calls into libraries" dir out
+    can_build "$name" || return
+    dir=$(fixture fs-with-libs fs-unsafe-libs)
+    cat > "$dir/CsLib/Raw.cs" <<'EOF'
+namespace CsLib;
+
+public static class Raw
+{
+    /// <safety>index must be inside the array.</safety>
+    public static unsafe int At(int[] items, int index)
+    {
+        unsafe { fixed (int* p = items) return p[index]; } // SAFETY: the caller's promise.
+    }
+
+    public static int First(int[] items) => items[0];
+}
+EOF
+    cat >> "$dir/FsLib/Tree.fs" <<'EOF'
+
+module Frames =
+    let frame = Arena.Create(1024un)
+
+    // Not small: fsc would copy a small one into the caller.
+    [<RequiresUnsafe>]
+    let reset (times: int) =
+        for _ in 1 .. times do
+            frame.Reset()
+        for _ in 1 .. times do
+            frame.Reset()
+
+    [<Safety "the frame is this module's own and holds nothing">]
+    let clear () = frame.Reset()
+EOF
+    cat > "$dir/App/Program.fs" <<'EOF'
+module Program
+
+[<Safety "index 0 of an array of one">]
+let marked () = CsLib.Raw.At([| 7 |], 0)
+
+[<EntryPoint>]
+let main _ =
+    let second = CsLib.Raw.At([| 1; 2 |], 1)
+    FsLib.Frames.reset 1
+    FsLib.Frames.clear ()
+    Out.Line("libraries: ", int64 (second + marked () + CsLib.Raw.First([| 3 |])))
+    0
+EOF
+    if ! run_in "$dir/App" fs-unsafe-libs run; then fail "$name" "dotnet run failed"; return; fi
+    out=$(tr -d '\r' < "$LOG" | tail -1)
+    if [ "$out" != "libraries: 12" ]; then fail "$name" "printed: $out"; return; fi
+    if ! grep -q 'Program\.fs(8,.*warning ZERO007: Program.main calls Raw.At, which is unsafe' "$LOG"; then fail "$name" "no ZERO007 for the C# library's unsafe method"; return; fi
+    if ! grep -q 'Program\.fs(9,.*warning ZERO007: Program.main calls Frames.reset, which is unsafe' "$LOG"; then fail "$name" "no ZERO007 for the F# library's [<RequiresUnsafe>] function"; return; fi
+    if [ "$(grep -c 'warning ZERO007' "$LOG")" != "$(grep -c 'Program\.fs([89],.*warning ZERO007' "$LOG")" ]; then
+        fail "$name" "other ZERO007 warnings: $(grep 'warning ZERO007' "$LOG" | grep -v 'Program\.fs([89],' | head -c 300)"; return
+    fi
+    pass "$name"
+}
+
 # An F# program referencing a C# zero library and an F# one.
 test_fsharp_libraries() {
     local name="F# with libraries" dir out
@@ -1725,7 +1939,7 @@ test_fsharp_native_library_errors() {
 }
 
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
-    native_hello_runs cross_targets c64_target arm_target bad_target path_with_spaces compile_items incremental
+    native_hello_runs cross_targets c64_target arm_target gpu_template gpu_errors bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size strip_symbols debug_unoptimized mac_debug_object_kept windows_debugger macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild
@@ -1743,7 +1957,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
     link_library link_library_passed_on link_library_newer_glibc sdl3 sdl3_windows
     native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe
-    fsharp_program fsharp_printf fsharp_collections fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
+    fsharp_program fsharp_printf fsharp_collections fsharp_memory fsharp_must_not_compile fsharp_scratch_ref_struct_state fsharp_unsafe_calls fsharp_unsafe_calls_libraries fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
     fsharp_native_library fsharp_native_library_cross fsharp_native_library_errors)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports

@@ -109,6 +109,10 @@ The same idea applies to members. Each `unsafe` member in `lib/` documents its c
 allocated since the mark becomes dangling, including the buffer of an older collection that grew after
 the mark. The [Arena reference](../reference/arena.html) shows those sections.
 
+F# has no `unsafe` block. An F# function that calls an `unsafe` member is marked with
+`[<Safety "...">]` and the reason instead, and the build warns where the mark is missing
+([Write a program in F#](../how-to/write-fsharp.html#say-why-an-unsafe-call-is-safe)).
+
 ## What the rules don't do
 
 The rules mark where memory can go wrong; they don't check it. A `SAFETY` comment is a claim, and a

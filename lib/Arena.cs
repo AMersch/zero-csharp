@@ -101,7 +101,7 @@ public partial struct Arena
     /// A Save() that restores itself: from OpenScope(), for a using block.
     /// Leaving the block, by any path, frees what was allocated inside it.
     /// </summary>
-    public ref struct Scope
+    public ref struct Scope : System.IDisposable
     {
         internal Arena Arena;
         internal Mark Mark;
@@ -554,11 +554,12 @@ public partial struct Arena
     /// The objects die with the arena (Reset, Restore, Destroy), so no
     /// reference to one may be kept past that: not in a static field, not in an
     /// object from outside the scope. That includes what the compiler keeps
-    /// for you: a lambda that captures nothing is created the first time it
-    /// runs and then cached in a static field, and a static constructor runs
-    /// the first time its type is used. If either happens first inside the
-    /// scope, the cache or the static field points into the arena. Run such
-    /// code once before opening the scope. With Arena.DebugChecks on when the
+    /// for you: in C#, a lambda that captures nothing is created the first
+    /// time it runs and then cached in a static field. If that happens first
+    /// inside the scope, the cache points into the arena. Run such code once
+    /// before opening the scope. (Static constructors are no concern: what
+    /// one creates is allocated outside every scope, so F#'s cached lambdas,
+    /// made by static constructors, are too.) With Arena.DebugChecks on when the
     /// arena was created, closing the scope checks every static field and
     /// stops the program if one points into the arena.
     /// The compiler also caches delegates outside static fields: a lambda that
@@ -602,8 +603,8 @@ public partial struct Arena
     /// <safety>
     /// AllocateObjectsHere's rules and OpenScope's together: no reference to
     /// anything created inside may outlive the block (not in a static field,
-    /// not in an object or closure from outside, not a lambda or static
-    /// constructor run for the first time inside), and no collection created
+    /// not in an object or closure from outside, not a C# lambda run
+    /// for the first time inside), and no collection created
     /// before the scope may grow inside it.
     /// </safety>
     public unsafe ObjectScope OpenObjectScope()
@@ -632,7 +633,7 @@ public partial struct Arena
     /// it puts back the allocator that was in effect before, and for
     /// OpenObjectScope frees what was allocated inside.
     /// </summary>
-    public ref struct ObjectScope
+    public ref struct ObjectScope : System.IDisposable
     {
         internal delegate*<void*, nuint, void*> PreviousAllocate;
         internal void* PreviousContext;
@@ -677,7 +678,7 @@ public partial struct Arena
             {
                 if (System.Runtime.ObjectAllocator.StaticsReferInto(block->Start, block->End))
                     Fail(state, "Arena.AllocateObjectsHere: a static field points at an object created inside the scope. "
-                        + "A lambda or static constructor probably ran for the first time inside it; run it once before.");
+                        + "A C# lambda that captures nothing probably ran for the first time inside it; run it once before.");
             }
         }
     }

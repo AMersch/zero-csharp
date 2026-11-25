@@ -213,12 +213,13 @@ public abstract class Stream : IDisposable
     }
 
     /// <summary>Reads the rest of this stream and writes it to <paramref name="destination"/>.</summary>
-    public void CopyTo(Stream destination) => CopyTo(destination, 4096);
+    public void CopyTo(Stream destination) => CopyTo(destination, 512);
 
     /// <summary>
     /// Reads the rest of this stream and writes it to
     /// <paramref name="destination"/>, in pieces of up to
-    /// <paramref name="bufferSize"/> bytes (at most 4096, on the stack).
+    /// <paramref name="bufferSize"/> bytes (at most 512, on the stack, so
+    /// it fits a fiber's stack on a microcontroller).
     /// </summary>
     public virtual void CopyTo(Stream destination, int bufferSize)
     {
@@ -226,7 +227,7 @@ public abstract class Stream : IDisposable
             throw new ArgumentNullException(nameof(destination));
         if (bufferSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(bufferSize));
-        Span<byte> chunk = stackalloc byte[4096];
+        Span<byte> chunk = stackalloc byte[512];
         chunk = chunk.Slice(0, Math.Min(bufferSize, chunk.Length));
         int n;
         while ((n = Read(chunk)) > 0)

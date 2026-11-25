@@ -16,7 +16,7 @@ public static class Program
 
     static void End(string section)
     {
-        Out.Line($"{(s_sectionFailures == 0 ? "PASS" : "FAIL")} {section} ({s_sectionChecks} checks)");
+        Console.WriteLine($"{(s_sectionFailures == 0 ? "PASS" : "FAIL")} {section} ({s_sectionChecks} checks)");
         s_failures += s_sectionFailures;
         s_sectionChecks = 0;
         s_sectionFailures = 0;
@@ -28,7 +28,7 @@ public static class Program
         if (!ok)
         {
             s_sectionFailures++;
-            Out.Line($"  failed: {name}");
+            Console.WriteLine($"  failed: {name}");
         }
     }
 
@@ -38,7 +38,7 @@ public static class Program
         if (!got.SequenceEqual(want))
         {
             s_sectionFailures++;
-            Out.Line($"  failed: {name}: got \"{got}\", want \"{want}\"");
+            Console.WriteLine($"  failed: {name}: got \"{got}\", want \"{want}\"");
         }
     }
 
@@ -90,7 +90,7 @@ public static class Program
         s_arena = Arena.Create(1 << 16);
         if (!s_arena.IsCreated)
         {
-            Out.Line("Arena.Create failed");
+            Console.WriteLine("Arena.Create failed");
             return 1;
         }
 
@@ -302,18 +302,21 @@ public static class Program
         Check("Save/Restore frees temporary strings", temporaryOk && s_arena.Used == usedBefore);
         Check("earlier strings survive Restore", s == "n=5");
 
-        // docs:scratch
-        // Or build in a scratch arena and copy only the result out.
-        Arena scratch = Arena.Create(256);
-        StrBuilder draft = StrBuilder.Create(scratch);
-        for (int i = 0; i < 50; i++)
-            draft.Append($"{i} ");
         usedBefore = s_arena.Used;
-        string kept = draft.ToArenaString(s_arena);
+        // docs:scratch
+        // Or build in scratch memory and copy only the result out: the
+        // draft goes when the callback returns, the copy stays in s_arena.
+        string kept = Arena.Scratch(ref s_arena,
+            static (scoped ScratchScope scratch, scoped ref Arena keep) =>
+            {
+                ScratchText draft = scratch.Text();
+                for (int i = 0; i < 50; i++)
+                    draft.Append($"{i} ");
+                return draft.ToArenaString(keep);
+            });
         // docs:end
-        unsafe { scratch.Destroy(); } // SAFETY: draft is not used below; kept lives in s_arena.
-        Check("scratch arena: result copied out", kept.StartsWith("0 1 2 ") && kept.EndsWith("48 49 "));
-        Check("scratch arena: only the result is kept", s_arena.Used - usedBefore == (nuint)(System.Runtime.CompilerServices.RuntimeHelpers.OffsetToStringData + (kept.Length + 1) * 2));
+        Check("scratch: result copied out", kept.StartsWith("0 1 2 ") && kept.EndsWith("48 49 "));
+        Check("scratch: only the result is kept", s_arena.Used - usedBefore == (nuint)(System.Runtime.CompilerServices.RuntimeHelpers.OffsetToStringData + (kept.Length + 1) * 2));
 
         End("arena strings");
 
@@ -339,15 +342,15 @@ public static class Program
         End("StrBuilder");
 
         // ---- Out: $"..." straight to stdout ----
-        Out.Line();
+        Console.WriteLine();
         // docs:table
-        Out.Line($"{"item",-8}|{"qty",5}|{"price",9}");
-        Out.Line($"{"apple",-8}|{3,5}|{1.25,9:F2}");
-        Out.Line($"{"melon",-8}|{12,5}|{0.5,9:F2}");
+        Console.WriteLine($"{"item",-8}|{"qty",5}|{"price",9}");
+        Console.WriteLine($"{"apple",-8}|{3,5}|{1.25,9:F2}");
+        Console.WriteLine($"{"melon",-8}|{12,5}|{0.5,9:F2}");
         // docs:end
-        Out.Line($"UTF-8: héllo wörld, 世界, 🎉 ({"🎉".Length} UTF-16 chars)");
-        Out.Line();
-        Out.Line($"failures: {s_failures}");
+        Console.WriteLine($"UTF-8: héllo wörld, 世界, 🎉 ({"🎉".Length} UTF-16 chars)");
+        Console.WriteLine();
+        Console.WriteLine($"failures: {s_failures}");
         return s_failures;
     }
 

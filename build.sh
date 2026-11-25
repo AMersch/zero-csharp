@@ -76,6 +76,7 @@ SMALL_SAMPLES=(
 ALL_SAMPLES=(
     Tiny
     Minimal
+    Hello
     Arena
     Collections
     VirtualTest
@@ -109,6 +110,7 @@ ALL_SAMPLES=(
     Keys
     Tensors
     TensorsAvx
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
 )
 # Programs with kernels for the GPU (Metal): only --gpu builds them.
@@ -118,6 +120,7 @@ GPU_SAMPLES=(Gpu)
 DOS_SAMPLES=(
     Tiny
     Minimal
+    Hello
     Arena
     Collections
     VirtualTest
@@ -148,6 +151,7 @@ DOS_SAMPLES=(
     Formats
     Keys
     Tensors
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
     Vga
 )
@@ -158,6 +162,7 @@ DOS_SAMPLES=(
 C64_SAMPLES=(
     Tiny
     Minimal
+    Hello
     VirtualTest
     QuizStep1
     QuizStep2
@@ -172,6 +177,7 @@ C64_SAMPLES=(
 ARM_SAMPLES=(
     Tiny
     Minimal
+    Hello
     Arena
     Collections
     VirtualTest
@@ -202,6 +208,7 @@ ARM_SAMPLES=(
     Formats
     Keys
     Tensors
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
     Blink
 )
@@ -210,6 +217,7 @@ ARM_SAMPLES=(
 R4_SAMPLES=(
     Tiny
     Minimal
+    Hello
     VirtualTest
     Casts
     Core

@@ -42,6 +42,9 @@ With zerocore, as `build.sh` builds it:
 - **`TensorPrimitives`** (`System.Numerics.Tensors`): sums, dot products, softmax and the rest on
   whole spans of `float`, on NEON, SSE2 or AVX where the target has them (see
   [below](#tensorprimitives)).
+- **`Tensor<T>` and `TensorSpan<T>`** (`System.Numerics.Tensors`): n-dimensional arrays and
+  matrices with views, broadcasting and the `Tensor` class's math, for `float` (see
+  [Work with tensors and matrices](../how-to/use-tensors.html)).
 - **`Half`, `BitOperations` and `BitArray`**, with .NET's names and results: half-precision
   numbers, bit counts and scans on the processor's own instructions where it has them, and arrays
   of bits.
@@ -75,8 +78,8 @@ public record Employee(string Name, int Age, string Team) : Person(Name, Age);
 var a = new Point(1, 2);
 var b = new Point(Opaque(1), 2);
 Point moved = a with { Y = 5 };
-Out.Line(a.ToString());     // Point { X = 1, Y = 2 }
-Out.Line(moved.ToString()); // Point { X = 1, Y = 5 }
+Console.WriteLine(a.ToString());     // Point { X = 1, Y = 2 }
+Console.WriteLine(moved.ToString()); // Point { X = 1, Y = 5 }
 ```
 
 Extension members compile to ordinary static methods, so they cost nothing at run time:
@@ -362,6 +365,15 @@ Check("SoftMax", Near(p[0], 0.09003057f) && Near(p[2], 0.66524096f)
 
 `scripts/tensor-fuzz` compares all of it with .NET's package, on spans of every length up to 70.
 
+The rest of .NET's float functions are there too, one element at a time with float's own formulas:
+`SinPi`, `CosPi`, `TanPi`, `AcosPi` and the other `Pi` forms, `Exp2`, `Exp10`, `ExpM1`, `LogP1` and
+their variants, `DegreesToRadians`, `Ieee754Remainder`, `ILogB`, `RootN`, `Average`, and
+`MaxNumber`, `MinNumber` and their magnitude forms, which skip NaNs. `ExpM1`, `Exp2M1` and
+`Exp10M1` work in double, so they keep their digits near 0, where `Exp(x) - 1` cancels.
+
+`Tensor<T>`, `TensorSpan<T>` and the `Tensor` class build on these for tensors of any rank: see
+[Work with tensors and matrices](../how-to/use-tensors.html).
+
 ### Binary formats, hex and Base64
 
 `BinaryPrimitives` reads and writes numbers in a byte span in a given byte order, as file formats
@@ -538,8 +550,8 @@ public struct Rect : IArea<Rect>
 ```csharp
 static void PrintArea<T>(in T shape) where T : struct, IArea<T>
 {
-    Out.Write(T.Name);
-    Out.Line(" area: ", T.Area(in shape));
+    Console.Write(T.Name);
+    Console.WriteLine($" area: {T.Area(in shape)}");
 }
 ```
 

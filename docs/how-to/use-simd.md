@@ -19,7 +19,7 @@ instruction sets that target's baseline and the `-m` flags include:
 | Target | Without `-m` | With `-m` |
 |---|---|---|
 | arm64 | `AdvSimd` (NEON) is true; `Dp` is false | `-m dotprod`: `Dp` is true (ARMv8.2+, such as Apple M1 or Cortex-A76) |
-| x64 | `Avx`, `Avx2`, `Fma` are false | `-m x86-64-v3`: all three are true (Haswell, 2013, or newer) |
+| x64 | `Sse`, `Sse2` are true; `Avx`, `Avx2`, `Fma` are false | `-m x86-64-v3`: all five are true (Haswell, 2013, or newer) |
 | WebAssembly, DOS | all false | not applicable |
 
 Each check is a constant in the compiled program, not a test at run time. The other side of that: a
@@ -46,6 +46,11 @@ line:
 Simd | Kernels)
     if [ "$BFLAT_ARCH" = x64 ]; then echo -m x86-64-v3; else echo -m dotprod; fi ;;
 ```
+
+`TensorPrimitives` (`System.Numerics.Tensors`) follows the same flags: its arithmetic, sums, `Exp`,
+`Sigmoid`, `Tanh` and `SoftMax` use NEON on arm64, and on x64 SSE2, or AVX with `-m x86-64-v3`
+(see [What works](../concepts/limits.html#tensorprimitives)). `build.sh` builds its sample twice on
+x64, as `Tensors` (SSE2) and `TensorsAvx`, so both paths are tested.
 
 `lib/` itself is built once as IL. Each program's build compiles the parts it uses for its own `-m`
 flags, so one `BflatLib.dll` gives NEON code on arm64 and AVX2 code on x64.

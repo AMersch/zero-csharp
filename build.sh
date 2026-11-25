@@ -49,25 +49,182 @@ source ./env.sh
 # The Small samples are tests sized for a machine with little memory: what
 # Strings, Casts, Collections and the others check, in pieces that each fit
 # in a Commodore 64. They run on every target.
-SMALL_SAMPLES=(SmallStrings SmallBuilders SmallIntegers SmallDoubles SmallObjects SmallArena SmallLists SmallDicts SmallStrDicts SmallText SmallFloats SmallUnicode SmallEncoding SmallFormats SmallDoubleFormats SmallDecimalFormats SmallKeys)
-ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Formats Keys "${SMALL_SAMPLES[@]}")
+# The lists have one sample per line, so pull requests that add different
+# samples change different lines and merge without conflicts.
+SMALL_SAMPLES=(
+    SmallStrings
+    SmallBuilders
+    SmallIntegers
+    SmallDoubles
+    SmallObjects
+    SmallArena
+    SmallLists
+    SmallDicts
+    SmallStrDicts
+    SmallText
+    SmallFloats
+    SmallUnicode
+    SmallEncoding
+    SmallFormats
+    SmallDoubleFormats
+    SmallDecimalFormats
+    SmallKeys
+)
+ALL_SAMPLES=(
+    Tiny
+    Minimal
+    Arena
+    Collections
+    VirtualTest
+    Casts
+    Core
+    Bits
+    Files
+    Dice
+    Pipe
+    Env
+    Simd
+    Kernels
+    Strings
+    QuizStep1
+    QuizStep2
+    QuizStep3
+    Quiz
+    Guards
+    Queries
+    Threads
+    Records
+    Shapes
+    Refs
+    Patterns
+    Scratch
+    Links
+    Llama
+    Unicode
+    Numerics
+    Formats
+    Keys
+    Tensors
+    TensorsAvx
+    "${SMALL_SAMPLES[@]}"
+)
 # Programs with kernels for the GPU (Metal): only --gpu builds them.
 GPU_SAMPLES=(Gpu)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
 # Vga is a game for DOS and UEFI (lib/Dos.cs, lib/Uefi.cs: graphics, keyboard, clock).
-DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Formats Keys "${SMALL_SAMPLES[@]}" Vga)
+DOS_SAMPLES=(
+    Tiny
+    Minimal
+    Arena
+    Collections
+    VirtualTest
+    Casts
+    Core
+    Bits
+    Files
+    Dice
+    Pipe
+    Env
+    Strings
+    QuizStep1
+    QuizStep2
+    QuizStep3
+    Quiz
+    Guards
+    Queries
+    Threads
+    Records
+    Shapes
+    Refs
+    Patterns
+    Scratch
+    Links
+    Llama
+    Unicode
+    Numerics
+    Formats
+    Keys
+    Tensors
+    "${SMALL_SAMPLES[@]}"
+    Vga
+)
 # A C64 program has about 50 KB for its code, data, heap and stack together,
 # and the default is the samples that fit. Any sample can be asked for by
 # name; the linker says by how much it is too big. C64Demo and Paddles are for
 # the C64 only (lib/C64.cs: the screen, the video chip, the keyboard).
-C64_SAMPLES=(Tiny Minimal VirtualTest QuizStep1 QuizStep2 Refs "${SMALL_SAMPLES[@]}" C64Demo Paddles)
+C64_SAMPLES=(
+    Tiny
+    Minimal
+    VirtualTest
+    QuizStep1
+    QuizStep2
+    Refs
+    "${SMALL_SAMPLES[@]}"
+    C64Demo
+    Paddles
+)
 # A microcontroller has no SIMD to benchmark, and Vga is a PC game. Blink is
 # for microcontrollers only (lib/Board.cs: the LED, registers, a timer). The Uno R4
 # has 32 KB of RAM, for the data, the stacks and the heap: these fit.
-ARM_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Formats Keys "${SMALL_SAMPLES[@]}" Blink)
+ARM_SAMPLES=(
+    Tiny
+    Minimal
+    Arena
+    Collections
+    VirtualTest
+    Casts
+    Core
+    Bits
+    Files
+    Dice
+    Pipe
+    Env
+    Strings
+    QuizStep1
+    QuizStep2
+    QuizStep3
+    Quiz
+    Guards
+    Queries
+    Threads
+    Records
+    Shapes
+    Refs
+    Patterns
+    Scratch
+    Links
+    Llama
+    Unicode
+    Numerics
+    Formats
+    Keys
+    Tensors
+    "${SMALL_SAMPLES[@]}"
+    Blink
+)
 # Arena, Collections, Files, Strings, Queries, Threads, Patterns, Scratch and
 # Unicode need more (Arena, for one, allocates a 16 KB array).
-R4_SAMPLES=(Tiny Minimal VirtualTest Casts Core Bits Dice Pipe Env QuizStep1 QuizStep2 QuizStep3 Quiz Guards Records Shapes Refs "${SMALL_SAMPLES[@]}" Blink)
+R4_SAMPLES=(
+    Tiny
+    Minimal
+    VirtualTest
+    Casts
+    Core
+    Bits
+    Dice
+    Pipe
+    Env
+    QuizStep1
+    QuizStep2
+    QuizStep3
+    Quiz
+    Guards
+    Records
+    Shapes
+    Refs
+    "${SMALL_SAMPLES[@]}"
+    Blink
+)
 # UEFI gets every sample, and Vga too (lib/Uefi.cs has what it uses of lib/Dos.cs).
 UEFI_SAMPLES=("${ALL_SAMPLES[@]}" Vga)
 
@@ -111,7 +268,9 @@ bflat_flags() {
         # Zero mode has no runtime CPU detection, so SIMD extensions must be part of
         # the baseline. x64: AVX2/FMA (Haswell, 2013, or newer). arm64 always has
         # NEON; dotprod (SDOT, for int8) needs ARMv8.2+, e.g. Apple M1 or Cortex-A76.
-        Simd | Kernels | Llama)
+        # TensorsAvx is Tensors built for AVX, so both of TensorPrimitives' x64
+        # paths are tested: SSE2 (Tensors) and AVX (TensorsAvx).
+        Simd | Kernels | Llama | TensorsAvx)
             if [ "$BFLAT_ARCH" = x64 ]; then echo -m x86-64-v3; else echo -m dotprod; fi ;;
     esac
 }
@@ -136,10 +295,15 @@ if [ -z "${KEEP_SYMBOLS:-}" ]; then
     LINK_FLAGS+=(--no-debug-info --no-pie --ldflags --strip-all)
 fi
 
-# The sources of a sample: samples/<name>.cs, plus anything generated for it.
+# The sources of a sample: samples/<name>.cs, plus anything generated for it;
+# TensorsAvx is samples/Tensors.cs again, built with other flags.
 # Llama compiles its model and tokenizer in as byte literals, generated from
 # models/ into bin/gen/Stories260K.cs (scripts/llama-model-cs.sh).
 sample_sources() {
+    if [ "$1" = TensorsAvx ]; then
+        echo samples/Tensors.cs
+        return
+    fi
     echo "samples/$1.cs"
     if [ "$1" = Llama ]; then
         scripts/llama-model-cs.sh bin/gen/Stories260K.cs

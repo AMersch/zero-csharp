@@ -32,6 +32,9 @@ namespace System.Runtime.Intrinsics.Arm
         public static void Store(float* address, Vector128<float> source) => Store(address, source);
         public static void Store(int* address, Vector128<int> source) => Store(address, source);
         public static Vector64<byte> PopCount(Vector64<byte> value) => PopCount(value);
+        public static Vector128<float> Abs(Vector128<float> value) => Abs(value);
+        public static Vector128<float> CompareLessThan(Vector128<float> left, Vector128<float> right) => CompareLessThan(left, right);
+        public static Vector128<float> BitwiseSelect(Vector128<float> select, Vector128<float> left, Vector128<float> right) => BitwiseSelect(select, left, right);
 
         [Intrinsic]
         public abstract class Arm64

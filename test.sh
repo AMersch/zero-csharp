@@ -68,6 +68,8 @@ SAMPLES=(
     Core
     Bits
     Files
+    Paths
+    Directories
     Dice
     Pipe
     Env
@@ -101,6 +103,9 @@ SAMPLES=(
 
 # Samples WebAssembly can't run (as in build.sh): the fiber samples switch stacks.
 NOT_WASM=" Fibers SmallFibers SmallChannels "
+# Samples UEFI can't run (as in build.sh): lib/ has directories only on Linux,
+# macOS, Windows and WebAssembly.
+NOT_UEFI=" Directories "
 # Simd and Kernels print timings, so only their exit code is checked.
 TIMED=" Simd Kernels Fibers "
 # Arena and Collections print byte counts that depend on the pointer size, so
@@ -120,6 +125,7 @@ DOS_SAMPLES=(
     Core
     Bits
     Files
+    Paths
     Dice
     Pipe
     Env
@@ -177,6 +183,7 @@ ARM_SAMPLES=(
     Core
     Bits
     Files
+    Paths
     Dice
     Pipe
     Env
@@ -251,7 +258,10 @@ run_all() {
     [ "$target" = mac ] && run+=(--mac)
     if [ "$target" = uefi ]; then
         run+=(--uefi)
-        samples=("${SAMPLES[@]}" Vga)
+        samples=(Vga)
+        for name in "${SAMPLES[@]}"; do
+            [[ "$NOT_UEFI" == *" $name "* ]] || samples+=("$name")
+        done
     fi
     if [ "$target" = dos ]; then
         run+=(--dos)

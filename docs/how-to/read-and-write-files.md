@@ -29,7 +29,8 @@ if (File.TryReadAllText(arena, Path, out string text))
 The string lives in the arena you pass, like any string from `Str.Format`, so it goes away when the
 arena is reset. `TryReadAllBytes` does the same for bytes; it is `unsafe`, as `Arena.AllocSpan` is,
 because the span it gives you points into the arena. `WriteAllBytes`, `Exists` and `Delete` complete
-the set.
+the set. `Exists` is true for a file, readable or not, and false for a directory. (On DOS, UEFI and
+microcontrollers it says whether the file can be opened for reading.)
 
 Bytes that aren't UTF-8 read as U+FFFD, the replacement character, as they do with `In`.
 
@@ -84,8 +85,51 @@ order: `BinaryPrimitives.ReadUInt32LittleEndian(header[4..])` (see
 
 Nothing in `File` ends the program. A file that can't be opened gives a handle whose `IsOpen` is false,
 and every method on it does nothing: `Read` returns 0, `Position` and `Length` return -1. The
-whole-file functions return false. There is no reason given, as there would be in a .NET exception:
-check `IsOpen`, or the `bool`, where it matters.
+whole-file functions return false.
+
+To find out why, use the forms that return a `FileError`: `None`, `NotFound`, `AccessDenied`,
+`AlreadyExists`, `NotEmpty`, `NotADirectory`, `IsADirectory`, `InvalidPath`, `NoSpace` or `Other`:
+
+<!-- sample: samples/Directories.cs errors -->
+```csharp
+// OpenRead, Create and OpenAppend can say why they failed.
+File file = File.OpenRead("dirs.tmp/none", out error);
+// file.IsOpen is false, and error is FileError.NotFound
+```
+
+`OpenRead`, `Create` and `OpenAppend` take an `out FileError`. `OpenRead` also refuses a directory,
+which the C library would otherwise open on Linux and macOS. `CreateNew` creates a file only if
+nothing has the name yet, so no other program can create it in between. `File.Remove` is `Delete` with
+a reason.
+
+## Copy, move and look at a file
+
+`File.Copy` copies a file's bytes, and `File.Move` moves or renames it. Neither replaces a file that's
+already there unless you pass `overwrite: true`:
+
+<!-- sample: samples/Directories.cs copy-move -->
+```csharp
+// Copy and Move refuse to replace a file unless told to overwrite.
+error = File.Copy("dirs.tmp/notes.txt", "dirs.tmp/copy.txt");
+FileError again = File.Copy("dirs.tmp/notes.txt", "dirs.tmp/copy.txt");
+// again is FileError.AlreadyExists
+File.Move("dirs.tmp/copy.txt", "dirs.tmp/logs/moved.txt");
+```
+
+`Move` renames when it can. Between file systems, where a rename can't go, it copies the file and then
+deletes the original. `File.GetInfo` returns a file's length, whether it's a directory, and when it was
+last written:
+
+<!-- sample: samples/Directories.cs info -->
+```csharp
+// GetInfo: a file's length, whether it's a directory, and when it was
+// last written (milliseconds since 1970, as Clock.UnixMilliseconds).
+File.GetInfo("dirs.tmp/notes.txt", out FileInfo info);
+long age = Clock.UnixMilliseconds - info.LastWriteUnixMilliseconds;
+```
+
+The error codes, `Copy`, `Move` and `GetInfo` work on Linux, macOS, Windows and WebAssembly, as
+directories do (see [Work with paths and directories](work-with-paths-and-directories.html)).
 
 ## On each target
 

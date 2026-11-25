@@ -226,3 +226,16 @@ ZeroFiberStart:
     mov     rcx, r12
     call    r13
     int3
+
+// Which system this is, for lib/FileSystem.cs: 4 on Windows and 5 on UEFI, with efi/'s build defining ZERO_UEFI. (1 Linux x64,
+// 2 Linux arm64, 3 macOS, 4 Windows, 5 UEFI, 6 WebAssembly, 7 DOS,
+// 8 a microcontroller, 9 the Commodore 64.)
+    .text
+    .globl ZeroSystem
+ZeroSystem:
+#ifdef ZERO_UEFI
+    mov     eax, 5
+#else
+    mov     eax, 4
+#endif
+    ret

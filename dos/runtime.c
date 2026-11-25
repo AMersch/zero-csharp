@@ -1038,3 +1038,15 @@ float tanhf(float x)
     double e = exp(2.0 * x);
     return (float)((e - 1) / (e + 1));
 }
+
+// ---- lib/FileSystem.cs ----------------------------------------------------
+
+// Which system this is: 7, DOS.
+int ZeroSystem(void) { return 7; }
+
+// File.Exists calls stat only on Linux, macOS, Windows and WebAssembly; here
+// it opens the file instead. These are there for the link, and always fail.
+static int file_system_errno;
+int *__errno_location(void) { return &file_system_errno; }
+int __xstat64(int version, const char *path, void *out) { (void)version; (void)path; (void)out; file_system_errno = 38; return -1; }
+int __lxstat64(int version, const char *path, void *out) { (void)version; (void)path; (void)out; file_system_errno = 38; return -1; }

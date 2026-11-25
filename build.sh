@@ -86,6 +86,8 @@ ALL_SAMPLES=(
     Core
     Bits
     Files
+    Paths
+    Directories
     Dice
     Pipe
     Env
@@ -134,6 +136,7 @@ DOS_SAMPLES=(
     Core
     Bits
     Files
+    Paths
     Dice
     Pipe
     Env
@@ -192,6 +195,7 @@ ARM_SAMPLES=(
     Core
     Bits
     Files
+    Paths
     Dice
     Pipe
     Env
@@ -245,8 +249,14 @@ R4_SAMPLES=(
     "${SMALL_SAMPLES[@]}"
     Blink
 )
-# UEFI gets every sample, and Vga too (lib/Uefi.cs has what it uses of lib/Dos.cs).
-UEFI_SAMPLES=("${ALL_SAMPLES[@]}" Vga)
+# UEFI gets every sample but these, and Vga too (lib/Uefi.cs has what it uses
+# of lib/Dos.cs). Directories needs directories, which lib/ has only on Linux,
+# macOS, Windows and WebAssembly.
+NOT_UEFI=" Directories "
+UEFI_SAMPLES=(Vga)
+for name in "${ALL_SAMPLES[@]}"; do
+    [[ "$NOT_UEFI" == *" $name "* ]] || UEFI_SAMPLES+=("$name")
+done
 
 # Language version and memory safety rules for every sample.
 CSHARP_FLAGS=(--langversion preview --compiler-feature updated-memory-safety-rules)
@@ -818,7 +828,7 @@ build_win() {
         # shellcheck disable=SC2046
         "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none \
             "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os windows --arch x64 $(BFLAT_ARCH=x64 bflat_flags "$name") \
-            --ldflags "/entry:zero_start /wrap:getenv /wrap:fopen /wrap:remove $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
+            --ldflags "/entry:zero_start /wrap:getenv /wrap:fopen /wrap:remove /wrap:mkdir /wrap:rmdir /wrap:rename /wrap:getcwd /wrap:chdir $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
         rm -f "bin/win/$name.pdb"
     done
 }

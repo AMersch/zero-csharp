@@ -431,3 +431,14 @@ void *ZeroFiberInit(char *top, char *bottom, void (*entry)(void *), void *argume
     return frame;
 }
 
+// ---- lib/FileSystem.cs ----------------------------------------------------
+
+// Which system this is: 8, a microcontroller.
+int ZeroSystem(void) { return 8; }
+
+// File.Exists calls stat only on Linux, macOS, Windows and WebAssembly; here
+// it opens the file instead. These are there for the link, and always fail.
+static int file_system_errno;
+int *__errno_location(void) { return &file_system_errno; }
+int __xstat64(int version, const char *path, void *out) { (void)version; (void)path; (void)out; file_system_errno = 38; return -1; }
+int __lxstat64(int version, const char *path, void *out) { (void)version; (void)path; (void)out; file_system_errno = 38; return -1; }

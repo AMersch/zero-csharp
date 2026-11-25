@@ -1,6 +1,6 @@
 <!--
   ZeroCSharp.Sdk: zero-mode C# and F# projects (.csproj, .fsproj).
-  <Project Sdk="ZeroCSharp.Sdk/0.11.0">.
+  <Project Sdk="ZeroCSharp.Sdk/0.12.0">.
 
   A project gets a target framework of its own, ZeroFramework (zero03, in
   version.props), and compiles against zerocore (the core library,
@@ -73,9 +73,10 @@
     <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">linux-arm64</ZeroHostRid>
     <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">win-x64</ZeroHostRid>
     <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('OSX')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">osx-arm64</ZeroHostRid>
-    <!-- linux-x64, linux-arm64, win-x64, osx-arm64, or uefi-x64 and uefi-arm64
-         (a program the firmware starts, no operating system); the host's own
-         by default. A chosen
+    <!-- linux-x64, linux-arm64, win-x64, osx-arm64, uefi-x64 and uefi-arm64
+         (a program the firmware starts, no operating system), c64 (the
+         Commodore 64), or pico2 and r4 (the Raspberry Pi Pico 2 and the
+         Arduino Uno R4 microcontrollers); the host's own by default. A chosen
          one (here: on the command line or in Directory.Build.props) gets an
          output folder of its own, see Sdk.targets. -->
     <ZeroTargetChosen Condition="'$(ZeroTarget)' != ''">true</ZeroTargetChosen>
@@ -103,6 +104,11 @@
          first; building for the machine's own system, its usual library
          folders follow (Homebrew's on macOS). -->
     <!-- ZeroInstructionSet: passed to bflat as -m (x86-64-v3, dotprod, ...). -->
+    <!-- ZeroGpu: Metal compiles the program's [RuntimeExport("Name")] methods
+         for the GPU as well, as kernels lib/Gpu.cs launches (Gpu.Run("Name", ...)).
+         For ZeroTarget osx-arm64, on an Apple Silicon Mac with Xcode, its Metal
+         Toolchain (xcodebuild -downloadComponent MetalToolchain) and Docker,
+         which runs NativeAOT-LLVM, the compiler of the kernels' first step. -->
 
     <!-- dotnet pack: the dll goes to lib/<framework>/ by a target in Sdk.targets,
          because NuGet's pack rejects build output for a framework it doesn't know. -->

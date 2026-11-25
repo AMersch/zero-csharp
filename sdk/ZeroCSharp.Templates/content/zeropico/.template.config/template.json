@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Zero C# contributors",
+  "classifications": ["Native", "Embedded", "IoT"],
+  "identity": "ZeroCSharp.Templates.Pico",
+  "name": "Zero C# microcontroller program (Raspberry Pi Pico 2)",
+  "description": "A program for a Raspberry Pi Pico 2 (or an Arduino Uno R4, in QEMU): a C# interrupt handler blinks the LED. No .NET runtime, no garbage collector, no operating system.",
+  "shortName": "zeropico",
+  "sourceName": "ZeroPico1",
+  "preferNameDirectory": true,
+  "tags": { "language": "C#", "type": "project" },
+  "symbols": {
+    "board": {
+      "type": "parameter",
+      "datatype": "choice",
+      "description": "The board the program is for.",
+      "choices": [
+        { "choice": "pico2", "description": "Raspberry Pi Pico 2 (RP2350, Cortex-M33): a .uf2 for the board, and an .elf for QEMU" },
+        { "choice": "r4", "description": "Arduino Uno R4 (RA4M1, Cortex-M4, 32 KB of RAM): an .elf for QEMU" }
+      ],
+      "defaultValue": "pico2",
+      "replaces": "ZERO_BOARD"
+    }
+  }
+}

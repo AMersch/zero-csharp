@@ -27,6 +27,11 @@ namespace System.Runtime.Intrinsics.X86
         public static Vector256<sbyte> LoadVector256(sbyte* address) => LoadVector256(address);
         public static void Store(float* address, Vector256<float> source) => Store(address, source);
         public static void Store(int* address, Vector256<int> source) => Store(address, source);
+        public static Vector256<float> And(Vector256<float> left, Vector256<float> right) => And(left, right);
+        public static Vector256<float> Or(Vector256<float> left, Vector256<float> right) => Or(left, right);
+        public static Vector256<float> AndNot(Vector256<float> left, Vector256<float> right) => AndNot(left, right);
+        public static Vector256<float> CompareLessThan(Vector256<float> left, Vector256<float> right) => CompareLessThan(left, right);
+        public static Vector256<float> BlendVariable(Vector256<float> left, Vector256<float> right, Vector256<float> mask) => BlendVariable(left, right, mask);
     }
 
     [Intrinsic]
@@ -48,6 +53,38 @@ namespace System.Runtime.Intrinsics.X86
         public static bool IsSupported => false;
 
         public static Vector256<float> MultiplyAdd(Vector256<float> a, Vector256<float> b, Vector256<float> c) => MultiplyAdd(a, b, c);
+    }
+
+    // SSE and SSE2: in every x64 processor, so IsSupported is true on x64
+    // without -m. TensorPrimitives uses them where AVX isn't enabled.
+    [Intrinsic]
+    public abstract unsafe class Sse
+    {
+        public static bool IsSupported => false;
+
+        public static Vector128<float> Add(Vector128<float> left, Vector128<float> right) => Add(left, right);
+        public static Vector128<float> Subtract(Vector128<float> left, Vector128<float> right) => Subtract(left, right);
+        public static Vector128<float> Multiply(Vector128<float> left, Vector128<float> right) => Multiply(left, right);
+        public static Vector128<float> Divide(Vector128<float> left, Vector128<float> right) => Divide(left, right);
+        public static Vector128<float> Max(Vector128<float> left, Vector128<float> right) => Max(left, right);
+        public static Vector128<float> Min(Vector128<float> left, Vector128<float> right) => Min(left, right);
+        public static Vector128<float> And(Vector128<float> left, Vector128<float> right) => And(left, right);
+        public static Vector128<float> Or(Vector128<float> left, Vector128<float> right) => Or(left, right);
+        public static Vector128<float> AndNot(Vector128<float> left, Vector128<float> right) => AndNot(left, right);
+        public static Vector128<float> CompareLessThan(Vector128<float> left, Vector128<float> right) => CompareLessThan(left, right);
+        public static Vector128<float> LoadVector128(float* address) => LoadVector128(address);
+        public static void Store(float* address, Vector128<float> source) => Store(address, source);
+    }
+
+    [Intrinsic]
+    public abstract unsafe class Sse2
+    {
+        public static bool IsSupported => false;
+
+        public static Vector128<int> Add(Vector128<int> left, Vector128<int> right) => Add(left, right);
+        public static Vector128<int> ShiftLeftLogical(Vector128<int> value, byte count) => ShiftLeftLogical(value, count);
+        public static Vector128<int> ConvertToVector128Int32(Vector128<float> value) => ConvertToVector128Int32(value);
+        public static Vector128<float> ConvertToVector128Single(Vector128<int> value) => ConvertToVector128Single(value);
     }
 
     // The bit instructions BitOperations uses. X86Base (bsf, bsr) is in every

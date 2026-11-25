@@ -909,6 +909,10 @@ float tanhf(float x)
         return 1;
     if (x < -20)
         return -1;
+    // tanh x = x - x^3/3 + ..., and below 1e-4 x^3/3 is beyond a float's
+    // precision; (e - 1) / (e + 1) would lose x to cancellation (0 for 1e-30).
+    if (fabs(x) < 1e-4)
+        return x;
     double e = exp(2.0 * x);
     return (float)((e - 1) / (e + 1));
 }

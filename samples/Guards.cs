@@ -51,6 +51,9 @@ public static class Program
             Console.WriteLine("  pool-other           a Pool handle used with another pool");
             Console.WriteLine("  scratch-dict-outer   a new key in a ScratchDict inside a nested Arena.Scratch");
             Console.WriteLine("  scratch-set-outer    a new item in a ScratchHashSet inside a nested Arena.Scratch");
+            Console.WriteLine("  native-overflow      NativeMemory.Alloc with a count times size past the address space");
+            Console.WriteLine("  native-zeroed-overflow  the same for NativeMemory.AllocZeroed");
+            Console.WriteLine("  native-out-of-memory NativeMemory.Alloc of more than the system can give");
             return 0;
         }
 
@@ -87,6 +90,9 @@ public static class Program
             case "pool-other": PoolOther(); break;
             case "scratch-dict-outer": ScratchDictOuter(); break;
             case "scratch-set-outer": ScratchSetOuter(); break;
+            case "native-overflow": NativeOverflow(); break;
+            case "native-zeroed-overflow": NativeZeroedOverflow(); break;
+            case "native-out-of-memory": NativeOutOfMemory(); break;
             default:
                 Console.WriteLine("Unknown case");
                 return 0;
@@ -379,6 +385,23 @@ public static class Program
                 state.Dict.Set(2, 2); // a new key: stops
             });
         });
+    }
+
+    // Where .NET throws OutOfMemoryException, zero mode stops the program.
+    static void NativeOverflow()
+    {
+        unsafe { System.Runtime.InteropServices.NativeMemory.Alloc(~(nuint)0 / 2, 4); }
+    }
+
+    static void NativeZeroedOverflow()
+    {
+        unsafe { System.Runtime.InteropServices.NativeMemory.AllocZeroed(3, ~(nuint)0 / 2); }
+    }
+
+    static void NativeOutOfMemory()
+    {
+        // More than half the address space: no system has that much to give.
+        unsafe { System.Runtime.InteropServices.NativeMemory.Alloc((nuint)nint.MaxValue + 1); }
     }
 
     static void ScratchSetOuter()

@@ -26,7 +26,9 @@ namespace System.Runtime.InteropServices
 
         private static void* Allocate(nuint byteCount)
         {
-            void* block = Platform.calloc(byteCount == 0 ? 1 : byteCount, 1);
+            // C allows no object larger than PTRDIFF_MAX; some systems (Rosetta)
+            // crash on such a request instead of returning null.
+            void* block = byteCount > (nuint)nint.MaxValue ? null : Platform.calloc(byteCount == 0 ? 1 : byteCount, 1);
             if (block == null)
                 Environment.FailFast("NativeMemory: out of memory");
             return block;

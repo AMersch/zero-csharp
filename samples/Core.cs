@@ -294,6 +294,87 @@ public static class Program
         }
     }
 
+    // A zero element count or size is a zero-byte block: still a valid pointer.
+    static bool AllocatesNoElements()
+    {
+        unsafe
+        {
+            void* noElements = NativeMemory.Alloc(0, 8);
+            void* noSize = NativeMemory.AllocZeroed(8, 0);
+            bool valid = noElements != null && noSize != null;
+            NativeMemory.Free(noElements);
+            NativeMemory.Free(noSize);
+            return valid;
+        }
+    }
+
+    // AllocZeroed must zero memory that a freed block left dirty, not only
+    // fresh pages from the system.
+    static bool ZeroesReusedMemory(int count)
+    {
+        unsafe
+        {
+            bool zero = true;
+            for (int round = 0; round < 4; round++)
+            {
+                byte* dirty = (byte*)NativeMemory.Alloc((nuint)count);
+                for (int i = 0; i < count; i++)
+                    dirty[i] = 0xAB;
+                NativeMemory.Free(dirty);
+                byte* clean = (byte*)NativeMemory.AllocZeroed((nuint)count, 1);
+                for (int i = 0; i < count; i++)
+                    zero &= clean[i] == 0;
+                NativeMemory.Free(clean);
+            }
+            return zero;
+        }
+    }
+
+    // Blocks alive at once don't overlap, and freeing one leaves the other.
+    static bool KeepsBlocksApart(int count)
+    {
+        unsafe
+        {
+            int* first = (int*)NativeMemory.Alloc((nuint)count, sizeof(int));
+            int* second = (int*)NativeMemory.AllocZeroed((nuint)count, sizeof(int));
+            for (int i = 0; i < count; i++)
+            {
+                first[i] = i;
+                second[i] = -i - 1;
+            }
+            bool apart = first != second;
+            for (int i = 0; i < count; i++)
+                apart &= first[i] == i;
+            NativeMemory.Free(second);
+            for (int i = 0; i < count; i++)
+                apart &= first[i] == i;
+            NativeMemory.Free(first);
+            return apart;
+        }
+    }
+
+    // Nothing reads these attributes, but code shared with .NET puts them on
+    // every kind of member they allow, and may read their properties.
+    [SupportedOSPlatform("macos")]
+    sealed class PlatformOnly
+    {
+        [UnsupportedOSPlatform("browser")]
+        public int Value { get; set; }
+
+        [SupportedOSPlatform("linux"), UnsupportedOSPlatform("windows")]
+        public static int Twice([ConstantExpected(Min = 0, Max = 8)] int shift) => 2 << shift >> 1;
+    }
+
+    static bool AttributesKeepTheirValues()
+    {
+        var supported = new SupportedOSPlatformAttribute("linux");
+        var unsupported = new UnsupportedOSPlatformAttribute("browser");
+        var expected = new ConstantExpectedAttribute { Min = 1, Max = 16 };
+        return supported.PlatformName == "linux" && unsupported.PlatformName == "browser"
+            && expected.Min is int min && min == 1 && expected.Max is int max && max == 16
+            && PlatformOnly.Twice(Opaque(3)) == 8 && new PlatformOnly { Value = 5 }.Value == 5;
+    }
+
     public static int Main()
     {
         Check("Sqrt", Math.Sqrt(Opaque(2.0)) * Math.Sqrt(Opaque(2.0)) > 1.9999999999 && Math.Sqrt(Opaque(144.0)) == 12);
@@ -511,8 +592,12 @@ public static class Program
         Section("span copy and fill");
 
         Check("Alloc, then Free", AllocatesAndFrees(Opaque(1000)));
-        Check("AllocZeroed", AllocatesZeroed(Opaque(4096)));
+        Check("AllocZeroed", AllocatesZeroed(Opaque(256))); // 2 KB of longs: the Uno R4 has 32 KB of RAM
         Check("Alloc(0) is a valid pointer, Free(null) does nothing", AllocatesNothing());
+        Check("Alloc(0, n) and AllocZeroed(n, 0) are valid pointers", AllocatesNoElements());
+        Check("AllocZeroed zeroes a freed block's memory", ZeroesReusedMemory(Opaque(4096)));
+        Check("blocks alive at once are apart", KeepsBlocksApart(Opaque(256)));
+        Check("platform and ConstantExpected attributes", AttributesKeepTheirValues());
         Section("NativeMemory");
 
         Console.WriteLine();

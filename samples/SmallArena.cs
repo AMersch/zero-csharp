@@ -1,4 +1,4 @@
-// Test: an arena and spans, sized for a small machine. Arena.cs checks more
+// Test: an arena, spans and NativeMemory, sized for a small machine. Arena.cs checks more
 // and doesn't fit in a Commodore 64 (./build.sh --c64). The arena here is
 // 1 KB, because the machine this is for has about 10 KB of heap once the
 // program is loaded. It runs on every target.
@@ -6,6 +6,7 @@
 // Build: ./build.sh SmallArena
 
 using System;
+using System.Runtime.InteropServices;
 
 namespace SmallArenaSample;
 
@@ -46,6 +47,76 @@ public static class Program
         return sum;
     }
 
+    // NativeMemory sits on the target's calloc and free. The blocks are small:
+    // a C64 has about 10 KB of heap.
+    static bool NativeAllocAndFree()
+    {
+        unsafe
+        {
+            int* items = (int*)NativeMemory.Alloc(50, sizeof(int));
+            for (int i = 0; i < 50; i++)
+                items[i] = i * 3;
+            short* zeroed = (short*)NativeMemory.AllocZeroed(50, sizeof(short));
+            bool ok = items != null && zeroed != null;
+            for (int i = 0; i < 50; i++)
+                ok &= items[i] == i * 3 && zeroed[i] == 0;
+            NativeMemory.Free(zeroed);
+            NativeMemory.Free(items);
+            return ok;
+        }
+    }
+
+    static bool NativeZeroesReusedMemory()
+    {
+        unsafe
+        {
+            byte* dirty = (byte*)NativeMemory.Alloc(300);
+            for (int i = 0; i < 300; i++)
+                dirty[i] = 0xAB;
+            NativeMemory.Free(dirty);
+            byte* clean = (byte*)NativeMemory.AllocZeroed(300);
+            bool zero = clean != null;
+            for (int i = 0; i < 300; i++)
+                zero &= clean[i] == 0;
+            NativeMemory.Free(clean);
+            return zero;
+        }
+    }
+
+    static bool NativeEmpty()
+    {
+        unsafe
+        {
+            void* empty = NativeMemory.Alloc(0);
+            void* noElements = NativeMemory.AllocZeroed(0, 8);
+            bool valid = empty != null && noElements != null;
+            NativeMemory.Free(noElements);
+            NativeMemory.Free(empty);
+            NativeMemory.Free(null);
+            return valid;
+        }
+    }
+
+    // A block bigger than the arena's 1 KB, freed and allocated again: on a
+    // C64 this only works if Free gives the memory back.
+    static bool NativeFreeGivesBack()
+    {
+        unsafe
+        {
+            bool ok = true;
+            for (int round = 0; round < 20; round++)
+            {
+                byte* block = (byte*)NativeMemory.Alloc(2048);
+                ok &= block != null;
+                block[0] = (byte)round;
+                block[2047] = (byte)round;
+                ok &= block[0] == round && block[2047] == round;
+                NativeMemory.Free(block);
+            }
+            return ok;
+        }
+    }
+
     public static int Main()
     {
         Arena arena = Arena.Create(1024);
@@ -75,6 +146,12 @@ public static class Program
             stackSum += value;
         Check("stackalloc, Fill, Clear", stackSum == 84);
         End("arena and spans");
+
+        Check("NativeMemory.Alloc, AllocZeroed, Free", NativeAllocAndFree());
+        Check("AllocZeroed zeroes a freed block's memory", NativeZeroesReusedMemory());
+        Check("Alloc(0) is a valid pointer, Free(null) does nothing", NativeEmpty());
+        Check("Free gives the memory back", NativeFreeGivesBack());
+        End("NativeMemory");
 
         Console.WriteLine();
         if (s_failures == 0)

@@ -223,6 +223,32 @@ string report = Arena.Scratch(ref keep,
     });
 ```
 
+`scratch.Dict<TKey, TValue>()` and `scratch.HashSet<T>()` are the dictionary and set for scratch
+work, compared as `Dict` and `HashSet` are. `Clone(arena)` copies one into an arena of yours, to keep
+after the callback:
+
+<!-- sample: samples/Scratch.cs dict -->
+```csharp
+// Count each roll and keep only the counts: the dictionary and the set
+// go with the scratch memory, the copy stays in an arena of yours.
+int[] rolls = { 3, 6, 3, 1, 6, 3 };
+var dice = new Job { Input = rolls };
+Arena results = Arena.Create(4096);
+int distinct = Arena.Scratch(ref dice,
+    static (scoped ScratchScope scratch, scoped ref Job state) =>
+    {
+        ScratchDict<int, int> counts = scratch.Dict<int, int>();
+        ScratchHashSet<int> seen = scratch.HashSet<int>();
+        foreach (int roll in state.Input)
+        {
+            counts.TryGet(roll, out int count);
+            counts.Set(roll, count + 1);
+            seen.Add(roll);
+        }
+        return seen.Count;
+    });
+```
+
 A `ScratchPool<T>` from `scratch.Pool<T>()` holds items found by handles, as a `Pool<T>` does. Its
 `MoveTo` moves an item into a pool of yours, which is how a result made in scratch memory is kept:
 

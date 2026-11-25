@@ -52,6 +52,12 @@ namespace System
         public NotImplementedException(string message) : base(message) { }
     }
 
+    public class ObjectDisposedException : InvalidOperationException
+    {
+        public ObjectDisposedException(string objectName) : base("Cannot access a disposed object. Object name: '" + objectName + "'.") { }
+        public ObjectDisposedException(string objectName, string message) : base(message) { }
+    }
+
     public class ArgumentException : Exception
     {
         public ArgumentException() : base("ArgumentException") { }

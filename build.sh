@@ -103,6 +103,7 @@ ALL_SAMPLES=(
     Queries
     Threads
     Fibers
+    Timers
     Records
     Shapes
     Refs
@@ -121,7 +122,7 @@ ALL_SAMPLES=(
 )
 # Samples WebAssembly can't run: the fiber samples switch stacks, which a WebAssembly
 # program has no way to do.
-NOT_WASM=" Fibers SmallFibers SmallChannels "
+NOT_WASM=" Fibers Timers SmallFibers SmallChannels "
 # Programs with kernels for the GPU (Metal): only --gpu builds them.
 GPU_SAMPLES=(Gpu)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
@@ -155,6 +156,7 @@ DOS_SAMPLES=(
     Refs
     Patterns
     Fibers
+    Timers
     Scratch
     Links
     Llama
@@ -211,6 +213,7 @@ ARM_SAMPLES=(
     Queries
     Threads
     Fibers
+    Timers
     Records
     Shapes
     Refs
@@ -228,8 +231,9 @@ ARM_SAMPLES=(
     Blink
 )
 # Arena, Collections, Files, Strings, Queries, Threads, Fibers, Patterns,
-# Scratch and Unicode need more (Arena, for one, allocates a 16 KB array;
-# Fibers runs three fibers of 5 KB at once).
+# Scratch, Links and Unicode need more (Arena, for one, allocates a 16 KB
+# array; Fibers runs three fibers of 5 KB at once). Links passes, but with
+# less than 2 KB to spare, so a small change elsewhere would break it.
 R4_SAMPLES=(
     Tiny
     Minimal

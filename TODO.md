@@ -10,15 +10,11 @@ calls. `./test.sh --cx16` runs headless (`x16emu -testbench`), which has no fram
 output and no mouse: what can only be heard or seen needs a check in a window, or a recording
 (`-wav`, `-gif`).
 
-## 1. Do first
+## 1. Done
 
-| # | Task | Effort | Why now |
-|---|------|--------|---------|
-| 1 | **Real-time clock** (`cx16_k_clock_get_date_time`, `cx16_k_clock_set_date_time`) | S | `lib/Clock.cs` and `Clock.UtcNow` ask the runtime's `cs_clock_gettime`, which on the X16 starts both clocks at power-on: dates are wrong. Answering the wall clock (clock 0) from the RTC fixes `Clock.UtcNow`, `UnixMilliseconds` and `Random.FromClock()` for every program, with no new API. Add `CX16.SetDateTime` for setting it. |
-| 2 | **Hardware random seed** (`cx16_k_entropy_get`, 24 bits) | S | Gives `Random.FromClock()` a seed that differs on every run even without a battery-backed clock (the emulator starts its RTC from the host's, a real X16 may not have one). Mix it into the seed in `cs_clock_gettime` or offer `CX16.Entropy`. Do it together with 1. |
-
-Test for both: the emulator's `-rtc` sets the machine's clock; a headless test can check plausibility
-(year, month and day in range, two calls in order) and that two entropy reads differ.
+- **Real-time clock:** `Clock.UtcNow` and `UnixMilliseconds` read it; `CX16.SetDateTime` sets it.
+- **Hardware random seed:** `CX16.Entropy`, and `Clock.Monotonic` starts at a random moment, so
+  `Random.FromClock()` differs from run to run. (`samples/ClockSeed.cs`)
 
 ## 2. Next: the screen
 

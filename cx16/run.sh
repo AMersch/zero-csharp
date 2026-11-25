@@ -17,6 +17,9 @@
 # window also takes the mouse and the keyboard, so a mouse program (Mouse)
 # can't be moved out of the window by accident (x16emu's own -capture).
 #
+# The emulator is started with -rtc, which sets its real-time clock to the computer's
+# time (Clock.UtcNow reads it).
+#
 # Usage: cx16/run.sh [--window [--capture]] <Sample>
 # Env:   X16_EMULATOR  x16emu; default: x16emu on the PATH, or see env.sh
 #        X16_ROM       its ROM, if it isn't next to the emulator
@@ -58,7 +61,7 @@ if ! emulator=$(find_x16_emulator); then
     exit 1
 fi
 
-options=(-prg "$program" -run -fsroot "$(dirname "$program")")
+options=(-prg "$program" -run -rtc -fsroot "$(dirname "$program")")
 [ -n "${X16_ROM:-}" ] && options+=(-rom "$X16_ROM")
 
 if [ "$window" = 1 ]; then

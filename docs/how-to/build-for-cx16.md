@@ -99,6 +99,23 @@ File.WriteAllBytes("#9:data.bin", bytes);       // on device 9
 `samples/DiskFiles.cs` tests all of it (the emulator's host folder stands in for the SD card);
 `samples/Files.cs` is for the other targets: it wants 64 KB arenas and writes into the middle of files.
 
+## Date, time and random numbers
+
+- **`Clock.UtcNow`, `Clock.UnixMilliseconds`:** the X16's real-time clock, read once when a program first
+  asks, and from then on advanced by the jiffy clock (sixtieths of a second), so it has fractions of a
+  second and costs no more reads. The clock keeps what was set, usually the local time: the X16 knows no
+  time zone, so the "UTC" of `Clock.UtcNow` is whatever the clock says. A real X16 has to have the
+  time set (`CX16.SetDateTime`, or BASIC's `SETTIME`); `run.sh --cx16` starts the emulator with `-rtc`,
+  which gives it the computer's time.
+- **`CX16.SetDateTime(year, month, day, hour, minute, second)`:** sets it (1900 to 2155; dates that
+  don't exist are ignored).
+- **`Clock.Monotonic`:** the jiffies since power-on, plus a start somewhere in the first second, taken
+  from the hardware's random bits (a monotonic clock's origin is up to the machine). That is what makes
+  `Random.FromClock()` give different numbers on every run, even on a machine whose clock isn't set.
+- **`CX16.Entropy`:** 24 random bits from the KERNAL, for a seed: `new Random((ulong)CX16.Entropy)`.
+
+`samples/ClockSeed.cs` tests these; it sets the clock and puts the time back (to the second).
+
 ## Math
 
 llvm-mos's C library has no `sin`, `cos`, `tan`, `exp`, `log`, `log2`, `log10`, `pow` or `atan2`, which

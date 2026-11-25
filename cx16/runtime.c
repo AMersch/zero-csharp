@@ -507,18 +507,75 @@ i32 cs_read(i32 file, char *buffer, u32 count)
 // ---- the clock --------------------------------------------------------------------
 
 // The KERNAL counts sixtieths of a second since the machine was switched on
-// (RDTIM, from the vertical blank interrupt). That is all the clock there is:
-// both of clock_gettime's clocks start at power-on.
+// (RDTIM, from the vertical blank interrupt), and the real-time clock keeps the
+// date and the time of day, to the second (it keeps what was set, usually the
+// local time: no time zone is known). Of clock_gettime's two clocks:
+//
+//   0, the wall clock: the real-time clock, read once and then advanced by the
+//     jiffies, so that it has sixtieths of a second and costs no more reads.
+//   1, the monotonic clock: the jiffies since power-on, plus an arbitrary start
+//     (a monotonic clock's origin is not defined) taken from the hardware's
+//     random bits, which makes Random.FromClock() differ from run to run even
+//     when the real-time clock isn't set.
 static u32 jiffies(void) { return cx16_k_rdtim(); }
+
+static char wall_known;                 // the real-time clock has been read
+static i64 wall_seconds;                // Unix time then
+static u32 wall_jiffies;                // and the jiffies then
+static char origin_known;
+static i64 origin_ns;                   // the monotonic clock's start, in nanoseconds
+
+// Seconds since 1970-01-01 of a date (the proleptic Gregorian calendar's days from the
+// civil date: Howard Hinnant's algorithm), and a time of day.
+static i64 unix_seconds(int year, int month, int day, int hour, int minute, int second)
+{
+    long y = year - (month <= 2), era = (y >= 0 ? y : y - 399) / 400;
+    long yoe = y - era * 400, doy = (153L * (month > 2 ? month - 3 : month + 9) + 2) / 5 + day - 1;
+    long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    i64 days = (i64)era * 146097 + doe - 719468;
+    return days * 86400 + (i64)hour * 3600 + minute * 60 + second;
+}
+
+static void read_wall_clock(void)
+{
+    cx16_date_time_t now;
+    cx16_k_clock_get_date_time(&now);
+    wall_seconds = unix_seconds(1900 + now.year, now.mon, now.day, now.hour, now.min, now.sec);
+    wall_jiffies = jiffies();
+    wall_known = 1;
+}
 
 i32 cs_clock_gettime(i32 clock, i64 *timespec)
 {
     u32 ticks = jiffies();
-    (void)clock;
-    timespec[0] = ticks / 60;
-    timespec[1] = (i64)(ticks % 60) * 16666667;
+    if (clock == 0) {
+        if (!wall_known)
+            read_wall_clock();
+        u32 since = ticks - wall_jiffies;
+        timespec[0] = wall_seconds + since / 60;
+        timespec[1] = (i64)(since % 60) * 16666667;
+    } else {
+        if (!origin_known) {
+            origin_ns = (i64)cx16_k_entropy_get() * 61;     // up to a second
+            origin_known = 1;
+        }
+        i64 ns = (i64)ticks * 16666667 + origin_ns;
+        timespec[0] = ns / 1000000000;
+        timespec[1] = ns % 1000000000;
+    }
     return 0;
 }
+
+// Sets the real-time clock (and the wall clock with it).
+void cs_cx16_set_date_time(i32 year, i32 month, i32 day, i32 hour, i32 minute, i32 second)
+{
+    cx16_k_clock_set_date_time((unsigned char)(year - 1900), (unsigned char)month, (unsigned char)day,
+        (unsigned char)hour, (unsigned char)minute, (unsigned char)second, 0);
+    wall_known = 0;
+}
+
+// 24 random bits from the hardware.
+i32 cs_cx16_entropy(void) { return (i32)cx16_k_entropy_get(); }
 
 // ---- the rest of what zerocore and lib/ import -------------------------------------
 

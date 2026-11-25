@@ -66,6 +66,8 @@ public static class CX16
     [DllImport("libc")] static safe extern int cx16_joystick(int number);
     [DllImport("libc")] static safe extern void cx16_mouse_config(int show);
     [DllImport("libc")] static safe extern int cx16_mouse(int field);
+    [DllImport("libc")] static safe extern void cx16_set_date_time(int year, int month, int day, int hour, int minute, int second);
+    [DllImport("libc")] static safe extern int cx16_entropy();
     [DllImport("libc")] static safe extern void cx16_voice(int voice, int frequency, int volume, int waveform);
 
     // ---- memory ------------------------------------------------------------------
@@ -276,6 +278,18 @@ public static class CX16
 
     /// <summary>Sixtieths of a second since the machine was switched on.</summary>
     public static uint Ticks => cx16_ticks();
+
+    /// <summary>Sets the real-time clock, which keeps the date and the time of day while the machine is off (if it has a battery). Clock.UtcNow reads it, as the time that was set: the X16 knows no time zone. The year is 1900 to 2155.</summary>
+    public static void SetDateTime(int year, int month, int day, int hour, int minute, int second)
+    {
+        if (year < 1900 || year > 2155 || month < 1 || month > 12 || day < 1 || day > 31
+            || (uint)hour > 23 || (uint)minute > 59 || (uint)second > 59)
+            return;
+        cx16_set_date_time(year, month, day, hour, minute, second);
+    }
+
+    /// <summary>24 random bits from the hardware (the KERNAL's entropy source): different every time, and fine as a seed. For many random numbers, give one to a Random: new Random((ulong)CX16.Entropy).</summary>
+    public static int Entropy => cx16_entropy();
 
     // ---- keyboard and joysticks -------------------------------------------------------
 

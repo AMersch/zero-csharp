@@ -41,7 +41,7 @@
 // - System.Threading.Timer: no Dispose(WaitHandle), DisposeAsync or
 //   ActiveCount.
 // - PeriodicTimer: WaitForNextTick, which blocks, in place of
-//   WaitForNextTickAsync (zero mode has no async/await), and no
+//   WaitForNextTickAsync (not yet: lib/Tasks.cs came later), and no
 //   CancellationToken or TimeProvider. It needs no Fiber.Run: in a fiber the
 //   wait lets the others run, outside one it sleeps the thread.
 // - StackSize, the size of the timer's fiber's stack, is new on both.

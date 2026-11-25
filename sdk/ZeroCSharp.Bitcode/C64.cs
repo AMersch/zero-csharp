@@ -187,7 +187,13 @@ static class C64
         var extra = Directory.GetFiles(outDir, "*.s").Order(StringComparer.Ordinal)
             .Concat(new[] { "data.c", "external.c" }.Select(f => Path.Combine(outDir, f)).Where(File.Exists))
             .ToList();
-        string[] mos = ["--config", "mos-c64.cfg", "-Os", "-Wall", "-Wno-override-module", "-Wno-unused-command-line-argument"];
+        //
+        // -mlto-zp=0: no zero page for the optimizer's variables and stack
+        // frames. NativeAOT-LLVM checks for null as "address below 1024",
+        // so a C# local the 6502 compiler put in the zero page would be null
+        // to C# as soon as its address was taken (a NullReferenceException
+        // from `&local`, or `fixed`, in a method it proved isn't re-entered).
+        string[] mos = ["--config", "mos-c64.cfg", "-Os", "-mlto-zp=0", "-Wall", "-Wno-override-module", "-Wno-unused-command-line-argument"];
         // save-basic.o: by default an llvm-mos program never returns (it has
         // overwritten memory BASIC uses). This saves that memory at the start
         // and puts it back at the end, so the program ends at BASIC's READY.

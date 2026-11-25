@@ -19,8 +19,9 @@
 //                            way. NativeAOT-LLVM only uses packed structs, so
 //                            nothing else in a layout depends on the target.
 //
-// Four more things, each explained where it is done: the exception flag is
-// folded away, every function is marked to be compiled for size,
+// Five more things, each explained where it is done: the exception flag is
+// folded away, imported functions are called directly, every function is
+// marked to be compiled for size,
 // float-to-integer conversions call the runtime, and functions whose
 // declaration and definition disagree are refused.
 using System.Text;
@@ -45,6 +46,7 @@ static class Ll2Mos
             var lines = new List<string>();
             foreach (string line in text.Split('\n'))
                 lines.AddRange(rewriter.Line(line));
+            lines.AddRange(rewriter.Declarations(text));
             Files.WriteText(Path.Combine(outDir, Path.GetFileName(path)), string.Join("\n", lines));
         }
     }
@@ -236,6 +238,7 @@ static class Ll2Mos
         static readonly Regex Store = new(@"^(\s*)store (volatile )?ptr (.*)$", Options);
         static readonly Regex Extract = new(@"^(\s*)(%[\w.$]+) = extractvalue (.*)$", Options);
         static readonly Regex Insert = new(@"^(\s*)(%[\w.$]+) = insertvalue (.*)$", Options);
+        static readonly Regex Cell = new(@"^(\s*%[\w.$]+) = load ptr, ptr @cell\.([\w$]+), align \d+$", Options);
         static readonly Regex Flag = new(@"^(\s*%[\w.$]+) = load i32, ptr @RhpExceptionThrown, align 4$", Options);
         static readonly Regex Unoptimized = new(@"^attributes (#\d+) = \{[^}]*\boptnone\b", Options | RegexOptions.Multiline);
         static readonly Regex Group = new(@" (#\d+) \{$", Options);
@@ -247,6 +250,11 @@ static class Ll2Mos
         static readonly string[] Unsupported = ["cmpxchg", "atomicrmw", "x ptr>", "byval(", "sret(", "va_arg"];
 
         int _temporaries;
+        // The functions that replaced cells (cs_<name>), each with the type
+        // it is called with ("ret (args)"), or null if no call was seen.
+        readonly SortedDictionary<string, string?> _imports = new(StringComparer.Ordinal);
+        // In the function being read: the values that hold one, by name.
+        readonly Dictionary<string, string> _importIn = new(StringComparer.Ordinal);
         // The attribute groups ("attributes #1 = { noinline optnone }") that
         // switch optimization off.
         readonly HashSet<string> _unoptimized;
@@ -254,10 +262,64 @@ static class Ll2Mos
         public Rewriter(string text) =>
             _unoptimized = Unoptimized.Matches(text).Select(m => m.Groups[1].Value).ToHashSet();
 
+        // Declarations of the functions that replaced cells, unless the
+        // module has them. Each has the type its calls use: the optimizer
+        // treats a call to a function of another type as undefined.
+        public IEnumerable<string> Declarations(string text) =>
+            _imports.Where(i => !text.Contains($"@cs_{i.Key}(", StringComparison.Ordinal))
+                .Select(i => i.Value is { } type
+                    ? $"declare {type[..type.IndexOf(' ')]} @cs_{i.Key}{type[(type.IndexOf(' ') + 1)..]}"
+                    : $"declare void @cs_{i.Key}()");
+
+        public List<string> Line(string line)
+        {
+            if (line.StartsWith("define ", StringComparison.Ordinal))
+                _importIn.Clear();
+            List<string> result = Rewrite(line);
+            if (_importIn.Count > 0)
+            {
+                foreach (string output in result)
+                    NoteCalls(output);
+            }
+            return result;
+        }
+
+        // A call through a value that holds an import: what types it is called with.
+        void NoteCalls(string line)
+        {
+            int call = line.IndexOf("call ", StringComparison.Ordinal);
+            if (call < 0)
+                return;
+            foreach (var (value, name) in _importIn)
+            {
+                int at = line.IndexOf(" " + value + "(", call, StringComparison.Ordinal);
+                if (at < 0)
+                    continue;
+                string before = line[(call + 5)..at].Trim();
+                string result = before[(before.LastIndexOf(' ') + 1)..];
+                int open = at + value.Length + 2, depth = 1, close = open;
+                for (; close < line.Length && depth > 0; close++)
+                {
+                    if (line[close] == '(')
+                        depth++;
+                    else if (line[close] == ')')
+                        depth--;
+                }
+                string arguments = line[open..(close - 1)];
+                var types = arguments.Trim().Length == 0
+                    ? []
+                    : Operands(arguments).Select(a => a[..(a + " ").IndexOf(' ')]).ToList();
+                string type = $"{result} ({string.Join(", ", types)})";
+                if (_imports[name] is { } known && known != type)
+                    throw Fail($"cs_{name} is called as {known} and as {type} in one module");
+                _imports[name] = type;
+            }
+        }
+
         // Named, so the numbered values around it keep their numbers.
         string Temporary() => $"%mos.{++_temporaries}";
 
-        public List<string> Line(string line)
+        List<string> Rewrite(string line)
         {
             if (line.StartsWith("target datalayout", StringComparison.Ordinal)
                 || line.StartsWith("target triple", StringComparison.Ordinal))
@@ -274,6 +336,22 @@ static class Ll2Mos
             Match m = Flag.Match(line);
             if (m.Success)
                 return [$"{m.Groups[1].Value} = add i32 0, 0"];
+
+            // A function C# imports ([DllImport]) is called through its
+            // "cell", a slot that holds its address, and the cells are data
+            // (Wasm2Mos.cs) that the optimizer can't see into: every call is
+            // an indirect one. The cell always holds cs_<name>, so that is
+            // what is called, and at link time the optimizer can inline it:
+            // C64.Poke becomes one store instead of a call through a
+            // pointer with 8 bytes of arguments.
+            m = Cell.Match(line);
+            if (m.Success)
+            {
+                string value = m.Groups[1].Value.Trim(), name = m.Groups[2].Value;
+                _imports.TryAdd(name, null);
+                _importIn[value] = name;
+                return [$"{m.Groups[1].Value} = getelementptr i8, ptr @cs_{name}, i32 0"];
+            }
 
             m = Store.Match(line);
             if (m.Success)

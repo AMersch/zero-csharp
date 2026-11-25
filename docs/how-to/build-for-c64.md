@@ -261,9 +261,9 @@ static void Frame(int frame, ref int x, ref int y, ref int dx, ref int dy)
 ```
 
 `C64.ReadKey` gives the next key pressed without waiting, `C64.Joystick` the joystick in port 2, and
-`C64.Peek` and `C64.Poke` reach every address there is. Each call from C# costs about 125 processor
-cycles, of the 20,000 in a frame, because it passes 32-bit numbers through an 8-bit processor;
-`C64.Print` takes about 170 a character, so a full line is a third of a frame.
+`C64.Peek` and `C64.Poke` reach every address there is, and cost what a load or a store costs:
+`C64.Poke(0xD020, 0)` compiles to one `STA $D020`. `C64.Print` takes about 170 processor cycles a
+character, of the 20,000 in a frame, so a full line is a third of a frame.
 
 ## A game
 

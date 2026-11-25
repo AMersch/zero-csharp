@@ -45,6 +45,11 @@ public static class CX16
     // Sound: the shape of a voice's wave.
     public const int Pulse = 0, Sawtooth = 1, Triangle = 2, Noise = 3;
 
+    // Screen modes, for SetMode: text of so many columns and rows, or 320x240 pixels of 256
+    // colors with 40x30 text above them.
+    public const int Text80x60 = 0x00, Text80x30 = 0x01, Text40x60 = 0x02, Text40x30 = 0x03;
+    public const int Text40x15 = 0x04, Text20x30 = 0x05, Text20x15 = 0x06, Graphics320x240 = 0x80;
+
     // Where things are in the video chip's memory.
     const int SpriteShapes = 0x4000;        // 128 bytes a shape, up to 64 shapes
     const int SpriteAttributes = 0x1FC00;   // 8 bytes a sprite, 128 sprites
@@ -57,6 +62,8 @@ public static class CX16
     [DllImport("libc")] static safe extern void cx16_vpoke(int address, int value);
     [DllImport("libc")] static unsafe extern void cx16_vcopy(int address, byte* source, int count);
     [DllImport("libc")] static safe extern void cx16_clear(int background);
+    [DllImport("libc")] static safe extern int cx16_mode(int mode);
+    [DllImport("libc")] static safe extern int cx16_mode_number();
     [DllImport("libc")] static safe extern int cx16_columns();
     [DllImport("libc")] static safe extern int cx16_rows();
     [DllImport("libc")] static unsafe extern void cx16_print(int column, int row, char* text, int count, int color);
@@ -85,6 +92,20 @@ public static class CX16
     public static void VPoke(int address, int value) => cx16_vpoke(address, value);
 
     // ---- the screen ----------------------------------------------------------------
+
+    /// <summary>The screen mode: one of Text80x60 (the one at startup) and the others above.</summary>
+    public static int Mode => cx16_mode_number();
+
+    /// <summary>
+    /// Switches the screen mode. Returns false, and changes nothing, for a number that isn't a mode.
+    /// The screen is cleared and Out's cursor goes to the top left. Sprites stay on, and the mouse
+    /// (see MouseOn) is given the new screen's size; the sprites' positions, shapes and
+    /// colors are as they were, but a program that has changed the video chip's own registers
+    /// has to do that again. In the modes with 40 or fewer columns the characters are 16 pixels wide,
+    /// and in Graphics320x240 the whole picture is 320 by 240 pixels, sprites and the mouse
+    /// included.
+    /// </summary>
+    public static bool SetMode(int mode) => cx16_mode(mode) != 0;
 
     /// <summary>Characters across the text screen: 80 at startup.</summary>
     public static int Columns => cx16_columns();

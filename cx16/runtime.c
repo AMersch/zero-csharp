@@ -1007,6 +1007,35 @@ void cs_cx16_clear(i32 background)
     cbm_k_chrout(147);
 }
 
+static unsigned char mouse_show;        // what the program last asked mouse_config for
+static char mouse_on;
+void cs_cx16_mouse_config(i32 show);
+
+// Switches the screen mode (0-6: text, $80: 320x240 with 256 colors under 40x30 text). The
+// KERNAL clears the screen and starts the video chip over (the character set stays, ISO
+// or PETSCII, as it was); what a program would not expect to lose is put back: the
+// sprites stay on, and the mouse gets the new screen's size. Returns 1, or 0 for a mode
+// that isn't one.
+i32 cs_cx16_mode(i32 mode)
+{
+    VERA.control &= ~2;                             // DCSEL 0: the register with the sprite bit
+    unsigned char sprites = VERA.display.video & 0x40;
+    if (cx16_k_screen_mode_set((unsigned char)mode) != 0)
+        return 0;
+    VERA.control &= ~2;
+    VERA.display.video |= sprites;
+    if (mouse_on)
+        cs_cx16_mouse_config(mouse_show);
+    return 1;
+}
+
+i32 cs_cx16_mode_number(void)
+{
+    screen_mode_info_t info;
+    cx16_k_screen_mode_get(&info);
+    return info.mode;
+}
+
 i32 cs_cx16_columns(void)
 {
     screen_mode_info_t info;
@@ -1092,6 +1121,8 @@ void cs_cx16_mouse_config(i32 show)
     screen_mode_info_t info;
     cx16_k_screen_mode_get(&info);
     cx16_k_mouse_config((unsigned char)show, info.columns, info.rows);
+    mouse_show = (unsigned char)show;
+    mouse_on = show != 0;
 }
 
 // 0: the pointer's x, 1: its y, 2: the buttons (1 left, 2 right, 4 middle).

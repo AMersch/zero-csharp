@@ -196,6 +196,7 @@ CX16_SAMPLES=(
     DiskFiles
     SmallMath
     ClockSeed
+    ScreenModes
 )
 # Microcontrollers: no SIMD to benchmark, no PC screen for Vga. Blink is
 # theirs only, and checks itself. The Uno R4

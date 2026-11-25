@@ -99,6 +99,34 @@ File.WriteAllBytes("#9:data.bin", bytes);       // on device 9
 `samples/DiskFiles.cs` tests all of it (the emulator's host folder stands in for the SD card);
 `samples/Files.cs` is for the other targets: it wants 64 KB arenas and writes into the middle of files.
 
+## Screen modes
+
+`CX16.SetMode(mode)` switches the screen, `CX16.Mode` says which one it is in, and `Columns` and `Rows`
+follow it. The modes (the KERNAL's, as BASIC's `SCREEN` has them):
+
+| Constant | Mode | Columns x rows | Picture |
+|----------|------|----------------|---------|
+| `Text80x60` | $00 | 80x60 | 640x480, the start |
+| `Text80x30` | $01 | 80x30 | 640x240 |
+| `Text40x60` | $02 | 40x60 | 320x480 |
+| `Text40x30` | $03 | 40x30 | 320x240 |
+| `Text40x15` | $04 | 40x15 | 320x120 |
+| `Text20x30` | $05 | 20x30 | 160x240 |
+| `Text20x15` | $06 | 20x15 | 160x120 |
+| `Graphics320x240` | $80 | 40x30 | 320x240, 256 colors under the text |
+
+- **The picture's size** is the columns and rows times 8: a mode with fewer columns has fewer, bigger
+  pixels, 2 or 4 times as wide, and the sprites, the mouse and `MoveSprite` use that picture's pixels.
+  In `Text40x30` the mouse goes from 0 to 319 across and 0 to 239 down, and a sprite at (304, 224) is in
+  the bottom right corner.
+- **What a change does:** the KERNAL clears the screen and sets the video chip up again. The character set
+  (ISO or PETSCII) stays, sprites stay on (shapes and positions aren't touched), and the mouse gets the
+  new size (`MouseOn` need not be called again). A program that has set the video chip's own registers has
+  to do that again.
+- `SetMode` says false, and changes nothing, for a number that isn't a mode.
+- `Graphics320x240` switches to the bitmap mode, but there is nothing to draw with yet.
+- `samples/ScreenModes.cs` tests every mode.
+
 ## Date, time and random numbers
 
 - **`Clock.UtcNow`, `Clock.UnixMilliseconds`:** the X16's real-time clock, read once when a program first

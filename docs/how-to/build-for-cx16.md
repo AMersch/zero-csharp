@@ -64,7 +64,8 @@ while (CX16.ReadKey() == 0)
 - **Time:** `WaitFrame` and `Ticks`, at 60 Hz.
 
 `samples/CX16Demo.cs` uses most of it: `./run.sh --cx16 --window CX16Demo`. `samples/Mouse.cs` is a
-pointer, an arrow as an 8-bit sprite that the mouse moves: `./run.sh --cx16 --window Mouse`. The headless runs
+pointer, an arrow as an 8-bit sprite that the mouse moves: `./run.sh --cx16 --window --capture Mouse`: `--capture` keeps the mouse in the window, whose
+pointer covers 0-639 across and 0-479 down. The headless runs
 (`./test.sh --cx16`) draw nothing and have no frame interrupt, so there `WaitFrame` gives up after about
 two frames' time, and the clock, the joysticks and the mouse stand still; the demo's checks read the video memory
 back, and leave those two to a run in a window. The YM2151 FM chip, the PCM audio, the bitmap layers
@@ -118,6 +119,7 @@ and capacity are kept in the banks too. It doubles when full, in place while it 
 ./build.sh --cx16                 # the samples that fit, into bin/cx16/*.prg
 ./run.sh --cx16 Refs              # prints the output, exits with the program's code
 ./run.sh --cx16 --window Minimal  # shows the X16's screen, at its real speed
+./run.sh --cx16 --window --capture Mouse  # the window keeps the mouse and keyboard
 ./run.sh --cx16 QuizStep2 < answers.txt
 ./test.sh --cx16                  # every X16 sample, compared with tests/expected
 ```

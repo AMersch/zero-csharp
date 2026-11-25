@@ -13,9 +13,11 @@
 #     "User debug 1: $xx". The script ends the emulator when it sees it.
 #
 # With --window, the emulator runs at a real X16's speed, with its screen,
-# sound and keyboard; close the window to end.
+# sound and keyboard; close the window to end. With --window --capture the
+# window also takes the mouse and the keyboard, so a mouse program (Mouse)
+# can't be moved out of the window by accident (x16emu's own -capture).
 #
-# Usage: cx16/run.sh [--window] <Sample>
+# Usage: cx16/run.sh [--window [--capture]] <Sample>
 # Env:   X16_EMULATOR  x16emu; default: x16emu on the PATH, or see env.sh
 #        X16_ROM       its ROM, if it isn't next to the emulator
 #        X16_TIMEOUT   seconds the program may take without a window (default 600)
@@ -27,12 +29,17 @@ cd "$(dirname "$0")/.."
 source ./env.sh
 
 window=0
+capture=()
 if [ "${1:-}" = --window ]; then
     window=1
     shift
+    if [ "${1:-}" = --capture ]; then
+        capture=(-capture)
+        shift
+    fi
 fi
 if [ $# -lt 1 ]; then
-    echo "Usage: ./run.sh --cx16 [--window] <Sample>" >&2
+    echo "Usage: ./run.sh --cx16 [--window [--capture]] <Sample>" >&2
     exit 1
 fi
 name=$1
@@ -55,7 +62,7 @@ options=(-prg "$program" -run -fsroot "$(dirname "$program")")
 [ -n "${X16_ROM:-}" ] && options+=(-rom "$X16_ROM")
 
 if [ "$window" = 1 ]; then
-    exec "$emulator" "${options[@]}" -scale 2 > /dev/null 2>&1
+    exec "$emulator" "${options[@]}" ${capture[@]+"${capture[@]}"} -scale 2 > /dev/null 2>&1
 fi
 
 # Text for the program to read: the emulator can't type it, so it goes in a

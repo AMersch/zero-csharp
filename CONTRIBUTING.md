@@ -46,6 +46,7 @@ built next to this repository. It has no release to download; the
 ./run.sh --c64 --window C64Demo  # a C64's screen: text, a sprite, raster bars; any key ends it
 ./build.sh --cx16             # bin/cx16/*.prg (and *.BNK, see below); ./run.sh --cx16 runs them in x16emu
 ./run.sh --cx16 --window CX16Demo  # an X16's screen: text, a sprite, a tone; any key ends it
+./run.sh --cx16 --window --capture Mouse  # a mouse pointer; --capture keeps the mouse in the window
 ./build.sh --uefi             # bin/uefi/*.efi; ./run.sh --uefi runs them in QEMU on OVMF
 ./run.sh --uefi --window Vga  # the same game, started by the firmware
 ```

@@ -459,6 +459,61 @@ public ref struct ScratchText
     {
     }
 
+    /// <summary>The char at <paramref name="index"/>; stops the program if it is out of range.</summary>
+    public char this[int index]
+    {
+        get => _builder[index];
+        set { var builder = _builder; builder[index] = value; }
+    }
+
+    /// <summary>Puts <paramref name="text"/> before the char at <paramref name="index"/> (at the end when it is Length).</summary>
+    public void Insert(int index, ReadOnlySpan<char> text)
+    {
+        CheckInnermostToEdit();
+        _builder.Insert(index, text);
+    }
+
+    /// <summary>Puts one char before the char at <paramref name="index"/>.</summary>
+    public void Insert(int index, char value)
+    {
+        CheckInnermostToEdit();
+        _builder.Insert(index, value);
+    }
+
+    /// <summary>Puts a number, in decimal, before the char at <paramref name="index"/>.</summary>
+    public void Insert(int index, long value)
+    {
+        CheckInnermostToEdit();
+        _builder.Insert(index, value);
+    }
+
+    /// <summary>Puts a number, in decimal, before the char at <paramref name="index"/>.</summary>
+    public void Insert(int index, int value) => Insert(index, (long)value);
+
+    /// <summary>Removes <paramref name="length"/> chars from <paramref name="startIndex"/>.</summary>
+    public void Remove(int startIndex, int length) => _builder.Remove(startIndex, length);
+
+    /// <summary>Replaces every <paramref name="oldChar"/> with <paramref name="newChar"/>.</summary>
+    public void Replace(char oldChar, char newChar) => _builder.Replace(oldChar, newChar);
+
+    /// <summary>Replaces <paramref name="oldChar"/> with <paramref name="newChar"/> in the <paramref name="count"/> chars from <paramref name="startIndex"/>.</summary>
+    public void Replace(char oldChar, char newChar, int startIndex, int count)
+        => _builder.Replace(oldChar, newChar, startIndex, count);
+
+    /// <summary>Replaces every <paramref name="oldValue"/> with <paramref name="newValue"/>, left to right.</summary>
+    public void Replace(ReadOnlySpan<char> oldValue, ReadOnlySpan<char> newValue)
+    {
+        CheckInnermostToEdit();
+        _builder.Replace(oldValue, newValue);
+    }
+
+    /// <summary>Replaces the <paramref name="oldValue"/>s that lie wholly within the <paramref name="count"/> chars from <paramref name="startIndex"/>.</summary>
+    public void Replace(ReadOnlySpan<char> oldValue, ReadOnlySpan<char> newValue, int startIndex, int count)
+    {
+        CheckInnermostToEdit();
+        _builder.Replace(oldValue, newValue, startIndex, count);
+    }
+
     /// <summary>Empties the text; the memory stays the text's.</summary>
     public void Clear() => _builder.Clear();
 
@@ -477,6 +532,10 @@ public ref struct ScratchText
 
     void CheckInnermost() => ScratchThread.CheckInnermost(_thread, _depth,
         "Arena.Scratch: a ScratchText appended to inside a nested Arena.Scratch, which would free its memory early");
+
+    // Insert and Replace may need a bigger buffer, so they follow Append's rule.
+    void CheckInnermostToEdit() => ScratchThread.CheckInnermost(_thread, _depth,
+        "Arena.Scratch: a ScratchText changed by Insert or Replace inside a nested Arena.Scratch, which would free its memory early");
 }
 
 public delegate void ScratchAction(scoped ScratchScope scratch);

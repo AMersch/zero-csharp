@@ -51,6 +51,9 @@ public static class Program
             Console.WriteLine("  pool-other           a Pool handle used with another pool");
             Console.WriteLine("  scratch-dict-outer   a new key in a ScratchDict inside a nested Arena.Scratch");
             Console.WriteLine("  scratch-set-outer    a new item in a ScratchHashSet inside a nested Arena.Scratch");
+            Console.WriteLine("  builder-index        a StrBuilder index out of range");
+            Console.WriteLine("  builder-replace-empty  a StrBuilder Replace of an empty string");
+            Console.WriteLine("  scratch-outer-edit   a ScratchText inserted into inside a nested Arena.Scratch");
             return 0;
         }
 
@@ -87,6 +90,9 @@ public static class Program
             case "pool-other": PoolOther(); break;
             case "scratch-dict-outer": ScratchDictOuter(); break;
             case "scratch-set-outer": ScratchSetOuter(); break;
+            case "builder-index": BuilderIndex(); break;
+            case "builder-replace-empty": BuilderReplaceEmpty(); break;
+            case "scratch-outer-edit": ScratchOuterEdit(); break;
             default:
                 Console.WriteLine("Unknown case");
                 return 0;
@@ -320,6 +326,33 @@ public static class Program
             Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref OuterScratch state) =>
             {
                 state.Text.Append($"{42}");
+            });
+        });
+    }
+
+    static void BuilderIndex()
+    {
+        StrBuilder text = StrBuilder.Create(Arena.Create(256));
+        text.Append("abc");
+        text.Insert(4, "d");
+    }
+
+    static void BuilderReplaceEmpty()
+    {
+        StrBuilder text = StrBuilder.Create(Arena.Create(256));
+        text.Append("abc");
+        text.Replace("", "x");
+    }
+
+    static void ScratchOuterEdit()
+    {
+        Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            var outer = new OuterScratch { Text = scratch.Text() };
+            outer.Text.Append("bc");
+            Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref OuterScratch state) =>
+            {
+                state.Text.Insert(0, 'a');
             });
         });
     }

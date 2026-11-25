@@ -28,3 +28,6 @@ Usage: Guards <case>, where the case is one of:
   pool-other           a Pool handle used with another pool
   scratch-dict-outer   a new key in a ScratchDict inside a nested Arena.Scratch
   scratch-set-outer    a new item in a ScratchHashSet inside a nested Arena.Scratch
+  builder-index        a StrBuilder index out of range
+  builder-replace-empty  a StrBuilder Replace of an empty string
+  scratch-outer-edit   a ScratchText inserted into inside a nested Arena.Scratch

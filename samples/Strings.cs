@@ -42,6 +42,12 @@ public static class Program
         }
     }
 
+    // Where a span's chars are, as a number: enough to compare two of them.
+    static nint Address(ReadOnlySpan<char> span)
+    {
+        unsafe { fixed (char* p = span) return (nint)p; } // SAFETY: the address is only compared.
+    }
+
     static bool Parses(string text, long want) => Str.TryParse(text, out long value) && value == want;
 
     static bool Rejects(string text) => !Str.TryParse(text, out long _);
@@ -338,6 +344,70 @@ public static class Program
         Expect("ToArenaString", sb.ToArenaString(), "sum=-12!");
         sb.Clear();
         Check("Clear", sb.Length == 0 && sb.IsCreated);
+
+        // docs:builder-edit
+        StrBuilder text = StrBuilder.Create(s_arena);
+        text.Append("the cat sat on the mat");
+        text.Replace("at", "og");           // "the cog sog on the mog"
+        text.Insert(0, "Look: ");           // "Look: the cog sog on the mog"
+        text.Remove(10, 4);                 // "Look: the sog on the mog"
+        text[6] = 'T';                      // "Look: The sog on the mog"
+        // docs:end
+        Expect("Replace, Insert, Remove, indexer", text.AsSpan(),
+            "Look: The sog on the mog");
+
+        // The expected results come from .NET's StringBuilder.
+        StrBuilder edit = StrBuilder.Create(s_arena, 16);
+        edit.Append("world");
+        edit.Insert(0, "hello ");
+        edit.Insert(5, ',');
+        edit.Insert(12, "!");
+        Expect("Insert at the start, middle and end", edit.AsSpan(), "hello, world!");
+        edit.Clear();
+        edit.Append("x=");
+        edit.Insert(2, -42);
+        Expect("Insert a number", edit.AsSpan(), "x=-42");
+        edit.Clear();
+        edit.Append("hello, world");
+        edit.Remove(5, 7);
+        Expect("Remove", edit.AsSpan(), "hello");
+        edit.Clear();
+        edit.Append("a-b-c");
+        // Something allocated after the buffer, so it can't grow in place.
+        s_arena.AllocArray<byte>(8);
+        edit.Replace("-", "=========>");     // 23 chars: past the 16 it has
+        Expect("Replace that grows into a new buffer", edit.AsSpan(), "a=========>b=========>c");
+        edit.Replace("=========>", "-");
+        Expect("Replace that shrinks", edit.AsSpan(), "a-b-c");
+        edit.Clear();
+        edit.Append("aaaa");
+        edit.Replace("aa", "a");
+        Expect("Replace left to right, without overlaps", edit.AsSpan(), "aa");
+        edit.Clear();
+        edit.Append("one two two two");
+        edit.Replace("two", "2", 4, 7);
+        Expect("Replace within a range", edit.AsSpan(), "one 2 2 two");
+        edit.Replace('o', '0');
+        Expect("Replace a char", edit.AsSpan(), "0ne 2 2 tw0");
+        Check("Replace with no match", edit.Replace("xyz", "!") && edit.AsSpan().SequenceEqual("0ne 2 2 tw0"));
+        StrBuilder many = StrBuilder.Create(s_arena, 16);
+        for (int i = 0; i < 100; i++)
+            many.Append('a');
+        nint before = Address(many.AsSpan());
+        many.Replace("a", "bcd");
+        bool allBcd = many.Length == 300;
+        for (int i = 0; allBcd && i < 300; i += 3)
+            allBcd = many.AsSpan().Slice(i, 3).SequenceEqual("bcd");
+        Check("Replace that grows in place", allBcd && Address(many.AsSpan()) == before);
+        edit.Clear();
+        edit.Append("abc");
+        edit.Insert(1, edit.AsSpan());
+        Expect("Insert the builder's own text", edit.AsSpan(), "aabcbc");
+        edit.Clear();
+        edit.Append("x-y");
+        edit.Replace("-", edit.AsSpan());
+        Expect("Replace with the builder's own text", edit.AsSpan(), "xx-yy");
+        Check("Insert into a not-created builder", !default(StrBuilder).Insert(0, "x"));
 
         End("StrBuilder");
 

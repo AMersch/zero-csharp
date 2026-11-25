@@ -6,7 +6,7 @@ Count: 10 | Capacity: 16
 After RemoveAt(5):
 [10, 20, 30, 40, 50, 70, 80, 90, 100]
 After AddMore(numbers, 3) in another method, Count: 12
-Add on default(List) returns false
+Add on default(List) returns False
 
 --- List<Point> ---
 [0] (1, 2)
@@ -19,7 +19,7 @@ scores[2] = 250
 scores[-42] = 999
 scores[99] not found
 1000 inserts after growth, found: 1000
-Lookup in default(Dict) misses instead of crashing: true
+Lookup in default(Dict) misses instead of crashing: True
 
 --- Dict<Point, int> ---
 ID for (10, 10): 2
@@ -32,14 +32,14 @@ Descending: [88, 61, 42, 19, 7, 7, 3]
 BinarySearch(19): 3, (20) would go at 4
 Reversed: 88 ... 3
 By a lambda, last digit first: 61, then 42
-Remove(3): true, again: false, Count: 3
+Remove(3): True, again: False, Count: 3
 foreach over scores: 3 pairs, values sum to 1349
 After removing the 500 even keys: Count 500, odd keys intact: 500
 
 --- Dict with a comparer ---
 By bytes: 2 keys; by value: 1
 Modulo 10: 1 key, [3] = 2
-TryAdd: true, again: false
+TryAdd: True, again: False
 100 lookups by a struct key: 100 found, 0 bytes allocated
 
 --- HashSet<int> ---
@@ -50,34 +50,34 @@ Union: 8 items summing to 37
 ExceptWith itself: 0
 
 --- Queue, Stack, PriorityQueue ---
-Queue: front was 31, 50 out in order: true, empty: true
+Queue: front was 31, 50 out in order: True, empty: True
 Stack, top first: 5 4 3 2 1; popped 5, then 4 on top
 By priority: a1 b2 c3 d4
-200 random priorities, largest first: true
+200 random priorities, largest first: True
 
 --- RefList<string> ---
 Sorted (null first): [null, alpha:5, bravo:5, charlie:7, delta:5] (5 items)
 RemoveAt(0), Set(0): [ALPHA, bravo:5, charlie:7, delta:5] (4 items)
 Sort(): [C, a, b] (3 items)
-default(RefList): Count 0, Add returns false
+default(RefList): Count 0, Add returns False
 
 --- StrDict ---
 Word counts: 5 distinct, the = 3, and = 2, bat = 1, dog = 0
 500 keys, 250 even ones removed: Count 250, odd keys intact: 250, foreach: 250 pairs summing to 20833250
-key0 gone: true, key499 = 249001
+key0 gone: True, key499 = 249001
 StrDict<string>: ok = fine x2, Count 1
-default(StrDict): Count 0, Set returns false, found: false
+default(StrDict): Count 0, Set returns False, found: False
 
 --- RefDict<int, string> ---
-3 = three is 3, 9 found: true and null: true, 4 found: false and null: true
-Remove(7): true, again: false, Count: 2
+3 = three is 3, 9 found: True and null: True, 4 found: False and null: True
+Remove(7): True, again: False, Count: 2
 foreach: keys sum to 12
 
 --- Clone ---
 Original changed: numbers[0] = -1, scores[2] = 0
 Clones unchanged: snapshot[0] = 10, scoresCopy[2] = 250
 Clone capacity fits its 12 items: 12
-Clone of default(List) is not created: true
+Clone of default(List) is not created: True
 
 Arena used: 163984 bytes
 StrDict clone, keys copied: the = 3, dog = 1, Count 6

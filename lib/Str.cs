@@ -728,13 +728,20 @@ public static class Str
     }
 }
 
-/// <summary>Number formatting shared by Out and StrBuilder. Writes into a caller's buffer.</summary>
+/// <summary>
+/// Number formatting shared by Out and StrBuilder, into a caller's buffer.
+/// An integer without a format takes the small path here (Int, UInt), which
+/// prints what .NET prints in fewer bytes of code than the general one, so a
+/// program that only prints whole numbers stays small on a C64. Everything
+/// else, {x:X4} and every double, goes through the value's TryFormat: .NET's
+/// format strings, from zerocore (System/Number.Formatting.cs).
+/// </summary>
 static class Fmt
 {
-    /// <summary>Enough for any value this class formats.</summary>
+    /// <summary>Enough for any value without a format, and most with one.</summary>
     public const int MaxChars = 64;
 
-    public static int UInt(ulong value, Span<char> dest, int minDigits = 1)
+    public static int UInt(ulong value, Span<char> dest)
     {
         Span<char> digits = stackalloc char[20];
         int n = 0;
@@ -743,172 +750,28 @@ static class Fmt
             digits[n++] = (char)('0' + (int)(value % 10));
             value /= 10;
         } while (value != 0);
-        while (n < minDigits && n < digits.Length)
-            digits[n++] = '0';
 
         for (int i = 0; i < n; i++)
             dest[i] = digits[n - 1 - i];
         return n;
     }
 
-    public static int Int(long value, Span<char> dest, int minDigits = 1)
+    public static int Int(long value, Span<char> dest)
     {
         if (value >= 0)
-            return UInt((ulong)value, dest, minDigits);
+            return UInt((ulong)value, dest);
         // Negate as ulong so long.MinValue works too.
         dest[0] = '-';
-        return 1 + UInt(0 - (ulong)value, dest.Slice(1), minDigits);
-    }
-
-    public static int Hex(ulong value, bool upper, int minDigits, Span<char> dest)
-    {
-        Span<char> digits = stackalloc char[16];
-        int n = 0;
-        do
-        {
-            int d = (int)(value & 0xF);
-            digits[n++] = (char)(d < 10 ? '0' + d : (upper ? 'A' : 'a') + d - 10);
-            value >>= 4;
-        } while (value != 0);
-        while (n < minDigits && n < digits.Length)
-            digits[n++] = '0';
-
-        for (int i = 0; i < n; i++)
-            dest[i] = digits[n - 1 - i];
-        return n;
+        return 1 + UInt(0 - (ulong)value, dest.Slice(1));
     }
 
     /// <summary>
-    /// Fixed-point with <paramref name="decimals"/> digits (rounded half away from zero).
-    /// Values of 1.8e19 and up switch to m.mmme+X. With <paramref name="trim"/>, trailing
-    /// zeros and a trailing '.' are removed.
+    /// value.TryFormat with the format ("X4", "F2", ... or null), or -1 if the
+    /// text needs more than dest. A format .NET doesn't know, such as a
+    /// custom "0.00", throws FormatException.
     /// </summary>
-    public static int Double(double value, int decimals, bool trim, Span<char> dest)
-    {
-        // The core library's double has no IsNaN or PositiveInfinity. x - x is 0 for every
-        // finite x and NaN for NaN and both infinities; NaN compares false to 0.
-        if (value - value != 0)
-            return Copy(value > 0 ? "Infinity" : value < 0 ? "-Infinity" : "NaN", dest);
+    public static int Format<T>(T value, string format, Span<char> dest) where T : ISpanFormattable
+        => value.TryFormat(dest, out int written, format.AsSpan(), null) ? written : -1;
 
-        if (decimals < 0) decimals = 0;
-        if (decimals > 15) decimals = 15;
-
-        bool negative = value < 0;
-        double magnitude = negative ? -value : value;
-
-        int exponent = 0;
-        bool scientific = magnitude >= 1.8e19;
-        if (scientific)
-        {
-            while (magnitude >= 10)
-            {
-                magnitude /= 10;
-                exponent++;
-            }
-        }
-
-        ulong scale = 1;
-        for (int i = 0; i < decimals; i++)
-            scale *= 10;
-
-        ulong whole = (ulong)magnitude;
-        ulong fraction = (ulong)((magnitude - whole) * scale + 0.5);
-        if (fraction >= scale)
-        {
-            whole++;
-            fraction -= scale;
-        }
-        if (scientific && whole >= 10) // 9.99... rounded up to 10.00
-        {
-            whole = 1;
-            exponent++;
-        }
-
-        int n = 0;
-        if (negative && (whole != 0 || fraction != 0))
-            dest[n++] = '-';
-        n += UInt(whole, dest.Slice(n));
-        if (decimals > 0)
-        {
-            dest[n++] = '.';
-            n += UInt(fraction, dest.Slice(n), decimals);
-            if (trim)
-            {
-                while (dest[n - 1] == '0')
-                    n--;
-                if (dest[n - 1] == '.')
-                    n--;
-            }
-        }
-        if (scientific)
-        {
-            dest[n++] = 'e';
-            dest[n++] = '+';
-            n += UInt((ulong)exponent, dest.Slice(n), 2);
-        }
-        return n;
-    }
-
-    // Format strings, as in {value:format}. Unknown formats fall back to the default.
-    //   integers: D or Dn (n = minimum digits), X/x or Xn/xn (hex)
-    //   doubles:  F or Fn (n decimals; F alone means 2), default = up to 6 decimals
-
-    public static int Long(long value, string format, Span<char> dest)
-    {
-        if (TryParseFormat(format, out char kind, out int precision))
-        {
-            if (kind == 'D')
-                return Int(value, dest, precision < 0 ? 1 : precision);
-            if (kind == 'X' || kind == 'x')
-                return Hex((ulong)value, kind == 'X', precision < 0 ? 1 : precision, dest);
-        }
-        return Int(value, dest);
-    }
-
-    public static int ULong(ulong value, string format, Span<char> dest)
-    {
-        if (TryParseFormat(format, out char kind, out int precision))
-        {
-            if (kind == 'D')
-                return UInt(value, dest, precision < 0 ? 1 : precision);
-            if (kind == 'X' || kind == 'x')
-                return Hex(value, kind == 'X', precision < 0 ? 1 : precision, dest);
-        }
-        return UInt(value, dest);
-    }
-
-    public static int Double(double value, string format, Span<char> dest)
-    {
-        if (TryParseFormat(format, out char kind, out int precision) && kind == 'F')
-            return Double(value, precision < 0 ? 2 : precision, trim: false, dest);
-        return Double(value, 6, trim: true, dest);
-    }
-
-    public static ReadOnlySpan<char> Bool(bool value) => value ? "true" : "false";
-
-    static bool TryParseFormat(string format, out char kind, out int precision)
-    {
-        kind = '\0';
-        precision = -1;
-        if (format is null || format.Length == 0 || format.Length > 3)
-            return false;
-
-        kind = format[0];
-        if (kind == 'd' || kind == 'f')
-            kind = (char)(kind - 32);
-        if (format.Length > 1)
-        {
-            ReadOnlySpan<char> digits = format.AsSpan(1);
-            if (!Str.TryParse(digits, out long p) || digits[0] == '-' || digits[0] == '+')
-                return false;
-            precision = (int)p;
-        }
-        return true;
-    }
-
-    static int Copy(ReadOnlySpan<char> text, Span<char> dest)
-    {
-        text.CopyTo(dest);
-        return text.Length;
-    }
+    public static ReadOnlySpan<char> Bool(bool value) => value ? "True" : "False";
 }

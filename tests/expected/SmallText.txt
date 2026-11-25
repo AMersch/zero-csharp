@@ -5,5 +5,5 @@ ulong: 18446744073709551615, uint: 4000000000
 small: 255 -128 -32768 65535
 hex: 2a FF 002a deadbeef ffffffffffffffff
 padded: [    42] [42    ] [   -42] [00042]
-text: [left    ] [   right] c true false
-Write: 42 -9000000000 true
+text: [left    ] [   right] c True False
+Write: 42 -9000000000 True

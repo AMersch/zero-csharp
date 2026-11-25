@@ -231,15 +231,20 @@ public static class Program
 
         double zero = 0;
         Expect("F2", Str.Format(s_arena, $"{3.14159:F2}"), "3.14");
-        Expect("F0 rounds half up", Str.Format(s_arena, $"{2.5:F0}"), "3");
+        // 2.5 is exact in binary: a tie, so the even digit, as in .NET.
+        Expect("F0 rounds a tie to even", Str.Format(s_arena, $"{2.5:F0}"), "2");
+        Expect("F0 rounds a tie to even, up", Str.Format(s_arena, $"{3.5:F0}"), "4");
         Expect("F2 rounding", Str.Format(s_arena, $"{123456.789:F2}"), "123456.79");
         Expect("float F3", Str.Format(s_arena, $"{1.5f:F3}"), "1.500");
         Expect("default trims zeros", Str.Format(s_arena, $"{0.1}"), "0.1");
         Expect("default whole number", Str.Format(s_arena, $"{1.0}"), "1");
         Expect("default negative", Str.Format(s_arena, $"{-2.25}"), "-2.25");
-        Expect("default small", Str.Format(s_arena, $"{0.000001}"), "0.000001");
-        Expect("default too small", Str.Format(s_arena, $"{0.0000001}"), "0");
-        Expect("huge switches to e", Str.Format(s_arena, $"{1e20:F2}"), "1.00e+20");
+        Expect("default small", Str.Format(s_arena, $"{0.0001}"), "0.0001");
+        Expect("default smaller: scientific", Str.Format(s_arena, $"{0.000001}"), "1E-06");
+        Expect("default round-trips", Str.Format(s_arena, $"{0.1 + 0.2}"), "0.30000000000000004");
+        Expect("huge F2 stays fixed", Str.Format(s_arena, $"{1e20:F2}"), "100000000000000000000.00");
+        Expect("N2", Str.Format(s_arena, $"{1234567.891:N2}"), "1,234,567.89");
+        Expect("E3", Str.Format(s_arena, $"{1234.56:E3}"), "1.235E+003");
         Expect("NaN", Str.Format(s_arena, $"{zero / zero}"), "NaN");
         Expect("Infinity", Str.Format(s_arena, $"{1 / zero}"), "Infinity");
         Expect("-Infinity", Str.Format(s_arena, $"{-1 / zero}"), "-Infinity");
@@ -253,7 +258,10 @@ public static class Program
         Expect("null string", Str.Format(s_arena, $"[{nothing}]"), "[]");
         Expect("span", Str.Format(s_arena, $"hello {span}"), "hello world");
         Expect("char", Str.Format(s_arena, $"{'c'}"), "c");
-        Expect("bool", Str.Format(s_arena, $"{true}/{false}"), "true/false");
+        Expect("bool", Str.Format(s_arena, $"{true}/{false}"), "True/False");
+        Expect("decimal", Str.Format(s_arena, $"{2.675m:F2} {1.50m}"), "2.68 1.50");
+        Expect("int hex is 32 bits", Str.Format(s_arena, $"{-1:X}"), "FFFFFFFF");
+        Expect("sbyte hex is 8 bits", Str.Format(s_arena, $"{(sbyte)-1:X}"), "FF");
         Expect("right-align", Str.Format(s_arena, $"[{42,5}]"), "[   42]");
         Expect("left-align", Str.Format(s_arena, $"[{42,-5}]"), "[42   ]");
         Expect("align string", Str.Format(s_arena, $"[{"ab",4}]"), "[  ab]");

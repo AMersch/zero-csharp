@@ -82,11 +82,18 @@ public static class Out
         Write(buffer.Slice(0, Fmt.Int(value, buffer)));
     }
 
-    /// <summary>Default: up to 6 decimals, trailing zeros removed. "F2" etc. gives fixed decimals.</summary>
+    /// <summary>
+    /// As .NET's ToString(format): by default the shortest text that reads
+    /// back as the same double ("0.1", "1E+20"); "F2" etc. as in .NET.
+    /// </summary>
     public static void Write(double value, string format = null)
     {
         Span<char> buffer = stackalloc char[Fmt.MaxChars];
-        Write(buffer.Slice(0, Fmt.Double(value, format, buffer)));
+        int length = Fmt.Format(value, format, buffer);
+        if (length >= 0)
+            Write(buffer.Slice(0, length));
+        else
+            Write(value.ToString(format, null)); // longer than the buffer: a string, never freed
     }
 
     public static void Write(bool value) => Write(Fmt.Bool(value));
@@ -211,22 +218,56 @@ public static class Out
             Aligned(one, alignment);
         }
 
-        public void AppendFormatted(long value, int alignment = 0, string format = null)
+        // Integers without a format: the small path (see Fmt). Overloads for
+        // each type and without optional parameters, as .NET's handler has
+        // them, so the compiler prefers these to the generic ones below.
+        public void AppendFormatted(sbyte value) => Whole(value, 0);
+        public void AppendFormatted(sbyte value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(byte value) => Whole(value, 0);
+        public void AppendFormatted(byte value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(short value) => Whole(value, 0);
+        public void AppendFormatted(short value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(ushort value) => Whole(value, 0);
+        public void AppendFormatted(ushort value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(int value) => Whole(value, 0);
+        public void AppendFormatted(int value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(uint value) => Whole(value, 0);
+        public void AppendFormatted(uint value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(long value) => Whole(value, 0);
+        public void AppendFormatted(long value, int alignment) => Whole(value, alignment);
+        public void AppendFormatted(ulong value) => Whole(value, 0);
+        public void AppendFormatted(ulong value, int alignment) => Whole(value, alignment);
+
+        // Any number with a format, {x:X4} or {x,8:F2}, and double, float,
+        // Half and decimal with or without one: .NET's format strings.
+        public void AppendFormatted<T>(T value) where T : ISpanFormattable => Formatted(value, 0, null);
+
+        public void AppendFormatted<T>(T value, int alignment) where T : ISpanFormattable => Formatted(value, alignment, null);
+
+        public void AppendFormatted<T>(T value, string format) where T : ISpanFormattable => Formatted(value, 0, format);
+
+        public void AppendFormatted<T>(T value, int alignment, string format) where T : ISpanFormattable => Formatted(value, alignment, format);
+
+        static void Formatted<T>(T value, int alignment, string format) where T : ISpanFormattable
         {
             Span<char> buffer = stackalloc char[Fmt.MaxChars];
-            Aligned(buffer.Slice(0, Fmt.Long(value, format, buffer)), alignment);
+            int length = Fmt.Format(value, format, buffer);
+            if (length >= 0)
+                Aligned(buffer.Slice(0, length), alignment);
+            else
+                Aligned(value.ToString(format, null), alignment); // longer than the buffer: a string, never freed
         }
 
-        public void AppendFormatted(ulong value, int alignment = 0, string format = null)
+        static void Whole(long value, int alignment)
         {
             Span<char> buffer = stackalloc char[Fmt.MaxChars];
-            Aligned(buffer.Slice(0, Fmt.ULong(value, format, buffer)), alignment);
+            Aligned(buffer.Slice(0, Fmt.Int(value, buffer)), alignment);
         }
 
-        public void AppendFormatted(double value, int alignment = 0, string format = null)
+        static void Whole(ulong value, int alignment)
         {
             Span<char> buffer = stackalloc char[Fmt.MaxChars];
-            Aligned(buffer.Slice(0, Fmt.Double(value, format, buffer)), alignment);
+            Aligned(buffer.Slice(0, Fmt.UInt(value, buffer)), alignment);
         }
 
         public void AppendFormatted(bool value, int alignment = 0) => Aligned(Fmt.Bool(value), alignment);

@@ -35,6 +35,14 @@ public struct Modulo : IEqualityComparer<int>
 }
 // docs:end
 
+// The 500-key check's map and what it found, passed to Arena.Scratch by ref.
+public struct SquareWork
+{
+    public StrDict<long> Map;
+    public int Removed;
+    public int OddFound;
+}
+
 public static class Program
 {
     public static int Main()
@@ -356,28 +364,36 @@ public static class Program
         // docs:end
         Console.WriteLine($"Word counts: {counts.Count} distinct, the = {Count(counts, "the")}, and = {Count(counts, "and")}, bat = {Count(counts, "bat")}, dog = {Count(counts, "dog")}");
 
-        // Keys made in a scratch arena that is reset every time: the map has its own copies.
-        var squareMap = StrDict<long>.Create(arena, 0);
-        Arena scratch = Arena.Create(256);
-        for (int i = 0; i < 500; i++)
+        // Keys formatted into scratch text, cleared for each one: the map
+        // copies each new key into its own arena.
+        var squareWork = new SquareWork { Map = StrDict<long>.Create(arena, 0) };
+        Arena.Scratch(ref squareWork, static (scoped ScratchScope scratch, scoped ref SquareWork work) =>
         {
-            unsafe { scratch.Reset(); } // SAFETY: nothing from scratch is used after this.
-            squareMap.Set(Str.Format(scratch, $"key{i}"), (long)i * i);
-        }
-        int removed = 0;
-        for (int i = 0; i < 500; i += 2)
-        {
-            unsafe { scratch.Reset(); } // SAFETY: as above.
-            if (squareMap.Remove(Str.Format(scratch, $"key{i}")))
-                removed++;
-        }
-        int oddFound = 0;
-        for (int i = 1; i < 500; i += 2)
-        {
-            unsafe { scratch.Reset(); } // SAFETY: as above.
-            if (squareMap.TryGet(Str.Format(scratch, $"key{i}"), out long square) && square == (long)i * i)
-                oddFound++;
-        }
+            ScratchText key = scratch.Text();
+            for (int i = 0; i < 500; i++)
+            {
+                key.Clear();
+                key.Append($"key{i}");
+                work.Map.Set(key.AsSpan(), (long)i * i);
+            }
+            for (int i = 0; i < 500; i += 2)
+            {
+                key.Clear();
+                key.Append($"key{i}");
+                if (work.Map.Remove(key.AsSpan()))
+                    work.Removed++;
+            }
+            for (int i = 1; i < 500; i += 2)
+            {
+                key.Clear();
+                key.Append($"key{i}");
+                if (work.Map.TryGet(key.AsSpan(), out long square) && square == (long)i * i)
+                    work.OddFound++;
+            }
+        });
+        StrDict<long> squareMap = squareWork.Map;
+        int removed = squareWork.Removed;
+        int oddFound = squareWork.OddFound;
         long squareSum = 0;
         int squarePairs = 0;
         foreach (var pair in squareMap)
@@ -385,7 +401,6 @@ public static class Program
             squareSum += pair.Value;
             squarePairs++;
         }
-        unsafe { scratch.Destroy(); } // SAFETY: nothing from scratch is used after this.
         Console.WriteLine($"500 keys, {removed} even ones removed: Count {squareMap.Count}, odd keys intact: {oddFound}, foreach: {squarePairs} pairs summing to {squareSum}");
         Console.WriteLine($"key0 gone: {!squareMap.ContainsKey("key0")}, key499 = {(squareMap.TryGet("key499", out long last) ? last : -1)}");
 

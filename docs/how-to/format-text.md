@@ -220,8 +220,10 @@ malformed hole such as `"{0:F2"`. `samples/Formats.cs` checks these results on e
 
 ## Watch out for
 
-- **Temporary strings belong in a scratch arena.** Every `Str.Format` takes memory from its arena until
-  that arena is reset. A string you only print needs no arena at all: write it with `Console.WriteLine`.
+- **Temporary strings belong in scratch memory.** Every `Str.Format` takes memory from its arena until
+  that arena is reset. Build text you only need for a while in a `ScratchText` inside `Arena.Scratch`,
+  which frees it when the callback returns. A string you only print needs no arena at all: write it
+  with `Console.WriteLine`.
 - **Output is UTF-8.** `Console` encodes what you write as UTF-8, and an unpaired surrogate becomes U+FFFD.
 
 See also: [Strings without a garbage collector](../concepts/strings.html), and the reference pages for

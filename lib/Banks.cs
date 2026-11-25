@@ -17,6 +17,12 @@
 // in the next. Bank 0, which belongs to the KERNAL, is left out, so address 0
 // is the first byte of bank 1. The banks start out holding whatever was in
 // them: not zeros.
+//
+// Alloc hands out regions of the banks, for BankedArray (lib/BankedArray.cs)
+// and for programs that want to share the banks between their parts: it moves
+// a pointer forward, and Reset takes everything back at once, like an Arena.
+// A program that mixes Alloc with addresses it picked itself has to keep the
+// two apart.
 
 using System;
 using System.Runtime.InteropServices;
@@ -36,6 +42,49 @@ public static class Banks
 
     /// <summary>The bytes in all those banks: 516096 with the emulator's 512 KB.</summary>
     public static int Size => Count * BankSize;
+
+    static int s_used;
+
+    /// <summary>The bytes Alloc has handed out.</summary>
+    public static int Used => s_used;
+
+    /// <summary>The bytes Alloc can still hand out.</summary>
+    public static int Available => Size - s_used;
+
+    /// <summary>Reserves count bytes of the banks and returns their address, or -1 if that many aren't left. The bytes hold whatever was in them.</summary>
+    public static int Alloc(int count)
+    {
+        if (count < 0 || count > Available)
+            return -1;
+        int address = s_used;
+        s_used += count;
+        return address;
+    }
+
+    /// <summary>Makes a region from Alloc bigger, in place, if it is the last one handed out and the banks have the room. Returns false, and changes nothing, otherwise.</summary>
+    public static bool TryExtend(int address, int oldCount, int newCount)
+    {
+        if (address < 0 || oldCount < 0 || newCount < oldCount || address > s_used - oldCount
+            || address + oldCount != s_used || newCount - oldCount > Available)
+            return false;
+        s_used = address + newCount;
+        return true;
+    }
+
+    /// <summary>Takes back everything Alloc handed out. Whatever used it, such as a BankedArray, must not be used again.</summary>
+    public static void Reset() => s_used = 0;
+
+    /// <summary>The state of Alloc, for Release.</summary>
+    public static int Mark() => s_used;
+
+    /// <summary>Takes back what Alloc handed out since a Mark. Returns false, and changes nothing, if that is already gone.</summary>
+    public static bool Release(int mark)
+    {
+        if (mark < 0 || mark > s_used)
+            return false;
+        s_used = mark;
+        return true;
+    }
 
     /// <summary>Whether count bytes from an address are all in the banks.</summary>
     public static bool Contains(int address, int count)
@@ -83,6 +132,21 @@ public static class Banks
                     cx16_bank_write(at / BankSize + 1, offset, p + done, n);
             }
             done += n;
+        }
+        return true;
+    }
+
+    /// <summary>Copies count bytes from one address in the banks to another, front to back, so a copy to a lower address may overlap the bytes it comes from. Returns false, and copies nothing, if either end isn't in the banks.</summary>
+    public static bool Copy(int source, int destination, int count)
+    {
+        if (!Contains(source, count) || !Contains(destination, count))
+            return false;
+        Span<byte> chunk = stackalloc byte[64];
+        for (int done = 0; done < count; done += chunk.Length)
+        {
+            Span<byte> part = chunk.Slice(0, Math.Min(chunk.Length, count - done));
+            Read(source + done, part);
+            Write(destination + done, part);
         }
         return true;
     }

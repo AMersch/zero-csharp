@@ -195,6 +195,8 @@ CX16_SAMPLES=(
     SmallKeys
     CX16Demo
     BanksDemo
+    BankedDemo
+    BankedListDemo
 )
 # A microcontroller has no SIMD to benchmark, and Vga is a PC game. Blink is
 # for microcontrollers only (lib/Board.cs: the LED, registers, a timer). The Uno R4

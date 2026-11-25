@@ -81,6 +81,30 @@ $00), copies, and switches back, with interrupts off. Addresses run over the ban
 copy can cross from one into the next. A copy that doesn't fit in the banks returns false and does
 nothing. The banks hold whatever was in them at startup. `samples/BanksDemo.cs` checks all of it.
 
+### Arrays in the banks
+
+`BankedArray<T>` (`lib/BankedArray.cs`) is an array whose elements are in the banks, for data that
+doesn't fit in the 38 KB: `Banks.Alloc` reserves the room (a pointer that moves forward;
+`Banks.Reset` or `Banks.Release(mark)` takes it back), and the array copies each element in and out.
+
+```csharp
+BankedArray<int> counts = BankedArray<int>.Create(100000);   // 400 KB, zeroed
+counts[5]++;
+counts.Read(0, span);                                        // many at once is faster
+```
+
+`T` is any unmanaged type, including structs that lie across the border between two banks. Every
+access is a bank switch and a copy, a few hundred cycles, so loop over ranges with `Read` and `Write`
+when there are many elements. An index out of range stops the program, as for `List<T>`; `Create`
+returns a not-created array when the banks are full. `samples/BankedDemo.cs` has a 240 KB array of
+structs and a sieve over flags in the banks.
+
+`BankedList<T>` (`lib/BankedList.cs`) is the growable kind, with `Add`, `AddRange`, the indexer,
+`Read`, `RemoveAt` and `Clear`. Like `List<T>` it is a handle, so copies share the elements; its count
+and capacity are kept in the banks too. It doubles when full, in place while it is the last thing
+`Banks.Alloc` handed out, and otherwise into a new region (the old one stays reserved until
+`Banks.Reset` or `Banks.Release`). `samples/BankedListDemo.cs` grows one to 5,000 structs.
+
 ## Build and run
 
 ```bash

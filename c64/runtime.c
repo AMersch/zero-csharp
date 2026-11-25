@@ -801,3 +801,6 @@ __asm__(
     "    lda __rc23\n"
     "    sta __rc5\n"
     "    jmp (__rc20)\n");
+
+// Which system this is, for lib/FileSystem.cs (Path asks): 9, the Commodore 64.
+i32 cs_ZeroSystem(void) { return 9; }

@@ -173,6 +173,218 @@ int __wrap_remove(const char *path)
     return _wremove(wide_path);
 }
 
+// ---- files and directories, for lib/FileSystem.cs -------------------------
+//
+// lib/FileSystem.cs calls glibc's names with glibc's layouts and UTF-8 paths;
+// these answer through the UTF-16 Win32 functions. Failures set the Universal
+// CRT's errno, with its numbers (which lib/FileSystem.cs knows). mkdir, rmdir,
+// rename, getcwd and chdir are linked with /wrap:, like fopen; the others
+// aren't in the Universal CRT.
+
+// Which system this is: zerocore/native/win-x64.S says (4, or 5 on UEFI).
+
+int *__errno_location(void) { return _errno(); }
+
+// The Universal CRT's errno for the thread's last Win32 error.
+static int set_errno_from_win32(void)
+{
+    int e;
+    switch (GetLastError()) {
+    case 2: case 3: case 15: case 53: case 67: e = 2; break;   // not found: ENOENT
+    case 5: case 19: case 32: case 33: e = 13; break;          // EACCES
+    case 80: case 183: e = 17; break;                          // EEXIST
+    case 145: e = 41; break;                                   // ENOTEMPTY
+    case 267: e = 20; break;                                   // ENOTDIR
+    case 17: e = 18; break;                                    // EXDEV
+    case 206: e = 38; break;                                   // ENAMETOOLONG
+    case 123: case 161: e = 22; break;                         // EINVAL
+    case 39: case 112: e = 28; break;                          // ENOSPC
+    default: e = 5; break;                                     // EIO
+    }
+    *_errno() = e;
+    return -1;
+}
+
+static int widen(const char *path, wchar *wide)
+{
+    if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, MaxPath))
+        return 1;
+    *_errno() = 38; // ENAMETOOLONG, or not UTF-8
+    return 0;
+}
+
+// glibc's struct stat as on arm64: the mode at 16, the size at 48, the
+// modification time at 88 (seconds) and 96 (nanoseconds). The attributes are
+// the path's own, so a symbolic link to a directory is a directory to stat
+// and a link to lstat.
+static int stat_windows(const char *path, unsigned char *out, int follow)
+{
+    wchar wide[MaxPath];
+    FileAttributeData data;
+    if (!widen(path, wide))
+        return -1;
+    if (!GetFileAttributesExW(wide, 0, &data))
+        return set_errno_from_win32();
+    for (int i = 0; i < 128; i++)
+        out[i] = 0;
+    u32 mode = !follow && (data.attributes & FILE_ATTRIBUTE_REPARSE_POINT) ? 0xA000
+             : (data.attributes & FILE_ATTRIBUTE_DIRECTORY) ? 0x4000 : 0x8000;
+    *(u32 *)(out + 16) = mode;
+    *(i64 *)(out + 48) = (i64)(((u64)data.size_high << 32) | data.size_low);
+    // 100-nanosecond intervals since 1601 to seconds and nanoseconds since 1970.
+    u64 ticks = ((u64)data.written.high << 32) | data.written.low;
+    u64 since1970 = ticks - 116444736000000000ull;
+    *(i64 *)(out + 88) = (i64)(since1970 / 10000000);
+    *(i64 *)(out + 96) = (i64)(since1970 % 10000000 * 100);
+    return 0;
+}
+
+int __xstat64(int version, const char *path, unsigned char *out)
+{
+    (void)version;
+    return stat_windows(path, out, 1);
+}
+
+int __lxstat64(int version, const char *path, unsigned char *out)
+{
+    (void)version;
+    return stat_windows(path, out, 0);
+}
+
+// A directory being read: FindFirstFileW's handle, the entry it found first,
+// and glibc's struct dirent64 to answer in (d_type at 18, d_name from 19).
+typedef struct {
+    unsigned long long d_ino;
+    long long d_off;
+    unsigned short d_reclen;
+    unsigned char d_type;
+    char d_name[1024];
+} Dirent64;
+
+typedef struct {
+    Handle find;
+    int pending; // FindFirstFileW's entry hasn't been returned yet
+    FindData data;
+    Dirent64 entry;
+} Dir;
+
+void *opendir(const char *path)
+{
+    wchar pattern[MaxPath];
+    if (!widen(path, pattern))
+        return 0;
+    int n = 0;
+    while (pattern[n])
+        n++;
+    if (n + 3 > MaxPath) {
+        *_errno() = 38;
+        return 0;
+    }
+    if (n > 0 && pattern[n - 1] != '\\' && pattern[n - 1] != '/')
+        pattern[n++] = '\\';
+    pattern[n++] = '*';
+    pattern[n] = 0;
+    Dir *dir = HeapAlloc(GetProcessHeap(), 0, sizeof(Dir));
+    if (!dir) {
+        *_errno() = 12; // ENOMEM
+        return 0;
+    }
+    dir->find = FindFirstFileW(pattern, &dir->data);
+    dir->pending = 1;
+    if (dir->find == INVALID_HANDLE_VALUE) {
+        if (GetLastError() == 2) {
+            dir->pending = 0; // a drive's root with nothing in it
+        } else {
+            set_errno_from_win32();
+            HeapFree(GetProcessHeap(), 0, dir);
+            return 0;
+        }
+    }
+    return dir;
+}
+
+void *readdir64(Dir *dir)
+{
+    if (dir->find == INVALID_HANDLE_VALUE)
+        return 0;
+    if (!dir->pending) {
+        if (!FindNextFileW(dir->find, &dir->data)) {
+            if (GetLastError() != 18) // ERROR_NO_MORE_FILES: the end, not an error
+                set_errno_from_win32();
+            return 0;
+        }
+    }
+    dir->pending = 0;
+    u32 attributes = dir->data.attributes;
+    u32 tag = dir->data.reparse_tag;
+    dir->entry.d_type = (attributes & FILE_ATTRIBUTE_REPARSE_POINT)
+            && (tag == IO_REPARSE_TAG_SYMLINK || tag == IO_REPARSE_TAG_MOUNT_POINT) ? 10
+        : (attributes & FILE_ATTRIBUTE_DIRECTORY) ? 4 : 8;
+    if (!WideCharToMultiByte(CP_UTF8, 0, dir->data.name, -1, dir->entry.d_name,
+                             sizeof dir->entry.d_name, 0, 0))
+        dir->entry.d_name[0] = 0;
+    return &dir->entry;
+}
+
+int closedir(Dir *dir)
+{
+    if (dir->find != INVALID_HANDLE_VALUE)
+        FindClose(dir->find);
+    HeapFree(GetProcessHeap(), 0, dir);
+    return 0;
+}
+
+int __wrap_mkdir(const char *path, int mode)
+{
+    (void)mode;
+    wchar wide[MaxPath];
+    if (!widen(path, wide))
+        return -1;
+    return CreateDirectoryW(wide, 0) ? 0 : set_errno_from_win32();
+}
+
+int __wrap_rmdir(const char *path)
+{
+    wchar wide[MaxPath];
+    if (!widen(path, wide))
+        return -1;
+    return RemoveDirectoryW(wide) ? 0 : set_errno_from_win32();
+}
+
+// As POSIX's rename: replaces a file already at `to`. Between drives a file
+// is copied (directories can't be).
+int __wrap_rename(const char *from, const char *to)
+{
+    wchar wide_from[MaxPath], wide_to[MaxPath];
+    if (!widen(from, wide_from) || !widen(to, wide_to))
+        return -1;
+    return MoveFileExW(wide_from, wide_to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)
+        ? 0 : set_errno_from_win32();
+}
+
+char *__wrap_getcwd(char *buffer, unsigned long long size)
+{
+    wchar wide[MaxPath];
+    u32 length = GetCurrentDirectoryW(MaxPath, wide);
+    if (length == 0 || length >= MaxPath) {
+        set_errno_from_win32();
+        return 0;
+    }
+    if (!WideCharToMultiByte(CP_UTF8, 0, wide, -1, buffer, (int)size, 0, 0)) {
+        *_errno() = 34; // ERANGE
+        return 0;
+    }
+    return buffer;
+}
+
+int __wrap_chdir(const char *path)
+{
+    wchar wide[MaxPath];
+    if (!widen(path, wide))
+        return -1;
+    return SetCurrentDirectoryW(wide) ? 0 : set_errno_from_win32();
+}
+
 // Environment.GetEnvironmentVariable passes the name as UTF-8 and expects the
 // value back as UTF-8; the Universal CRT's getenv speaks the ANSI code page.
 // This one goes through the UTF-16 environment instead. The linker reads the

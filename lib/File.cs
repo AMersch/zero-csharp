@@ -13,14 +13,20 @@
 //
 // Text is UTF-8 on disk and UTF-16 in a string, as with Out and In. Paths are
 // passed to the system as UTF-8. Nothing here fails the program: a file that
-// can't be opened, read or written shows up as a false or a 0.
+// can't be opened, read or written shows up as a false or a 0, or, from the
+// functions that return one, a FileError saying why.
+//
+// Copy, Move, Remove, GetInfo, CreateNew and the FileError forms of the open
+// functions work on Linux, macOS, Windows and WebAssembly; they use the calls
+// lib/FileSystem.cs describes. The rest works everywhere.
 //
 // Underneath are the C library's stdio functions (fopen, fread, fwrite,
 // fseeko, ftello, fclose, remove): the system's own on Linux, macOS, Windows
 // and WebAssembly; dos/runtime.c and efi/machine.c supply them on DOS and
 // UEFI. On Windows, win/runtime.c's fopen and remove take the UTF-8 path in
-// place of the Universal CRT's, which would read it in the ANSI code page. On DOS, names are 8.3. Under wasmtime, a program sees only the
-// directories it is given with --dir.
+// place of the Universal CRT's, which would read it in the ANSI code page.
+// On DOS, names are 8.3. Under wasmtime, a program sees only the directories
+// it is given with --dir.
 
 using System;
 using System.Runtime.CompilerServices;
@@ -54,15 +60,36 @@ public struct File
     /// <summary>Opens a file for writing at its end, creating it if needed. IsOpen is false if it can't be.</summary>
     public static File OpenAppend(ReadOnlySpan<char> path) => Open(path, 'a');
 
+    /// <summary>OpenRead, saying why it failed: NotFound, AccessDenied, IsADirectory...</summary>
+    public static File OpenRead(ReadOnlySpan<char> path, out FileError error) => Open(path, 'r', false, out error);
+
+    /// <summary>Create, saying why it failed.</summary>
+    public static File Create(ReadOnlySpan<char> path, out FileError error) => Open(path, 'w', false, out error);
+
+    /// <summary>
+    /// Creates a new file for writing, failing with AlreadyExists if anything
+    /// has the name already: no other program can create it in between.
+    /// </summary>
+    public static File CreateNew(ReadOnlySpan<char> path, out FileError error) => Open(path, 'w', true, out error);
+
+    /// <summary>OpenAppend, saying why it failed.</summary>
+    public static File OpenAppend(ReadOnlySpan<char> path, out FileError error) => Open(path, 'a', false, out error);
+
     static File Open(ReadOnlySpan<char> path, char how)
     {
         Span<byte> name = stackalloc byte[MaxPath];
         if (!ToCPath(path, name))
             return default;
-        Span<byte> mode = stackalloc byte[3];
+        return OpenC(name, how, false);
+    }
+
+    static File OpenC(Span<byte> name, char how, bool exclusive)
+    {
+        Span<byte> mode = stackalloc byte[4];
         mode[0] = (byte)how;
         mode[1] = (byte)'b'; // no newline translation on Windows
-        mode[2] = 0;
+        mode[2] = exclusive ? (byte)'x' : (byte)0;
+        mode[3] = 0;
         unsafe
         {
             // SAFETY: both are null-terminated; fopen only reads them.
@@ -70,6 +97,40 @@ public struct File
             fixed (byte* m = mode)
                 return new File { _stream = fopen(n, m) };
         }
+    }
+
+    // Opening with an error: the system's error number says why fopen failed,
+    // and a directory, which fopen opens for reading on Linux and macOS, is
+    // refused.
+    static File Open(ReadOnlySpan<char> path, char how, bool exclusive, out FileError error)
+    {
+        Span<byte> name = stackalloc byte[FileSystem.MaxPath];
+        if (FileSystem.ToC(path, name) < 0)
+        {
+            error = FileError.InvalidPath;
+            return default;
+        }
+        FileSystem.ClearError();
+        File file = OpenC(name, how, exclusive);
+        error = file.IsOpen ? FileError.None : FileSystem.LastError();
+        // A directory: Linux and macOS open one for reading, Windows says
+        // access denied. Either way, say what it is.
+        if (error == FileError.AlreadyExists)
+            return file;
+        unsafe
+        {
+            // SAFETY: name is null-terminated; the file is closed only here.
+            fixed (byte* n = name)
+                if (FileSystem.Stat(n, true, out FileSystem.Status status) == FileError.None
+                    && (status.Mode & FileSystem.TypeMask) == FileSystem.TypeDirectory)
+                {
+                    if (file.IsOpen)
+                        file.Close();
+                    error = FileError.IsADirectory;
+                    return default;
+                }
+        }
+        return file;
     }
 
     /// <summary>Whether the file was opened.</summary>
@@ -179,14 +240,146 @@ public struct File
 
     // ---- whole files ----------------------------------------------------------
 
-    /// <summary>Whether a file exists and can be opened for reading.</summary>
+    /// <summary>
+    /// Whether a file exists at the path: not a directory (following symbolic
+    /// links). On DOS, UEFI and microcontrollers, whether it can be opened for
+    /// reading.
+    /// </summary>
     public static bool Exists(ReadOnlySpan<char> path)
     {
+        if (FileSystem.HasCalls)
+            return FileSystem.Stat(path, true, out FileSystem.Status status) == FileError.None
+                && (status.Mode & FileSystem.TypeMask) != FileSystem.TypeDirectory;
         File file = OpenRead(path);
         if (!file.IsOpen)
             return false;
         unsafe { file.Close(); } // SAFETY: file is local and not used again.
         return true;
+    }
+
+    /// <summary>
+    /// What the system knows about the file or directory: its length, kind and
+    /// when it was last written (following symbolic links).
+    /// </summary>
+    public static FileError GetInfo(ReadOnlySpan<char> path, out FileInfo info)
+    {
+        FileError error = FileSystem.Stat(path, true, out FileSystem.Status status);
+        info = error != FileError.None ? default : new FileInfo
+        {
+            Length = status.Size,
+            IsDirectory = (status.Mode & FileSystem.TypeMask) == FileSystem.TypeDirectory,
+            LastWriteUnixMilliseconds = status.UnixMilliseconds,
+        };
+        return error;
+    }
+
+    /// <summary>
+    /// Moves (or renames) the file. With <paramref name="overwrite"/> a file
+    /// already at <paramref name="to"/> is replaced; without it that's
+    /// AlreadyExists. Between file systems, the file is copied and then deleted.
+    /// </summary>
+    public static FileError Move(ReadOnlySpan<char> from, ReadOnlySpan<char> to, bool overwrite = false)
+    {
+        FileError error = FileSystem.Stat(from, false, out FileSystem.Status status);
+        if (error != FileError.None)
+            return error;
+        if ((status.Mode & FileSystem.TypeMask) == FileSystem.TypeDirectory)
+            return FileError.IsADirectory;
+        if (FileSystem.Stat(to, false, out FileSystem.Status existing) == FileError.None)
+        {
+            if (!overwrite)
+                return FileError.AlreadyExists;
+            if ((existing.Mode & FileSystem.TypeMask) == FileSystem.TypeDirectory)
+                return FileError.IsADirectory;
+        }
+        error = Rename(from, to, out bool crossDevice);
+        if (!crossDevice)
+            return error;
+        error = Copy(from, to, overwrite);
+        return error != FileError.None ? error : Remove(from);
+    }
+
+    /// <summary>
+    /// Copies the file's bytes to <paramref name="to"/>. With
+    /// <paramref name="overwrite"/> a file already there is replaced; without
+    /// it that's AlreadyExists.
+    /// </summary>
+    public static FileError Copy(ReadOnlySpan<char> from, ReadOnlySpan<char> to, bool overwrite = false)
+    {
+        File source = OpenRead(from, out FileError error);
+        if (!source.IsOpen)
+            return error;
+        File target = Open(to, 'w', !overwrite, out error);
+        if (!target.IsOpen)
+        {
+            unsafe { source.Close(); } // SAFETY: local, not used again.
+            return error;
+        }
+        Span<byte> chunk = stackalloc byte[4096];
+        int n;
+        FileSystem.ClearError();
+        while ((n = source.Read(chunk)) > 0)
+        {
+            if (target.Write(chunk.Slice(0, n)) != n)
+            {
+                error = FileSystem.LastError();
+                break;
+            }
+        }
+        unsafe
+        {
+            // SAFETY: both are local and not used again. fclose writes out
+            // what's buffered, and can fail doing it.
+            source.Close();
+            FileSystem.ClearError();
+            if (fclose(target._stream) != 0 && error == FileError.None)
+                error = FileSystem.LastError();
+        }
+        return error;
+    }
+
+    /// <summary>Deletes a file, saying why it couldn't: NotFound, AccessDenied, IsADirectory...</summary>
+    public static FileError Remove(ReadOnlySpan<char> path)
+    {
+        Span<byte> name = stackalloc byte[FileSystem.MaxPath];
+        if (FileSystem.ToC(path, name) < 0)
+            return FileError.InvalidPath;
+        unsafe
+        {
+            // SAFETY: name is null-terminated; the calls only read it.
+            fixed (byte* n = name)
+            {
+                if (FileSystem.Stat(n, false, out FileSystem.Status status) == FileError.None
+                    && (status.Mode & FileSystem.TypeMask) == FileSystem.TypeDirectory)
+                    return FileError.IsADirectory;
+                FileSystem.ClearError();
+                return remove(n) == 0 ? FileError.None : FileSystem.LastError();
+            }
+        }
+    }
+
+    // rename(2), for files and directories. crossDevice: it failed only
+    // because the two are on different file systems.
+    internal static FileError Rename(ReadOnlySpan<char> from, ReadOnlySpan<char> to, out bool crossDevice)
+    {
+        crossDevice = false;
+        Span<byte> source = stackalloc byte[FileSystem.MaxPath];
+        Span<byte> target = stackalloc byte[FileSystem.MaxPath];
+        if (FileSystem.ToC(from, source) < 0 || FileSystem.ToC(to, target) < 0)
+            return FileError.InvalidPath;
+        unsafe
+        {
+            // SAFETY: both are null-terminated; rename only reads them.
+            fixed (byte* s = source)
+            fixed (byte* t = target)
+            {
+                FileSystem.ClearError();
+                if (FileSystem.rename(s, t) == 0)
+                    return FileError.None;
+            }
+        }
+        crossDevice = FileSystem.LastErrorIsCrossDevice();
+        return FileSystem.LastError();
     }
 
     /// <summary>Deletes a file. Returns false if it couldn't, for example because it doesn't exist.</summary>
@@ -314,6 +507,19 @@ public struct File
         dest[length] = 0;
         return true;
     }
+}
+
+/// <summary>What File.GetInfo says about a file or directory.</summary>
+public struct FileInfo
+{
+    /// <summary>The file's length in bytes.</summary>
+    public long Length;
+
+    /// <summary>Whether it's a directory.</summary>
+    public bool IsDirectory;
+
+    /// <summary>When it was last written, in milliseconds since 1970-01-01 UTC, as Clock.UnixMilliseconds.</summary>
+    public long LastWriteUnixMilliseconds;
 }
 
 // UTF-8 to and from UTF-16, for File. Unpaired surrogates and bytes that aren't

@@ -54,7 +54,7 @@ public static class Program
     {
         if (!Gpu.Open())
         {
-            Console.WriteLine("No Metal GPU.");
+            Console.WriteLine("No GPU.");
             return 1;
         }
         Span<char> name = stackalloc char[64];

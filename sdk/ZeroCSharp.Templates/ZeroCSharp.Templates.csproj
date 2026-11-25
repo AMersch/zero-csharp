@@ -1,4 +1,4 @@
-<!-- Packs dotnet new zero, zerolib, zerollama, zerosdl and zeropico (content/), with the SDK
+<!-- Packs dotnet new zero, zerolib, zerollama, zerosdl, zeropico and zerogpu (content/), with the SDK
      version filled in (obj/content). zerollama's Program.cs is samples/Llama.cs
      (sdk/pack.sh puts it in obj/zerollama). The program templates also get
      vscode/ as their .vscode folder, for debugging in VS Code. -->
@@ -15,7 +15,7 @@
     <Version>$(ZeroSdkVersion)</Version>
     <PackageType>Template</PackageType>
     <Authors>Zero C# contributors</Authors>
-    <Description>dotnet new zero (a native program), zerolib (a library), zerollama (a storyteller with a small language model), zerosdl (a game window with SDL 3) and zeropico (a Raspberry Pi Pico 2 program) for zero-mode C#: C# compiled to small native programs with no .NET runtime.</Description>
+    <Description>dotnet new zero (a native program), zerolib (a library), zerollama (a storyteller with a small language model), zerosdl (a game window with SDL 3), zeropico (a Raspberry Pi Pico 2 program) and zerogpu (C# kernels on an Apple Silicon Mac's GPU) for zero-mode C#: C# compiled to small native programs with no .NET runtime.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://onurgumus.github.io/zero-csharp/</PackageProjectUrl>
     <RepositoryUrl>https://github.com/OnurGumus/zero-csharp</RepositoryUrl>
@@ -46,6 +46,7 @@
       <_ZeroVsCode Include="vscode/*" Template="zero-fs" Project="ZeroApp1" />
       <_ZeroVsCode Include="vscode/*" Template="zerollama" Project="ZeroLlama1" />
       <_ZeroVsCode Include="vscode/*" Template="zerosdl" Project="ZeroSdl1" />
+      <_ZeroVsCode Include="vscode/*" Template="zerogpu" Project="ZeroGpu1" />
     </ItemGroup>
     <Copy SourceFiles="@(_ZeroVsCode)" DestinationFiles="@(_ZeroVsCode->'$(ZeroContent)%(Template)/.vscode/%(Filename)%(Extension)')" />
     <WriteLinesToFile File="$(ZeroContent)%(_ZeroVsCode.Template)/.vscode/%(_ZeroVsCode.Filename)%(_ZeroVsCode.Extension)"

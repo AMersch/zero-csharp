@@ -25,13 +25,19 @@
 # With --uefi, builds UEFI programs (bin/uefi/*.efi), which the firmware
 # starts without an operating system, for BFLAT_ARCH (x64 or arm64).
 #
+# With --gpu (on a Mac with Apple Silicon), builds macOS programs whose C#
+# kernels run on the GPU (bin/gpu/*; lib/Gpu.cs, gpu/), with NativeAOT-LLVM
+# (./setup.sh --wasm) and Apple's Metal Toolchain
+# (xcodebuild -downloadComponent MetalToolchain).
+#
 # With --mac (on a Mac with Apple Silicon), builds macOS programs (bin/mac/*)
 # that run directly, without the container: bflat compiles, Xcode's clang links.
 # With MAC_OBJECTS_PREBUILT=1 it only links, using the object files already in
 # bin/mac/obj (from `./build.sh --native-mac-objects <samples>` on Linux), and
 # needs neither bflat nor Docker: that is how CI's macOS job works.
 #
-# Usage:  ./build.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --uefi] [Sample ...]     default: all samples
+# Usage:  ./build.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --uefi] [Sample ...]
+#         ./build.sh --gpu-air [Sample ...]  the GPU build up to AIR, without a Mac (no program)     default: all samples
 #         ./build.sh --sdk-payload <dir>     what the ZeroCSharp.Sdk package carries (sdk/)
 #         ./build.sh --must-not-compile      check that tests/must-not-compile/*.cs are refused
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh),
@@ -45,6 +51,8 @@ source ./env.sh
 # in a Commodore 64. They run on every target.
 SMALL_SAMPLES=(SmallStrings SmallBuilders SmallIntegers SmallDoubles SmallObjects SmallArena SmallLists SmallDicts SmallStrDicts SmallText SmallFloats SmallUnicode SmallEncoding)
 ALL_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Simd Kernels Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Tensors TensorsAvx "${SMALL_SAMPLES[@]}")
+# Programs with kernels for the GPU (Metal): only --gpu builds them.
+GPU_SAMPLES=(Gpu)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
 # Vga is a game for DOS and UEFI (lib/Dos.cs, lib/Uefi.cs: graphics, keyboard, clock).
 DOS_SAMPLES=(Tiny Minimal Arena Collections VirtualTest Casts Core Bits Files Dice Pipe Env Strings QuizStep1 QuizStep2 QuizStep3 Quiz Guards Queries Threads Records Shapes Refs Patterns Scratch Links Llama Unicode Numerics Tensors "${SMALL_SAMPLES[@]}" Vga)
@@ -238,11 +246,13 @@ check_wasm() {
 
 # Source -> IL (bflat, as for the native build) -> LLVM bitcode (NativeAOT-LLVM).
 # $1: sample; $2: directory for the output; $3: zerocore's WebAssembly build;
-# $4: how to optimize (default -O; --Os favors size over speed).
+# $4: how to optimize (default -O; --Os favors size over speed); the rest:
+# more ILC flags.
 # Leaves $name.N.bc (bitcode: the code) and two WASM object files that need no
 # compiling: $name.bc (the program's data) and $name.external.o.
 compile_bitcode() {
     local name=$1 obj=$2 core=$3 optimize=${4:--O}
+    shift $(($# < 4 ? $# : 4))
     rm -rf "$obj"
     mkdir -p "$obj"
 
@@ -254,7 +264,7 @@ compile_bitcode() {
             --generateunmanagedentrypoints:System.Private.CoreLib \
             --targetos:wasi --targetarch:wasm "$optimize" --wasm-global-base:1024 \
             --codegenopt:Target=wasm32-unknown-wasip2 --codegenopt:LlvmExceptionHandlingModel=emulated \
-            --directpinvoke:libc --directpinvoke:libm.so.6 -o:"$obj/$name.bc" > "$obj/ilc.log" 2>&1; then
+            --directpinvoke:libc --directpinvoke:libm.so.6 "$@" -o:"$obj/$name.bc" > "$obj/ilc.log" 2>&1; then
         cat "$obj/ilc.log" >&2
         exit 1
     fi
@@ -659,13 +669,19 @@ build_mac_objects() {
 }
 
 # $1: clang; the rest: samples.
-build_mac_link() {
-    local clang=$1 name
-    shift
+# $1: clang. What every macOS program links besides its own object.
+build_mac_runtime() {
+    local clang=$1
     echo "[clang] mac/start.c, mac/runtime.c, zerocore/native/mac-arm64.S -> $MAC_OBJ"
     "$clang" -arch arm64 -O2 -Wall -Wextra -c mac/start.c -o "$MAC_OBJ/start.o"
     "$clang" -arch arm64 -O2 -Wall -Wextra -c mac/runtime.c -o "$MAC_OBJ/runtime.o"
     "$clang" -arch arm64 -c zerocore/native/mac-arm64.S -o "$MAC_OBJ/zerocore.o"
+}
+
+build_mac_link() {
+    local clang=$1 name
+    shift
+    build_mac_runtime "$clang"
     for name in "$@"; do
         echo "[ld]    $name -> bin/mac/$name"
         # zerocore's module list: mac/start.c copies the section's entries
@@ -674,6 +690,76 @@ build_mac_link() {
             -Wl,-dead_strip
         # Stripped like the Linux programs, unless KEEP_SYMBOLS is set.
         if [ -z "${KEEP_SYMBOLS:-}" ]; then strip "bin/mac/$name"; fi
+    done
+}
+
+# ---- GPU (Metal) -------------------------------------------------------------
+#
+# A macOS program whose kernels (its [RuntimeExport] methods) also run on the
+# GPU. The same C# is compiled twice:
+#   build_gpu_bitcode   C# -> bitcode, as for WebAssembly (in the build
+#                       container on macOS); the kernels are taken from it
+#   build_mac_objects   C# -> a macOS object, the whole program (as --mac)
+# and on the Mac, build_gpu_link:
+#   bitcode -> text IR (clang) -> the kernels as AIR, the LLVM dialect Apple's
+#   Metal compiler reads (zero-bitcode ll2air) -> metallib (metal, metallib),
+#   which the program carries; then the object + gpu/metal.m (Metal behind the
+#   C functions lib/Gpu.cs calls) + mac/'s runtime -> bin/gpu/<Sample>
+GPU_OBJ=bin/gpu/obj
+
+build_gpu_bitcode() {
+    local name
+    check_bflat
+    check_dos_ilc
+    build_core "$CORE"
+    build_core "$WASM_CORE" -d WASM
+    build_lib
+    for name in "$@"; do
+        echo "[gpu]   $name -> bitcode"
+        # ILC compiles a program's [RuntimeExport] methods, called or not, when
+        # asked for its entry points: the kernels need nothing on the CPU to call them.
+        compile_bitcode "$name" "$GPU_OBJ/$name" "$WASM_CORE" -O "--generateunmanagedentrypoints:$name"
+    done
+}
+
+# The GPU build up to AIR, where no Mac is needed (./build.sh --gpu-air; CI's
+# Linux runners): the bitcode as text, by the WASI SDK's clang. ll2air then
+# runs on the host.
+build_gpu_ir() {
+    local name bc
+    check_wasm
+    build_gpu_bitcode "$@"
+    for name in "$@"; do
+        rm -rf "$GPU_OBJ/$name/ll" && mkdir -p "$GPU_OBJ/$name/ll"
+        for bc in "$GPU_OBJ/$name/$name".*.bc; do
+            "$WASI_SDK/bin/clang" -Wno-override-module -S -emit-llvm "$bc" -o "$GPU_OBJ/$name/ll/$(basename "${bc%.bc}").ll"
+        done
+    done
+}
+
+# Apple's Metal compiler, which Xcode downloads separately.
+check_metal() {
+    if ! xcrun -f metal > /dev/null 2>&1 || ! xcrun -f metallib > /dev/null 2>&1; then
+        echo "Error: no Metal compiler. Install Xcode, then: xcodebuild -downloadComponent MetalToolchain" >&2
+        exit 1
+    fi
+}
+
+# $1: clang; the rest: samples.
+build_gpu_link() {
+    local clang=$1 name obj
+    shift
+    build_mac_runtime "$clang"
+    for name in "$@"; do
+        obj=$GPU_OBJ/$name
+        # The program's [RuntimeExport] methods -> AIR -> a metallib, in
+        # kernels.o; and gpu/metal.m -> metal.o (sdk/ZeroCSharp.Bitcode/Gpu.cs).
+        echo "[gpu]   $name kernels -> $obj/kernels.metallib"
+        zero_bitcode gpu-kernels "$obj" "$name" gpu/metal.m "$obj"
+        echo "[ld]    $name -> bin/gpu/$name"
+        "$clang" -arch arm64 -o "bin/gpu/$name" "$MAC_OBJ/$name.o" "$MAC_OBJ/start.o" "$MAC_OBJ/runtime.o" \
+            "$MAC_OBJ/zerocore.o" "$obj/metal.o" "$obj/kernels.o" -framework Metal -framework Foundation -Wl,-dead_strip
+        if [ -z "${KEEP_SYMBOLS:-}" ]; then strip "bin/gpu/$name"; fi
     done
 }
 
@@ -771,6 +857,11 @@ build_sdk_payload() {
     mkdir -p "$dir/native/arm"
     cp "$dir/native/c64/System.Private.CoreLib.dll" "$dir/native/arm/"
     cp arm/runtime.c arm/semihost.c arm/rp2350.c arm/rp2350.S arm/an505.ld.in arm/an386.ld.in arm/rp2350.ld.in "$dir/native/arm/"
+    # GPU kernels (ZeroGpu): compiled against that same zerocore, and Metal
+    # behind lib/Gpu.cs's C functions, as source: it needs Apple's headers, so
+    # it's compiled on the Mac that builds the program.
+    mkdir -p "$dir/native/gpu"
+    cp gpu/metal.m "$dir/native/gpu/"
     for arch in x64 arm64; do
         mkdir -p "$dir/native/linux-$arch"
         BFLAT_ARCH=$arch CORE_NATIVE=$dir/native/linux-$arch/zerocore.o \
@@ -836,6 +927,16 @@ if [ "${1:-}" = "--native" ]; then
     build_native "$@"
     exit 0
 fi
+if [ "${1:-}" = "--native-gpu-ir" ]; then
+    shift
+    build_gpu_ir "$@"
+    exit 0
+fi
+if [ "${1:-}" = "--native-gpu-bitcode" ]; then
+    shift
+    build_gpu_bitcode "$@"
+    exit 0
+fi
 if [ "${1:-}" = "--native-mac-objects" ]; then
     shift
     build_mac_objects "$@"
@@ -876,6 +977,8 @@ case "${1:-}" in
     --r4)   TARGET=r4; shift ;;
     --win)  TARGET=win; shift ;;
     --mac)  TARGET=mac; shift ;;
+    --gpu)  TARGET=gpu; shift ;;
+    --gpu-air) TARGET=gpu-air; shift ;;
     --uefi) TARGET=uefi; shift ;;
     --must-not-compile) TARGET=must-not-compile; shift ;;
     --sdk-payload)
@@ -900,12 +1003,23 @@ if [ $# -eq 0 ]; then
         set -- "${R4_SAMPLES[@]}"
     elif [ "$TARGET" = uefi ]; then
         set -- "${UEFI_SAMPLES[@]}"
+    elif [ "$TARGET" = gpu ] || [ "$TARGET" = gpu-air ]; then
+        set -- "${GPU_SAMPLES[@]}"
     else
         set -- "${ALL_SAMPLES[@]}"
     fi
 fi
 for name in "$@"; do
-    if [ "$TARGET" = dos ]; then
+    if [ "$TARGET" = gpu ] || [ "$TARGET" = gpu-air ]; then
+        if [[ " ${GPU_SAMPLES[*]} " != *" $name "* ]]; then
+            check_sample "$name"
+            echo "$name has no GPU kernels; ./build.sh --gpu builds ${GPU_SAMPLES[*]}" >&2
+            exit 1
+        fi
+    elif [[ " ${GPU_SAMPLES[*]} " == *" $name "* ]]; then
+        echo "$name runs kernels on the GPU: ./build.sh --gpu $name" >&2
+        exit 1
+    elif [ "$TARGET" = dos ]; then
         if [[ " ${DOS_SAMPLES[*]} " != *" $name "* ]]; then
             check_sample "$name"
             echo "$name isn't built for DOS: it benchmarks SIMD instructions, which a 386 doesn't have." >&2
@@ -942,6 +1056,8 @@ case "$TARGET" in
     pico2 | r4) output() { echo "bin/$TARGET/$1.elf"; } ;;
     win)    output() { echo "bin/win/$1.exe"; } ;;
     mac)    output() { echo "bin/mac/$1"; } ;;
+    gpu)    output() { echo "bin/gpu/$1"; } ;;
+    gpu-air) output() { echo "bin/gpu/obj/$1/kernels.ll"; } ;;
     uefi)   output() { echo "bin/uefi/$1.efi"; } ;;
     native) output() { echo "bin/$1"; } ;;
 esac
@@ -1025,6 +1141,28 @@ case "$TARGET" in
         fi
         run mac-objects "$@"
         build_mac_link "${MAC_CC:-clang}" "$@"
+        ;;
+    gpu)
+        if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
+            echo "Error: --gpu builds on a Mac with Apple Silicon: the kernels run on its GPU, through Metal." >&2
+            exit 1
+        fi
+        check_metal
+        build_bitcode_tool
+        mkdir -p bin/gpu
+        run gpu-bitcode "$@"
+        run mac-objects "$@"
+        build_gpu_link "${MAC_CC:-clang}" "$@"
+        ;;
+    gpu-air)
+        # Everything but Metal: what can break when zerocore, lib/ or the
+        # compiler change, checked on any machine with ./setup.sh --wasm.
+        build_bitcode_tool
+        run gpu-ir "$@"
+        for name in "$@"; do
+            zero_bitcode ll2air "$GPU_OBJ/$name/kernels.ll" "$name" "$GPU_OBJ/$name"/ll/*.ll
+            echo "[gpu]   $name: $(grep -c '^define void @' "$GPU_OBJ/$name/kernels.ll") kernels -> $GPU_OBJ/$name/kernels.ll"
+        done
         ;;
     win)
         if ! WIN_CLANG=$(find_dos_clang); then

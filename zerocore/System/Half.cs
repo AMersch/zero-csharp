@@ -7,7 +7,7 @@ using System.Runtime.CompilerServices;
 // Half's precision. Conversions round to nearest, ties to even.
 namespace System
 {
-    public readonly unsafe struct Half : IEquatable<Half>, IComparable<Half>
+    public readonly unsafe struct Half : IEquatable<Half>, IComparable<Half>, ISpanFormattable
     {
         private const ushort SignMask = 0x8000;
         private const ushort ExponentMask = 0x7C00;
@@ -194,33 +194,13 @@ namespace System
         }
 
         // The shortest text that converts back to this value, as .NET writes it:
-        // 0.1, 65500 (MaxValue, 65504), 6E-08 (Epsilon).
-        public override string ToString()
-        {
-            double value = (double)this;
-            if (!IsFinite(this) || IsZero(this))
-                return Number.FormatDouble(value);
-            double magnitude = value < 0 ? -value : value;
-            int exponent = (int)Math.Floor(Math.Log10(magnitude));
-            for (int precision = 1; precision < 5; precision++)
-            {
-                // The two numbers of this many digits either side of the value;
-                // the nearer one that converts back wins, the even one on a tie.
-                double scale = Math.Pow(10, exponent - precision + 1);
-                double below = Math.Floor(magnitude / scale);
-                double nearer = Math.Round(magnitude / scale);
-                double farther = nearer == below ? below + 1 : below;
-                for (int i = 0; i < 2; i++)
-                {
-                    double candidate = (i == 0 ? nearer : farther) * scale;
-                    if (value < 0)
-                        candidate = -candidate;
-                    if (((Half)candidate)._value == _value)
-                        return Number.FormatDouble(candidate, precision, 5);
-                }
-            }
-            return Number.FormatDouble(value, 5, 5);
-        }
+        // 0.1, 65500 (MaxValue, 65504), 6E-08 (Epsilon). Formats as for double.
+        public override string ToString() => ToString((string)null);
+        public string ToString(string format) => Number.IeeeToString(_value, 10, 5, 5, format);
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null) =>
+            Number.TryFormatIeee(_value, 10, 5, 5, destination, out charsWritten, format);
     }
 
     public static unsafe class BitConverter

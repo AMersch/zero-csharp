@@ -24,7 +24,21 @@ namespace System
 
     public delegate int Comparison<in T>(T x, T y);
 
+    // Cultures don't exist here: every provider means the invariant culture.
     public interface IFormatProvider { }
+
+    // A value that takes a format string, as string.Format's "{0:F2}" and
+    // $"{x:F2}" pass it.
+    public interface IFormattable
+    {
+        string ToString(string format, IFormatProvider formatProvider);
+    }
+
+    // The same, written into a span instead of a new string.
+    public interface ISpanFormattable : IFormattable
+    {
+        bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format, IFormatProvider provider);
+    }
 }
 
 namespace System.Collections.Generic

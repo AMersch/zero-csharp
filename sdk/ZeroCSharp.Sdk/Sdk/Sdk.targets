@@ -731,6 +731,28 @@
   <ItemGroup Condition="'$(ZeroLanguage)' == 'FSharp'">
     <ZeroFSharpNativeInput Include="@(IntermediateAssembly)" />
   </ItemGroup>
+  <!--
+    F#, programs and libraries alike: ZERO006 for an Arena.Scratch callback
+    whose state is a ref struct, which C# checks with `scoped` and F# can't
+    (Sdk/ZeroFSharpNative.cs.txt, CheckScratchStates), and the warning ZERO007
+    for a call to a member C# marks `unsafe` from a function without
+    [<Safety>] or [<RequiresUnsafe>] (CheckUnsafeCalls). Read from the IL, with
+    the references for the types and members it names from other assemblies.
+  -->
+  <Target Name="ZeroFSharpCheck" Condition="'$(ZeroLanguage)' == 'FSharp'" AfterTargets="CoreCompile"
+          Inputs="@(IntermediateAssembly);@(ReferencePath)" Outputs="$(IntermediateOutputPath)zero-fsharp-check.stamp">
+    <ZeroFSharpNative Assembly="@(IntermediateAssembly->'%(FullPath)')" Check="true" References="@(ReferencePath)">
+      <Output TaskParameter="Clean" PropertyName="_ZeroFSharpCheckClean" />
+    </ZeroFSharpNative>
+    <!-- Checked, until it changes, only if nothing was reported: warnings are
+         shown in every build until they're dealt with (and one made an error
+         by WarningsAsErrors fails every build, not just the first). -->
+    <Touch Files="$(IntermediateOutputPath)zero-fsharp-check.stamp" AlwaysCreate="true" Condition="'$(_ZeroFSharpCheckClean)' == 'true'" />
+    <Delete Files="$(IntermediateOutputPath)zero-fsharp-check.stamp" Condition="'$(_ZeroFSharpCheckClean)' != 'true'" />
+    <ItemGroup>
+      <FileWrites Include="$(IntermediateOutputPath)zero-fsharp-check.stamp" />
+    </ItemGroup>
+  </Target>
   <UsingTask TaskName="ZeroFSharpNative" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
     <Task>
       <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)ZeroFSharpNative.cs.txt" />

@@ -118,7 +118,7 @@ public static class Program
         Check("the bits", Bits(pi) == 0x4248);
         Check("compare", pi > Half.One && Half.NegativeOne < Half.Zero && pi == Half.Pi);
         Check("ToString of the limits", Half.MaxValue.ToString() == "65500" && Half.Epsilon.ToString() == "6E-08" && Half.MinValue.ToString() == "-65500");
-        Check("ToString of special values", Half.NaN.ToString() == "NaN" && Half.NegativeZero.ToString() == "-0" && Half.PositiveInfinity.ToString() == "∞");
+        Check("ToString of special values", Half.NaN.ToString() == "NaN" && Half.NegativeZero.ToString() == "-0" && Half.PositiveInfinity.ToString() == "Infinity");
         Check("ToString of 0.1 and 1E-05", ((Half)Opaque(0.1f)).ToString() == "0.1" && ((Half)Opaque(0.00001f)).ToString() == "1E-05");
         Check("ToString of a tie: the even digit, if it reads back", ((Half)Opaque(0.46875f)).ToString() == "0.4688" && ((Half)Opaque(0.015625f)).ToString() == "0.01563");
         Check("overflow to infinity", Half.IsPositiveInfinity((Half)Opaque(65520f)) && (Half)Opaque(65519f) == Half.MaxValue && Half.IsNegativeInfinity((Half)Opaque(-1e10)));

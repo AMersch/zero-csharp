@@ -95,6 +95,26 @@ namespace System.Runtime
                 System.Threading.Interlocked.Decrement(ref s_threadsWithSetting);
         }
 
+        // Runs a static constructor with this thread's allocations going to
+        // calloc. What a static constructor creates is kept in static fields,
+        // for the rest of the program, so it mustn't land in an arena an
+        // AllocateObjectsHere scope will free: F# caches every lambda that
+        // captures nothing, and each union case without fields, this way.
+        internal static void RunStaticConstructor(nint constructor)
+        {
+            Setting* setting = (Setting*)CurrentSetting();
+            if (setting == null || setting->Allocate == null)
+            {
+                ((delegate*<void>)constructor)();
+                return;
+            }
+            delegate*<void*, nuint, void*> allocate = setting->Allocate;
+            void* context = setting->Context;
+            Set(null, null);
+            ((delegate*<void>)constructor)();
+            Set(allocate, context);
+        }
+
         /// <summary>
         /// Whether any static field holds a reference into [start, end): for
         /// checking that nothing static was left pointing at objects about to

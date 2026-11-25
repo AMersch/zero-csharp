@@ -96,51 +96,29 @@ namespace System
 
         public override string ToString() => this;
 
-        // string.Format with positional holes only: "{0}", "{1}", ..., and
-        // "{{" and "}}" for braces. Alignment and format strings ("{0,5}",
-        // "{0:F2}") aren't supported and end the program; lib's Out and Fmt
-        // have them. Each argument's ToString fills its hole; null is empty.
+        // string.Format as .NET has it: "{index[,alignment][:format]}" holes,
+        // and "{{" and "}}" for braces. A number gets the format ("{0:F2}",
+        // "{1,8:X4}"; see Number.Formatting.cs), anything else its ToString();
+        // null is empty. $"{x:F2}" compiles to this. A malformed format string
+        // throws FormatException.
         public static string Format(string format, params object[] args) => Format(null, format, args);
 
         public static string Format(IFormatProvider provider, string format, params object[] args)
         {
-            var builder = new System.Text.StringBuilder();
-            for (int i = 0; i < format._stringLength; i++)
-            {
-                char c = format[i];
-                if (c == '{' && i + 1 < format._stringLength && format[i + 1] == '{')
-                {
-                    builder.Append('{');
-                    i++;
-                }
-                else if (c == '}' && i + 1 < format._stringLength && format[i + 1] == '}')
-                {
-                    builder.Append('}');
-                    i++;
-                }
-                else if (c == '{')
-                {
-                    int index = 0;
-                    i++;
-                    while (i < format._stringLength && format[i] >= '0' && format[i] <= '9')
-                        index = index * 10 + (format[i++] - '0');
-                    if (i >= format._stringLength || format[i] != '}' || args == null || index >= args.Length)
-                        Environment.FailFast("string.Format: only {0}, {1}, ... holes are supported");
-                    object arg = args[index];
-                    if (arg != null)
-                        builder.Append(arg.ToString());
-                }
-                else
-                {
-                    builder.Append(c);
-                }
-            }
-            return builder.ToString();
+            if (format == null)
+                throw new ArgumentNullException(nameof(format));
+            return new System.Text.StringBuilder().AppendFormat(provider, format, args).ToString();
         }
 
         public static bool operator ==(string a, string b) => Equals(a, b);
 
         public static bool operator !=(string a, string b) => !Equals(a, b);
+
+        // As .NET's: the string's characters, without a copy (null: an empty
+        // span). C# converts a string to a span by itself; F# calls this, so
+        // that a string can be passed where a ReadOnlySpan<char> is taken.
+        public static implicit operator ReadOnlySpan<char>(string value)
+            => value is null ? default : new ReadOnlySpan<char>(ref value._firstChar, value._stringLength);
 
         // A new string holding a copy of these characters; text[a..b] calls it.
         // text.AsSpan(start, length) gives the same characters without a copy.

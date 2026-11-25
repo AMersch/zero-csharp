@@ -9,8 +9,7 @@ On an Apple Silicon Mac, a zero program can run C# methods on the GPU, through M
 an ordinary static method that the build compiles twice: once into the program, and once for the GPU.
 The program then runs it on thousands of GPU threads at once, each working on its own element.
 
-`ZeroGpu` and `dotnet new zerogpu` come in the SDK release after 0.12.0; until then, the
-[repository](#in-this-repository) builds GPU programs. This is experimental. The kernels are compiled to AIR, the format Apple's Metal compiler reads, which
+`ZeroGpu` and `dotnet new zerogpu` are in the SDK from 0.13.0 on. This is experimental. The kernels are compiled to AIR, the format Apple's Metal compiler reads, which
 Apple doesn't document, so a new version of Xcode can break it.
 
 ## What you need
@@ -46,7 +45,7 @@ Sum:   4718580 (the CPU says 4718580), 85 us on the GPU
 The project is a program with one more property, `ZeroGpu`:
 
 ```xml
-<Project Sdk="ZeroCSharp.Sdk/0.12.0">
+<Project Sdk="ZeroCSharp.Sdk/0.13.0">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <ZeroGpu>Metal</ZeroGpu>

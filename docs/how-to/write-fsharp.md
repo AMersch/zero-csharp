@@ -24,7 +24,7 @@ dotnet new zerolib -lang F# -o Shapes
 ```
 
 ```xml
-<Project Sdk="ZeroCSharp.Sdk/0.12.0">
+<Project Sdk="ZeroCSharp.Sdk/0.13.0">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
   </PropertyGroup>
@@ -218,10 +218,271 @@ C# zero programs get the same `decimal`.
 There's no garbage collector: memory a program allocates is never given back. F# allocates more
 than you might think. Each list cell, closure, tuple, option, `seq` enumerator and `Map` update is an
 object, and so is every string `sprintf` and `+` make. A program that runs and ends, as a command-line
-tool does, can usually ignore this. One that loops for a long time, a game or a server, should
-allocate its data before the loop and use arrays and mutable values inside it. Use F#'s
-`[<Struct>]` records, unions and tuples, which aren't objects. [Memory](../concepts/memory.html)
-explains what zero mode does with memory, and the arenas the library gives C#.
+tool does, can usually ignore this. One that loops for a long time, a game or a server, needs to give
+its memory a lifetime. F# gets the same three ways as C#, which
+[Memory](../concepts/memory.html) explains in full; this section shows each from F#. `[<Struct>]`
+records, unions and tuples aren't objects, so they need none of it.
+
+An arena holds memory for one lifetime and frees it all at once. Lib's `List`, `Dict` and
+`StrBuilder` live in the arena you give them:
+
+<!-- sample: sdk/test/fixtures/fsmemory/Program.fs arena -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// One arena per lifetime: this one holds a list for as long as it lives.
+let level = Arena.Create(1024un, "level")
+let scores = List<int>.Create(level)
+for s in [ 30; 10; 20 ] do
+    scores.Add s |> ignore
+printfn "%d scores, first %d" scores.Count (scores.Get 0)
+```
+
+### Free F# values with a scope
+
+Ordinary F# code, with its lists, closures and options, allocates with `new`. Inside
+`OpenObjectScope` those objects go into the arena instead, and leaving the `use` block frees them.
+A loop that would leak on every round then leaks nothing:
+
+<!-- sample: sdk/test/fixtures/fsmemory/Program.fs object-scope -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// Each round's lists, closures and options go into the frame arena, and
+// closing the scope frees them: a thousand rounds leave nothing behind.
+let frame = Arena.Create(4096un, "frame")
+[<Safety "a round returns an int, and keeps nothing it made">]
+let round (n: int) =
+    use _ = frame.OpenObjectScope()
+    let evens =
+        [ 1 .. 100 ]
+        |> List.map (fun x -> x * 2)
+        |> List.filter (fun x -> x % 3 <> 0)
+    let rotated =
+        match evens with
+        | [] -> []
+        | first :: rest -> rest @ [ first ]
+    let zero = Some n |> Option.map (fun r -> r - n) |> Option.defaultValue 0
+    List.sum rotated + zero
+
+let first = round 0
+let before = GC.GetTotalAllocatedBytes()
+let mutable total = 0
+for n in 1 .. 1000 do
+    total <- total + round n
+let neverFreed = GC.GetTotalAllocatedBytes() - before
+printfn "total %d, first %d, never freed: %d bytes" total first neverFreed
+```
+
+That prints `never freed: 0 bytes`. Nothing may keep a reference to a value made inside the scope
+once it closes: not a module-level value, not a ref cell or a collection from outside. Here `round`
+returns an `int`, which is copied out. What the compiler keeps for you is safe, unlike in C#: fsc
+keeps each lambda that captures nothing, and each union case without fields such as `[]`, in a
+static field set by a static constructor, and static constructors allocate outside every scope. A
+lambda that captures something is a new object each time, in the arena, and nothing outside points at
+it. Set `Arena.DebugChecks <- true` while testing: closing a scope then stops the program if a static
+field points into the arena.
+
+`OpenObjectScope` is one of the members C# marks `unsafe`: the compiler can't check that rule, so
+a C# caller has to wrap the call in an `unsafe` block. F# has no such block, and `round` carries a
+`[<Safety "...">]` attribute instead. The next section is about that.
+
+### Say why an unsafe call is safe
+
+When an F# function calls a member C# marks `unsafe`, such as an arena's `Reset`, `Restore`,
+`Destroy`, `OpenScope` and `OpenObjectScope`, or an `unsafe` method of a C# zero library of yours,
+the build warns:
+
+```text
+Program.fs(63,19): warning ZERO007: Program.unmarked calls Arena.Reset, which is unsafe: ...
+```
+
+Read the member's safety rules (the [Arena reference](../reference/arena.html) has them), then mark
+the function with `[<Safety "...">]` and the reason this use is correct. It is the
+[SAFETY comment](../concepts/safety-rules.html#safety-comments) C# code here writes on an `unsafe`
+block, made part of the code:
+
+<!-- sample: sdk/test/fixtures/fsunsafe/Program.fs safety -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// OpenObjectScope is unsafe: nothing made inside it may be used after it.
+// [<Safety>] says why this use is correct, as a SAFETY comment does in C#.
+[<Safety "the round's values are summed into an int; nothing else is kept">]
+let round (n: int) =
+    use _ = frame.OpenObjectScope()
+    [ 1 .. n ] |> List.map (fun x -> x * 2) |> List.sum
+```
+
+A function that can't promise that by itself passes the duty on with `[<RequiresUnsafe>]`. It is
+then unsafe to call, as an `unsafe` method is in C#, and the build warns about its callers instead:
+
+<!-- sample: sdk/test/fixtures/fsunsafe/Program.fs requires-unsafe -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// [<RequiresUnsafe>] passes the duty on instead: the function is unsafe to
+// call, as an `unsafe` method is in C#, and its callers are the ones to mark.
+[<RequiresUnsafe>]
+let endFrame () = frame.Reset()
+
+[<Safety "nothing from the frame is in use between frames">]
+let playFrame (n: int) =
+    let total = round n
+    endFrame ()
+    total
+```
+
+How the marks work:
+
+- **A mark covers the whole function**, with the lambdas and inner functions in it. It goes on a
+  function, a member or a property, not on a type or a module. On a top-level `do`, it covers the
+  file's top-level code.
+- **The reason is required.** `[<Safety "">]` isn't a mark.
+- **A marked function is never copied into its callers.** The F# compiler does that with small
+  functions, which would put the unsafe call in a function nobody marked. `Safety` is F#'s
+  `NoCompilerInlining` attribute with a reason, so it can't go on an `inline` function (FS3151). A
+  small function with `[<RequiresUnsafe>]` may be copied, and the warning for its caller then names
+  the member it calls.
+- **It's a warning, and it stays.** The program builds and runs. The warning is shown in every build
+  until the function is marked; `<WarningsAsErrors>ZERO007</WarningsAsErrors>` in the project makes
+  it an error, and `<NoWarn>$(NoWarn);ZERO007</NoWarn>` turns it off.
+
+As in C#, the mark is a claim: the build checks that it's there, not that it's true.
+[Catch arena mistakes](catch-arena-mistakes.html) shows what catches a wrong one when the program
+runs.
+
+### Temporary memory F# checks
+
+`Arena.Scratch` runs a callback with a scope to allocate from, and frees what it allocated when the
+callback returns. What the callback works on goes in as an input, passed by value:
+
+<!-- sample: sdk/test/fixtures/fsmemory/Program.fs scratch -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// Temporary memory F# checks: nothing from the scope can leave the callback.
+// The callback is made once, as a C# static lambda is, so a call allocates
+// nothing. What it works on goes in as the input, by value: here a span.
+let medianOf =
+    ScratchFuncIn<ReadOnlySpan<int>, int>(fun scratch input ->
+        // A copy to sort, so the caller's items keep their order.
+        let copy = scratch.AllocSpan<int>(input.Length)
+        input.CopyTo(copy)
+        copy.Sort()
+        copy[copy.Length / 2])
+
+let median (values: ReadOnlySpan<int>) = Arena.Scratch(values, medianOf)
+
+let values = [| 5; 3; 8; 1; 9 |]
+// One call first: it sets up what the later calls reuse.
+let firstMedian = median (ReadOnlySpan<int>(values))
+let scratchBefore = GC.GetTotalAllocatedBytes()
+let mutable medians = 0
+for _ in 1 .. 1000 do
+    medians <- medians + median (ReadOnlySpan<int>(values))
+let scratchNeverFreed = GC.GetTotalAllocatedBytes() - scratchBefore
+printfn "median %d, first still %d, never freed: %d bytes"
+    (medians / 1000 + firstMedian - 5) values[0] scratchNeverFreed
+```
+
+That prints `never freed: 0 bytes` after its thousand calls. The scope's spans, lists and text are
+`ref struct`s, and F#'s rules for them keep everything inside the callback: a closure can't capture
+them, a field, a ref cell or a module-level value can't hold them, and the result can't be one.
+`sdk/test/fixtures/fs-must-not-compile/` holds one program per way out, and the SDK's tests check
+that the build refuses each.
+
+**Make the callback once.** `medianOf` is a module-level value, so its delegate is created when the
+program starts, as a C# `static` lambda's is on its first call. A lambda written at the call also
+works, and F# picks the delegate type itself, but each call then makes a new delegate that is never
+freed:
+
+<!-- sample: sdk/test/fixtures/fsmemory/Program.fs scratch-inline -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// A lambda written at the call is a new delegate each time: 48 bytes that
+// are never freed, and more if it captures something. Fine for a call or
+// two; in a loop, make the callback once, or free them with an object scope.
+let inlineBefore = GC.GetTotalAllocatedBytes()
+let mutable lengths = 0
+for _ in 1 .. 100 do
+    let length = Arena.Scratch(fun scratch -> scratch.AllocSpan<int>(8).Length)
+    lengths <- lengths + length
+let inlineNeverFreed = GC.GetTotalAllocatedBytes() - inlineBefore
+printfn "inline: %d, something never freed: %b" lengths (inlineNeverFreed > 0L)
+```
+
+The input is a copy, so a span passed that way still points at your items, and the callback can
+fill them:
+
+<!-- sample: sdk/test/fixtures/fsmemory/Program.fs scratch-fill -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// A span of yours that the callback fills: it gets a copy of the span,
+// which points at the same items.
+let squaresInto =
+    ScratchActionIn<Span<int>>(fun scratch output ->
+        let work = scratch.List<int>()
+        for i in 1 .. output.Length do
+            work.Add(i * i)
+        work.AsSpan().CopyTo(output))
+
+let squares: int[] = Array.zeroCreate 4
+Arena.Scratch(Span<int>(squares), squaresInto)
+printfn "squares %d %d %d %d" squares[0] squares[1] squares[2] squares[3]
+```
+
+Several results come back through a state passed by reference, with `&`. That form needs the
+delegate type written out:
+
+<!-- sample: sdk/test/fixtures/fsmemory/Program.fs scratch-state -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// Several results come back through a state passed by reference. It can't
+// be a ref struct (ZERO006), so what goes in with it is an array.
+[<Struct>]
+type Stats =
+    { Values: int[]
+      mutable Sum: int
+      mutable Largest: int }
+
+let statsOf =
+    ScratchAction<Stats>(fun scratch st ->
+        let sorted = scratch.AllocSpan<int>(st.Values.Length)
+        Span<int>(st.Values).CopyTo(sorted)
+        sorted.Sort()
+        for v in sorted do
+            st.Sum <- st.Sum + v
+        st.Largest <- sorted[sorted.Length - 1])
+
+let mutable stats = { Values = values; Sum = 0; Largest = 0 }
+Arena.Scratch(&stats, statsOf)
+printfn "sum %d, largest %d" stats.Sum stats.Largest
+```
+
+Here is the one difference from C#. C# lets that state be a `ref struct` holding spans of yours, and
+its `scoped` keyword stops the callback from storing scratch memory in it. F# ignores `scoped`, so the
+build checks instead: a callback whose by-reference state is a `ref struct` (a `Span`, or a type
+with `[<IsByRefLike>]`) is an error, ZERO006, that names the callback. Pass a `ref struct` by value,
+as above, where a copy can't carry anything out; a state passed by reference is a struct or a record
+of ordinary values.
+
+Lists and text that grow come from the scope too. Text takes strings, chars and numbers; a string to
+keep is copied out into an arena of yours:
+
+<!-- sample: sdk/test/fixtures/fsmemory/Program.fs scratch-list -->
+```fsharp no-check reason="uses the zero library: the SDK tests build and run it"
+// Lists and text that grow, from the scope; the string to keep is copied
+// out into an arena of yours.
+let reportOf =
+    ScratchFunc<Arena, string>(fun scratch target ->
+        let evens = scratch.List<int>(4)
+        for i in 18 .. -2 .. 0 do
+            evens.Add i
+        evens.AsSpan().Sort()
+        let text = scratch.Text()
+        text.Append(evens.Count)
+        text.Append(" evens:")
+        for e in evens do
+            text.Append(' ')
+            text.Append(e)
+        text.Append(", half of them ")
+        text.Append(float evens.Count / 2.0)
+        text.ToArenaString(target))
+
+let mutable keep = Arena.Create(1024un, "keep")
+printfn "%s" (Arena.Scratch(&keep, reportOf))
+```
+
+C#'s `text.Append($"...")`, which formats straight into the text, has no F# counterpart: append the
+pieces, as here. `sprintf` works, but makes a string of its own first.
 
 ## Build for the Commodore 64
 

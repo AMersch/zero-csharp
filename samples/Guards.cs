@@ -75,6 +75,8 @@ public static class Program
             case "scratch-outer-text": ScratchOuterText(); break;
             case "ptr-null": PtrNull(); break;
             case "ptr-after-reset": PtrAfterReset(); break;
+            case "custom-format": Out.Line(Opaque(1.5).ToString("0.00")); break;
+            case "bad-format-item": Out.Line(string.Format("{0:F2", Opaque(1.5))); break;
             case "pool-removed": PoolRemoved(); break;
             case "pool-moved": PoolMoved(); break;
             case "scratch-pool-outer": ScratchPoolOuter(); break;
@@ -88,6 +90,9 @@ public static class Program
         Out.Line("NOT STOPPED");
         return 0;
     }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static double Opaque(double value) => value;
 
     // The unsafe blocks below break their promises on purpose: that is the test.
 

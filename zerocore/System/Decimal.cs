@@ -6,7 +6,7 @@
 // checked against .NET by fuzzing every operation (scripts/decimal-fuzz).
 namespace System
 {
-    public readonly unsafe struct Decimal : IEquatable<Decimal>, IComparable<Decimal>, IComparable
+    public readonly unsafe struct Decimal : IEquatable<Decimal>, IComparable<Decimal>, IComparable, ISpanFormattable
     {
         private const int SignMask = unchecked((int)0x80000000);
         private const int ScaleShift = 16;
@@ -696,35 +696,14 @@ namespace System
 
         // ---- text ----------------------------------------------------------
 
-        public override string ToString()
-        {
-            Span<char> buffer = stackalloc char[64];
-            Span<uint> x = stackalloc uint[3];
-            Load(x);
-            int pos = buffer.Length;
-            int scale = Scale;
-            int digits = 0;
-            do
-            {
-                uint digit = DivSmall(x, 10);
-                buffer[--pos] = (char)('0' + digit);
-                digits++;
-                if (digits == scale)
-                    buffer[--pos] = '.';
-            }
-            while (!IsZeroLimbs(x) || digits < scale);
-            if (buffer[pos] == '.')
-                buffer[--pos] = '0';
-            if (IsNegative && !IsZero)
-                buffer[--pos] = '-';
-            return MakeString(buffer.Slice(pos));
-        }
-
-        private static string MakeString(ReadOnlySpan<char> chars)
-        {
-            fixed (char* p = chars)
-                return Number.FromChars(p, chars.Length);
-        }
+        // All the digits, trailing zeros too: 1.50m is "1.50". Formats round
+        // half away from zero: 2.675m.ToString("F2") is "2.68".
+        public override string ToString() => ToString((string)null);
+        public string ToString(string format) => Number.DecimalToString(_lo64, _hi32, Scale, IsNegative, format);
+        public string ToString(IFormatProvider provider) => ToString();
+        public string ToString(string format, IFormatProvider provider) => ToString(format);
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format = default, IFormatProvider provider = null) =>
+            Number.TryFormatDecimal(_lo64, _hi32, Scale, IsNegative, destination, out charsWritten, format);
 
         // Digits with an optional sign, decimal point and exponent ("e5",
         // "E-3"), as .NET's Parse takes with NumberStyles.Float; digits beyond

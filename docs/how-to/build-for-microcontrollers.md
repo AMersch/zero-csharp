@@ -85,9 +85,11 @@ Code and read-only data stay in flash; RAM holds the writable data, the stacks a
   included. A program needs 35 KB of RAM before its heap, most of it the stacks: 16 KB each for the
   processor's stack and the stack managed code keeps its references on. Llama's 1.1 MB model stays in
   flash, and its key/value cache, sized for the 64 tokens it makes, is 82 KB of RAM.
-- **Uno R4:** 29 of the samples, those that don't need a big heap. The stacks are 4 KB each, so a
+- **Uno R4:** 38 of the samples, those that don't need a big heap. The stacks are 4 KB each, so a
   program needs about 10.5 KB of RAM before its heap and has some 20 KB left. Arena (which allocates a
-  16 KB array), Collections, Files, Strings, Queries, Threads, Patterns, Scratch and Unicode don't fit.
+  16 KB array), Collections, Files, Strings, Queries, Threads, Fibers, Patterns, Scratch, Links and
+  Unicode don't fit. `Arena.Scratch` starts each arena with a 2 KB block on a microcontroller instead
+  of 16 KB, and so does each fiber's scratch arena.
 
 String literals go to flash too, so the RAM they would cost is free. Flash is read-only: the memory
 protection unit makes a write to it fault, in QEMU as on a chip, so a bug that writes to a string

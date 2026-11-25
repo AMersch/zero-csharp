@@ -115,8 +115,18 @@ one gets all of them, and nothing is in a program that doesn't.
   routines every `double` program has, so the build compiles them to IR like the program's own and moves
   the big ones into banks (see above). A call takes 0.4 to 0.9 million cycles: 50 to 110 milliseconds at 8 MHz
   (measured: `sin` 400,000, `exp` 380,000, `log` 450,000, `atan2` 620,000, `pow` 870,000, a `double`
-  multiplication 37,000, `sqrt` 80,000). A game that needs many sines a frame wants a table.
-- **`MathF`:** the `float` versions compute in `double` and round: not faster.
+  multiplication 37,000, `sqrt` 80,000). A game that needs many sines a frame wants `MathF`, or `CX16.Sin`.
+- **`MathF`:** `Sin`, `Cos`, `Exp`, `Log`, `Pow` and `Tanh` of a `float` are computed in `float`: a
+  polynomial for sine and cosine, FreeBSD's `expf` and `logf` for the others. They are 10 to 16 times
+  faster (`sin` 24,000 cycles, `exp` 24,000, `log` 27,000, `tanh` 31,000, `pow` 53,000, or 9,000 for a
+  whole exponent), good to a few units in the last place of a float (1e-7 relative: `Sin`, `Cos` an absolute
+  1e-7, `Tanh` 3e-7), and they use no `double` at all, so a program that only has floats doesn't carry the soft-double
+  routines (18 KB). `Pow` with another exponent than a whole one up to 64 loses `|y * log(x)|` units. Beyond 8192
+  radians `Sin` and `Cos` lose a digit for every factor of ten.
+- **A table:** one with linear interpolation reaches 1e-7 only with 2,048 entries of 4 bytes (8 KB), and
+  then it is not much faster than the polynomial, so `MathF` has none. For games that turn things by whole steps
+  there is `CX16.Sin(angle)` and `CX16.Cos(angle)`: the angle in 256ths of a turn, the result from -32767 to
+  32767, from a table of 65 numbers: good to 1.5e-5, about a hundred cycles.
 
 ## Banked RAM
 

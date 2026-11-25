@@ -113,9 +113,15 @@ public static class Program
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void Single()
     {
-        Check("MathF", Near(MathF.Sin(F(1)), 0.8414709848078965) && Near(MathF.Cos(F(1)), 0.5403023058681398)
-            && Near(MathF.Exp(F(1)), 2.718281828459045) && Near(MathF.Log(F(2)), 0.6931471805599453)
-            && Near(MathF.Pow(F(2), F(8)), 256) && Near(MathF.Tanh(F(0.5f)), 0.46211715726000974));
+        Check("MathF Sin, Cos", Near(MathF.Sin(F(1)), 0.8414709848078965) && Near(MathF.Cos(F(1)), 0.5403023058681398)
+            && Near(MathF.Sin(F(1000)), 0.8268795405320025) && Near(MathF.Cos(F(-100)), 0.8623188722876839)
+            && MathF.Sin(F(0)) == 0 && MathF.Cos(F(0)) == 1 && float.IsNaN(MathF.Sin(F(float.PositiveInfinity))));
+        Check("MathF Exp, Log", Near(MathF.Exp(F(1)), 2.718281828459045) && Near(MathF.Exp(F(10)), 22026.465794806718)
+            && Near(MathF.Log(F(2)), 0.6931471805599453) && Near(MathF.Log(F(1000)), 6.907755278982137)
+            && MathF.Exp(F(100)) == float.PositiveInfinity && MathF.Exp(F(-110)) == 0 && float.IsNaN(MathF.Log(F(-1))));
+        Check("MathF Pow, Tanh", MathF.Pow(F(2), F(8)) == 256 && MathF.Pow(F(2), F(-3)) == 0.125f && MathF.Pow(F(-2), F(3)) == -8
+            && Near(MathF.Pow(F(1.5f), F(2.5f)), 2.7556759606310752) && Near(MathF.Tanh(F(0.5f)), 0.46211715726000974)
+            && Near(MathF.Tanh(F(2)), 0.9640275800758169) && Near(MathF.Tanh(F(0.1f)), 0.09966799462495582));
         End("single precision");
     }
 

@@ -183,6 +183,9 @@ public static class Program
         // The emulator's headless mode, which ./test.sh --cx16 uses, draws
         // nothing and has no frame interrupt: the clock and the joysticks,
         // which that interrupt drives, can only be tried in a window.
+        Check("sine and cosine from a table", CX16.Sin(0) == 0 && CX16.Sin(64) == 32767 && CX16.Sin(128) == 0
+            && CX16.Sin(192) == -32767 && CX16.Sin(32) == 23170 && CX16.Sin(-32) == -23170 && CX16.Cos(0) == 32767
+            && CX16.Cos(128) == -32767 && CX16.Sin(256 + 96) == CX16.Sin(96) && CX16.Sin(96) == 23170);
         Check("a joystick that doesn't exist", CX16.Joystick(9) == 128);
 
         // Leave the machine as BASIC expects it.

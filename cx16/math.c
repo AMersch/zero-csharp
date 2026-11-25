@@ -22,10 +22,13 @@ double sqrt(double x);      // the runtime's, or the C library's when tested on 
 // hundreds of bytes at every use.
 typedef union { double f; struct { uint32_t lo, hi; } w; } math_bits;
 
+// The public functions are kept out of line (noinline): the float ones call the double ones
+// for what they can't do, and inlined, the whole of pow would be in powf, a function too
+// big to move into a bank.
+
 static int32_t hi_word(double x) { math_bits u; u.f = x; return (int32_t)u.w.hi; }
 static uint32_t lo_word(double x) { math_bits u; u.f = x; return u.w.lo; }
 static double with_hi(double x, int32_t hi) { math_bits u; u.f = x; u.w.hi = (uint32_t)hi; return u.f; }
-static double with_lo(double x, uint32_t lo) { math_bits u; u.f = x; u.w.lo = lo; return u.f; }
 static double from_words(int32_t hi, uint32_t lo) { math_bits u; u.w.hi = (uint32_t)hi; u.w.lo = lo; return u.f; }
 
 static double math_fabs(double x) { return x < 0 ? -x : x; }
@@ -54,7 +57,7 @@ static const double huge = 1.0e300, tiny = 1.0e-300;
 
 // ---- exp ----------------------------------------------------------------------
 
-double cs_exp(double x)
+__attribute__((noinline)) double cs_exp(double x)
 {
     static const double halF[2] = { 0.5, -0.5 };
     static const double ln2HI[2] = { 6.93147180369123816490e-01, -6.93147180369123816490e-01 };
@@ -105,7 +108,6 @@ double cs_exp(double x)
     return scale_pow2(y, k);
 }
 
-float cs_expf(float x) { return (float)cs_exp((double)x); }
 
 // ---- log ----------------------------------------------------------------------
 
@@ -161,7 +163,7 @@ static double log_mantissa(double x, int32_t *k, int *special)
     return f - s * (f - R);
 }
 
-double cs_log(double x)
+__attribute__((noinline)) double cs_log(double x)
 {
     double f, hfsq, s, z, w, t1, t2, R, dk;
     int32_t k, hx, i, j;
@@ -221,7 +223,6 @@ double cs_log(double x)
     return dk * ln2_hi - ((s * (f - R) - dk * ln2_lo) - f);
 }
 
-float cs_logf(float x) { return (float)cs_log((double)x); }
 
 double cs_log2(double x)
 {
@@ -344,7 +345,7 @@ static int32_t rem_pio2(double x, double *y)
     return n;
 }
 
-double cs_sin(double x)
+__attribute__((noinline)) double cs_sin(double x)
 {
     double y[2];
     int32_t ix = hi_word(x) & 0x7FFFFFFFL, n;
@@ -364,7 +365,7 @@ double cs_sin(double x)
     }
 }
 
-double cs_cos(double x)
+__attribute__((noinline)) double cs_cos(double x)
 {
     double y[2];
     int32_t ix = hi_word(x) & 0x7FFFFFFFL, n;
@@ -401,24 +402,6 @@ double cs_tan(double x)
     return -kernel_cos(y[0], y[1]) / kernel_sin(y[0], y[1], 1);
 }
 
-float cs_sinf(float x) { return (float)cs_sin((double)x); }
-float cs_cosf(float x) { return (float)cs_cos((double)x); }
-
-// tanh in float: the float result has 24 bits, and this computes in 53.
-float cs_tanhf(float x)
-{
-    double a = (double)x, e;
-    if (a != a)
-        return x;
-    if (a > 22.0)
-        return 1.0f;
-    if (a < -22.0)
-        return -1.0f;
-    if (math_fabs(a) < 0.001)
-        return (float)(a - a * a * a / 3.0);
-    e = cs_exp(2.0 * a);
-    return (float)((e - 1.0) / (e + 1.0));
-}
 
 // ---- atan2 -------------------------------------------------------------------------
 
@@ -534,7 +517,7 @@ double cs_atan2(double y, double x)
 // tenth of a percent of a digit for each doubling beyond. (fdlibm's own pow
 // computes the logarithm with twice the bits, at 12 KB of code on this machine.)
 
-double cs_pow(double x, double y)
+__attribute__((noinline)) double cs_pow(double x, double y)
 {
     int32_t hx = hi_word(x), hy = hi_word(y), ix = hx & 0x7FFFFFFFL, iy = hy & 0x7FFFFFFFL;
     uint32_t lx = lo_word(x), ly = lo_word(y);
@@ -600,4 +583,284 @@ double cs_pow(double x, double y)
     return (hx < 0 && odd) ? -result : result;
 }
 
-float cs_powf(float x, float y) { return (float)cs_pow((double)x, (double)y); }
+// ---- single precision ----------------------------------------------------------------
+//
+// MathF's functions, computed in float: the 6502's float is 32 bits in software,
+// a third of the code and about a quarter of the time of its double, and good to
+// 24 bits, a few units in the last place of that (1e-7 relative or so). These are
+// FreeBSD's e_expf and e_logf, and short polynomials for sin and cos. They use no
+// double at all, so a program that has only floats doesn't carry the 18 KB of
+// the double arithmetic. Past what a float can hold exactly, they give up some
+// digits (sin and cos beyond 8192 radians, pow with a large exponent).
+
+typedef union { float f; uint32_t i; } float_bits;
+
+static uint32_t float_word(float x) { float_bits u; u.f = x; return u.i; }
+static float float_from(uint32_t i) { float_bits u; u.i = i; return u.f; }
+
+// x * 2^n for n in about -150 .. 130.
+static float scale_pow2f(float x, int32_t n)
+{
+    if (n > 120) { x *= float_from(0x7E800000ul); n -= 126; }       // 2^126
+    if (n < -120) { x *= float_from(0x0D800000ul); n += 100; }      // 2^-100
+    return x * float_from((uint32_t)(127 + n) << 23);
+}
+
+__attribute__((noinline)) float cs_expf(float x)
+{
+    static const float ln2HI = 6.9313812256e-01f, ln2LO = 9.0580006145e-06f, invln2 = 1.4426950216e+00f,
+        P1 = 1.6666667163e-01f, P2 = -2.7777778450e-03f;
+    float y, hi = 0, lo = 0, c, t;
+    int32_t k = 0;
+    uint32_t hx = float_word(x), sign = hx >> 31;
+    hx &= 0x7FFFFFFFul;
+
+    if (hx >= 0x42B17218ul) {                       // |x| >= 88.72
+        if (x != x)
+            return x;
+        if (sign == 0 && x > 88.7228f)
+            return 1.0f / 0.0f;                     // overflow
+        if (sign != 0 && hx >= 0x42CFF1B5ul)
+            return 0.0f;                            // x <= -103.97
+    }
+    if (hx > 0x3EB17218ul) {                        // |x| > 0.5 ln2
+        k = (int32_t)(invln2 * x + (sign ? -0.5f : 0.5f));
+        t = (float)k;
+        hi = x - t * ln2HI;
+        lo = t * ln2LO;
+        x = hi - lo;
+    } else if (hx < 0x39000000ul) {                 // |x| < 2^-13
+        return 1.0f + x;
+    }
+    t = x * x;
+    c = x - t * (P1 + t * P2);
+    if (k == 0)
+        return 1.0f - ((x * c) / (c - 2.0f) - x);
+    y = 1.0f - ((lo - (x * c) / (2.0f - c)) - hi);
+    return scale_pow2f(y, k);
+}
+
+__attribute__((noinline)) float cs_logf(float x)
+{
+    static const float ln2_hi = 6.9313812256e-01f, ln2_lo = 9.0580006145e-06f, two25 = 3.355443200e+07f,
+        Lg1 = 6.6666662693e-01f, Lg2 = 4.0000972152e-01f, Lg3 = 2.8498786688e-01f, Lg4 = 2.4279078841e-01f;
+    float f, s, z, w, R, hfsq, dk, t1, t2;
+    int32_t k = 0, i, j, ix;
+
+    ix = (int32_t)float_word(x);
+    if (ix < 0x00800000L) {                         // x < 2^-126, or negative
+        if ((ix & 0x7FFFFFFFL) == 0)
+            return -1.0f / 0.0f;                    // log(+-0)
+        if (ix < 0)
+            return (x - x) / 0.0f;                  // log(<0)
+        k -= 25;
+        x *= two25;
+        ix = (int32_t)float_word(x);
+    }
+    if (ix >= 0x7F800000L)
+        return x + x;
+    k += (ix >> 23) - 127;
+    ix &= 0x007FFFFFL;
+    i = (ix + (0x95F64L << 3)) & 0x800000L;
+    x = float_from((uint32_t)(ix | (i ^ 0x3F800000L)));     // normalize x or x/2
+    k += (i >> 23);
+    f = x - 1.0f;
+    if ((0x007FFFFFL & (15 + ix)) < 16) {           // |f| < 2^-20
+        if (f == 0.0f) {
+            if (k == 0)
+                return 0.0f;
+            dk = (float)k;
+            return dk * ln2_hi + dk * ln2_lo;
+        }
+        R = f * f * (0.5f - 0.33333333333333333f * f);
+        if (k == 0)
+            return f - R;
+        dk = (float)k;
+        return dk * ln2_hi - ((R - dk * ln2_lo) - f);
+    }
+    s = f / (2.0f + f);
+    dk = (float)k;
+    z = s * s;
+    i = ix - (0x6147AL << 3);
+    w = z * z;
+    j = (0x6B851L << 3) - ix;
+    t1 = w * (Lg2 + w * Lg4);
+    t2 = z * (Lg1 + w * Lg3);
+    i |= j;
+    R = t2 + t1;
+    if (i > 0) {
+        hfsq = 0.5f * f * f;
+        if (k == 0)
+            return f - (hfsq - s * (hfsq + R));
+        return dk * ln2_hi - ((hfsq - (s * (hfsq + R) + dk * ln2_lo)) - f);
+    }
+    if (k == 0)
+        return f - s * (f - R);
+    return dk * ln2_hi - ((s * (f - R) - dk * ln2_lo) - f);
+}
+
+// sin and cos of a float: the argument taken to within pi/4 of 0 with pi/2 in three
+// pieces (each exact in a few bits, so n times it is exact), then a polynomial.
+// Beyond 8192 radians, n would need more bits than the pieces have.
+static float sinf_poly(float x)     // |x| <= pi/4
+{
+    float z = x * x;
+    return x + x * z * (-1.6666667163e-01f + z * (8.3333337680e-03f + z * (-1.9841270114e-04f + z * 2.7557314297e-06f)));
+}
+
+static float cosf_poly(float x)     // |x| <= pi/4
+{
+    float z = x * x;
+    return 1.0f - 0.5f * z + z * z * (4.1666667908e-02f + z * (-1.3888889225e-03f + z * (2.4801587642e-05f + z * -2.7557314297e-07f)));
+}
+
+// The remainder of x / y, exactly (x >= 0, y > 0, finite): long division on the bits.
+static float math_fmodf(float x, float y)
+{
+    uint32_t ux = float_word(x), uy = float_word(y);
+    int32_t ex = (int32_t)((ux >> 23) & 0xFF), ey = (int32_t)((uy >> 23) & 0xFF);
+    uint32_t mx = (ux & 0x7FFFFFul) | 0x800000ul, my = (uy & 0x7FFFFFul) | 0x800000ul;
+    if (ex < ey)
+        return x;
+    for (; ex > ey; ex--) {
+        if (mx >= my)
+            mx -= my;
+        mx <<= 1;
+    }
+    if (mx >= my)
+        mx -= my;
+    if (mx == 0)
+        return 0.0f;
+    while (mx < 0x800000ul) {
+        mx <<= 1;
+        ey--;
+    }
+    return float_from(((uint32_t)ey << 23) | (mx & 0x7FFFFFul));
+}
+
+// A float beyond 8192 radians, taken within a few turns of 0: whole turns of the float
+// nearest 2 pi come off exactly, but that isn't 2 pi, so every factor of ten in the size
+// of x costs a digit of the result.
+static float few_turns(float x)
+{
+    float r = math_fmodf(x < 0 ? -x : x, 6.2831855f);
+    return x < 0 ? -r : r;
+}
+
+// Returns n, and the remainder in *r: x = n * pi/2 + *r.
+static int32_t reduce_halfpi(float x, float *r)
+{
+    static const float P1 = 1.5703125f, P2 = 4.837512969970703125e-4f, P3 = 7.54978995489188216e-8f,
+        twoOverPi = 6.3661977237e-01f;
+    float n = (float)(int32_t)(x * twoOverPi + (x < 0 ? -0.5f : 0.5f));
+    *r = ((x - n * P1) - n * P2) - n * P3;
+    return (int32_t)n;
+}
+
+float cs_sinf(float x)
+{
+    float r;
+    uint32_t hx = float_word(x) & 0x7FFFFFFFul;
+    if (hx < 0x32000000ul)
+        return x;                                   // |x| < 2^-27
+    if (hx >= 0x7F800000ul)
+        return x - x;                               // infinity or NaN
+    if (hx > 0x46000000ul)
+        x = few_turns(x);                           // |x| > 8192
+    switch (reduce_halfpi(x, &r) & 3) {
+    case 0: return sinf_poly(r);
+    case 1: return cosf_poly(r);
+    case 2: return -sinf_poly(r);
+    default: return -cosf_poly(r);
+    }
+}
+
+float cs_cosf(float x)
+{
+    float r;
+    uint32_t hx = float_word(x) & 0x7FFFFFFFul;
+    if (hx < 0x32000000ul)
+        return 1.0f;
+    if (hx >= 0x7F800000ul)
+        return x - x;
+    if (hx > 0x46000000ul)
+        x = few_turns(x);
+    switch (reduce_halfpi(x, &r) & 3) {
+    case 0: return cosf_poly(r);
+    case 1: return -sinf_poly(r);
+    case 2: return -cosf_poly(r);
+    default: return sinf_poly(r);
+    }
+}
+
+// tanh: a series for small values, else through exp.
+float cs_tanhf(float x)
+{
+    float a = x < 0 ? -x : x, t;
+    if (x != x)
+        return x;
+    if (a > 9.0f)
+        return x < 0 ? -1.0f : 1.0f;                // 1 - tanh(9) is below 2^-26
+    if (a < 0.25f) {
+        float z = x * x;
+        return x * (1.0f + z * (-3.3333334327e-01f + z * (1.3333334029e-01f + z * (-5.3968254477e-02f + z * 2.1869488060e-02f))));
+    }
+    t = cs_expf(2.0f * a);
+    t = 1.0f - 2.0f / (t + 1.0f);
+    return x < 0 ? -t : t;
+}
+
+// x ** y: a whole number of up to 64 by squaring, which is exact where the result
+// is, else exp(y * log(x)), good to about |y * log(x)| units in the last place.
+float cs_powf(float x, float y)
+{
+    uint32_t hx = float_word(x), hy = float_word(y), ax = hx & 0x7FFFFFFFul, ay = hy & 0x7FFFFFFFul;
+    float magnitude, result, base;
+    int whole = 0, odd = 0;
+
+    if (ay == 0 || hx == 0x3F800000ul)
+        return 1.0f;                                // x ** 0 and 1 ** y
+    if (ax > 0x7F800000ul || ay > 0x7F800000ul)
+        return x + y;                               // NaN
+
+    if (ay >= 0x4B800000ul) {                       // |y| >= 2^24: whole and even (or infinite)
+        whole = 1;
+    } else if (ay >= 0x3F800000ul) {                // whole if the bits after the point are 0
+        int32_t e = (int32_t)(ay >> 23) - 127;
+        uint32_t fraction = ay & (0x7FFFFFul >> e);
+        if (fraction == 0) {
+            whole = 1;
+            odd = (ay >> (23 - e)) & 1;
+        }
+    }
+    if (ay == 0x7F800000ul) {                       // y is +-inf
+        if (ax == 0x3F800000ul)
+            return 1.0f;
+        return ((ax > 0x3F800000ul) == (hy >> 31 == 0)) ? 1.0f / 0.0f : 0.0f;
+    }
+    magnitude = float_from(ax);
+    if (ax == 0 || ax == 0x7F800000ul) {            // x is +-0 or +-inf
+        result = (hy >> 31) ? 1.0f / magnitude : magnitude;
+        return (hx >> 31 && odd) ? -result : result;
+    }
+    if ((hx >> 31) && !whole)
+        return (x - x) / (x - x);                   // (x<0)**(non-whole): NaN
+
+    if (whole && ay < 0x42800000ul) {               // |y| < 64
+        uint32_t m = (uint32_t)(y < 0 ? -y : y);
+        result = 1.0f;
+        base = magnitude;
+        while (m != 0) {
+            if (m & 1)
+                result *= base;
+            m >>= 1;
+            if (m != 0)
+                base *= base;
+        }
+        if (hy >> 31)
+            result = 1.0f / result;
+    } else {
+        result = cs_expf(y * cs_logf(magnitude));
+    }
+    return ((hx >> 31) && odd) ? -result : result;
+}

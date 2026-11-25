@@ -56,6 +56,49 @@ static double tan_ref(double x) { return tan(x); }
 static double pow_ref(double x, double y) { return pow(x, y); }
 static double atan2_ref(double y, double x) { return atan2(y, x); }
 
+// The float versions, in units in the last place of a float.
+typedef float (*ffn1)(float);
+typedef float (*ffn2)(float, float);
+
+static double fulp_error(float got, float want)
+{
+    if (isnan(want)) return isnan(got) ? 0 : 1e30;
+    if (isinf(want)) return got == want ? 0 : 1e30;
+    if (got == want) return 0;
+    double u = nextafterf(fabsf(want), INFINITY) - fabsf(want);
+    if (u == 0) u = 1.4e-45;
+    return fabs((double)got - (double)want) / u;
+}
+
+static void testf1(const char *name, ffn1 f, ffn1 ref, double lo, double hi, int count)
+{
+    double worst = 0, at = 0;
+    for (int i = 0; i < count; i++) {
+        float x = (float)random_in(lo, hi);
+        double e = fulp_error(f(x), ref(x));
+        if (e > worst) { worst = e; at = x; }
+    }
+    printf("%-8s [%g, %g]: worst %.2f float ulp at %.9g\n", name, lo, hi, worst, at);
+}
+
+static void testf2(const char *name, ffn2 f, ffn2 ref, double lo, double hi, double lo2, double hi2, int count)
+{
+    double worst = 0, ax = 0, ay = 0;
+    for (int i = 0; i < count; i++) {
+        float x = (float)random_in(lo, hi), y = (float)random_in(lo2, hi2);
+        double e = fulp_error(f(x, y), ref(x, y));
+        if (e > worst) { worst = e; ax = x; ay = y; }
+    }
+    printf("%-8s x [%g, %g] y [%g, %g]: worst %.2f float ulp at (%.9g, %.9g)\n", name, lo, hi, lo2, hi2, worst, ax, ay);
+}
+
+static float expf_ref(float x) { return expf(x); }
+static float logf_ref(float x) { return logf(x); }
+static float sinf_ref(float x) { return sinf(x); }
+static float cosf_ref(float x) { return cosf(x); }
+static float tanhf_ref(float x) { return tanhf(x); }
+static float powf_ref(float x, float y) { return powf(x, y); }
+
 int main(void)
 {
     srand(12345);
@@ -82,7 +125,30 @@ int main(void)
     test2("pow", cs_pow, pow_ref, -100, 100, -9, 9, n);   // negative bases, mostly non-integer exponents: NaN
     test2("pow", cs_pow, pow_ref, 1, 10, 0, 300, n);
 
-    // Beyond the exact range of the reduction: the error, in absolute terms.
+    testf1("expf", cs_expf, expf_ref, -87, 88, n);
+    testf1("expf", cs_expf, expf_ref, -1, 1, n);
+    testf1("expf", cs_expf, expf_ref, -103, -87, n);
+    testf1("logf", cs_logf, logf_ref, 1e-38, 1e38, n);
+    testf1("logf", cs_logf, logf_ref, 0.5, 2, n);
+    testf1("sinf", cs_sinf, sinf_ref, -10, 10, n);
+    testf1("sinf", cs_sinf, sinf_ref, -8000, 8000, n);
+    testf1("cosf", cs_cosf, cosf_ref, -10, 10, n);
+    testf1("cosf", cs_cosf, cosf_ref, -8000, 8000, n);
+    testf1("tanhf", cs_tanhf, tanhf_ref, -10, 10, n);
+    testf1("tanhf", cs_tanhf, tanhf_ref, -0.3, 0.3, n);
+    testf2("powf", cs_powf, powf_ref, 0.01, 100, -10, 10, n);
+    testf2("powf", cs_powf, powf_ref, 0.5, 2, -50, 50, n);
+    testf2("powf", cs_powf, powf_ref, 1, 10, 0, 30, n);
+
+    // Beyond the exact range of the reductions: the error, in absolute terms.
+    double worstf = 0;
+    for (int i = 0; i < n; i++) {
+        float x = (float)random_in(8192, 1e5);
+        double e = fabs((double)cs_sinf(x) - (double)sinf(x));
+        if (e > worstf) worstf = e;
+    }
+    printf("sinf over 8192..1e5: worst absolute error %.3g\n", worstf);
+
     double worst = 0;
     for (int i = 0; i < n; i++) {
         double x = random_in(1.6e6, 1e10);
@@ -109,8 +175,15 @@ int main(void)
     EXPECT(isnan(cs_sin(INFINITY)) && isnan(cs_cos(NAN)));
     EXPECT(cs_atan2(0, 1) == 0 && cs_atan2(1, 0) == M_PI_2 && cs_atan2(0, -1) == M_PI && cs_atan2(-1, -1) == -3 * M_PI_4);
     EXPECT(cs_atan2(1, 1) == M_PI_4 && isnan(cs_atan2(NAN, 1)));
-    EXPECT(cs_tanhf(0.5f) == tanhf(0.5f) && cs_tanhf(30) == 1 && cs_tanhf(-30) == -1);
-    EXPECT(cs_sinf(1) == sinf(1) && cs_cosf(1) == cosf(1) && cs_expf(1) == expf(1) && cs_logf(2) == logf(2) && cs_powf(2, 8) == 256);
+#define NEARF(a, b, ulps) (fulp_error((a), (b)) <= (ulps))
+    EXPECT(NEARF(cs_tanhf(0.5f), tanhf(0.5f), 2) && cs_tanhf(30) == 1 && cs_tanhf(-30) == -1 && cs_tanhf(0) == 0);
+    EXPECT(NEARF(cs_sinf(1), sinf(1), 2) && NEARF(cs_cosf(1), cosf(1), 2) && NEARF(cs_expf(1), expf(1), 2));
+    EXPECT(NEARF(cs_logf(2), logf(2), 2) && cs_powf(2, 8) == 256 && cs_powf(10, -2) == 1 / 100.0f);
+    EXPECT(cs_expf(0) == 1 && isinf(cs_expf(100)) && cs_expf(-110) == 0 && isnan(cs_expf(NAN)));
+    EXPECT(cs_logf(1) == 0 && isinf(cs_logf(0)) && isnan(cs_logf(-1)) && cs_logf(8) > 2.0794f && cs_logf(8) < 2.0795f);
+    EXPECT(cs_sinf(0) == 0 && cs_cosf(0) == 1 && isnan(cs_sinf(INFINITY)) && isnan(cs_cosf(NAN)));
+    EXPECT(cs_powf(2, 0.5f) == sqrtf(2) || NEARF(cs_powf(2, 0.5f), sqrtf(2), 2));
+    EXPECT(isnan(cs_powf(-2, 0.5f)) && cs_powf(-2, 3) == -8 && cs_powf(0, 2) == 0 && isinf(cs_powf(10, 50)));
     printf(bad == 0 ? "special cases ok\n" : "%d special cases FAILED\n", bad);
     return bad != 0;
 }

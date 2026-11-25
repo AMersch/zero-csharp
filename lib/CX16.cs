@@ -225,6 +225,33 @@ public static class CX16
             cx16_vpoke(SpriteAttributes + sprite * 8 + 6, 0);   // z-depth 0: off
     }
 
+    // ---- sine and cosine, from a table --------------------------------------------------
+
+    // A quarter of the sine wave: entry i is 32767 * sin(i / 256 of a turn), for i from 0 to 64.
+    static ReadOnlySpan<short> QuarterWave => new short[]
+    {
+        0, 804, 1608, 2410, 3212, 4011, 4808, 5602, 6393, 7179, 7962, 8739, 9512, 10278, 11039, 11793,
+        12539, 13279, 14010, 14732, 15446, 16151, 16846, 17530, 18204, 18868, 19519, 20159, 20787, 21403, 22005, 22594,
+        23170, 23731, 24279, 24811, 25329, 25832, 26319, 26790, 27245, 27683, 28105, 28510, 28898, 29268, 29621, 29956,
+        30273, 30571, 30852, 31113, 31356, 31580, 31785, 31971, 32137, 32285, 32412, 32521, 32609, 32678, 32728, 32757,
+        32767,
+    };
+
+    /// <summary>The sine of an angle given in 256ths of a turn (any whole number: it goes round), as a number from -32767 to 32767, where 32767 is 1. A table of 65 numbers, good to 1.5e-5, and a hundred cycles or so: MathF.Sin takes 24,000, Math.Sin 400,000. For angles that are not a multiple of 1/256 of a turn, or for more digits, use those.</summary>
+    public static int Sin(int angle)
+    {
+        int a = angle & 255;
+        bool negative = a >= 128;
+        a &= 127;
+        if (a > 64)
+            a = 128 - a;
+        int value = QuarterWave[a];
+        return negative ? -value : value;
+    }
+
+    /// <summary>The cosine of an angle in 256ths of a turn, as Sin has it.</summary>
+    public static int Cos(int angle) => Sin(angle + 64);
+
     // ---- the mouse -----------------------------------------------------------------
 
     /// <summary>Switches the mouse on, with the pointer drawn by sprite 0, which the KERNAL then moves in every frame's interrupt. With defaultCursor the sprite is the KERNAL's arrow; without, it is whatever the program gave sprite 0 (see Sprite). It needs the machine's interrupts: it does nothing in the emulator's headless mode.</summary>

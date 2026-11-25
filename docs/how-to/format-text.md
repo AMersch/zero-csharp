@@ -94,7 +94,19 @@ output. These results are checked by `samples/Strings.cs`:
 On a Commodore 64, holes cost space. A program whose holes are all strings and integers without a
 format stays small: lib prints those itself, the same text in less code. The first hole with a format
 (`{x:X4}`), or of type `double` or `decimal`, brings in .NET's formatting, about 12 KB for integers
-and 14 KB more for doubles.
+and 14 KB more for doubles. For hex, `Hex.Of` prints the same digits with a loop of its own, about
+1.7 KB on a C64:
+
+<!-- sample: samples/SmallBuilders.cs hex -->
+```csharp
+// Hex.Of(x, 4) prints what {x:X4} does, without .NET's
+// formatting: a negative value at its type's width, .Lower for
+// lower case, and an alignment as for any hole.
+string hex = Str.Format(arena,
+    $"{Hex.Of(255, 4)}|{Hex.Of(-1)}|{Hex.Of((sbyte)-2)}|"
+    + $"{Hex.Of(171).Lower}|{Hex.Of(10, 4),6}");
+Check("Hex.Of", hex == "00FF|FFFFFFFF|FE|ab|  000A");
+```
 
 To line up a table, give every column a width. `samples/QuizStep1.cs` pads each number with `{a,2}` so
 the questions line up, and `samples/Strings.cs` prints its table with

@@ -8,9 +8,10 @@ namespace System.Numerics.Tensors
     // .NET's float functions that generic math reaches through T.Foo(x)
     // (System.Private.CoreLib's Single.cs and MathF.cs), for the tensor
     // operations' one-element paths: the same formulas, so a strided tensor
-    // gets the results .NET gives it. SinPi, CosPi, TanPi and ILogB are
-    // based on AMD's aocl-libm-ose (BSD 3-Clause, Copyright (C) 2008-2022
-    // Advanced Micro Devices, Inc.), as .NET's are.
+    // gets the results .NET gives it. SinPi, CosPi and TanPi are .NET's,
+    // which are based on AMD's aocl-libm-ose: Copyright (C) 2008-2020 Advanced
+    // Micro Devices, Inc., under the BSD 3-Clause license, whose text is in
+    // ../../../THIRD-PARTY-NOTICES.txt. ILogB is written from float's bit layout.
     internal static class ScalarF
     {
         private const float Pi = MathF.PI;

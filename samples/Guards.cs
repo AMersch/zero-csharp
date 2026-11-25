@@ -31,6 +31,8 @@ public static class Program
             Console.WriteLine("  builder-grew-in-place  the same for a StrBuilder (DebugChecks)");
             Console.WriteLine("  list-index           a list index out of range");
             Console.WriteLine("  out-of-memory        an allocation the system can't satisfy (stopOnOutOfMemory)");
+            Console.WriteLine("  arena-limit          an allocation past an arena's maxCapacity (stopOnOutOfMemory)");
+            Console.WriteLine("  buffer-full          an allocation that doesn't fit in a FromBuffer arena (stopOnOutOfMemory)");
             Console.WriteLine("  lambda-in-scope      a lambda first run inside AllocateObjectsHere, cached in the arena (DebugChecks)");
             Console.WriteLine("  throw                a throw, inside a try with a matching catch");
             Console.WriteLine("  throw-null           throw null");
@@ -71,6 +73,8 @@ public static class Program
             case "builder-grew-in-place": BuilderGrewInPlace(); break;
             case "list-index": ListIndex(); break;
             case "out-of-memory": OutOfMemory(); break;
+            case "arena-limit": ArenaLimit(); break;
+            case "buffer-full": BufferFull(); break;
             case "lambda-in-scope": LambdaInScope(); break;
             case "throw": Throw(); break;
             case "throw-null": ThrowNull(); break;
@@ -229,6 +233,25 @@ public static class Program
         // Half the address space: no system has that much to give.
         arena.Alloc(~(nuint)0 / 2);
         // docs:end
+    }
+
+    static void ArenaLimit()
+    {
+        // docs:arena-limit
+        Arena arena = Arena.Create(256, "budget", stopOnOutOfMemory: true,
+            maxCapacity: 1024);
+        arena.Alloc(600);  // fits
+        arena.Alloc(600);  // 1200 bytes in all: past the limit
+        // docs:end
+    }
+
+    static void BufferFull()
+    {
+        Span<byte> memory = stackalloc byte[512];
+        Arena arena;
+        // SAFETY: the arena isn't used after this method returns.
+        unsafe { arena = Arena.FromBuffer(memory, "buffer", stopOnOutOfMemory: true); }
+        arena.Alloc(1000);
     }
 
     static void LambdaInScope()

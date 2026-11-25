@@ -151,7 +151,10 @@ rest are plain comparisons, and so are `IsWhiteSpace` and `IsControl`.
 
 So keep to whole numbers where you can, share collection types, and keep arenas small: 1 KB blocks
 instead of the default 4 KB. Memory really does run out here; `Arena.Create(..., stopOnOutOfMemory:
-true)` says so when it does (see [Catch arena mistakes](catch-arena-mistakes.html)).
+true)` says so when it does (see [Catch arena mistakes](catch-arena-mistakes.html)). `maxCapacity` caps
+an arena so it leaves the rest of the heap alone, and `Arena.FromBuffer` over a static buffer takes its
+memory out of the program's data instead, so the arena is sure to have it once the program has loaded
+(see [An arena in a buffer of your own](../concepts/memory.html#an-arena-in-a-buffer-of-your-own)).
 
 The build already favors size everywhere: the C# compiler runs with `--Os`, every function is marked
 to be compiled for size, and llvm-mos optimizes the whole program at link time, which makes it a fifth

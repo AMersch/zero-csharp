@@ -486,6 +486,77 @@ program couldn't carry on anyway, create the arena with `stopOnOutOfMemory: true
 program with a message instead, so nothing built on that arena has to check. That matters most on DOS
 and WebAssembly, where memory really does run out.
 
+On Linux and macOS it rarely does: malloc promises memory the system doesn't have, and a runaway loop
+eats RAM until the system kills the program. Give an arena a budget with `maxCapacity`, and it fails
+at that size instead, the same way it fails when memory runs out:
+
+<!-- sample: samples/Arena.cs max-capacity -->
+```csharp
+// A budget: past 64 KB of blocks, allocations fail as if memory had
+// run out, even on systems where malloc never says no.
+Arena request = Arena.Create(4096, "request", maxCapacity: 64 * 1024);
+int* small = request.AllocArray<int>(1000);      // fine
+int* huge = request.AllocArray<int>(100_000);    // null: over budget
+```
+
+The cap counts the bytes of all blocks together. When the next block would cross it, the block shrinks
+to what is left, so an allocation fails only when it can't fit at all. Use it for an arena that holds
+what input you don't control turns into (a parsed request, a decoded file) and to give each part of a
+small machine its share.
+
+### An arena in a buffer of your own
+
+`Arena.FromBuffer` puts the arena in memory you hand it. It never calls malloc or free, keeps its
+bookkeeping at the start of the buffer (about 150 bytes on 64-bit targets, less on
+32-bit ones), and can't
+grow, so a full buffer fails like running out of memory. `Destroy()` only ends the handle, because the
+memory is yours.
+
+For a short-lived arena, the buffer can be on the stack:
+
+<!-- sample: samples/Arena.cs from-buffer -->
+```csharp
+// An arena in memory you provide: here 1 KB of stack. It never calls
+// malloc and never grows; when the buffer is full, allocations fail.
+Span<byte> memory = stackalloc byte[1024];
+Arena local;
+// SAFETY: local isn't used after this method returns.
+unsafe { local = Arena.FromBuffer(memory, "local"); }
+Point* p = local.Alloc<Point>();
+```
+
+For one that lives as long as the program, or one too big for the stack, use a static buffer: a struct
+with a `fixed` array, kept in a static field. It is part of the program's data, like a global array in
+C, so it costs neither heap nor stack. (A static `byte[]` wouldn't do that: `new byte[512]` comes from
+the heap.)
+
+<!-- sample: samples/SmallArena.cs static-buffer -->
+```csharp
+// 512 bytes in the program's data, like a global array in C: not on
+// the heap, not on the stack.
+struct Pool
+{
+    public fixed byte Bytes[512];
+}
+
+static Pool s_pool;
+```
+
+<!-- sample: samples/SmallArena.cs from-static-buffer -->
+```csharp
+Arena arena;
+unsafe
+{
+    // SAFETY: s_pool is static, so it outlives the arena, and
+    // nothing else uses it.
+    fixed (byte* memory = s_pool.Bytes)
+        arena = Arena.FromBuffer(memory, 512, "pool");
+}
+```
+
+`FromBuffer` is unsafe because the arena can't check that the memory outlives it: an arena on the stack
+must not be used after the method that made it returns.
+
 ## Seeing what an arena does
 
 - **Names.** `Arena.Create(size, "frame")` names an arena, and failure messages then say which arena

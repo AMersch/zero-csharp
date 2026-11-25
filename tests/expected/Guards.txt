@@ -8,6 +8,8 @@ Usage: Guards <case>, where the case is one of:
   builder-grew-in-place  the same for a StrBuilder (DebugChecks)
   list-index           a list index out of range
   out-of-memory        an allocation the system can't satisfy (stopOnOutOfMemory)
+  arena-limit          an allocation past an arena's maxCapacity (stopOnOutOfMemory)
+  buffer-full          an allocation that doesn't fit in a FromBuffer arena (stopOnOutOfMemory)
   lambda-in-scope      a lambda first run inside AllocateObjectsHere, cached in the arena (DebugChecks)
   throw                a throw, inside a try with a matching catch
   throw-null           throw null

@@ -6,6 +6,7 @@
 //   Bitmap.Clear(0);
 //   Bitmap.Line(10, 10, 300, 200, 5);                 // the colors of the palette
 //   Bitmap.Fill(100, 50, 40, 30, 8);                  // x, y, width, height
+//   Bitmap.FillTriangle(20, 100, 120, 90, 70, 180, 12);
 //   Bitmap.Text(8, 8, "drawn", 1);
 //   CX16.SetColor(40, 15, 8, 0);                      // color 40 is now orange
 //
@@ -21,7 +22,9 @@
 // the whole picture 133,000 / 650,000, of 100 by 50 pixels 25,000 / 100,000; Line across
 // the picture 6,700 / 116,000 (a line from the helper is within a pixel of the exact one,
 // both ends exact; a line that leaves the picture is drawn without it); Circle 133,000
-// for a radius of 100; Text 12,000 a character with a background, 15,000 without; Plot
+// for a radius of 100; FillTriangle 24,000 for one of 10 by 10 pixels, 62,000 / 71,000 for 50
+// by 50, 133,000 / 160,000 for 100 by 100 (about 1,200 a row, edges and all); Text 12,000 a
+// character with a background, 15,000 without; Plot
 // 1,500, most of it the call from C#: a lot of pixels want Fill, Line or Text. So a
 // frame holds a whole picture's fill, or a few dozen lines; the whole picture can be
 // cleared and redrawn about once a frame.
@@ -37,6 +40,7 @@ public static class Bitmap
     [DllImport("libc")] static safe extern void cx16_bitmap_plot(int x, int y, int color);
     [DllImport("libc")] static safe extern int cx16_bitmap_get(int x, int y);
     [DllImport("libc")] static safe extern void cx16_bitmap_fill(int x, int y, int width, int height, int color);
+    [DllImport("libc")] static safe extern void cx16_bitmap_triangle(int x0, int y0, int x1, int y1, int x2, int y2, int color);
     [DllImport("libc")] static safe extern void cx16_bitmap_circle(int centerX, int centerY, int radius, int color);
     [DllImport("libc")] static safe extern void cx16_bitmap_line(int x0, int y0, int x1, int y1, int color);
     [DllImport("libc")] static unsafe extern void cx16_bitmap_text(int x, int y, char* text, int count, int foreground, int background);
@@ -77,6 +81,18 @@ public static class Bitmap
 
     /// <summary>Draws a line between two points, both included.</summary>
     public static void Line(int x0, int y0, int x1, int y1, int color) => cx16_bitmap_line(x0, y0, x1, y1, color);
+
+    /// <summary>Draws the outline of a triangle, three lines, the corners included.</summary>
+    public static void Triangle(int x0, int y0, int x1, int y1, int x2, int y2, int color)
+    {
+        cx16_bitmap_line(x0, y0, x1, y1, color);
+        cx16_bitmap_line(x1, y1, x2, y2, color);
+        cx16_bitmap_line(x2, y2, x0, y0, color);
+    }
+
+    /// <summary>Fills a triangle with corners at three points, in any order. A pixel is inside when its center is, so that triangles with a side in common leave no gap and don't overlap: one that is flat on the top or on the left gets that row or column, the one next to it doesn't. Nothing is drawn for a triangle with no height. What is outside the picture is cut off; a corner more than 8000 pixels away is taken for one at 8000.</summary>
+    public static void FillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, int color)
+        => cx16_bitmap_triangle(x0, y0, x1, y1, x2, y2, color);
 
     /// <summary>Draws the outline of a circle, a pixel thick.</summary>
     public static void Circle(int centerX, int centerY, int radius, int color) => cx16_bitmap_circle(centerX, centerY, radius, color);

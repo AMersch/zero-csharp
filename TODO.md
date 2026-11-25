@@ -12,7 +12,7 @@ output and no mouse: what can only be heard or seen needs a check in a window, o
 
 ## 1. Done
 
-- **VERA FX, a first part:** the cache for `Bitmap.Clear`, `Fill` and `Tiles.Fill` (4 to 9 times faster), the line helper for `Bitmap.Line` (17 times faster), `CX16.HasVeraFx` and `UseVeraFx`. Not yet: the polygon filler (filled triangles), the affine helper (rotating and zooming tile maps and bitmaps), the multiplier.
+- **VERA FX, a first part:** the cache for `Bitmap.Clear`, `Fill` and `Tiles.Fill` (4 to 9 times faster), the line helper for `Bitmap.Line` (17 times faster), `CX16.HasVeraFx` and `UseVeraFx`. **Filled triangles** (`Bitmap.FillTriangle`, `Triangle`): by scan lines with cache fills, not the chip's polygon helper (it writes a pixel at a time; see the how-to). Not yet: the affine helper (rotating and zooming tile maps and bitmaps), the multiplier.
 - **Real-time clock:** `Clock.UtcNow` and `UnixMilliseconds` read it; `CX16.SetDateTime` sets it.
 - **Bitmap:** `Bitmap` (clear, plot, get, fill, rectangle, line, circle, text) and the palette (`CX16.SetColor`) in 320x240 with 256 colors, directly on the VERA; sprite shapes moved to $13000 to keep clear of the bitmap. (`samples/BitmapDemo.cs`) Not yet: other depths (4, 2, 1 bit), 640x480, speed with VERA FX.
 - **Tiles:** `Tiles` (map and tile pictures in 2, 4 and 8 bits, 8x8 and 16x16, flips and palette offsets, scrolling) on layer 0. (`samples/TileDemo.cs`) Not yet: the 1-bit text-like tile mode, layer 1 as tiles (it is the text), a second layer of tiles.
@@ -31,7 +31,7 @@ output and no mouse: what can only be heard or seen needs a check in a window, o
 
 | # | Task | Effort | Why it is last |
 |---|------|--------|----------------|
-| 3 | **VERA FX, the rest** (polygon filler for filled triangles; affine helper for rotating and zooming tile maps and bitmaps; the 32-bit multiplier) | M each | The cache and the line helper are in (see Done). The polygon filler is the next most useful (`Bitmap.FillTriangle`): the doc gives the steps (row by row: read DATA1, read the fill length from FX_POLY_FILL, write DATA1 that many pixels) but no example, so it would be worked out in the emulator like the line helper. The affine helper gives mode-7 effects. The multiplier is a niche: a 16x16 signed multiply and accumulate through the cache. |
+| 3 | **VERA FX, the rest** (the affine helper for rotating and zooming tile maps and bitmaps; the 32-bit multiplier; perhaps the polygon helper after all, for narrow triangles) | M each | The cache, the line helper and triangles are in (see Done). The affine helper gives mode-7 effects and is the one that makes the chip do what software can't do fast. The multiplier is a niche: a 16x16 signed multiply and accumulate through the cache. The polygon helper would help only for narrow shapes (see the how-to), so it is last. |
 | 4 | **Mouse wheel** | S once known | `mouse_get` in this KERNAL's documentation returns position and buttons only; the wheel isn't in it. Find out first (a newer KERNAL's `mouse_get`, or the PS/2 packets of a 4-byte mouse, read through the I/O chip). Low value next to the rest. |
 
 ## Also open

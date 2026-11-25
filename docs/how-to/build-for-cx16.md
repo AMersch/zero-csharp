@@ -140,10 +140,11 @@ Bitmap.Line(10, 10, 300, 200, 40);            // the colors of the palette
 Bitmap.Fill(100, 50, 40, 30, 8);              // x, y, width, height
 Bitmap.Rectangle(0, 0, Bitmap.Width, Bitmap.Height, 15);
 Bitmap.Circle(160, 120, 50, 5);
+Bitmap.FillTriangle(20, 100, 120, 90, 70, 180, 12);        // a filled triangle, corners in any order
 Bitmap.Text(8, 8, "drawn", 1);                // or with a background color: Text(8, 8, "x", 1, 0)
 ```
 
-`Plot`, `Get`, `Fill`, `Rectangle`, `Line`, `Circle` and `Text` cut off what is outside the picture, and do
+`Plot`, `Get`, `Fill`, `Rectangle`, `Line`, `Triangle`, `FillTriangle`, `Circle` and `Text` cut off what is outside the picture, and do
 nothing in another screen mode. The palette is `CX16.SetColor` and `GetColor`: 12 bits a color, and
 colors 0 to 15 start as the C64's (`CX16.Black` ... `LightGray`).
 
@@ -169,12 +170,18 @@ them:
 | `Fill`, 100 by 50 pixels | 25,000 | 100,000 |
 | `Line` across the picture | 6,700 | 116,000 |
 | `Circle` of radius 100 | 133,000 | 133,000 |
+| `FillTriangle`, 50 by 50 | 62,000 | 71,000 |
+| `FillTriangle`, 100 by 100 | 133,000 | 160,000 |
+| `FillTriangle`, 200 wide, 100 high | 153,000 | 213,000 |
+| `FillTriangle`, 10 by 10 | 24,000 | 24,000 |
 | `Text`, a character | 12,000 | 12,000 |
 | `Plot` | 1,500 | 1,500 |
 
 `Plot` is mostly the call from C#: a lot of pixels want `Fill`, `Line` or `Text`. With FX a frame holds a whole
 picture's fill or a few dozen lines. `samples/BitmapDemo.cs` draws a picture and checks every function against the
-video memory, with the helpers and again without them.
+video memory. `samples/BitmapShapes.cs` checks fills of every width and position, lines in all eight directions
+and 15 triangles against an exact rule (a pixel is inside when its center is; the left edge and the top row belong
+to a triangle), with the helpers and again without them.
 
 ### VERA FX
 
@@ -191,7 +198,12 @@ two ways.
   in the middle of a long line can be one off Bresenham's, and the two ends are always exact.
 - FX is switched on only while a call needs it, with the interrupts off (the KERNAL's own writes to the video memory,
   those of the mouse pointer, must not become cache writes): so a long `Clear` delays the mouse by its 127,000 cycles.
-- Not used yet: the polygon filler, the affine helper for tiles and bitmaps, and the 32-bit multiplier.
+- **Triangles** (`Bitmap.FillTriangle`) do not use the chip's polygon helper: it steps the two edges itself, but
+  writes one pixel at a time, about as slowly as the line helper (10 cycles a pixel against 1 to 2 for a cache
+  fill), so a row of it is not faster than the cache fill of a row from about 40 pixels wide, and a triangle
+  is mostly wide rows. (That is an estimate; the helper was not built.) The triangle's rows are cache fills, with
+  the edges stepped in 16.16 fixed point; it works without FX as well, a little slower.
+- Not used yet: the polygon helper, the affine helper for tiles and bitmaps, and the 32-bit multiplier.
 
 ## Tiles
 

@@ -1248,6 +1248,27 @@ static void run_of(unsigned char value, unsigned count)
         VERA.data0 = value;
 }
 
+// One row of a fill, with the cache on (fx_begin has been called): the pixels from `first` up to but
+// not including `end` of a row, whole groups of 4 with the first and the last cut by the mask. The
+// cache's write value says which of the four bytes to leave alone.
+static void fx_row(unsigned first, unsigned end, unsigned row)
+{
+    static const unsigned char before[4] = { 0x00, 0x03, 0x0F, 0x3F };   // none | byte 0 | 0 and 1 | 0 to 2
+    static const unsigned char after[4] = { 0xFC, 0xF0, 0xC0, 0x00 };    // bytes 1 to 3 | 2 and 3 | 3 | none
+    unsigned firstGroup = first & ~3u, lastGroup = (end - 1) & ~3u;
+    unsigned char headMask = before[first & 3], tailMask = after[(end - 1) & 3];
+    unsigned middle = (lastGroup - firstGroup) / 4;      // groups after the first
+    vera_at_pixel(firstGroup, row, 3);                   // up by 4 a write
+    if (middle == 0) {
+        VERA.data0 = headMask | tailMask;
+    } else {
+        VERA.data0 = headMask;
+        for (unsigned n = middle - 1; n != 0; n--)
+            VERA.data0 = 0;
+        VERA.data0 = tailMask;
+    }
+}
+
 // A filled rectangle, cut to the screen.
 void cs_cx16_bitmap_fill(i32 x, i32 y, i32 width, i32 height, i32 color)
 {
@@ -1263,27 +1284,10 @@ void cs_cx16_bitmap_fill(i32 x, i32 y, i32 width, i32 height, i32 color)
     unsigned count = (unsigned)(x1 - x);
     unsigned char value = (unsigned char)color;
     if (has_fx() && (count >= 16 || (y1 - y) >= 32)) {
-        // Whole groups of 4 pixels, the first and the last cut by the mask: the cache's
-        // write value says which of the four bytes to leave alone. A small one isn't faster
-        // this way, only about as fast: the call from C# costs more than it.
-        static const unsigned char before[4] = { 0x00, 0x03, 0x0F, 0x3F };   // none | byte 0 | 0 and 1 | 0 to 2
-        static const unsigned char after[4] = { 0xFC, 0xF0, 0xC0, 0x00 };    // bytes 1 to 3 | 2 and 3 | 3 | none
-        unsigned first = (unsigned)x & ~3u, last = (unsigned)(x1 - 1) & ~3u;
-        unsigned char headMask = before[(unsigned)x & 3];
-        unsigned char tailMask = after[(unsigned)(x1 - 1) & 3];
-        unsigned middle = (last - first) / 4;           // groups between the first and the last
+        // A small one isn't faster this way, only about as fast: the call from C# costs more than it.
         fx_begin(value);
-        for (i32 row = y; row < y1; row++) {
-            vera_at_pixel(first, (unsigned)row, 3);     // up by 4 a write
-            if (middle == 0) {
-                VERA.data0 = headMask | tailMask;
-            } else {
-                VERA.data0 = headMask;
-                for (unsigned n = middle - 1; n != 0; n--)
-                    VERA.data0 = 0;
-                VERA.data0 = tailMask;
-            }
-        }
+        for (i32 row = y; row < y1; row++)
+            fx_row((unsigned)x, (unsigned)x1, (unsigned)row);
         fx_end();
         return;
     }
@@ -1405,6 +1409,72 @@ void cs_cx16_bitmap_circle(i32 cx, i32 cy, i32 radius, i32 color)
             error += 2 * (y - x) + 1;
         }
     }
+}
+
+// A filled triangle, by scan lines. A pixel is inside when its center is: a row of pixels runs from the
+// first whose center is not left of the triangle's left edge up to the first whose center is not left of
+// the right edge, so that triangles which share an edge leave no gap and don't overlap (the left edge
+// and the top row belong to a triangle, the right edge and the bottom row to the next). The edges are
+// followed in 16.16 fixed point: the slope of an edge (the x it moves per row) is added once a row.
+// Each row is a fill, with the video chip's cache where there is one: measured, a row costs about 1,200
+// cycles with the edges and the address, whatever its width, and a little for every four pixels (a
+// triangle 50 by 50 takes 62,000 cycles, 100 by 100 133,000). The chip's polygon helper steps the
+// edges itself, but writes a pixel at a time, as its line helper does, about 10 cycles each: by that
+// estimate (I did not build it) a row of it is not faster than one of these from about 40 pixels wide,
+// and the helper would not work without FX.
+void cs_cx16_bitmap_triangle(i32 ax, i32 ay, i32 bx, i32 by, i32 cx, i32 cy, i32 color)
+{
+    if (!in_bitmap())
+        return;
+    int x[3] = { near_screen(ax), near_screen(bx), near_screen(cx) };
+    int y[3] = { near_screen(ay), near_screen(by), near_screen(cy) };
+    for (int i = 0; i < 2; i++)                     // sorted by y: 0 is the top, 2 the bottom
+        for (int j = 0; j < 2 - i; j++)
+            if (y[j] > y[j + 1]) {
+                int t = x[j]; x[j] = x[j + 1]; x[j + 1] = t;
+                t = y[j]; y[j] = y[j + 1]; y[j + 1] = t;
+            }
+    if (y[0] == y[2])
+        return;                                     // no height: no row has its center inside
+    unsigned char value = (unsigned char)color;
+
+    i32 longSlope = ((i32)(x[2] - x[0]) << 16) / (y[2] - y[0]);
+    i32 longX = ((i32)x[0] << 16) + longSlope / 2;                  // at the center of the top row
+    i32 shortSlope, shortX;
+    if (y[1] > y[0]) {                              // the upper short edge, from the top to the middle
+        shortSlope = ((i32)(x[1] - x[0]) << 16) / (y[1] - y[0]);
+        shortX = ((i32)x[0] << 16) + shortSlope / 2;
+    } else {                                        // a flat top: the lower one from the start
+        shortSlope = ((i32)(x[2] - x[1]) << 16) / (y[2] - y[1]);
+        shortX = ((i32)x[1] << 16) + shortSlope / 2;
+    }
+    char cache = has_fx() && (y[2] - y[0]) >= 6;
+    if (cache)
+        fx_begin(value);
+    for (int row = y[0]; row < y[2] && row < BITMAP_HEIGHT; row++) {
+        if (row == y[1] && y[1] > y[0]) {           // the middle: the short edge goes on from the middle vertex
+            shortSlope = ((i32)(x[2] - x[1]) << 16) / (y[2] - y[1]);
+            shortX = ((i32)x[1] << 16) + shortSlope / 2;
+        }
+        if (row >= 0) {
+            i32 low = shortX < longX ? shortX : longX, high = shortX < longX ? longX : shortX;
+            i32 first = (low + 0x7FFF) >> 16, end = (high + 0x7FFF) >> 16;      // ceil(edge - 1/2) in pixels
+            if (first < 0) first = 0;
+            if (end > BITMAP_WIDTH) end = BITMAP_WIDTH;
+            if (first < end) {
+                if (cache) {
+                    fx_row((unsigned)first, (unsigned)end, (unsigned)row);
+                } else {
+                    vera_at_pixel((unsigned)first, (unsigned)row, 1);
+                    run_of(value, (unsigned)(end - first));
+                }
+            }
+        }
+        shortX += shortSlope;
+        longX += longSlope;
+    }
+    if (cache)
+        fx_end();
 }
 
 // Text: the glyphs of the character set in the video memory (8 bytes a character, from

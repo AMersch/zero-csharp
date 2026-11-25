@@ -14,8 +14,9 @@ instead, and lists what compiles as usual but behaves differently.
 
 | In .NET | Here | More |
 |---|---|---|
-| `Console.Write`, `Console.WriteLine` | `Out.Write`, `Out.Line`, with `$"..."` written straight to stdout | [Format text](../how-to/format-text.html) |
-| `Console.ReadLine()` | `In.ReadLine(buffer)` into a `Span<char>` you provide | [Read input](../how-to/read-input.html) |
+| `Console.Write`, `Console.WriteLine` | The same, through `Out`; `Console.WriteLine($"...")`, like `Out.Line($"...")`, writes each hole straight to stdout | [Format text](../how-to/format-text.html) |
+| `Console.ReadLine()` | The same, a new string never freed; in a loop, `In.ReadLine(buffer)` into a `Span<char>` you provide | [Read input](../how-to/read-input.html) |
+| `Console.ReadKey`, `Console.KeyAvailable` | The same, on every target, the C64 and DOS included | [Read input](../how-to/read-input.html#read-keys-one-at-a-time) |
 | `Console.OpenStandardInput().Read` | `In.Read(bytes)` into a `Span<byte>` you provide | [Read input](../how-to/read-input.html#read-bytes-instead-of-lines) |
 | `int.Parse`, `double.TryParse` | `Str.TryParse(span, out value)` | [Read input](../how-to/read-input.html) |
 | `string.Format`, `$"..."` kept as a string | The same, with .NET's format strings, each string never freed; in a loop, `Str.Format(arena, $"...")`, `StrBuilder`, or `TryFormat` into a span | [Format text](../how-to/format-text.html#nets-format-strings-tostring-string.format-and-tryformat) |
@@ -59,7 +60,8 @@ if (length < 0)
 asked++;
 ```
 
-`Console` itself doesn't exist, so `Console.WriteLine` is a compile error, not a surprise at run time.
+`Console.WriteLine` and `Console.ReadLine` work too, but `ReadLine` returns a new string that is never
+freed: fine once, not in a loop. `Console` has no `Out`, `Error`, colors or cursor.
 
 ## Memory
 

@@ -269,10 +269,122 @@ static char line[82]; // the editor's longest line is 80 characters
 static unsigned char line_length, line_at;
 static char input_ended;
 
+// ---- keys one at a time, for Console.ReadKey (lib/InKeys.cs) -----------------
+//
+// The POSIX calls ReadKey and KeyAvailable make. A "termios" is one byte, 1
+// for raw; tcsetattr remembers it, and in raw mode cs_read returns the next
+// key press, from the KERNAL's keyboard buffer (GETIN), as a Unix terminal
+// would send it: letters, digits and signs in ASCII, RETURN as '\r', DEL as
+// backspace, RUN/STOP as Escape, and the cursor and function keys as escape
+// sequences (ESC [ A for cursor up, ESC O P for F1).
+
+struct pollfd {
+    i32 fd;
+    short events, revents;
+};
+
+static char keys_raw;
+
+i32 cs_isatty(i32 fd) { return fd == 0; }
+
+i32 cs_tcgetattr(i32 fd, unsigned char *termios)
+{
+    if (fd != 0)
+        return -1;
+    termios[0] = 0;
+    return 0;
+}
+
+void cs_cfmakeraw(unsigned char *termios) { termios[0] = 1; }
+
+i32 cs_tcsetattr(i32 fd, i32 when, const unsigned char *termios)
+{
+    (void)when;
+    if (fd != 0)
+        return -1;
+    keys_raw = (char)termios[0];
+    return 0;
+}
+
+// A key from GETIN (PETSCII) as a terminal's bytes, or 0 bytes for one that
+// has no meaning here (colors, CLR, the graphics signs).
+static unsigned char keys_bytes(unsigned char key, char *out)
+{
+    static const char *const sequences[] = {
+        "\x1b[B", "\x1b[A", "\x1b[C", "\x1b[D", "\x1b[H", "\x1b[2~",
+        "\x1bOP", "\x1bOR", "\x1b[15~", "\x1b[18~", "\x1bOQ", "\x1bOS", "\x1b[17~", "\x1b[19~",
+    };
+    static const unsigned char codes[] = { 17, 145, 29, 157, 19, 148, 133, 134, 135, 136, 137, 138, 139, 140 };
+    for (unsigned char i = 0; i < sizeof codes; i++) {
+        if (codes[i] == key) {
+            const char *sequence = sequences[i];
+            unsigned char n = 0;
+            while (sequence[n]) {
+                out[n] = sequence[n];
+                n++;
+            }
+            return n;
+        }
+    }
+    char c;
+    if (key == 13)
+        c = '\r';
+    else if (key == 20)
+        c = 8; // DEL: backspace
+    else if (key == 3)
+        c = 0x1B; // RUN/STOP: Escape
+    else if (key >= 0x41 && key <= 0x5A)
+        c = (char)(key + 0x20); // unshifted letters are lower case here
+    else if (key >= 0xC1 && key <= 0xDA)
+        c = (char)(key - 0x80); // shifted ones upper case
+    else if (key >= 0x20 && key <= 0x3F)
+        c = (char)key;
+    else if (key == 0x5F)
+        c = '_'; // the left-arrow key
+    else
+        return 0;
+    out[0] = c;
+    return 1;
+}
+
+static i32 keys_read(char *buffer, u32 count)
+{
+    for (;;) {
+        unsigned char key = cbm_k_getin();
+        if (key == 0)
+            continue;
+        char bytes[8];
+        unsigned char n = keys_bytes(key, bytes);
+        if (n == 0)
+            continue;
+        if (n > count)
+            n = (unsigned char)count;
+        memcpy(buffer, bytes, n);
+        return n;
+    }
+}
+
+// Only standard input is asked about: whether the keyboard buffer has a key.
+i32 cs_poll(struct pollfd *fds, u32 count, i32 timeout)
+{
+    i32 ready = 0;
+    (void)timeout;
+    for (u32 i = 0; i < count; i++) {
+        fds[i].revents = 0;
+        if (fds[i].fd == 0 && (fds[i].events & 1) && *(volatile unsigned char *)0xC6 > 0) {
+            fds[i].revents = 1;
+            ready++;
+        }
+    }
+    return ready;
+}
+
 i32 cs_read(i32 file, char *buffer, u32 count)
 {
     unsigned char available;
     (void)file;
+    if (keys_raw)
+        return keys_read(buffer, count);
     if (line_at == line_length) {
         if (input_ended)
             return 0;

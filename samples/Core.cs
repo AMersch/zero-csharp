@@ -1,8 +1,8 @@
 // Example: the smaller parts of the core library (zerocore): Math and MathF,
 // Interlocked, Volatile, interface calls from one call site to many classes,
 // extension members, C# 15 unions (zerocore/System/Exceptions.cs and Unions.cs
-// explain what those two need from the library), caller-info attributes, and
-// indices and ranges.
+// explain what those two need from the library), caller-info attributes,
+// indices and ranges, and NativeMemory.
 // Exit code = number of failed checks.
 // Build: ./build.sh Core
 
@@ -10,6 +10,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Threading;
 
 namespace CoreSample;
@@ -248,6 +250,137 @@ public static class Program
 
     static byte ByteOf<T>(ref T value, int index) => Unsafe.Add(ref Unsafe.As<T, byte>(ref value), index);
 
+    // docs:native-memory
+    // The attributes are for .NET's analyzers; zero mode ignores them.
+    [SupportedOSPlatform("linux"), SupportedOSPlatform("windows")]
+    [UnsupportedOSPlatform("browser")]
+    static bool AllocatesAndFrees(int count)
+    {
+        unsafe
+        {
+            // SAFETY: items is freed once, after its last use.
+            int* items =
+                (int*)NativeMemory.Alloc((nuint)count, sizeof(int));
+            for (int i = 0; i < count; i++)
+                items[i] = i * 3;
+            bool kept = true;
+            for (int i = 0; i < count; i++)
+                kept &= items[i] == i * 3;
+            NativeMemory.Free(items);
+            return kept;
+        }
+    }
+    // docs:end
+
+    static bool AllocatesZeroed([ConstantExpected(Min = 1)] int count)
+    {
+        unsafe
+        {
+            long* items = (long*)NativeMemory.AllocZeroed((nuint)count, sizeof(long));
+            bool zero = true;
+            for (int i = 0; i < count; i++)
+                zero &= items[i] == 0;
+            NativeMemory.Free(items);
+            byte* bytes = (byte*)NativeMemory.AllocZeroed((nuint)count);
+            for (int i = 0; i < count; i++)
+                zero &= bytes[i] == 0;
+            NativeMemory.Free(bytes);
+            return zero;
+        }
+    }
+
+    static bool AllocatesNothing()
+    {
+        unsafe
+        {
+            void* empty = NativeMemory.Alloc(0);
+            NativeMemory.Free(empty);
+            NativeMemory.Free(null);
+            return empty != null;
+        }
+    }
+
+    // A zero element count or size is a zero-byte block: still a valid pointer.
+    static bool AllocatesNoElements()
+    {
+        unsafe
+        {
+            void* noElements = NativeMemory.Alloc(0, 8);
+            void* noSize = NativeMemory.AllocZeroed(8, 0);
+            bool valid = noElements != null && noSize != null;
+            NativeMemory.Free(noElements);
+            NativeMemory.Free(noSize);
+            return valid;
+        }
+    }
+
+    // AllocZeroed must zero memory that a freed block left dirty, not only
+    // fresh pages from the system.
+    static bool ZeroesReusedMemory(int count)
+    {
+        unsafe
+        {
+            bool zero = true;
+            for (int round = 0; round < 4; round++)
+            {
+                byte* dirty = (byte*)NativeMemory.Alloc((nuint)count);
+                for (int i = 0; i < count; i++)
+                    dirty[i] = 0xAB;
+                NativeMemory.Free(dirty);
+                byte* clean = (byte*)NativeMemory.AllocZeroed((nuint)count, 1);
+                for (int i = 0; i < count; i++)
+                    zero &= clean[i] == 0;
+                NativeMemory.Free(clean);
+            }
+            return zero;
+        }
+    }
+
+    // Blocks alive at once don't overlap, and freeing one leaves the other.
+    static bool KeepsBlocksApart(int count)
+    {
+        unsafe
+        {
+            int* first = (int*)NativeMemory.Alloc((nuint)count, sizeof(int));
+            int* second = (int*)NativeMemory.AllocZeroed((nuint)count, sizeof(int));
+            for (int i = 0; i < count; i++)
+            {
+                first[i] = i;
+                second[i] = -i - 1;
+            }
+            bool apart = first != second;
+            for (int i = 0; i < count; i++)
+                apart &= first[i] == i;
+            NativeMemory.Free(second);
+            for (int i = 0; i < count; i++)
+                apart &= first[i] == i;
+            NativeMemory.Free(first);
+            return apart;
+        }
+    }
+
+    // Nothing reads these attributes, but code shared with .NET puts them on
+    // every kind of member they allow, and may read their properties.
+    [SupportedOSPlatform("macos")]
+    sealed class PlatformOnly
+    {
+        [UnsupportedOSPlatform("browser")]
+        public int Value { get; set; }
+
+        [SupportedOSPlatform("linux"), UnsupportedOSPlatform("windows")]
+        public static int Twice([ConstantExpected(Min = 0, Max = 8)] int shift) => 2 << shift >> 1;
+    }
+
+    static bool AttributesKeepTheirValues()
+    {
+        var supported = new SupportedOSPlatformAttribute("linux");
+        var unsupported = new UnsupportedOSPlatformAttribute("browser");
+        var expected = new ConstantExpectedAttribute { Min = 1, Max = 16 };
+        return supported.PlatformName == "linux" && unsupported.PlatformName == "browser"
+            && expected.Min is int min && min == 1 && expected.Max is int max && max == 16
+            && PlatformOnly.Twice(Opaque(3)) == 8 && new PlatformOnly { Value = 5 }.Value == 5;
+    }
+
     public static int Main()
     {
         Check("Sqrt", Math.Sqrt(Opaque(2.0)) * Math.Sqrt(Opaque(2.0)) > 1.9999999999 && Math.Sqrt(Opaque(144.0)) == 12);
@@ -463,6 +596,15 @@ public static class Program
         sevens.Slice(10, 280).Clear();
         Check("big Fill and Clear", allSeven && sevens[9] == 7 && sevens[10] == 0 && sevens[289] == 0 && sevens[290] == 7);
         Section("span copy and fill");
+
+        Check("Alloc, then Free", AllocatesAndFrees(Opaque(1000)));
+        Check("AllocZeroed", AllocatesZeroed(Opaque(256))); // 2 KB of longs: the Uno R4 has 32 KB of RAM
+        Check("Alloc(0) is a valid pointer, Free(null) does nothing", AllocatesNothing());
+        Check("Alloc(0, n) and AllocZeroed(n, 0) are valid pointers", AllocatesNoElements());
+        Check("AllocZeroed zeroes a freed block's memory", ZeroesReusedMemory(Opaque(4096)));
+        Check("blocks alive at once are apart", KeepsBlocksApart(Opaque(256)));
+        Check("platform and ConstantExpected attributes", AttributesKeepTheirValues());
+        Section("NativeMemory");
 
         Console.WriteLine();
         if (s_failures == 0)

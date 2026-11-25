@@ -29,3 +29,6 @@ scratch-pool-outer|Arena.Scratch: a ScratchPool added to inside a nested Arena.S
 pool-other|Pool: the handle is from another pool
 scratch-dict-outer|Arena.Scratch: a ScratchDict added to inside a nested Arena.Scratch
 scratch-set-outer|Arena.Scratch: a ScratchHashSet added to inside a nested Arena.Scratch
+builder-index|StrBuilder: index out of range
+builder-replace-empty|StrBuilder: Replace of an empty string
+scratch-outer-edit|Arena.Scratch: a ScratchText changed by Insert or Replace inside a nested Arena.Scratch

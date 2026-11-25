@@ -113,7 +113,8 @@ public struct StrBuilder
     public bool Append(double value)
     {
         Span<char> buffer = stackalloc char[Fmt.MaxChars];
-        return Append(buffer.Slice(0, Fmt.Double(value, null, buffer)));
+        int length = Fmt.Format(value, null, buffer);
+        return length >= 0 ? Append(buffer.Slice(0, length)) : Append(value.ToString());
     }
 
     /// <summary>Appends True or False.</summary>

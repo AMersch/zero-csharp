@@ -90,7 +90,7 @@ int wrong = 0;
 for (int i = 0; i < N; i++)
     if (y.Span[i] != 2f * (i % 100) + 1) wrong++;
 long us = (long)(ms * 1000);
-Out.Line($"Saxpy: {N} elements, {us} us on the GPU, {wrong} wrong");
+Console.WriteLine($"Saxpy: {N} elements, {us} us on the GPU, {wrong} wrong");
 ```
 
 - `GpuBuffer<T>.Allocate(n)` makes a buffer of `n` elements that the CPU and the GPU share: on Apple

@@ -16,7 +16,7 @@ public static class Program
 
     static void Section(string section)
     {
-        Out.Line($"{(s_sectionFailures == 0 ? "PASS" : "FAIL")} {section} ({s_sectionChecks} checks)");
+        Console.WriteLine($"{(s_sectionFailures == 0 ? "PASS" : "FAIL")} {section} ({s_sectionChecks} checks)");
         s_sectionChecks = 0;
         s_sectionFailures = 0;
     }
@@ -28,7 +28,7 @@ public static class Program
         {
             s_failures++;
             s_sectionFailures++;
-            Out.Line($"  FAIL: {name}");
+            Console.WriteLine($"  FAIL: {name}");
         }
     }
 
@@ -44,7 +44,7 @@ public static class Program
     {
         string actual = R(pattern).Replace(s_arena, input, replacement, count);
         if (actual != expected)
-            Out.Line($"  {pattern} on {input} with {replacement}: {actual}, not {expected}");
+            Console.WriteLine($"  {pattern} on {input} with {replacement}: {actual}, not {expected}");
         return actual == expected;
     }
 
@@ -64,7 +64,7 @@ public static class Program
         joined.Append(']');
         bool ok = joined.AsSpan().SequenceEqual(expected);
         if (!ok)
-            Out.Line($"  {pattern} on {input}: {joined.AsSpan()}, not {expected}");
+            Console.WriteLine($"  {pattern} on {input}: {joined.AsSpan()}, not {expected}");
         return ok;
     }
 
@@ -81,7 +81,7 @@ public static class Program
     {
         bool ok = !Regex.TryCreate(s_arena, pattern, RegexOptions.None, out _, out string error, out int at);
         if (ok && (error != reason || at != position))
-            Out.Line($"  {pattern}: \"{error}\" at {at}");
+            Console.WriteLine($"  {pattern}: \"{error}\" at {at}");
         return ok && error == reason && at == position;
     }
 
@@ -248,11 +248,11 @@ public static class Program
         Check("no match, and the ends", SplitInto("x", "abc", "[abc]") && SplitInto(",", ",a,", "[|a|]"));
         Section("split");
 
-        Out.Line();
+        Console.WriteLine();
         if (s_failures == 0)
-            Out.Line("All checks passed.");
+            Console.WriteLine("All checks passed.");
         else
-            Out.Line($"{s_failures} checks FAILED.");
+            Console.WriteLine($"{s_failures} checks FAILED.");
         return s_failures;
     }
 }

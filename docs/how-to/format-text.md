@@ -13,28 +13,34 @@ string in an arena, or a `StrBuilder`. This guide shows the three destinations, 
 hole accepts, and [.NET's format strings](#nets-format-strings-tostring-string.format-and-tryformat)
 for when a string is what you need.
 
-## Write to stdout: `Out.Write` and `Out.Line`
+## Write to stdout: `Console.Write` and `Console.WriteLine`
 
-`Out.Line($"...")` writes the text and a newline into `Out`'s buffer, and no string is built:
+`Console.WriteLine($"...")` writes the text and a newline into the output buffer, and no string is
+built:
 
 <!-- sample: samples/QuizStep2.cs ask -->
 ```csharp
-// In.ReadLine flushes Out first, so the prompt shows before the
-// program waits for the answer.
-Out.Write($"Q{i}: {a} + {b} = ");
+// Console.Write holds the prompt in a buffer; In.ReadLine writes it
+// out first, so it shows before the program waits for the answer.
+Console.Write($"Q{i}: {a} + {b} = ");
 int length = In.ReadLine(buffer);
 if (length < 0)
 {
-    Out.Line();
-    Out.Line("(end of input)");
+    Console.WriteLine();
+    Console.WriteLine("(end of input)");
     break;
 }
 asked++;
 ```
 
-`Out.Write` leaves the line open, as for a prompt. `Out.Line` flushes the buffer after the newline;
-output without a newline waits until the buffer is full, `Out.Flush()` is called, or `In.ReadLine`
-flushes it. Call `Out.Flush()` before the program ends if the last thing written had no newline.
+`Console.Write` leaves the line open, as for a prompt. `Console.WriteLine` writes the buffer out after
+the newline; output without a newline waits until the buffer is full, until `In.ReadLine` or
+`Console.ReadKey` writes it out before reading, or until the program ends. `Out.Flush()`, from the
+`Out` class `Console` writes through, writes it out at once.
+
+`Console.Write(x)` and `Console.WriteLine(x)` without `$"..."` take a string, a span, a `char`, a
+`bool`, any number, or an `object`, whose `ToString()` allocates. `Console.WriteLine("{0,8:F2}", x)`
+works, through `string.Format`, which allocates too.
 
 ## Make a string: `Str.Format(arena, $"...")`
 
@@ -44,7 +50,7 @@ When you need a real `string` (to store, to pass on, to use as a key), format it
 ```csharp
 else
 {
-    Out.Line($"no, it's {a + b}");
+    Console.WriteLine($"no, it's {a + b}");
     // Kept until the end, so the string is built in `keep`, not in
     // the buffer the next answer overwrites.
     mistakes.Add(Str.Format(keep, $"  {a} + {b} = {a + b}, not {value}"));
@@ -215,8 +221,8 @@ malformed hole such as `"{0:F2"`. `samples/Formats.cs` checks these results on e
 ## Watch out for
 
 - **Temporary strings belong in a scratch arena.** Every `Str.Format` takes memory from its arena until
-  that arena is reset. A string you only print needs no arena at all: write it with `Out.Line`.
-- **Output is UTF-8.** `Out` encodes what you write as UTF-8, and an unpaired surrogate becomes U+FFFD.
+  that arena is reset. A string you only print needs no arena at all: write it with `Console.WriteLine`.
+- **Output is UTF-8.** `Console` encodes what you write as UTF-8, and an unpaired surrogate becomes U+FFFD.
 
 See also: [Strings without a garbage collector](../concepts/strings.html), and the reference pages for
 [`Out`](../reference/out.html), [`Str`](../reference/str.html) and

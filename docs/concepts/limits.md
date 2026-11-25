@@ -75,8 +75,8 @@ public record Employee(string Name, int Age, string Team) : Person(Name, Age);
 var a = new Point(1, 2);
 var b = new Point(Opaque(1), 2);
 Point moved = a with { Y = 5 };
-Out.Line(a.ToString());     // Point { X = 1, Y = 2 }
-Out.Line(moved.ToString()); // Point { X = 1, Y = 5 }
+Console.WriteLine(a.ToString());     // Point { X = 1, Y = 2 }
+Console.WriteLine(moved.ToString()); // Point { X = 1, Y = 5 }
 ```
 
 Extension members compile to ordinary static methods, so they cost nothing at run time:
@@ -538,8 +538,8 @@ public struct Rect : IArea<Rect>
 ```csharp
 static void PrintArea<T>(in T shape) where T : struct, IArea<T>
 {
-    Out.Write(T.Name);
-    Out.Line(" area: ", T.Area(in shape));
+    Console.Write(T.Name);
+    Console.WriteLine($" area: {T.Area(in shape)}");
 }
 ```
 

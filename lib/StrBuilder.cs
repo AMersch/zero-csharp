@@ -3,7 +3,7 @@
 //   StrBuilder sb = StrBuilder.Create(arena);
 //   sb.Append("total: ");
 //   sb.Append($"{count} items, {price:F2} each");
-//   Out.Line(sb.AsSpan());
+//   Console.WriteLine(sb.AsSpan());
 //
 // Like List<T>, a StrBuilder is a handle to a header in the arena, so copies
 // share the same contents, and default(StrBuilder) is "not created": it reads

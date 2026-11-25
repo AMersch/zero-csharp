@@ -2,7 +2,7 @@
 //
 //   Regex date = Regex.Create(arena, @"(\d{4})-(\d\d)-(\d\d)");
 //   RegexMatch m = date.Match(line);
-//   if (m.Success) Out.Line("year: ", m.Groups[1].Value);
+//   if (m.Success) Console.WriteLine($"year: {m.Groups[1].Value}");
 //   foreach (RegexMatch number in Regex.Create(arena, @"\d+").Matches(text)) ...
 //   string swapped = date.Replace(arena, line, "$3/$2/$1");
 //   foreach (ReadOnlySpan<char> field in Regex.Create(arena, @"\s*,\s*").Split(line)) ...

@@ -260,14 +260,14 @@ byBytes.Set(0.0, 1);
 byBytes.Set(-0.0, 2);
 byValue.Set(0.0, 1);
 byValue.Set(-0.0, 2);
-Out.Line($"By bytes: {byBytes.Count} keys; by value: {byValue.Count}");
+Console.WriteLine($"By bytes: {byBytes.Count} keys; by value: {byValue.Count}");
 
 var lastDigit =
     Dict<int, int, Modulo>.Create(more, comparer: new Modulo { By = 10 });
 lastDigit.Set(13, 1);
 lastDigit.Set(23, 2);  // the same key as 13
 lastDigit.TryGet(3, out int atThree);
-Out.Line($"Modulo 10: {lastDigit.Count} key, [3] = {atThree}");
+Console.WriteLine($"Modulo 10: {lastDigit.Count} key, [3] = {atThree}");
 ```
 
 A `HashSet` is a `Dict` without values. `Add` returns false for an item that is already there:
@@ -281,7 +281,7 @@ foreach (int id in new[] { 3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5 })
     if (!seen.Add(id))
         duplicates++;
 }
-Out.Line($"{seen.Count} distinct, {duplicates} duplicates");
+Console.WriteLine($"{seen.Count} distinct, {duplicates} duplicates");
 
 var odds = HashSet<int>.Create(more);
 for (int i = 1; i < 10; i += 2)
@@ -329,10 +329,10 @@ tasks.Enqueue('c', 3);
 tasks.Enqueue('a', 1);
 tasks.Enqueue('d', 4);
 tasks.Enqueue('b', 2);
-Out.Write("By priority:");
+Console.Write("By priority:");
 while (tasks.TryDequeue(out char task, out int priority))
-    Out.Write($" {task}{priority}");
-Out.Line();
+    Console.Write($" {task}{priority}");
+Console.WriteLine();
 ```
 
 ## Sort and iterate
@@ -360,15 +360,15 @@ public struct Descending : IComparer<int>
 <!-- sample: samples/Collections.cs sort-comparers -->
 ```csharp
 unsorted.Sort();                  // by int's IComparable<int>
-Out.Write("Sort():     ");
+Console.Write("Sort():     ");
 PrintList(unsorted);
 unsorted.Sort(new Descending());  // by a struct: an IComparer<int>
-Out.Write("Descending: ");
+Console.Write("Descending: ");
 PrintList(unsorted);
 
 Span<int> span = values;          // spans sort in place too
 span.Sort();
-Out.Line($"BinarySearch(19): {span.BinarySearch(19)}, "
+Console.WriteLine($"BinarySearch(19): {span.BinarySearch(19)}, "
     + $"(20) would go at {~span.BinarySearch(20)}");
 ```
 

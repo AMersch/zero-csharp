@@ -54,6 +54,8 @@ SMALL_SAMPLES=(
     SmallDoubleFormats
     SmallDecimalFormats
     SmallKeys
+    SmallFibers
+    SmallChannels
 )
 SAMPLES=(
     Tiny
@@ -79,6 +81,7 @@ SAMPLES=(
     Guards
     Queries
     Threads
+    Fibers
     Records
     Shapes
     Refs
@@ -96,8 +99,10 @@ SAMPLES=(
     "${SMALL_SAMPLES[@]}"
 )
 
+# Samples WebAssembly can't run (as in build.sh): the fiber samples switch stacks.
+NOT_WASM=" Fibers SmallFibers SmallChannels "
 # Simd and Kernels print timings, so only their exit code is checked.
-TIMED=" Simd Kernels "
+TIMED=" Simd Kernels Fibers "
 # Arena and Collections print byte counts that depend on the pointer size, so
 # on WebAssembly, DOS and microcontrollers (32-bit) only their exit code is checked.
 POINTER_SIZED=" Arena Collections "
@@ -130,6 +135,7 @@ DOS_SAMPLES=(
     Shapes
     Refs
     Patterns
+    Fibers
     Scratch
     Links
     Llama
@@ -182,6 +188,7 @@ ARM_SAMPLES=(
     Guards
     Queries
     Threads
+    Fibers
     Records
     Shapes
     Refs
@@ -198,8 +205,9 @@ ARM_SAMPLES=(
     "${SMALL_SAMPLES[@]}"
     Blink
 )
-# Arena, Collections, Files, Strings, Queries, Threads, Patterns, Scratch and
-# Unicode need more (Arena, for one, allocates a 16 KB array).
+# Arena, Collections, Files, Strings, Queries, Threads, Fibers, Patterns,
+# Scratch and Unicode need more (Arena, for one, allocates a 16 KB array;
+# Fibers runs three fibers of 5 KB at once).
 R4_SAMPLES=(
     Tiny
     Minimal
@@ -232,7 +240,13 @@ run_all() {
     local fields=()
     local run=(./run.sh)
     local samples=("${SAMPLES[@]}")
-    [ "$target" = wasm ] && run+=(--wasm)
+    if [ "$target" = wasm ]; then
+        run+=(--wasm)
+        samples=()
+        for name in "${SAMPLES[@]}"; do
+            [[ "$NOT_WASM" == *" $name "* ]] || samples+=("$name")
+        done
+    fi
     [ "$target" = win ] && run+=(--win)
     [ "$target" = mac ] && run+=(--mac)
     if [ "$target" = uefi ]; then
@@ -336,6 +350,24 @@ run_all() {
             echo "ok   Files --keep (a name outside ASCII)"
         fi
         rm -f -- "$name"
+    fi
+
+    # A fiber that overflows its stack must stop the program: the guard page
+    # does it where there is one, and on UEFI and DOS, which have none, the
+    # check of the stack's bottom does, with a message.
+    if [[ " ${samples[*]} " == *" Fibers "* ]]; then
+        status=0
+        out=$("${run[@]}" Fibers overflow < /dev/null 2>&1) || status=$?
+        if [ "$status" = 0 ]; then
+            echo "FAIL Fibers overflow: the program wasn't stopped"
+            failures=$((failures + 1))
+        elif { [ "$target" = uefi ] || [ "$target" = dos ]; } && [[ "$out" != *"Fiber 1 overflowed its stack"* ]]; then
+            echo "FAIL Fibers overflow: stopped (exit code $status) without the message"
+            echo "$out" | tail -3 | sed 's/^/       /'
+            failures=$((failures + 1))
+        else
+            echo "ok   Fibers overflow (stopped, as it must be)"
+        fi
     fi
 }
 

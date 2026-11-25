@@ -72,6 +72,8 @@ SMALL_SAMPLES=(
     SmallDoubleFormats
     SmallDecimalFormats
     SmallKeys
+    SmallFibers
+    SmallChannels
 )
 ALL_SAMPLES=(
     Tiny
@@ -97,6 +99,7 @@ ALL_SAMPLES=(
     Guards
     Queries
     Threads
+    Fibers
     Records
     Shapes
     Refs
@@ -113,6 +116,9 @@ ALL_SAMPLES=(
     TensorTypes
     "${SMALL_SAMPLES[@]}"
 )
+# Samples WebAssembly can't run: the fiber samples switch stacks, which a WebAssembly
+# program has no way to do.
+NOT_WASM=" Fibers SmallFibers SmallChannels "
 # Programs with kernels for the GPU (Metal): only --gpu builds them.
 GPU_SAMPLES=(Gpu)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
@@ -143,6 +149,7 @@ DOS_SAMPLES=(
     Shapes
     Refs
     Patterns
+    Fibers
     Scratch
     Links
     Llama
@@ -196,6 +203,7 @@ ARM_SAMPLES=(
     Guards
     Queries
     Threads
+    Fibers
     Records
     Shapes
     Refs
@@ -212,8 +220,9 @@ ARM_SAMPLES=(
     "${SMALL_SAMPLES[@]}"
     Blink
 )
-# Arena, Collections, Files, Strings, Queries, Threads, Patterns, Scratch and
-# Unicode need more (Arena, for one, allocates a 16 KB array).
+# Arena, Collections, Files, Strings, Queries, Threads, Fibers, Patterns,
+# Scratch and Unicode need more (Arena, for one, allocates a 16 KB array;
+# Fibers runs three fibers of 5 KB at once).
 R4_SAMPLES=(
     Tiny
     Minimal
@@ -966,7 +975,8 @@ build_uefi_objects() {
         "$clang" -target "$triple" "${UEFI_CFLAGS[@]}" -Wall -Wextra -c "efi/$name.c" -o "$UEFI_OBJ/$name.obj"
     done
     "$clang" -target "$triple" -c "efi/$BFLAT_ARCH.S" -o "$UEFI_OBJ/stack.obj"
-    "$clang" -target "$triple" -c "zerocore/native/win-$BFLAT_ARCH.S" -o "$UEFI_OBJ/zerocore.obj"
+    # ZERO_UEFI: no thread information block for the fiber switch to update.
+    "$clang" -target "$triple" -DZERO_UEFI -c "zerocore/native/win-$BFLAT_ARCH.S" -o "$UEFI_OBJ/zerocore.obj"
     echo "[clang] efi/libm/*.c -> $UEFI_OBJ/libm"
     for source in efi/libm/*.c; do
         object=$UEFI_OBJ/libm/$(basename "$source" .c).obj
@@ -1257,6 +1267,11 @@ if [ $# -eq 0 ]; then
         set -- "${UEFI_SAMPLES[@]}"
     elif [[ " gpu gpu-air cuda cuda-ptx " == *" $TARGET "* ]]; then
         set -- "${GPU_SAMPLES[@]}"
+    elif [ "$TARGET" = wasm ]; then
+        set --
+        for name in "${ALL_SAMPLES[@]}"; do
+            [[ "$NOT_WASM" == *" $name "* ]] || set -- "$@" "$name"
+        done
     else
         set -- "${ALL_SAMPLES[@]}"
     fi
@@ -1270,6 +1285,9 @@ for name in "$@"; do
         fi
     elif [[ " ${GPU_SAMPLES[*]} " == *" $name "* ]]; then
         echo "$name runs kernels on the GPU: ./build.sh --gpu $name" >&2
+        exit 1
+    elif [ "$TARGET" = wasm ] && [[ "$NOT_WASM" == *" $name "* ]]; then
+        echo "$name isn't built for WebAssembly: it switches stacks, which WebAssembly can't do." >&2
         exit 1
     elif [ "$TARGET" = dos ]; then
         if [[ " ${DOS_SAMPLES[*]} " != *" $name "* ]]; then

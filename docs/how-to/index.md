@@ -71,6 +71,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   with `Interlocked`, and one arena per thread.
 - [Work with tensors and matrices](use-tensors.html): `Tensor<T>` and `TensorSpan<T>` as in .NET,
   broadcasting, views that share memory, matrix products, and freeing the temporaries.
+- [Run green threads](use-fibers.html): many fibers on one thread, each on its own stack, taking
+  turns; channels between them, sleeping, and what they share.
 - [Run code on the GPU](run-code-on-the-gpu.html): C# kernels on an Apple Silicon Mac's GPU through
   Metal, threadgroup memory and barriers, 2D grids, atomics, and when a launch is worth it.
 - [Run a language model](run-a-language-model.html): a small Llama-style model, compiled into the

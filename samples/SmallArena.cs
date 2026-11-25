@@ -117,6 +117,26 @@ public static class Program
         }
     }
 
+    // Alignments up to 256 bytes; the C64's blocks are only 4-aligned.
+    static bool NativeAligned()
+    {
+        unsafe
+        {
+            bool ok = true;
+            for (nuint alignment = 1; alignment <= 256; alignment *= 2)
+            {
+                byte* block = (byte*)NativeMemory.AlignedAlloc(40, alignment);
+                ok &= ((nuint)block & (alignment - 1)) == 0 && block[0] == 0 && block[39] == 0;
+                block[0] = 1;
+                block[39] = 2;
+                ok &= block[0] == 1 && block[39] == 2;
+                NativeMemory.AlignedFree(block);
+            }
+            NativeMemory.AlignedFree(null);
+            return ok;
+        }
+    }
+
     // maxCapacity caps the bytes of all blocks together.
     static void Limits()
     {
@@ -271,6 +291,7 @@ public static class Program
         Check("AllocZeroed zeroes a freed block's memory", NativeZeroesReusedMemory());
         Check("Alloc(0) is a valid pointer, Free(null) does nothing", NativeEmpty());
         Check("Free gives the memory back", NativeFreeGivesBack());
+        Check("AlignedAlloc, AlignedFree", NativeAligned());
         End("NativeMemory");
 
         Console.WriteLine();

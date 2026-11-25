@@ -150,9 +150,9 @@ Two things to keep in mind:
 
   There's no exception to catch, so check a size that comes from input before you allocate it.
 - **`Alloc(0)` returns a valid pointer** that `Free` takes, and `Free(null)` does nothing, as in .NET.
-- **Only `Alloc`, `AllocZeroed` and `Free`.** `Realloc`, `AlignedAlloc`, `AlignedFree`, `Clear`,
-  `Copy` and `Fill` aren't there. Grow a block as `Resize` does above, and use a span's `Clear`,
-  `CopyTo` and `Fill` for the rest.
+- **Only `Alloc`, `AllocZeroed`, `Free`, `AlignedAlloc` and `AlignedFree`.** `Realloc`,
+  `AlignedRealloc`, `Clear`, `Copy` and `Fill` aren't there. Grow a block as `Resize` does above,
+  and use a span's `Clear`, `CopyTo` and `Fill` for the rest.
 - **Some targets have little to give.** On the C64 one block can't be larger than 65,520 bytes, and
   the Arduino Uno R4 has 32 KB of RAM for everything ([Build for
   microcontrollers](build-for-microcontrollers.html)).

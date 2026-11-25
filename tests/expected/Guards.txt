@@ -36,3 +36,5 @@ Usage: Guards <case>, where the case is one of:
   native-overflow      NativeMemory.Alloc with a count times size past the address space
   native-zeroed-overflow  the same for NativeMemory.AllocZeroed
   native-out-of-memory NativeMemory.Alloc of more than the system can give
+  native-bad-alignment NativeMemory.AlignedAlloc with an alignment that isn't a power of two
+  native-aligned-overflow  NativeMemory.AlignedAlloc of a size that overflows with the alignment

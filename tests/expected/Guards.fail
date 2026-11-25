@@ -37,3 +37,5 @@ scratch-outer-edit|Arena.Scratch: a ScratchText changed by Insert or Replace ins
 native-overflow|NativeMemory: the size overflows
 native-zeroed-overflow|NativeMemory: the size overflows
 native-out-of-memory|NativeMemory: out of memory
+native-bad-alignment|NativeMemory: the alignment isn't a power of two
+native-aligned-overflow|NativeMemory: the size overflows

@@ -435,6 +435,37 @@ public static class Program
         }
     }
 
+    // Every alignment from 1 to a page gives an aligned, zeroed, writable
+    // block, whose neighbours are left alone; AlignedFree(null) does nothing.
+    static bool AlignsBlocks(int count)
+    {
+        unsafe
+        {
+            bool ok = true;
+            for (nuint alignment = 1; alignment <= 4096; alignment *= 2)
+            {
+                byte* first = (byte*)NativeMemory.AlignedAlloc((nuint)count, alignment);
+                byte* second = (byte*)NativeMemory.AlignedAlloc((nuint)count, alignment);
+                ok &= ((nuint)first & (alignment - 1)) == 0 && ((nuint)second & (alignment - 1)) == 0;
+                for (int i = 0; i < count; i++)
+                {
+                    ok &= first[i] == 0 && second[i] == 0;
+                    first[i] = 0x11;
+                    second[i] = 0x22;
+                }
+                for (int i = 0; i < count; i++)
+                    ok &= first[i] == 0x11 && second[i] == 0x22;
+                NativeMemory.AlignedFree(second);
+                NativeMemory.AlignedFree(first);
+            }
+            void* empty = NativeMemory.AlignedAlloc(0, 64);
+            ok &= empty != null && ((nuint)empty & 63) == 0;
+            NativeMemory.AlignedFree(empty);
+            NativeMemory.AlignedFree(null);
+            return ok;
+        }
+    }
+
     // Nothing reads these attributes, but code shared with .NET puts them on
     // every kind of member they allow, and may read their properties.
     [SupportedOSPlatform("macos")]
@@ -681,6 +712,7 @@ public static class Program
         Check("blocks alive at once are apart", KeepsBlocksApart(Opaque(256)));
         Check("platform and ConstantExpected attributes", AttributesKeepTheirValues());
         Check("a buffer that grows and frees itself", GrowsAndFrees(Opaque(100)));
+        Check("AlignedAlloc, AlignedFree", AlignsBlocks(Opaque(100)));
         Section("NativeMemory");
 
         Console.WriteLine();

@@ -1,6 +1,6 @@
 PASS arena and spans (9 checks)
 PASS maxCapacity (6 checks)
 PASS FromBuffer (10 checks)
-PASS NativeMemory (4 checks)
+PASS NativeMemory (5 checks)
 
 All checks passed.

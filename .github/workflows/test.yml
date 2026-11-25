@@ -133,6 +133,46 @@ jobs:
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: ./test.sh --win
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win-programs
+          path: zero-csharp/bin/win/*.exe
+
+  # The programs the windows job built and ran under Wine, run on Windows itself:
+  # the ones whose Windows code is this repository's own (files, directories,
+  # streams, sockets over Winsock, fibers), where Wine can behave differently
+  # (it doesn't reset a connection closed with linger 0, for one).
+  windows-native:
+    needs: windows
+    if: always()
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: win-programs
+          path: bin/win
+      - name: Run on Windows
+        shell: bash
+        run: |
+          failed=0
+          for name in Files Paths Directories Streams Network Fibers; do
+            out=$(./bin/win/$name.exe < /dev/null 2>&1); status=$?
+            out=${out//$'\r'/}
+            if [ "$status" != 0 ]; then
+              echo "FAIL $name: exit code $status"
+              echo "$out" | tail -8 | sed 's/^/       /'
+              failed=1
+            elif [ -f "tests/expected/$name.txt" ] && [ "$out" != "$(tr -d '\r' < "tests/expected/$name.txt")" ]; then
+              echo "FAIL $name: output differs from tests/expected/$name.txt"
+              diff <(echo "$out") <(tr -d '\r' < "tests/expected/$name.txt") | head -10 | sed 's/^/       /'
+              failed=1
+            else
+              echo "ok   $name"
+            fi
+          done
+          exit $failed
 
   uefi:
     needs: bflat

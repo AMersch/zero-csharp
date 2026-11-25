@@ -99,6 +99,25 @@ File.WriteAllBytes("#9:data.bin", bytes);       // on device 9
 `samples/DiskFiles.cs` tests all of it (the emulator's host folder stands in for the SD card);
 `samples/Files.cs` is for the other targets: it wants 64 KB arenas and writes into the middle of files.
 
+## Math
+
+llvm-mos's C library has no `sin`, `cos`, `tan`, `exp`, `log`, `log2`, `log10`, `pow` or `atan2`, which
+`Math` (and `MathF`) need; `cx16/math.c` has them, from FreeBSD's msun (fdlibm). A program that uses
+one gets all of them, and nothing is in a program that doesn't.
+
+- **Accuracy:** double precision, a unit in the last place or two (`tan` three), checked against a computer's
+  math library by `cx16/test-math.c` (`cc -O1 -o /tmp/test-math cx16/test-math.c -lm`) and in the
+  emulator by `samples/SmallMath.cs`. Two exceptions, to keep `pow` from being 12 KB: `pow` with a
+  whole-number exponent is exact where the result is, and for the others it is good to about
+  `|y * log(x)|` units in the last place (1e-14 up to results near e^100). `sin`, `cos` and `tan` reduce
+  their argument exactly up to 1.6 million radians; beyond that they lose a digit for every factor of ten.
+- **Size and speed:** the functions are some 28 KB of code, on top of the 18 KB of the soft-float
+  routines every `double` program has, so the build compiles them to IR like the program's own and moves
+  the big ones into banks (see above). A call takes 0.4 to 0.9 million cycles: 50 to 110 milliseconds at 8 MHz
+  (measured: `sin` 400,000, `exp` 380,000, `log` 450,000, `atan2` 620,000, `pow` 870,000, a `double`
+  multiplication 37,000, `sqrt` 80,000). A game that needs many sines a frame wants a table.
+- **`MathF`:** the `float` versions compute in `double` and round: not faster.
+
 ## Banked RAM
 
 `lib/Banks.cs` copies bytes to and from the banked RAM, which is 63 banks of 8 KB in the emulator

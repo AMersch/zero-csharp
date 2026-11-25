@@ -135,6 +135,9 @@ take care of it. `ZERO_CX16_BANK=Name` forces the functions whose names contain 
 when the program fits, to test banking or to measure what a call costs (about 33 cycles, in
 `x16emu`, with the jiffy clock: run it without `-testbench`, which has no frame interrupt).
 `BanksWithCode`, `BanksDemo`, `BankedDemo`, `BankedListDemo`, `DiskFiles`, `Mouse` and `CX16Demo` are for the X16 only.
+`cx16/math.c` (sin, cos, exp, log, pow, ...) is tested on a computer first, against its math library:
+`cc -O1 -o /tmp/test-math cx16/test-math.c -lm && /tmp/test-math`; `SmallMath` then checks it in the emulator, and on the
+other targets that have the functions.
 [Build for the Commander X16](docs/how-to/build-for-cx16.md) has the rest.
 
 The guards are tested the other way round. `lib/` stops the program when it catches a mistake, and

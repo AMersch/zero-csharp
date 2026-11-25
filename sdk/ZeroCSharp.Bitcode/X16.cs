@@ -138,12 +138,15 @@ static partial class C64
 
     /// <summary>
     /// What the runtime has to be compiled with for this program: the file functions
-    /// (the C library's stdio, 3 KB) only if the program calls them.
+    /// (the C library's stdio, 3 KB) and the math functions (cx16/math.c, 5 KB) only
+    /// if the program calls them.
     /// </summary>
     static IEnumerable<string> X16Defines(IEnumerable<string> irFiles)
     {
         if (irFiles.Any(f => Regex.IsMatch(Files.ReadText(f), @"@cell\.(fopen|fread|fwrite|fclose|fseeko|ftello|remove)\b", RegexOptions.CultureInvariant)))
             yield return "-DCX16_FILES";
+        if (irFiles.Any(f => Regex.IsMatch(Files.ReadText(f), @"@cell\.(exp|log|log2|log10|sin|cos|tan|pow|atan2|expf|logf|sinf|cosf|tanhf|powf|sqrt|fabs|floor|ceil|trunc|rint|sqrtf|fabsf|floorf|ceilf|truncf|rintf)\b", RegexOptions.CultureInvariant)))
+            yield return "-DCX16_MATH";
     }
 
     /// <summary>
@@ -155,6 +158,16 @@ static partial class C64
     static void X16Prepare(ref X16Banks? banks, X16Context c, List<string> options)
     {
         options.AddRange(X16Defines(c.Whole));
+        if (options.Contains("-DCX16_MATH"))
+        {
+            // The math functions (cx16/math.c) are compiled to IR here and linked with the
+            // program's own, so that the largest of them can go into banks like the program's
+            // functions: they are slow enough for a bank switch to be nothing, and big.
+            string source = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(c.Runtime))!, "math.c");
+            string ir = Path.Combine(c.OutDir, "xmath.ll");
+            Tools.Run(c.Clang, [.. c.Mos, "-S", "-emit-llvm", source, "-o", ir], "compiling math.c");
+            c.Whole.Add(ir);
+        }
         string? wanted = Environment.GetEnvironmentVariable("ZERO_CX16_BANK");
         if (string.IsNullOrEmpty(wanted))
             return;
@@ -324,7 +337,10 @@ static partial class C64
 
             string quoted = name.StartsWith('"') ? "\"" + name.Trim('"') + "__bank\"" : name + "__bank";
             string noinline = Regex.IsMatch(after, @"\bnoinline\b", Options) ? "" : " noinline";
-            string body = $"define {pre}@{quoted}({parameters}){after}{noinline} section \".bank{bank}\" {{";
+            // Metadata attachments ("!guid !22") come after the attributes and the section.
+            int metadata = after.IndexOf(" !", StringComparison.Ordinal);
+            string attributes = metadata < 0 ? after : after[..metadata], attached = metadata < 0 ? "" : after[metadata..];
+            string body = $"define {pre}@{quoted}({parameters}){attributes}{noinline} section \".bank{bank}\"{attached} {{";
 
             var arguments = new List<string>();
             foreach (string parameter in SplitParameters(parameters))

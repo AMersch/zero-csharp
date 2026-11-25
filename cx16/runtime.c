@@ -656,6 +656,30 @@ float roundevenf(float x) { return (float)roundeven(x); }
 float fabsf(float x) { return x < 0 ? -x : x; }
 float fmodf(float x, float y) { return (float)fmod(x, y); }
 
+// ---- math, for lib/Math: sin, cos, exp, log, pow, ... -----------------------------------
+//
+// Only in a program that calls them (the build defines CX16_MATH): they are
+// some 28 KB of soft floating point. cx16/test-math.c tests them on a computer.
+
+#ifdef CX16_MATH
+// math.c is compiled apart, to IR, by the build (X16Prepare in X16.cs), so that the
+// big functions can be moved into banks; the rest is here.
+
+// The imports of lib's Math that the runtime has under C's own names.
+double cs_sqrt(double x) { return sqrt(x); }
+double cs_fabs(double x) { return fabs(x); }
+double cs_floor(double x) { return floor(x); }
+double cs_ceil(double x) { return ceil(x); }
+double cs_trunc(double x) { return trunc(x); }
+double cs_rint(double x) { return roundeven(x); }
+float cs_sqrtf(float x) { return sqrtf(x); }
+float cs_fabsf(float x) { return fabsf(x); }
+float cs_floorf(float x) { return floorf(x); }
+float cs_ceilf(float x) { return ceilf(x); }
+float cs_truncf(float x) { return truncf(x); }
+float cs_rintf(float x) { return roundevenf(x); }
+#endif
+
 #ifdef CX16_FILES
 // ---- files, for lib/File.cs ----------------------------------------------------------
 //

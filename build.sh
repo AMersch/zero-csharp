@@ -111,6 +111,7 @@ ALL_SAMPLES=(
     Tensors
     TensorsAvx
     "${SMALL_SAMPLES[@]}"
+    SmallMath
 )
 # Programs with kernels for the GPU (Metal): only --gpu builds them.
 GPU_SAMPLES=(Gpu)
@@ -205,6 +206,7 @@ CX16_SAMPLES=(
     BanksWithCode
     Mouse
     DiskFiles
+    SmallMath
 )
 # A microcontroller has no SIMD to benchmark, and Vga is a PC game. Blink is
 # for microcontrollers only (lib/Board.cs: the LED, registers, a timer). The Uno R4

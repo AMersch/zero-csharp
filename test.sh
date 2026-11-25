@@ -95,6 +95,7 @@ SAMPLES=(
     Tensors
     TensorsAvx
     "${SMALL_SAMPLES[@]}"
+    SmallMath
 )
 
 # Simd and Kernels print timings, so only their exit code is checked.
@@ -193,6 +194,7 @@ CX16_SAMPLES=(
     BanksWithCode
     Mouse
     DiskFiles
+    SmallMath
 )
 # Microcontrollers: no SIMD to benchmark, no PC screen for Vga. Blink is
 # theirs only, and checks itself. The Uno R4

@@ -70,6 +70,7 @@ SAMPLES=(
     Files
     Paths
     Streams
+    Network
     Directories
     Dice
     Pipe
@@ -104,10 +105,10 @@ SAMPLES=(
 )
 
 # Samples WebAssembly can't run (as in build.sh): the fiber samples switch stacks.
-NOT_WASM=" Fibers Timers SmallFibers SmallChannels "
+NOT_WASM=" Fibers Timers SmallFibers SmallChannels Network "
 # Samples UEFI can't run (as in build.sh): lib/ has directories only on Linux,
 # macOS, Windows and WebAssembly.
-NOT_UEFI=" Directories "
+NOT_UEFI=" Directories Network "
 # Simd and Kernels print timings, so only their exit code is checked.
 TIMED=" Simd Kernels Fibers "
 # Arena and Collections print byte counts that depend on the pointer size, so

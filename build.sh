@@ -88,6 +88,7 @@ ALL_SAMPLES=(
     Files
     Paths
     Streams
+    Network
     Directories
     Dice
     Pipe
@@ -122,7 +123,7 @@ ALL_SAMPLES=(
 )
 # Samples WebAssembly can't run: the fiber samples switch stacks, which a WebAssembly
 # program has no way to do.
-NOT_WASM=" Fibers Timers SmallFibers SmallChannels "
+NOT_WASM=" Fibers Timers SmallFibers SmallChannels Network "
 # Programs with kernels for the GPU (Metal): only --gpu builds them.
 GPU_SAMPLES=(Gpu)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
@@ -259,7 +260,7 @@ R4_SAMPLES=(
 # UEFI gets every sample but these, and Vga too (lib/Uefi.cs has what it uses
 # of lib/Dos.cs). Directories needs directories, which lib/ has only on Linux,
 # macOS, Windows and WebAssembly.
-NOT_UEFI=" Directories "
+NOT_UEFI=" Directories Network "
 UEFI_SAMPLES=(Vga)
 for name in "${ALL_SAMPLES[@]}"; do
     [[ "$NOT_UEFI" == *" $name "* ]] || UEFI_SAMPLES+=("$name")
@@ -835,7 +836,7 @@ build_win() {
         # shellcheck disable=SC2046
         "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none \
             "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os windows --arch x64 $(BFLAT_ARCH=x64 bflat_flags "$name") \
-            --ldflags "/entry:zero_start /wrap:getenv /wrap:fopen /wrap:remove /wrap:mkdir /wrap:rmdir /wrap:rename /wrap:getcwd /wrap:chdir $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
+            --ldflags "/entry:zero_start /wrap:getenv /wrap:fopen /wrap:remove /wrap:mkdir /wrap:rmdir /wrap:rename /wrap:getcwd /wrap:chdir /wrap:socket /wrap:bind /wrap:listen /wrap:accept /wrap:connect /wrap:sendto /wrap:recvfrom /wrap:shutdown /wrap:close /wrap:setsockopt /wrap:getsockopt /wrap:getsockname /wrap:getpeername /wrap:getaddrinfo /wrap:freeaddrinfo /wrap:gethostname $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
         rm -f "bin/win/$name.pdb"
     done
 }

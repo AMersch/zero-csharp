@@ -29,6 +29,11 @@
 // Each fiber also has its own Arena.Scratch arena, made on its first Scratch
 // call and destroyed when it ends, so a fiber can wait inside Scratch.
 //
+// A fiber can also wait on a socket (lib/Sockets.cs): when no fiber is ready
+// to run, Run waits in poll(2) until a socket is, or the earliest sleeper's
+// time comes, and while fibers are busy it looks, without waiting, every 64
+// switches.
+//
 // Rules:
 // - Yield, Sleep, Send and Receive (and a Pipe's Read and Write) block only
 //   inside a fiber. Outside one (in Main, before or after Run), Yield and
@@ -124,6 +129,9 @@ public static class Fiber
         public bool Done;
         public bool Woken;          // by a channel, as opposed to closed
         public void* Slot;          // while waiting on a channel: the T to send, or to receive into
+        public int Fd;              // while waiting on input or output (WaitForIO): what for,
+        public short Events;        // as poll(2) takes it,
+        public short Revents;       // and what poll said
     }
 
     // One per system thread that runs fibers.
@@ -137,7 +145,23 @@ public static class Fiber
         public int Waiting;         // on a channel
         public int NextId;
         public long Switches;
+        public Record* IoWaiters;   // waiting on input or output (WaitForIO), newest first
+        public int IoWaiting;
+        public void* PollFds;       // the array PollIO hands poll(2), from malloc
+        public int PollCapacity;    // in entries
     }
+
+    // poll(2), set by the code that first waits on input or output (the
+    // sockets in lib/Sockets.cs). A pointer, so that a program that uses
+    // fibers and no sockets doesn't link poll: DOS, microcontrollers and the
+    // C64 have none. Its array holds struct pollfd: { int fd; short events;
+    // short revents; }.
+    internal static delegate*<void*, nuint, int, int> Poll;
+
+    // PollIO, set by the first WaitForIO. Run calls it through this pointer,
+    // so a program that never waits on input or output doesn't carry its
+    // code (1.3 KB on a C64).
+    static delegate*<Scheduler*, bool, void> s_pollIO;
 
     [ThreadStatic] static Scheduler* t_scheduler;
 
@@ -256,6 +280,15 @@ public static class Fiber
                 Record* f = Dequeue(s);
                 if (f == null)
                 {
+                    if (s->IoWaiters != null)
+                    {
+                        // Nothing to run: wait for input or output, or until
+                        // the earliest sleeper's time.
+                        s_pollIO(s, true);
+                        if (s->Sleepers != null)
+                            WakeSleepers(s, wait: false);
+                        continue;
+                    }
                     if (s->Sleepers == null)
                         Environment.FailFast("Fiber.Run: every fiber is waiting on a channel, so none can run again");
                     WakeSleepers(s, wait: true);
@@ -286,8 +319,100 @@ public static class Fiber
                 }
                 if (s->Sleepers != null)
                     WakeSleepers(s, wait: false);
+                // Busy fibers don't keep the waiting ones from their input:
+                // a look, without waiting, every 64 switches.
+                if (s->IoWaiters != null && (s->Switches & 63) == 0)
+                    s_pollIO(s, false);
             }
         }
+    }
+
+    // Blocks the current fiber until fd is ready for `events` (poll(2)'s
+    // POLLIN, POLLOUT...), letting the others run. Returns what poll said,
+    // or 0 outside a fiber, where the caller waits by itself.
+    internal static short WaitForIO(int fd, short events)
+    {
+        Scheduler* s = This;
+        unsafe
+        {
+            // SAFETY: the current fiber's record, parked until PollIO wakes it.
+            Record* current = s->Current;
+            if (current == null)
+                return 0;
+            s_pollIO = &PollIO;
+            current->Fd = fd;
+            current->Events = events;
+            current->Revents = 0;
+            current->Next = s->IoWaiters;
+            s->IoWaiters = current;
+            s->IoWaiting++;
+            SwitchToScheduler(s, current);
+            return current->Revents;
+        }
+    }
+
+    // Asks poll which waiters' input or output is ready, and puts those back
+    // in the run queue. With wait, waits until one is, or until the earliest
+    // sleeper's time; without, only looks. If poll fails (a socket closed
+    // under its waiter, say), every waiter goes back, to try again and find out.
+    static void PollIO(Scheduler* s, bool wait)
+    {
+        unsafe
+        {
+            int timeout = !wait ? 0 : s->Sleepers == null ? -1 : MillisecondsUntil(s->Sleepers->WakeAt);
+            // SAFETY: the waiters are parked fibers' records; PollFds has
+            // room for PollCapacity entries of 8 bytes.
+            int n = s->IoWaiting;
+            if (n > s->PollCapacity)
+            {
+                int capacity = Math.Max(n, s->PollCapacity * 2);
+                free(s->PollFds);
+                s->PollFds = malloc((nuint)capacity * 8);
+                if (s->PollFds == null)
+                    Environment.FailFast("Fiber.Run: out of memory for the poll array");
+                s->PollCapacity = capacity;
+            }
+            byte* fds = (byte*)s->PollFds;
+            int i = 0;
+            for (Record* f = s->IoWaiters; f != null; f = f->Next, i++)
+            {
+                *(int*)(fds + i * 8) = f->Fd;
+                *(short*)(fds + i * 8 + 4) = f->Events;
+                *(short*)(fds + i * 8 + 6) = 0;
+            }
+            int ready = Poll(fds, (nuint)n, timeout);
+            if (ready == 0)
+                return;
+            Record** link = &s->IoWaiters;
+            i = 0;
+            while (*link != null)
+            {
+                Record* f = *link;
+                short revents = ready < 0 ? (short)1 : *(short*)(fds + i * 8 + 6);
+                i++;
+                if (revents == 0)
+                {
+                    link = &f->Next;
+                    continue;
+                }
+                *link = f->Next;
+                f->Revents = revents;
+                s->IoWaiting--;
+                Enqueue(s, f);
+            }
+        }
+    }
+
+    // Milliseconds from now to a Clock.Monotonic time, rounded up; 0 if past.
+    // * 1074 / 2^30 is a hair more than / 1000000, without the code for
+    // 64-bit division (as in WakeSleepers). At most 1000 s at a time; Run's
+    // loop comes back.
+    static int MillisecondsUntil(long time)
+    {
+        long nanos = Math.Min(time - Clock.Monotonic, 1_000_000_000_000L);
+        if (nanos <= 0)
+            return 0;
+        return (int)((nanos * 1074 >> 30) + 1);
     }
 
     static void StackOverflowed(Record* f)

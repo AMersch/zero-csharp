@@ -237,7 +237,12 @@ static int keys_waiting(void)
 }
 
 // Only standard input is asked about, and only whether it can be read now.
-int poll(struct pollfd *fds, unsigned long count, int timeout)
+// win/runtime.c names this keys_poll (KEYS_POLL): its poll also waits on
+// sockets, and asks this for standard input.
+#ifndef KEYS_POLL
+#define KEYS_POLL poll
+#endif
+int KEYS_POLL(struct pollfd *fds, unsigned long count, int timeout)
 {
     (void)timeout;
     int ready = 0;

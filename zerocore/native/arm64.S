@@ -168,4 +168,12 @@ ZeroSystem:
     mov     w0, #2
     ret
 
+// fcntl(fd, command, argument), for lib/Sockets.cs. fcntl is variadic; on
+// Linux a variadic call passes its arguments as any other does.
+    .text
+    .globl ZeroFcntl
+    .type ZeroFcntl, %function
+ZeroFcntl:
+    b       fcntl
+
     .section .note.GNU-stack, "", %progbits

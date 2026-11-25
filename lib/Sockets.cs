@@ -1,0 +1,1431 @@
+// Sockets: .NET's System.Net.Sockets (Socket, TcpListener, TcpClient,
+// UdpClient, NetworkStream), so code written against them compiles here.
+//
+//   var listener = new TcpListener(IPAddress.Loopback, 8080);
+//   listener.Start();
+//   Fiber.Spawn(listener, static l =>
+//   {
+//       while (true)
+//       {
+//           TcpClient client = l.AcceptTcpClient();
+//           Fiber.Spawn(client, static c => Serve(c.GetStream()));
+//       }
+//   });
+//   Fiber.Run();
+//
+// Every socket is non-blocking underneath, and works with fibers: a call that
+// would wait (Accept, Connect, Receive, a Send into a full buffer) parks the
+// fiber and lets the others run until the socket is ready. Outside a fiber
+// the call simply waits. So one thread can serve many connections, a fiber
+// each, without callbacks or async.
+//
+// What differs from .NET:
+// - A throw ends the program, so a failure .NET reports with a
+//   SocketException stops the program with its message. The forms that
+//   return a SocketError don't: Receive and Send with `out SocketError`, and
+//   TryConnect and TryAccept, which .NET doesn't have.
+// - No async methods, timeouts or Select: fibers do the waiting.
+// - Linux, macOS and Windows. WebAssembly (WASI preview 1), DOS, UEFI and
+//   microcontrollers have no sockets: a program that uses them there fails to
+//   link.
+//
+// Underneath are the C library's socket functions, with Linux's numbers and
+// layouts. macOS's differ, and the tables below hold both. win/runtime.c gives
+// Windows the Linux ones over Winsock, the names that Winsock also has linked
+// with /wrap:. ZeroFcntl, in each system's assembly, calls fcntl: macOS's
+// arm64 passes a variadic function's extra arguments on the stack, which a
+// call from C# doesn't.
+
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+namespace System.Net.Sockets;
+
+/// <summary>The kind of address a socket uses.</summary>
+public enum AddressFamily
+{
+    /// <summary>Not known.</summary>
+    Unknown = -1,
+    /// <summary>Not given.</summary>
+    Unspecified = 0,
+    /// <summary>IPv4.</summary>
+    InterNetwork = 2,
+    /// <summary>IPv6.</summary>
+    InterNetworkV6 = 23,
+}
+
+/// <summary>What a socket carries.</summary>
+public enum SocketType
+{
+    /// <summary>Not known.</summary>
+    Unknown = -1,
+    /// <summary>A connection's stream of bytes (TCP).</summary>
+    Stream = 1,
+    /// <summary>Separate messages (UDP).</summary>
+    Dgram = 2,
+}
+
+/// <summary>The protocol a socket speaks.</summary>
+public enum ProtocolType
+{
+    /// <summary>Not known.</summary>
+    Unknown = -1,
+    /// <summary>Whatever the socket type implies.</summary>
+    Unspecified = 0,
+    /// <summary>TCP.</summary>
+    Tcp = 6,
+    /// <summary>UDP.</summary>
+    Udp = 17,
+}
+
+/// <summary>Options for Send and Receive.</summary>
+[Flags]
+public enum SocketFlags
+{
+    /// <summary>None.</summary>
+    None = 0,
+    /// <summary>Look at what has arrived without taking it.</summary>
+    Peek = 2,
+}
+
+/// <summary>Which direction Shutdown ends.</summary>
+public enum SocketShutdown
+{
+    /// <summary>No more receiving.</summary>
+    Receive = 0,
+    /// <summary>No more sending: the other end reads the end of the stream.</summary>
+    Send = 1,
+    /// <summary>Both.</summary>
+    Both = 2,
+}
+
+/// <summary>Why a socket operation failed, with .NET's (Winsock's) numbers.</summary>
+public enum SocketError
+{
+    /// <summary>It worked.</summary>
+    Success = 0,
+    /// <summary>Something not listed here.</summary>
+    SocketError = -1,
+    /// <summary>The socket was closed while the operation waited.</summary>
+    OperationAborted = 995,
+    /// <summary>Interrupted.</summary>
+    Interrupted = 10004,
+    /// <summary>Not allowed (a port below 1024 without privileges, say).</summary>
+    AccessDenied = 10013,
+    /// <summary>A bad argument.</summary>
+    InvalidArgument = 10022,
+    /// <summary>The program has too many sockets open.</summary>
+    TooManyOpenSockets = 10024,
+    /// <summary>It would have to wait (only seen inside lib/).</summary>
+    WouldBlock = 10035,
+    /// <summary>Under way.</summary>
+    InProgress = 10036,
+    /// <summary>Already under way.</summary>
+    AlreadyInProgress = 10037,
+    /// <summary>Not a socket.</summary>
+    NotSocket = 10038,
+    /// <summary>No address to send to.</summary>
+    DestinationAddressRequired = 10039,
+    /// <summary>The message is too big.</summary>
+    MessageSize = 10040,
+    /// <summary>The protocol isn't supported.</summary>
+    ProtocolNotSupported = 10043,
+    /// <summary>The operation isn't supported.</summary>
+    OperationNotSupported = 10045,
+    /// <summary>The address family isn't supported.</summary>
+    AddressFamilyNotSupported = 10047,
+    /// <summary>Another socket has this address and port.</summary>
+    AddressAlreadyInUse = 10048,
+    /// <summary>This machine has no such address.</summary>
+    AddressNotAvailable = 10049,
+    /// <summary>The network is down.</summary>
+    NetworkDown = 10050,
+    /// <summary>The network can't be reached.</summary>
+    NetworkUnreachable = 10051,
+    /// <summary>The network dropped the connection.</summary>
+    NetworkReset = 10052,
+    /// <summary>The connection was aborted on this side.</summary>
+    ConnectionAborted = 10053,
+    /// <summary>The other end reset the connection.</summary>
+    ConnectionReset = 10054,
+    /// <summary>Out of buffer space.</summary>
+    NoBufferSpaceAvailable = 10055,
+    /// <summary>Already connected.</summary>
+    IsConnected = 10056,
+    /// <summary>Not connected.</summary>
+    NotConnected = 10057,
+    /// <summary>The socket was shut down for this direction.</summary>
+    Shutdown = 10058,
+    /// <summary>The other end didn't answer in time.</summary>
+    TimedOut = 10060,
+    /// <summary>Nothing listens at that address and port.</summary>
+    ConnectionRefused = 10061,
+    /// <summary>The host is down.</summary>
+    HostDown = 10064,
+    /// <summary>The host can't be reached.</summary>
+    HostUnreachable = 10065,
+    /// <summary>No such host name.</summary>
+    HostNotFound = 11001,
+    /// <summary>The name servers didn't answer; try again.</summary>
+    TryAgain = 11002,
+    /// <summary>The name servers failed.</summary>
+    NoRecovery = 11003,
+    /// <summary>The name has no address of the kind asked for.</summary>
+    NoData = 11004,
+}
+
+/// <summary>A socket failure. Thrown, it ends the program with its message.</summary>
+public class SocketException : Exception
+{
+    /// <summary>The failure for this SocketError number.</summary>
+    public SocketException(int errorCode) : base(string.Concat("SocketException: ", Describe((SocketError)errorCode)))
+        => SocketErrorCode = (SocketError)errorCode;
+
+    /// <summary>Why it failed.</summary>
+    public SocketError SocketErrorCode { get; }
+
+    /// <summary>Why it failed, as a number.</summary>
+    public int ErrorCode => (int)SocketErrorCode;
+
+    internal static string Describe(SocketError error) => error switch
+    {
+        SocketError.ConnectionRefused => "connection refused",
+        SocketError.ConnectionReset => "connection reset by the other end",
+        SocketError.ConnectionAborted => "connection aborted",
+        SocketError.AddressAlreadyInUse => "address already in use",
+        SocketError.AddressNotAvailable => "address not available",
+        SocketError.AccessDenied => "access denied",
+        SocketError.TimedOut => "timed out",
+        SocketError.HostNotFound => "host not found",
+        SocketError.TryAgain => "the name servers didn't answer",
+        SocketError.NoData => "the name has no address",
+        SocketError.NetworkUnreachable => "network unreachable",
+        SocketError.HostUnreachable => "host unreachable",
+        SocketError.NotConnected => "not connected",
+        SocketError.Shutdown => "the socket was shut down",
+        SocketError.OperationAborted => "the socket was closed",
+        SocketError.InvalidArgument => "invalid argument",
+        SocketError.TooManyOpenSockets => "too many open sockets",
+        _ => ((int)error).ToString(),
+    };
+}
+
+/// <summary>
+/// A network endpoint to send and receive through: TCP or UDP, IPv4 or IPv6.
+/// Calls that would wait let other fibers run (see the file's comment).
+/// </summary>
+public class Socket : IDisposable
+{
+    int _fd;
+    bool _connected;
+
+    /// <summary>A socket for the family, type and protocol. Failing ends the program.</summary>
+    public Socket(AddressFamily addressFamily, SocketType socketType, ProtocolType protocolType)
+    {
+        SocketError error = SocketNative.Create(addressFamily, socketType, protocolType, out _fd);
+        if (error != SocketError.Success)
+            throw new SocketException((int)error);
+        AddressFamily = addressFamily;
+        SocketType = socketType;
+        ProtocolType = protocolType == ProtocolType.Unspecified
+            ? (socketType == SocketType.Stream ? ProtocolType.Tcp : ProtocolType.Udp)
+            : protocolType;
+    }
+
+    /// <summary>An IPv6 socket that also takes IPv4 (DualMode), as .NET makes it.</summary>
+    public Socket(SocketType socketType, ProtocolType protocolType)
+        : this(AddressFamily.InterNetworkV6, socketType, protocolType)
+        => DualMode = true;
+
+    Socket(int fd, AddressFamily family, SocketType type, ProtocolType protocol)
+    {
+        _fd = fd;
+        _connected = true;
+        AddressFamily = family;
+        SocketType = type;
+        ProtocolType = protocol;
+    }
+
+    /// <summary>IPv4 or IPv6.</summary>
+    public AddressFamily AddressFamily { get; }
+    /// <summary>Stream (TCP) or Dgram (UDP).</summary>
+    public SocketType SocketType { get; }
+    /// <summary>Tcp or Udp.</summary>
+    public ProtocolType ProtocolType { get; }
+    /// <summary>The system's handle for the socket; -1 once closed.</summary>
+    public nint Handle => _fd;
+    /// <summary>Whether the last Connect or Accept made a connection, and it hasn't failed or closed since.</summary>
+    public bool Connected => _connected && _fd >= 0;
+
+    /// <summary>The address and port this end has: after Bind, Connect or Accept.</summary>
+    public EndPoint LocalEndPoint => _fd < 0 ? null : SocketNative.Name(_fd, peer: false);
+
+    /// <summary>The address and port of the other end, once connected.</summary>
+    public EndPoint RemoteEndPoint => _fd < 0 || !_connected ? null : SocketNative.Name(_fd, peer: true);
+
+    /// <summary>Whether small writes go out at once (TCP_NODELAY), rather than gathered.</summary>
+    public bool NoDelay
+    {
+        get => SocketNative.GetOption(Fd, SocketNative.Option.NoDelay) != 0;
+        set => SocketNative.SetOption(Fd, SocketNative.Option.NoDelay, value ? 1 : 0);
+    }
+
+    /// <summary>Whether an IPv6 socket also takes IPv4 (as ::ffff:a.b.c.d). Set it before Bind or Connect.</summary>
+    public bool DualMode
+    {
+        get => AddressFamily == AddressFamily.InterNetworkV6 && SocketNative.GetOption(Fd, SocketNative.Option.V6Only) == 0;
+        set
+        {
+            if (AddressFamily != AddressFamily.InterNetworkV6)
+                throw new NotSupportedException("Socket.DualMode: only for an IPv6 socket");
+            SocketNative.SetOption(Fd, SocketNative.Option.V6Only, value ? 0 : 1);
+        }
+    }
+
+    /// <summary>Whether a UDP socket may send to a broadcast address.</summary>
+    public bool EnableBroadcast
+    {
+        get => SocketNative.GetOption(Fd, SocketNative.Option.Broadcast) != 0;
+        set => SocketNative.SetOption(Fd, SocketNative.Option.Broadcast, value ? 1 : 0);
+    }
+
+    /// <summary>Gives the socket an address and port of this machine. Failing ends the program.</summary>
+    public void Bind(EndPoint localEP)
+    {
+        SocketError error = SocketNative.Bind(Fd, ToIP(localEP));
+        if (error != SocketError.Success)
+            throw new SocketException((int)error);
+    }
+
+    /// <summary>Starts taking connections, with room for <paramref name="backlog"/> waiting to be accepted.</summary>
+    public void Listen(int backlog = 512)
+    {
+        SocketError error = SocketNative.Listen(Fd, backlog);
+        if (error != SocketError.Success)
+            throw new SocketException((int)error);
+    }
+
+    /// <summary>The next connection, waiting for one (other fibers run meanwhile). Failing ends the program.</summary>
+    public Socket Accept()
+    {
+        if (!TryAccept(out Socket socket, out SocketError error))
+            throw new SocketException((int)error);
+        return socket;
+    }
+
+    /// <summary>The next connection, waiting for one, or why there isn't one.</summary>
+    public bool TryAccept(out Socket socket, out SocketError error)
+    {
+        error = SocketNative.Accept(Fd, out int fd);
+        socket = error == SocketError.Success ? new Socket(fd, AddressFamily, SocketType, ProtocolType) : null;
+        return socket != null;
+    }
+
+    /// <summary>Connects to the endpoint, waiting until it answers (other fibers run meanwhile). Failing ends the program.</summary>
+    public void Connect(EndPoint remoteEP)
+    {
+        if (!TryConnect(remoteEP, out SocketError error))
+            throw new SocketException((int)error);
+    }
+
+    /// <summary>Connects to the address and port. Failing ends the program.</summary>
+    public void Connect(IPAddress address, int port) => Connect(new IPEndPoint(address, port));
+
+    /// <summary>
+    /// Connects to a host name's port, trying each of its addresses (of this
+    /// socket's family) in turn. Failing ends the program.
+    /// </summary>
+    public void Connect(string host, int port)
+    {
+        if (!TryConnect(host, port, out SocketError error))
+            throw new SocketException((int)error);
+    }
+
+    /// <summary>Connects to the endpoint, or says why it couldn't: ConnectionRefused, TimedOut, HostUnreachable...</summary>
+    public bool TryConnect(EndPoint remoteEP, out SocketError error)
+    {
+        error = SocketNative.Connect(Fd, ToIP(remoteEP));
+        _connected = error == SocketError.Success;
+        return _connected;
+    }
+
+    /// <summary>Connects to a host name's port, trying each address in turn, or says why it couldn't.</summary>
+    public bool TryConnect(string host, int port, out SocketError error)
+    {
+        if (!Dns.TryGetHostAddresses(host, out IPAddress[] addresses, out error))
+            return false;
+        error = SocketError.HostNotFound;
+        foreach (IPAddress address in addresses)
+        {
+            IPAddress target = address;
+            if (address.AddressFamily != AddressFamily)
+            {
+                if (AddressFamily == AddressFamily.InterNetworkV6 && DualMode)
+                    target = address.MapToIPv6();
+                else
+                    continue;
+            }
+            if (TryConnect(new IPEndPoint(target, port), out error))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>Sends all of the bytes, waiting while the system's buffer is full. Failing ends the program.</summary>
+    public int Send(ReadOnlySpan<byte> buffer) => Send(buffer, SocketFlags.None);
+
+    /// <summary>Sends all of the bytes. Failing ends the program.</summary>
+    public int Send(ReadOnlySpan<byte> buffer, SocketFlags socketFlags)
+    {
+        int sent = Send(buffer, socketFlags, out SocketError error);
+        if (error != SocketError.Success)
+            throw new SocketException((int)error);
+        return sent;
+    }
+
+    /// <summary>Sends all of the bytes, or as many as went before a failure, which <paramref name="errorCode"/> says.</summary>
+    public int Send(ReadOnlySpan<byte> buffer, SocketFlags socketFlags, out SocketError errorCode)
+    {
+        errorCode = SocketNative.Send(Fd, buffer, socketFlags, null, out int sent);
+        if (errorCode != SocketError.Success)
+            _connected = false;
+        return sent;
+    }
+
+    /// <summary>Sends all of the bytes. Failing ends the program.</summary>
+    public int Send(byte[] buffer) => Send(new ReadOnlySpan<byte>(buffer ?? throw new ArgumentNullException(nameof(buffer))));
+
+    /// <summary>Sends <paramref name="size"/> bytes from offset. Failing ends the program.</summary>
+    public int Send(byte[] buffer, int offset, int size, SocketFlags socketFlags)
+    {
+        Check(buffer, offset, size);
+        return Send(new ReadOnlySpan<byte>(buffer, offset, size), socketFlags);
+    }
+
+    /// <summary>
+    /// Receives what has arrived, up to buffer.Length bytes, waiting while
+    /// nothing has (other fibers run meanwhile). Returns 0 when the other end
+    /// has shut its sending down. Failing ends the program.
+    /// </summary>
+    public int Receive(Span<byte> buffer) => Receive(buffer, SocketFlags.None);
+
+    /// <summary>Receive, with flags (Peek). Failing ends the program.</summary>
+    public int Receive(Span<byte> buffer, SocketFlags socketFlags)
+    {
+        int received = Receive(buffer, socketFlags, out SocketError error);
+        if (error != SocketError.Success)
+            throw new SocketException((int)error);
+        return received;
+    }
+
+    /// <summary>Receive, saying why it failed (ConnectionReset...) instead of ending the program.</summary>
+    public int Receive(Span<byte> buffer, SocketFlags socketFlags, out SocketError errorCode)
+    {
+        errorCode = SocketNative.Receive(Fd, buffer, socketFlags, out int received, null);
+        if (errorCode != SocketError.Success)
+            _connected = false;
+        return received;
+    }
+
+    /// <summary>Receive into an array. Failing ends the program.</summary>
+    public int Receive(byte[] buffer) => Receive(new Span<byte>(buffer ?? throw new ArgumentNullException(nameof(buffer))));
+
+    /// <summary>Receive up to <paramref name="size"/> bytes into buffer from offset. Failing ends the program.</summary>
+    public int Receive(byte[] buffer, int offset, int size, SocketFlags socketFlags)
+    {
+        Check(buffer, offset, size);
+        return Receive(new Span<byte>(buffer, offset, size), socketFlags);
+    }
+
+    /// <summary>Sends a datagram to the endpoint (UDP). Failing ends the program.</summary>
+    public int SendTo(ReadOnlySpan<byte> buffer, EndPoint remoteEP)
+    {
+        SocketError error = SocketNative.Send(Fd, buffer, SocketFlags.None, ToIP(remoteEP), out int sent);
+        if (error != SocketError.Success)
+            throw new SocketException((int)error);
+        return sent;
+    }
+
+    /// <summary>Sends a datagram to the endpoint (UDP). Failing ends the program.</summary>
+    public int SendTo(byte[] buffer, EndPoint remoteEP) => SendTo(new ReadOnlySpan<byte>(buffer ?? throw new ArgumentNullException(nameof(buffer))), remoteEP);
+
+    /// <summary>
+    /// Receives a datagram (UDP), waiting for one, and says where it came from.
+    /// Bytes past buffer.Length are lost. Failing ends the program.
+    /// </summary>
+    public int ReceiveFrom(Span<byte> buffer, ref EndPoint remoteEP)
+    {
+        IPEndPoint from = new IPEndPoint(IPAddress.Any, 0);
+        SocketError error = SocketNative.Receive(Fd, buffer, SocketFlags.None, out int received, from);
+        if (error != SocketError.Success)
+            throw new SocketException((int)error);
+        remoteEP = from;
+        return received;
+    }
+
+    /// <summary>Receives a datagram into an array (UDP). Failing ends the program.</summary>
+    public int ReceiveFrom(byte[] buffer, ref EndPoint remoteEP)
+        => ReceiveFrom(new Span<byte>(buffer ?? throw new ArgumentNullException(nameof(buffer))), ref remoteEP);
+
+    /// <summary>Ends receiving, sending (the other end reads the end of the stream), or both.</summary>
+    public void Shutdown(SocketShutdown how)
+    {
+        SocketError error = SocketNative.Shutdown(Fd, how);
+        if (error != SocketError.Success && error != SocketError.NotConnected)
+            throw new SocketException((int)error);
+    }
+
+    /// <summary>Closes the socket. Fibers waiting on it wake, and their calls fail.</summary>
+    public void Close()
+    {
+        if (_fd < 0)
+            return;
+        SocketNative.Close(_fd);
+        _fd = -1;
+        _connected = false;
+    }
+
+    /// <summary>Closes the socket.</summary>
+    public void Dispose() => Close();
+
+    int Fd => _fd >= 0 ? _fd : throw new ObjectDisposedException("Socket");
+
+    IPEndPoint ToIP(EndPoint endPoint)
+    {
+        if (endPoint is not IPEndPoint ip)
+            throw new ArgumentException("Socket: only IPEndPoint addresses");
+        if (ip.AddressFamily != AddressFamily)
+        {
+            // An IPv4 address on a dual-mode IPv6 socket.
+            if (AddressFamily == AddressFamily.InterNetworkV6 && ip.AddressFamily == AddressFamily.InterNetwork)
+                return new IPEndPoint(ip.Address.MapToIPv6(), ip.Port);
+            throw new ArgumentException("Socket: the address's family isn't the socket's");
+        }
+        return ip;
+    }
+
+    static void Check(byte[] buffer, int offset, int size)
+    {
+        if (buffer == null)
+            throw new ArgumentNullException(nameof(buffer));
+        if (offset < 0 || (uint)size > (uint)(buffer.Length - offset))
+            throw new ArgumentOutOfRangeException(nameof(size));
+    }
+}
+
+/// <summary>A connected socket as a Stream: Read receives, Write sends.</summary>
+public class NetworkStream : Stream
+{
+    readonly bool _ownsSocket;
+    bool _open = true;
+
+    /// <summary>A stream over a connected socket, which it doesn't close.</summary>
+    public NetworkStream(Socket socket) : this(socket, false) { }
+
+    /// <summary>A stream over a connected socket; with <paramref name="ownsSocket"/>, disposing the stream closes it.</summary>
+    public NetworkStream(Socket socket, bool ownsSocket)
+    {
+        Socket = socket ?? throw new ArgumentNullException(nameof(socket));
+        if (socket.SocketType != SocketType.Stream)
+            throw new IOException("NetworkStream: needs a stream (TCP) socket");
+        _ownsSocket = ownsSocket;
+    }
+
+    /// <summary>The socket underneath.</summary>
+    public Socket Socket { get; }
+
+    /// <inheritdoc/>
+    public override bool CanRead => _open;
+    /// <inheritdoc/>
+    public override bool CanWrite => _open;
+    /// <inheritdoc/>
+    public override bool CanSeek => false;
+    /// <summary>Not for a network stream: ends the program.</summary>
+    public override long Length => throw new NotSupportedException("NetworkStream: no length");
+    /// <summary>Not for a network stream: ends the program.</summary>
+    public override long Position
+    {
+        get => throw new NotSupportedException("NetworkStream: no position");
+        set => throw new NotSupportedException("NetworkStream: no position");
+    }
+
+    /// <inheritdoc/>
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        return Read(new Span<byte>(buffer, offset, count));
+    }
+
+    /// <summary>Receives up to buffer.Length bytes, waiting for some; 0 when the other end is done sending.</summary>
+    public override int Read(Span<byte> buffer)
+    {
+        EnsureOpen();
+        int n = Socket.Receive(buffer, SocketFlags.None, out SocketError error);
+        if (error != SocketError.Success)
+            throw new IOException(string.Concat("NetworkStream: ", SocketException.Describe(error)));
+        return n;
+    }
+
+    /// <inheritdoc/>
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        Write(new ReadOnlySpan<byte>(buffer, offset, count));
+    }
+
+    /// <summary>Sends all of the bytes.</summary>
+    public override void Write(ReadOnlySpan<byte> buffer)
+    {
+        EnsureOpen();
+        Socket.Send(buffer, SocketFlags.None, out SocketError error);
+        if (error != SocketError.Success)
+            throw new IOException(string.Concat("NetworkStream: ", SocketException.Describe(error)));
+    }
+
+    /// <summary>Nothing to do: sends aren't buffered here.</summary>
+    public override void Flush() { }
+    /// <summary>Not for a network stream: ends the program.</summary>
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException("NetworkStream: can't seek");
+    /// <summary>Not for a network stream: ends the program.</summary>
+    public override void SetLength(long value) => throw new NotSupportedException("NetworkStream: no length");
+
+    /// <inheritdoc/>
+    protected override void Dispose(bool disposing)
+    {
+        if (!_open)
+            return;
+        _open = false;
+        if (_ownsSocket)
+            Socket.Close();
+    }
+
+    void EnsureOpen()
+    {
+        if (!_open)
+            throw new ObjectDisposedException("NetworkStream");
+    }
+}
+
+/// <summary>Listens for TCP connections on an address and port.</summary>
+public class TcpListener
+{
+    readonly IPEndPoint _endpoint;
+    Socket _server;
+
+    /// <summary>A listener for the address and port (0 lets the system choose; see LocalEndpoint after Start).</summary>
+    public TcpListener(IPAddress localaddr, int port) : this(new IPEndPoint(localaddr, port)) { }
+
+    /// <summary>A listener for the endpoint.</summary>
+    public TcpListener(IPEndPoint localEP) => _endpoint = localEP ?? throw new ArgumentNullException(nameof(localEP));
+
+    /// <summary>The socket that listens, once started.</summary>
+    public Socket Server => _server;
+
+    /// <summary>The address and port listened on: the system's choice if the port was 0.</summary>
+    public EndPoint LocalEndpoint => _server?.LocalEndPoint ?? _endpoint;
+
+    /// <summary>Starts listening. Failing (the port is taken, say) ends the program.</summary>
+    public void Start() => Start(512);
+
+    /// <summary>Starts listening, with room for <paramref name="backlog"/> connections waiting to be accepted.</summary>
+    public void Start(int backlog)
+    {
+        if (_server != null)
+            return;
+        var server = new Socket(_endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+        SocketNative.ReuseAddress(server);
+        server.Bind(_endpoint);
+        server.Listen(backlog);
+        _server = server;
+    }
+
+    /// <summary>Stops listening and closes the socket.</summary>
+    public void Stop()
+    {
+        _server?.Close();
+        _server = null;
+    }
+
+    /// <summary>The next connection as a socket, waiting for one (other fibers run meanwhile).</summary>
+    public Socket AcceptSocket() => Started.Accept();
+
+    /// <summary>The next connection as a TcpClient, waiting for one (other fibers run meanwhile).</summary>
+    public TcpClient AcceptTcpClient() => new TcpClient(Started.Accept());
+
+    Socket Started => _server ?? throw new InvalidOperationException("TcpListener: call Start first");
+}
+
+/// <summary>A TCP connection, and a stream over it.</summary>
+public class TcpClient : IDisposable
+{
+    Socket _socket;
+    NetworkStream _stream;
+
+    /// <summary>An unconnected IPv4 client.</summary>
+    public TcpClient() : this(AddressFamily.InterNetwork) { }
+
+    /// <summary>An unconnected client of the family.</summary>
+    public TcpClient(AddressFamily family) => _socket = new Socket(family, SocketType.Stream, ProtocolType.Tcp);
+
+    /// <summary>A client connected to a host name's port. Failing ends the program.</summary>
+    public TcpClient(string hostname, int port)
+    {
+        if (!Dns.TryGetHostAddresses(hostname, out IPAddress[] addresses, out SocketError error))
+            throw new SocketException((int)error);
+        foreach (IPAddress address in addresses)
+        {
+            var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            if (socket.TryConnect(new IPEndPoint(address, port), out error))
+            {
+                _socket = socket;
+                return;
+            }
+            socket.Close();
+        }
+        throw new SocketException((int)error);
+    }
+
+    internal TcpClient(Socket connected) => _socket = connected;
+
+    /// <summary>The socket underneath.</summary>
+    public Socket Client => _socket;
+
+    /// <summary>Whether it's connected.</summary>
+    public bool Connected => _socket != null && _socket.Connected;
+
+    /// <summary>Whether small writes go out at once (TCP_NODELAY).</summary>
+    public bool NoDelay
+    {
+        get => _socket.NoDelay;
+        set => _socket.NoDelay = value;
+    }
+
+    /// <summary>Connects to a host name's port. Failing ends the program.</summary>
+    public void Connect(string hostname, int port) => _socket.Connect(hostname, port);
+
+    /// <summary>Connects to the address and port. Failing ends the program.</summary>
+    public void Connect(IPAddress address, int port) => _socket.Connect(address, port);
+
+    /// <summary>Connects to the endpoint. Failing ends the program.</summary>
+    public void Connect(IPEndPoint remoteEP) => _socket.Connect(remoteEP);
+
+    /// <summary>The connection as a stream; disposing it, or this client, closes the connection.</summary>
+    public NetworkStream GetStream()
+    {
+        if (_socket == null)
+            throw new ObjectDisposedException("TcpClient");
+        if (!_socket.Connected)
+            throw new InvalidOperationException("TcpClient: not connected");
+        return _stream ??= new NetworkStream(_socket, true);
+    }
+
+    /// <summary>Closes the connection.</summary>
+    public void Close() => Dispose();
+
+    /// <summary>Closes the connection.</summary>
+    public void Dispose()
+    {
+        _stream?.Dispose();
+        _socket?.Close();
+        _socket = null;
+    }
+}
+
+/// <summary>Sends and receives UDP datagrams.</summary>
+public class UdpClient : IDisposable
+{
+    Socket _socket;
+
+    /// <summary>An IPv4 client on a port the system chooses.</summary>
+    public UdpClient() : this(AddressFamily.InterNetwork) { }
+
+    /// <summary>A client of the family, not bound until it first sends.</summary>
+    public UdpClient(AddressFamily family) => _socket = new Socket(family, SocketType.Dgram, ProtocolType.Udp);
+
+    /// <summary>An IPv4 client bound to the port on every address.</summary>
+    public UdpClient(int port) : this(port, AddressFamily.InterNetwork) { }
+
+    /// <summary>A client bound to the port on every address of the family.</summary>
+    public UdpClient(int port, AddressFamily family) : this(new IPEndPoint(family == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, port)) { }
+
+    /// <summary>A client bound to the endpoint.</summary>
+    public UdpClient(IPEndPoint localEP)
+    {
+        if (localEP == null)
+            throw new ArgumentNullException(nameof(localEP));
+        _socket = new Socket(localEP.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
+        _socket.Bind(localEP);
+    }
+
+    /// <summary>The socket underneath.</summary>
+    public Socket Client => _socket;
+
+    /// <summary>Whether it may send to a broadcast address.</summary>
+    public bool EnableBroadcast
+    {
+        get => _socket.EnableBroadcast;
+        set => _socket.EnableBroadcast = value;
+    }
+
+    /// <summary>Sets the endpoint Send without one goes to, and the only one Receive takes datagrams from.</summary>
+    public void Connect(IPEndPoint endPoint) => _socket.Connect(endPoint);
+
+    /// <summary>Connect to a host name's port.</summary>
+    public void Connect(string hostname, int port) => _socket.Connect(hostname, port);
+
+    /// <summary>Sends a datagram to the endpoint.</summary>
+    public int Send(ReadOnlySpan<byte> datagram, IPEndPoint endPoint) => _socket.SendTo(datagram, endPoint);
+
+    /// <summary>Sends <paramref name="bytes"/> bytes of the array as a datagram to the endpoint.</summary>
+    public int Send(byte[] dgram, int bytes, IPEndPoint endPoint) => _socket.SendTo(new ReadOnlySpan<byte>(dgram, 0, bytes), endPoint);
+
+    /// <summary>Sends a datagram to the connected endpoint.</summary>
+    public int Send(ReadOnlySpan<byte> datagram) => _socket.Send(datagram);
+
+    /// <summary>
+    /// The next datagram, waiting for one (other fibers run meanwhile), in a
+    /// new array, and where it came from. Datagrams up to 64 KB.
+    /// </summary>
+    public byte[] Receive(ref IPEndPoint remoteEP)
+    {
+        byte[] buffer = new byte[65536];
+        EndPoint from = remoteEP ?? new IPEndPoint(IPAddress.Any, 0);
+        int n = _socket.ReceiveFrom(buffer, ref from);
+        remoteEP = (IPEndPoint)from;
+        byte[] datagram = new byte[n];
+        new ReadOnlySpan<byte>(buffer, 0, n).CopyTo(datagram);
+        return datagram;
+    }
+
+    /// <summary>
+    /// The next datagram into <paramref name="buffer"/>, without allocating,
+    /// and where it came from. Bytes past the buffer's end are lost.
+    /// </summary>
+    public int Receive(Span<byte> buffer, out IPEndPoint remoteEP)
+    {
+        EndPoint from = new IPEndPoint(IPAddress.Any, 0);
+        int n = _socket.ReceiveFrom(buffer, ref from);
+        remoteEP = (IPEndPoint)from;
+        return n;
+    }
+
+    /// <summary>Closes the socket.</summary>
+    public void Close() => Dispose();
+
+    /// <summary>Closes the socket.</summary>
+    public void Dispose()
+    {
+        _socket?.Close();
+        _socket = null;
+    }
+}
+
+// ---- the C side --------------------------------------------------------------
+
+// The socket functions, with Linux's numbers and layouts, or macOS's where
+// they differ. Every socket is non-blocking: a call that would wait waits in
+// Wait, which parks a fiber (Fiber.WaitForIO) or polls outside one.
+static class SocketNative
+{
+    [DllImport("libc")] static unsafe extern int socket(int domain, int type, int protocol);
+    [DllImport("libc")] static unsafe extern int bind(int fd, byte* address, uint length);
+    [DllImport("libc")] static unsafe extern int listen(int fd, int backlog);
+    [DllImport("libc")] static unsafe extern int accept(int fd, byte* address, uint* length);
+    [DllImport("libc")] static unsafe extern int connect(int fd, byte* address, uint length);
+    [DllImport("libc")] static unsafe extern nint sendto(int fd, byte* buffer, nuint length, int flags, byte* address, uint addressLength);
+    [DllImport("libc")] static unsafe extern nint recvfrom(int fd, byte* buffer, nuint length, int flags, byte* address, uint* addressLength);
+    [DllImport("libc")] static unsafe extern int shutdown(int fd, int how);
+    [DllImport("libc")] static unsafe extern int close(int fd);
+    [DllImport("libc")] static unsafe extern int setsockopt(int fd, int level, int name, void* value, uint length);
+    [DllImport("libc")] static unsafe extern int getsockopt(int fd, int level, int name, void* value, uint* length);
+    [DllImport("libc")] static unsafe extern int getsockname(int fd, byte* address, uint* length);
+    [DllImport("libc")] static unsafe extern int getpeername(int fd, byte* address, uint* length);
+    [DllImport("libc")] static unsafe extern int poll(void* fds, nuint count, int timeout);
+    [DllImport("libc")] static unsafe extern int getaddrinfo(byte* node, byte* service, byte* hints, byte** result);
+    [DllImport("libc")] static unsafe extern void freeaddrinfo(byte* result);
+    [DllImport("libc")] static unsafe extern int gethostname(byte* name, nuint length);
+    [DllImport("libc")] static unsafe extern int* __errno_location();
+    [DllImport("libc")] static unsafe extern int pthread_create(nint* thread, void* attributes, delegate* unmanaged<void*, void*> start, void* argument);
+    [DllImport("libc")] static unsafe extern int pthread_join(nint thread, void** result);
+    [DllImport("libc")] static unsafe extern void* calloc(nuint count, nuint size);
+    [DllImport("libc")] static unsafe extern void free(void* memory);
+    [DllImport("*")] static unsafe extern int ZeroFcntl(int fd, int command, int argument);
+
+    static bool Mac => FileSystem.System == SystemKind.MacOS;
+
+    // Numbers that differ: Linux's (and win/runtime.c's), then macOS's.
+    static int AF_INET6 => Mac ? 30 : 10;
+    static int SOL_SOCKET => Mac ? 0xFFFF : 1;
+    static int SO_REUSEADDR => Mac ? 4 : 2;
+    static int SO_ERROR => Mac ? 0x1007 : 4;
+    static int SO_BROADCAST => Mac ? 0x20 : 6;
+    static int IPV6_V6ONLY => Mac ? 27 : 26;
+    static int O_NONBLOCK => Mac ? 4 : 0x800;
+    static int MSG_NOSIGNAL => Mac ? 0 : 0x4000; // macOS: SO_NOSIGPIPE on the socket instead
+    const int AF_INET = 2, SOCK_STREAM = 1, SOCK_DGRAM = 2, IPPROTO_TCP = 6, IPPROTO_IPV6 = 41, TCP_NODELAY = 1;
+    const int F_GETFL = 3, F_SETFL = 4, SO_NOSIGPIPE = 0x1022;
+    const short POLLIN = 1, POLLOUT = 4;
+    const int SockaddrSize = 28; // sockaddr_in6, the bigger
+
+    internal enum Option { NoDelay, V6Only, Broadcast }
+
+    // ---- errors ---------------------------------------------------------------
+
+    static int Errno
+    {
+        get { unsafe { return *__errno_location(); } } // SAFETY: the thread's errno
+    }
+
+    static bool WouldBlock(int e) => e == (Mac ? 35 : 11);       // EAGAIN
+    static bool InProgress(int e) => e == (Mac ? 36 : 115);      // EINPROGRESS
+    static bool Interrupted(int e) => e == 4;                    // EINTR
+
+    static SocketError LastError()
+    {
+        int e = Errno;
+        if (Mac)
+        {
+            return e switch
+            {
+                1 or 13 => SocketError.AccessDenied,
+                4 => SocketError.Interrupted,
+                9 => SocketError.OperationAborted,
+                22 => SocketError.InvalidArgument,
+                24 => SocketError.TooManyOpenSockets,
+                32 or 58 => SocketError.Shutdown,
+                35 => SocketError.WouldBlock,
+                36 => SocketError.InProgress,
+                37 => SocketError.AlreadyInProgress,
+                38 => SocketError.NotSocket,
+                39 => SocketError.DestinationAddressRequired,
+                40 => SocketError.MessageSize,
+                43 => SocketError.ProtocolNotSupported,
+                47 => SocketError.AddressFamilyNotSupported,
+                48 => SocketError.AddressAlreadyInUse,
+                49 => SocketError.AddressNotAvailable,
+                50 => SocketError.NetworkDown,
+                51 => SocketError.NetworkUnreachable,
+                52 => SocketError.NetworkReset,
+                53 => SocketError.ConnectionAborted,
+                54 => SocketError.ConnectionReset,
+                55 => SocketError.NoBufferSpaceAvailable,
+                56 => SocketError.IsConnected,
+                57 => SocketError.NotConnected,
+                60 => SocketError.TimedOut,
+                61 => SocketError.ConnectionRefused,
+                64 => SocketError.HostDown,
+                65 => SocketError.HostUnreachable,
+                102 => SocketError.OperationNotSupported,
+                _ => SocketError.SocketError,
+            };
+        }
+        return e switch
+        {
+            1 or 13 => SocketError.AccessDenied,
+            4 => SocketError.Interrupted,
+            9 => SocketError.OperationAborted,
+            11 => SocketError.WouldBlock,
+            22 => SocketError.InvalidArgument,
+            24 => SocketError.TooManyOpenSockets,
+            32 or 108 => SocketError.Shutdown,
+            88 => SocketError.NotSocket,
+            89 => SocketError.DestinationAddressRequired,
+            90 => SocketError.MessageSize,
+            93 => SocketError.ProtocolNotSupported,
+            95 => SocketError.OperationNotSupported,
+            97 => SocketError.AddressFamilyNotSupported,
+            98 => SocketError.AddressAlreadyInUse,
+            99 => SocketError.AddressNotAvailable,
+            100 => SocketError.NetworkDown,
+            101 => SocketError.NetworkUnreachable,
+            102 => SocketError.NetworkReset,
+            103 => SocketError.ConnectionAborted,
+            104 => SocketError.ConnectionReset,
+            105 => SocketError.NoBufferSpaceAvailable,
+            106 => SocketError.IsConnected,
+            107 => SocketError.NotConnected,
+            110 => SocketError.TimedOut,
+            111 => SocketError.ConnectionRefused,
+            112 => SocketError.HostDown,
+            113 => SocketError.HostUnreachable,
+            114 => SocketError.AlreadyInProgress,
+            115 => SocketError.InProgress,
+            _ => SocketError.SocketError,
+        };
+    }
+
+    // getaddrinfo's own errors (EAI_*): Linux's (and win/runtime.c's), macOS's.
+    static SocketError LookupError(int e)
+    {
+        if (Mac)
+            return e switch { 2 => SocketError.TryAgain, 4 => SocketError.NoRecovery, 5 or 7 => SocketError.NoData, 8 => SocketError.HostNotFound, _ => SocketError.SocketError };
+        return e switch { -3 => SocketError.TryAgain, -4 => SocketError.NoRecovery, -5 or -6 => SocketError.NoData, -2 => SocketError.HostNotFound, _ => SocketError.SocketError };
+    }
+
+    // ---- waiting --------------------------------------------------------------
+
+    static int PollAll(void* fds, nuint count, int timeout)
+    {
+        unsafe { return poll(fds, count, timeout); } // SAFETY: Fiber.Run's array of count entries
+    }
+
+    // Waits until fd is ready for events: in a fiber, the others run
+    // meanwhile; outside one, poll waits here.
+    static void Wait(int fd, short events)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            if (Fiber.Poll == null)
+                Fiber.Poll = &PollAll;
+            if (Fiber.WaitForIO(fd, events) != 0)
+                return;
+            long one = 0;
+            *(int*)&one = fd;
+            *((short*)&one + 2) = events;
+            poll(&one, 1, -1);
+        }
+    }
+
+    // ---- operations -----------------------------------------------------------
+
+    internal static SocketError Create(AddressFamily family, SocketType type, ProtocolType protocol, out int fd)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            int domain = family == AddressFamily.InterNetwork ? AF_INET : family == AddressFamily.InterNetworkV6 ? AF_INET6 : -1;
+            int kind = type == SocketType.Stream ? SOCK_STREAM : type == SocketType.Dgram ? SOCK_DGRAM : -1;
+            fd = -1;
+            if (domain < 0)
+                return SocketError.AddressFamilyNotSupported;
+            if (kind < 0)
+                return SocketError.ProtocolNotSupported;
+            fd = socket(domain, kind, (int)protocol);
+            if (fd < 0)
+                return LastError();
+            Prepare(fd);
+            return SocketError.Success;
+        }
+    }
+
+    // Non-blocking, and on macOS no SIGPIPE when the other end has gone.
+    static void Prepare(int fd)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            int flags = ZeroFcntl(fd, F_GETFL, 0);
+            ZeroFcntl(fd, F_SETFL, flags | O_NONBLOCK);
+            if (Mac)
+            {
+                int one = 1;
+                setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, 4);
+            }
+        }
+    }
+
+    internal static SocketError Bind(int fd, IPEndPoint endpoint)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            byte* address = stackalloc byte[SockaddrSize];
+            uint length = Write(endpoint, address);
+            return bind(fd, address, length) == 0 ? SocketError.Success : LastError();
+        }
+    }
+
+    internal static SocketError Listen(int fd, int backlog)
+    {
+        unsafe { return listen(fd, backlog) == 0 ? SocketError.Success : LastError(); } // SAFETY: no pointers
+    }
+
+    internal static SocketError Accept(int fd, out int accepted)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            while (true)
+            {
+                accepted = accept(fd, null, null);
+                if (accepted >= 0)
+                {
+                    Prepare(accepted);
+                    return SocketError.Success;
+                }
+                int e = Errno;
+                if (WouldBlock(e) || Interrupted(e))
+                    Wait(fd, POLLIN);
+                else
+                    return LastError();
+            }
+        }
+    }
+
+    internal static SocketError Connect(int fd, IPEndPoint endpoint)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            byte* address = stackalloc byte[SockaddrSize];
+            uint length = Write(endpoint, address);
+            if (connect(fd, address, length) == 0)
+                return SocketError.Success;
+            int e = Errno;
+            if (!InProgress(e) && !WouldBlock(e) && !Interrupted(e))
+                return LastError();
+            // Under way: done when the socket can be written, and SO_ERROR says how.
+            Wait(fd, POLLOUT);
+            int error = 0;
+            uint size = 4;
+            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) != 0)
+                return LastError();
+            if (error == 0)
+                return SocketError.Success;
+            *__errno_location() = error;
+            return LastError();
+        }
+    }
+
+    // Sends all of it, to `to` if given (UDP), waiting while the buffer is full.
+    internal static SocketError Send(int fd, ReadOnlySpan<byte> bytes, SocketFlags flags, IPEndPoint to, out int sent)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            sent = 0;
+            byte* address = stackalloc byte[SockaddrSize];
+            uint length = to == null ? 0 : Write(to, address);
+            fixed (byte* p = bytes)
+            {
+                while (sent < bytes.Length || (bytes.IsEmpty && to != null && sent == 0))
+                {
+                    nint n = sendto(fd, p + sent, (nuint)(bytes.Length - sent), (int)flags | MSG_NOSIGNAL, to == null ? null : address, length);
+                    if (n >= 0)
+                    {
+                        sent += (int)n;
+                        if (bytes.IsEmpty)
+                            break;
+                        continue;
+                    }
+                    int e = Errno;
+                    if (WouldBlock(e) || Interrupted(e))
+                        Wait(fd, POLLOUT);
+                    else
+                        return LastError();
+                }
+            }
+            return SocketError.Success;
+        }
+    }
+
+    // Receives what has arrived, waiting for something; fills `from` (UDP).
+    internal static SocketError Receive(int fd, Span<byte> buffer, SocketFlags flags, out int received, IPEndPoint from)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            byte* address = stackalloc byte[SockaddrSize];
+            fixed (byte* p = buffer)
+            {
+                while (true)
+                {
+                    uint length = SockaddrSize;
+                    nint n = recvfrom(fd, p, (nuint)buffer.Length, (int)flags, from == null ? null : address, from == null ? null : &length);
+                    if (n >= 0)
+                    {
+                        received = (int)n;
+                        if (from != null)
+                        {
+                            IPEndPoint source = Read(address);
+                            if (source != null)
+                            {
+                                from.Address = source.Address;
+                                from.Port = source.Port;
+                            }
+                        }
+                        return SocketError.Success;
+                    }
+                    int e = Errno;
+                    if (WouldBlock(e) || Interrupted(e))
+                    {
+                        Wait(fd, POLLIN);
+                        continue;
+                    }
+                    received = 0;
+                    return LastError();
+                }
+            }
+        }
+    }
+
+    internal static SocketError Shutdown(int fd, SocketShutdown how)
+    {
+        unsafe { return shutdown(fd, (int)how) == 0 ? SocketError.Success : LastError(); } // SAFETY: no pointers
+    }
+
+    internal static void Close(int fd)
+    {
+        unsafe { close(fd); } // SAFETY: no pointers
+    }
+
+    internal static IPEndPoint Name(int fd, bool peer)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            byte* address = stackalloc byte[SockaddrSize];
+            uint length = SockaddrSize;
+            int result = peer ? getpeername(fd, address, &length) : getsockname(fd, address, &length);
+            return result == 0 ? Read(address) : null;
+        }
+    }
+
+    internal static void ReuseAddress(Socket socket)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            // Lets a server start again at once on a port whose old connections
+            // linger (TIME_WAIT). Windows' SO_REUSEADDR means something else (two
+            // listeners on one port), so win/runtime.c ignores it.
+            int one = 1;
+            setsockopt((int)socket.Handle, SOL_SOCKET, SO_REUSEADDR, &one, 4);
+        }
+    }
+
+    static void OptionOf(Option option, out int level, out int name)
+    {
+        switch (option)
+        {
+            case Option.NoDelay: level = IPPROTO_TCP; name = TCP_NODELAY; break;
+            case Option.V6Only: level = IPPROTO_IPV6; name = IPV6_V6ONLY; break;
+            default: level = SOL_SOCKET; name = SO_BROADCAST; break;
+        }
+    }
+
+    internal static int GetOption(int fd, Option option)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            OptionOf(option, out int level, out int name);
+            int value = 0;
+            uint size = 4;
+            return getsockopt(fd, level, name, &value, &size) == 0 ? value : 0;
+        }
+    }
+
+    internal static void SetOption(int fd, Option option, int value)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            OptionOf(option, out int level, out int name);
+            if (setsockopt(fd, level, name, &value, 4) != 0)
+                throw new SocketException((int)LastError());
+        }
+    }
+
+    // ---- addresses ------------------------------------------------------------
+
+    // sockaddr_in (16 bytes) or sockaddr_in6 (28): the family, the port in
+    // network order, then the address (and for IPv6 flow information before
+    // it, the scope after). Linux's family is 16 bits; macOS's is a byte after
+    // a byte of length.
+    static uint Write(IPEndPoint endpoint, byte* address)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            new Span<byte>(address, SockaddrSize).Clear();
+            bool v6 = endpoint.AddressFamily == AddressFamily.InterNetworkV6;
+            uint length = v6 ? 28u : 16u;
+            int family = v6 ? AF_INET6 : AF_INET;
+            if (Mac)
+            {
+                address[0] = (byte)length;
+                address[1] = (byte)family;
+            }
+            else
+            {
+                *(ushort*)address = (ushort)family;
+            }
+            address[2] = (byte)(endpoint.Port >> 8);
+            address[3] = (byte)endpoint.Port;
+            if (v6)
+            {
+                endpoint.Address.TryWriteBytes(new Span<byte>(address + 8, 16), out _);
+                *(uint*)(address + 24) = (uint)endpoint.Address.ScopeId;
+            }
+            else
+            {
+                endpoint.Address.TryWriteBytes(new Span<byte>(address + 4, 4), out _);
+            }
+            return length;
+        }
+    }
+
+    static IPEndPoint Read(byte* address)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            int family = Mac ? address[1] : *(ushort*)address;
+            int port = address[2] << 8 | address[3];
+            if (family == AF_INET)
+                return new IPEndPoint(new IPAddress(new ReadOnlySpan<byte>(address + 4, 4)), port);
+            if (family == AF_INET6)
+            {
+                var ip = new IPAddress(new ReadOnlySpan<byte>(address + 8, 16));
+                ip.ScopeId = *(uint*)(address + 24);
+                return new IPEndPoint(ip, port);
+            }
+            return null;
+        }
+    }
+
+    // ---- names ----------------------------------------------------------------
+
+    internal static string HostName()
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            byte* name = stackalloc byte[256];
+            if (gethostname(name, 256) != 0)
+                return "";
+            name[255] = 0;
+            return FileSystem.ToString(new ReadOnlySpan<byte>(name, FileSystem.Length(name)));
+        }
+    }
+
+    // What getaddrinfo's thread shares with the fiber that waits for it.
+    struct Lookup
+    {
+        public int Done;        // set last, by the thread
+        public int Result;
+        public unsafe byte* List;
+        public byte Hints0;     // the hints (48 bytes) start here
+    }
+
+    const int HintsSize = 48, NameRoom = 1024;
+
+    // Looks the name up with getaddrinfo. In a fiber it runs on a thread of
+    // its own, while the fiber sleeps a millisecond at a time and the others
+    // run: getaddrinfo can take seconds, and can't let them run itself.
+    internal static bool Resolve(string host, out IPAddress[] addresses, out SocketError error)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            addresses = null;
+            Lookup* lookup = (Lookup*)calloc(1, (nuint)(sizeof(Lookup) + HintsSize + NameRoom));
+            if (lookup == null)
+            {
+                error = SocketError.NoBufferSpaceAvailable;
+                return false;
+            }
+            byte* hints = &lookup->Hints0;
+            byte* name = hints + HintsSize;
+            if (FileSystem.ToC(host, new Span<byte>(name, NameRoom)) < 0)
+            {
+                free(lookup);
+                error = SocketError.HostNotFound;
+                return false;
+            }
+            // ai_socktype (offset 8): stream, so each address comes once.
+            *(int*)(hints + 8) = SOCK_STREAM;
+            nint thread = 0;
+            if (Fiber.Id != 0 && pthread_create(&thread, null, &LookUp, lookup) == 0)
+            {
+                while (Volatile.Read(ref lookup->Done) == 0)
+                    Fiber.Sleep(1);
+                pthread_join(thread, null);
+            }
+            else
+            {
+                RunLookup(lookup);
+            }
+            int result = lookup->Result;
+            byte* list = lookup->List;
+            free(lookup);
+            if (result != 0)
+            {
+                error = LookupError(result);
+                return false;
+            }
+            addresses = Addresses(list);
+            freeaddrinfo(list);
+            error = addresses.Length > 0 ? SocketError.Success : SocketError.NoData;
+            return addresses.Length > 0;
+        }
+    }
+
+    [UnmanagedCallersOnly]
+    static void* LookUp(void* argument)
+    {
+        unsafe { RunLookup((Lookup*)argument); } // SAFETY: Resolve's lookup, freed after this thread is joined
+        return null;
+    }
+
+    static void RunLookup(Lookup* lookup)
+    {
+        unsafe
+        {
+            // SAFETY: Resolve's lookup, with the hints and the name after it.
+            byte* hints = &lookup->Hints0;
+            byte* list = null;
+            lookup->Result = getaddrinfo(hints + HintsSize, null, hints, &list);
+            lookup->List = list;
+            Volatile.Write(ref lookup->Done, 1);
+        }
+    }
+
+    // struct addrinfo: ai_family at 4, then the address and the next entry.
+    // Linux puts ai_addr at 24 and ai_canonname at 32; macOS (and Windows,
+    // which win/runtime.c turns into Linux's) the other way round.
+    static IPAddress[] Addresses(byte* list)
+    {
+        unsafe
+        {
+            // SAFETY: the C calls get memory on this stack (or from calloc), of
+            // the sizes they are told, and keep none of it past the call.
+            int count = 0;
+            for (byte* entry = list; entry != null; entry = *(byte**)(entry + 40))
+                count++;
+            var addresses = new IPAddress[count];
+            int n = 0;
+            for (byte* entry = list; entry != null; entry = *(byte**)(entry + 40))
+            {
+                byte* address = *(byte**)(entry + (Mac ? 32 : 24));
+                IPEndPoint endpoint = address == null ? null : Read(address);
+                if (endpoint != null)
+                    addresses[n++] = endpoint.Address;
+            }
+            if (n == count)
+                return addresses;
+            var some = new IPAddress[n];
+            new ReadOnlySpan<IPAddress>(addresses, 0, n).CopyTo(some);
+            return some;
+        }
+    }
+}

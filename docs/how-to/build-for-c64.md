@@ -110,7 +110,7 @@ programs `./test.sh --c64` runs:
 | `Tiny`, `Minimal` | 7 KB | 42 KB |
 | `QuizStep1` | 13 KB | 36 KB |
 | `VirtualTest` | 15 KB | 34 KB |
-| `SmallIntegers` | 18 KB | 31 KB |
+| `SmallNative`, `SmallIntegers` | 17 to 18 KB | 31 to 32 KB |
 | `QuizStep2` | 20 KB | 29 KB |
 | `SmallText`, `SmallArena`, `SmallDicts`, `SmallStrings`, `SmallEncoding` | 25 to 28 KB | 21 to 24 KB |
 | `Refs`, `SmallLists`, `SmallStrDicts`, `SmallObjects` | 32 to 34 KB | 15 to 17 KB |

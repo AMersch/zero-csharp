@@ -33,6 +33,7 @@ IMPORT u32 WINAPI GetEnvironmentVariableA(const char *name, char *buffer, u32 si
 IMPORT void *WINAPI GetProcessHeap(void);
 IMPORT void *WINAPI HeapAlloc(void *heap, u32 flags, u32 size);
 IMPORT int WINAPI HeapFree(void *heap, u32 flags, void *block);
+IMPORT void *WINAPI HeapReAlloc(void *heap, u32 flags, void *block, u32 size);
 IMPORT char *WINAPI GetCommandLineA(void);
 IMPORT void *WINAPI CreateFileA(const char *path, u32 access, u32 share, void *security, u32 disposition, u32 flags, void *template_file);
 IMPORT int WINAPI ReadFile(void *file, void *buffer, u32 count, u32 *read, void *overlapped);
@@ -102,6 +103,14 @@ void free(void *block)
 {
     if (block)
         HeapFree(GetProcessHeap(), 0, block);
+}
+
+// HeapReAlloc takes no null block, as realloc does.
+void *realloc(void *block, size_t size)
+{
+    if (!block)
+        return malloc(size);
+    return HeapReAlloc(GetProcessHeap(), 0, block, size);
 }
 
 // ---- output and exit ---------------------------------------------------------

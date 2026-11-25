@@ -15,6 +15,13 @@ namespace System.Runtime
         [DllImport("*"), SuppressGCTransition]
         internal static extern void free(void* memory);
 
+        // For NativeMemory.Realloc. DOS and UEFI get it from their runtime.c.
+        [DllImport("*"), SuppressGCTransition]
+        internal static extern void* realloc(void* memory, nuint size);
+
+        [DllImport("*"), SuppressGCTransition]
+        internal static extern void* memmove(void* destination, void* source, nuint count);
+
         [DllImport("*"), SuppressGCTransition]
         internal static extern nint write(int fd, void* buffer, nuint count);
 

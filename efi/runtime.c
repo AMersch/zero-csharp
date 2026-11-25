@@ -70,14 +70,16 @@ int memcmp(const void *a, const void *b, usize count)
 }
 
 // Pool memory is 8-byte aligned; C's malloc promises 16, which SIMD code may
-// count on. Each block keeps the pool's own pointer just before it.
+// count on. Each block keeps the pool's own pointer just before it, and its
+// size before that, for realloc.
 void *malloc(usize size)
 {
     u8 *pool = 0;
-    if (size > (usize)-32 || EFI_ERROR(efi_system->boot_services->allocate_pool(EfiLoaderData, size + 16, (void **)&pool)))
+    if (size > (usize)-48 || EFI_ERROR(efi_system->boot_services->allocate_pool(EfiLoaderData, size + 24, (void **)&pool)))
         return 0;
-    u8 *block = (u8 *)(((usize)pool + 8 + 15) & ~(usize)15);
+    u8 *block = (u8 *)(((usize)pool + 16 + 15) & ~(usize)15);
     ((void **)block)[-1] = pool;
+    ((usize *)block)[-2] = size;
     return block;
 }
 
@@ -95,6 +97,19 @@ void free(void *block)
 {
     if (block)
         efi_system->boot_services->free_pool(((void **)block)[-1]);
+}
+
+void *realloc(void *block, usize size)
+{
+    if (!block)
+        return malloc(size);
+    usize had = ((usize *)block)[-2];
+    void *moved = malloc(size);
+    if (moved) {
+        memcpy(moved, block, had < size ? had : size);
+        free(block);
+    }
+    return moved;
 }
 
 // ---- standard input and output ----------------------------------------------

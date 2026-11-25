@@ -43,6 +43,7 @@ SMALL_SAMPLES=(
     SmallDoubles
     SmallObjects
     SmallArena
+    SmallNative
     SmallLists
     SmallDicts
     SmallStrDicts

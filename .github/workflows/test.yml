@@ -272,6 +272,7 @@ jobs:
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: |
+          sudo apt-get update -qq
           sudo apt-get install -y -qq llvm-18
           pip install --quiet --break-system-packages nvidia-cuda-nvcc-cu12
           nvcc_dir=$(python3 -c 'import nvidia.cuda_nvcc as m; print(m.__path__[0])')

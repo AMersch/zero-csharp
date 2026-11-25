@@ -418,7 +418,7 @@ test_arm_target() {
     if command -v qemu-system-arm > /dev/null 2>&1; then
         for target in pico2 r4; do
             if ! run_in "$dir" run-$target run -p:ZeroTarget=$target < /dev/null; then fail "$name" "dotnet run in QEMU ($target) failed"; return; fi
-            if ! grep -q "ticks: 10, LED on: false" "$LOG"; then fail "$name" "dotnet run in QEMU ($target) printed something else"; return; fi
+            if ! grep -q "ticks: 10, LED on: False" "$LOG"; then fail "$name" "dotnet run in QEMU ($target) printed something else"; return; fi
         done
     else
         echo "     (no qemu-system-arm: built, not run)"
@@ -2172,7 +2172,7 @@ test_simd_instruction_set() {
     if ! grep -qE -- "-m (x86-64-v3|dotprod)" "$LOG"; then fail "$name" "bflat didn't get -m"; return; fi
     out=$("$(exe "$dir/bin/Debug/$TFM/native")" | tr -d '\r')
     if ! grep -qE "Path: (NEON|AVX)" <<< "$out"; then fail "$name" "not the SIMD path: $(grep Path: <<< "$out")"; return; fi
-    if ! grep -q "Results match: true" <<< "$out"; then fail "$name" "the results don't match"; return; fi
+    if ! grep -q "Results match: True" <<< "$out"; then fail "$name" "the results don't match"; return; fi
     if ! run_in "$dir" simd-mac build -p:ZeroTarget=osx-arm64; then fail "$name" "the osx-arm64 build failed"; return; fi
     pass "$name"
 }

@@ -38,11 +38,11 @@ of the run:
 
 <!-- sample: samples/VirtualTest.cs new-leaks -->
 ```csharp
-Out.Line("--- 3. Virtual methods on classes (each `new` leaks) ---");
+Console.WriteLine("--- 3. Virtual methods on classes (each `new` leaks) ---");
 Animal dog = new Dog();
 Animal cat = new Cat();
-Out.Line(dog.Sound());
-Out.Line(cat.Sound());
+Console.WriteLine(dog.Sound());
+Console.WriteLine(cat.Sound());
 ```
 
 Two objects allocated once are not a problem. The same two allocated per request, per frame or per

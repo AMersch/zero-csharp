@@ -22,7 +22,7 @@ Arena keep = Arena.Create(4096);
 RefList<string> mistakes = RefList<string>.Create(keep);
 if (!mistakes.IsCreated)
 {
-    Out.Line("Arena.Create failed");
+    Console.WriteLine("Arena.Create failed");
     return 1;
 }
 ```
@@ -51,7 +51,7 @@ needed:
 ```csharp
 else
 {
-    Out.Line($"no, it's {a + b}");
+    Console.WriteLine($"no, it's {a + b}");
     // Kept until the end, so the string is built in `keep`, not in
     // the buffer the next answer overwrites.
     mistakes.Add(Str.Format(keep, $"  {a} + {b} = {a + b}, not {value}"));
@@ -81,12 +81,12 @@ back:
 
 <!-- sample: samples/Quiz.cs report -->
 ```csharp
-Out.Line($"{right} of {asked} right");
+Console.WriteLine($"{right} of {asked} right");
 if (mistakes.Count > 0)
 {
-    Out.Line("Mistakes:");
+    Console.WriteLine("Mistakes:");
     foreach (string mistake in mistakes)
-        Out.Line(mistake);
+        Console.WriteLine(mistake);
 }
 ```
 

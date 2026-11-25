@@ -204,8 +204,9 @@ Or use the destination forms, which allocate nothing.
   `Squeeze`, `Unsqueeze`, `Reverse`, `Resize`, `SetSlice`, `FilteredUpdate`, `SequenceEqual`) take
   any `T`. The math (`Add`, `Exp`, `Sum`, the comparisons, the operators) is written for `float`, as
   zerocore's `TensorPrimitives` is. Each has a generic form with .NET's signature, so
-  `Tensor.Sum<float>(t)` compiles, but for any other `T` it ends the program with
-  `NotSupportedException`.
+  `Tensor.Sum<float>(t)` compiles; any other `T` is refused when the program is built (error
+  CS0315: no conversion from `double` to `IFloatTensorElement`, an interface only `float` has),
+  as are the operators on a `Tensor<double>`.
 - **`Tensor.Sum(t)` works without `<float>`.** .NET needs the type argument, since C# can't infer
   `T` through the conversion from `Tensor<T>` to `ReadOnlyTensorSpan<T>`; zerocore's float methods
   take the conversion directly.

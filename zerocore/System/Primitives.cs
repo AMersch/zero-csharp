@@ -244,7 +244,8 @@ namespace System
     //
     // Equals here is bit equality, so NaN equals NaN, as .NET's Equals has
     // it (unlike ==); 0.0 and -0.0 are equal, as in .NET.
-    public unsafe struct Single : IEquatable<float>, IComparable<float>, IComparable, ISpanFormattable
+    public unsafe struct Single : IEquatable<float>, IComparable<float>, IComparable, ISpanFormattable,
+        System.Numerics.Tensors.IFloatTensorElement
     {
         public int CompareTo(object obj) => obj is float other ? CompareTo(other) : obj == null ? 1 : throw new ArgumentException("Object must be of type Single.");
 

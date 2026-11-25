@@ -534,7 +534,7 @@ static class Program
         Run("FilteredUpdate", ix, () =>
         {
             Z.Tensor<float> c = MakeZ(sx);
-            Z.Tensor<bool> mask = Z.Tensor.GreaterThan<float>(c, 0f);
+            Z.Tensor<bool> mask = Z.Tensor.GreaterThan(c, 0f);
             Z.Tensor.FilteredUpdate<float>(c, mask, -1f);
             return c;
         }, () =>

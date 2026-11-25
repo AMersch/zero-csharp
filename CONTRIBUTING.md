@@ -24,6 +24,10 @@ built next to this repository. It has no release to download; the
   instructions a 386 doesn't have, and QEMU's `486` doesn't.
 - **Commodore 64:** `./setup.sh --c64` downloads llvm-mos, a compiler for the 6502, into `tools/c64`
   (about 750 MB) and checks for the .NET SDK, Python 3 and VICE, the emulator (`brew install vice`).
+- **Commander X16:** `./setup.sh --c64` fetches the same llvm-mos (the X16 is built with the C64's
+  pipeline). The emulator is x16emu, from [X16Community/x16-emulator](https://github.com/X16Community/x16-emulator):
+  `X16_EMULATOR` points at it (or put it on the `PATH`, or in `$X16_HOME` or `~/X16`), and `X16_ROM` at its
+  ROM if that isn't next to it. Needs the .NET SDK and Python 3 as well.
 - **UEFI:** QEMU with the OVMF firmware (`brew install qemu` includes it; on Ubuntu
   `qemu-system-x86 ovmf`, or `qemu-system-arm qemu-efi-aarch64` for arm64), a clang with the Windows
   targets (as for `--win`), and Python 3. `UEFI_FIRMWARE` points at another firmware file.
@@ -40,6 +44,8 @@ built next to this repository. It has no release to download; the
 ./run.sh --dos --window Vga   # the DOS game, on screen: arrow keys steer, Esc quits
 ./build.sh --c64              # bin/c64/*.prg, the samples that fit; ./run.sh --c64 runs them in VICE
 ./run.sh --c64 --window C64Demo  # a C64's screen: text, a sprite, raster bars; any key ends it
+./build.sh --cx16             # bin/cx16/*.prg (and *.BNK, see below); ./run.sh --cx16 runs them in x16emu
+./run.sh --cx16 --window CX16Demo  # an X16's screen: text, a sprite, a tone; any key ends it
 ./build.sh --uefi             # bin/uefi/*.efi; ./run.sh --uefi runs them in QEMU on OVMF
 ./run.sh --uefi --window Vga  # the same game, started by the firmware
 ```
@@ -102,6 +108,7 @@ exit with their number of failed checks), and those whose output doesn't vary mu
 ./test.sh --wasm     # WebAssembly
 ./test.sh --dos      # DOS, on an emulated 386 with 4 MB
 ./test.sh --c64      # Commodore 64, in VICE: the samples that fit in it
+./test.sh --cx16     # Commander X16, in x16emu: the samples that fit in it
 ./test.sh --mac      # macOS
 ./test.sh --win      # Windows, under Wine
 ./test.sh --uefi     # UEFI, in QEMU on OVMF, for BFLAT_ARCH (x64 or arm64)
@@ -118,6 +125,16 @@ which has 50 KB for a program, its heap and its stack. They run on every target.
 check that the C64 really does its work: a compiler that optimizes the whole program computes at build
 time whatever it can see, so the samples read their inputs through a static field (`s_never`), and
 `llvm-nm bin/c64/<Sample>.prg.elf` shows whether the routines you meant to test are in the program.
+
+The Commander X16 has 38 KB of fixed RAM, less than the C64. The five Small samples with the most code
+(`SmallBuilders`, `SmallDoubles`, `SmallFloats`, `SmallFormats`, `SmallDoubleFormats`) don't fit it,
+so the build keeps their largest functions in RAM banks (`sdk/ZeroCSharp.Bitcode/X16.cs`). That
+leaves a second file, `bin/cx16/NAME.BNK`, which has to stay next to the `.prg`; `run.sh` and `test.sh`
+take care of it. `ZERO_CX16_BANK=Name` forces the functions whose names contain `Name` into banks even
+when the program fits, to test banking or to measure what a call costs (about 33 cycles, in
+`x16emu`, with the jiffy clock: run it without `-testbench`, which has no frame interrupt).
+`BanksWithCode`, `BanksDemo`, `BankedDemo`, `BankedListDemo` and `CX16Demo` are for the X16 only.
+[Build for the Commander X16](docs/how-to/build-for-cx16.md) has the rest.
 
 The guards are tested the other way round. `lib/` stops the program when it catches a mistake, and
 `samples/Guards.cs` makes one mistake per run (`./run.sh Guards restore-order`). `test.sh` runs each

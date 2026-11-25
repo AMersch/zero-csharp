@@ -54,9 +54,36 @@ static void leave(int code)
     exit(code);
 }
 
+#ifdef CX16_CODE_BANKS
+// A program with more code than fixed RAM holds has some of its functions in
+// RAM banks 1 to CX16_CODE_BANKS (see sdk/ZeroCSharp.Bitcode/Banking.cs). They
+// are in a file next to the program, which one KERNAL LOAD into $A000 reads:
+// it carries on into the next bank when one is full, and leaves the last one
+// selected.
+static void load_code_banks(void)
+{
+    unsigned char device = *(volatile unsigned char *)0x00BA;   // the one the program came from
+    RAM_BANK = 1;
+    cbm_k_setnam(CX16_BANK_FILE);
+    cbm_k_setlfs(0, device ? device : 8, 0);
+    void *end = cbm_k_load(0, (void *)0xA000);
+    RAM_BANK = 1;
+    if (end == 0 || cbm_k_readst() & 0xBF) {
+        puts("can't load " CX16_BANK_FILE);
+        leave(1);
+    }
+}
+#define CODE_BANKS CX16_CODE_BANKS
+#else
+#define CODE_BANKS 0
+#endif
+
 int main(void)
 {
     in_emulator = EMU_ID_1 == 0x31 && EMU_ID_2 == 0x36;
+#ifdef CX16_CODE_BANKS
+    load_code_banks();
+#endif
     leave((int)__managed__Main(0, 0));
     return 0;
 }
@@ -789,13 +816,13 @@ i32 cs_cx16_bank_count(void)
         __asm__ volatile("sec\n\tjsr $FF99" : "=a"(banks) : : "x", "y", "c", "memory");
         count = banks == 0 ? 256 : banks;
     }
-    return (i32)count;
+    return (i32)count - CODE_BANKS;     // the code's banks are not the program's
 }
 
 #define WITH_BANK(bank, body) do { \
     unsigned char saved = RAM_BANK; \
     __asm__ volatile("sei" ::: "memory"); \
-    RAM_BANK = (unsigned char)(bank); \
+    RAM_BANK = (unsigned char)((bank) + CODE_BANKS); \
     body; \
     RAM_BANK = saved; \
     __asm__ volatile("cli" ::: "memory"); \

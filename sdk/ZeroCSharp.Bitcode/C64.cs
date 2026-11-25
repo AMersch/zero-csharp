@@ -18,7 +18,7 @@ using System.Text.RegularExpressions;
 
 namespace ZeroBitcode;
 
-static class C64
+static partial class C64
 {
     static ToolFailure Fail(string message) => new("zero-bitcode", message);
 
@@ -194,18 +194,29 @@ static class C64
         // and puts it back at the end, so the program ends at BASIC's READY.
         string saveBasic = Path.Combine(llvmMos, "mos-platform", "commodore", "lib", "save-basic.o");
 
+        // The X16 keeps code that doesn't fit its fixed RAM in banks (X16.cs):
+        // extra compiler options, and the state of that, for the retries.
+        var options = new List<string>();
+        X16Banks? banks = null;
+        if (platform == "cx16")
+            X16ForceBanks(ref banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos), options);
+
         while (true)
         {
-            var (code, log) = Capture(clang, [.. mos, .. whole, .. separate, .. extra, runtime, saveBasic, "-o", output]);
+            var (code, log) = Capture(clang, [.. mos, .. options, .. whole, .. separate, .. extra, runtime, saveBasic, "-o", output]);
             File.WriteAllText(Path.Combine(outDir, "link.log"), log);
             if (code == 0)
+            {
+                if (platform == "cx16")
+                    X16Finish(banks, llvmMos, outDir, output, name);
                 return;
+            }
 
             Match registers = Regex.Match(log, @"ran out of registers during register allocation in function '(.*?)'");
             string? method = registers.Success ? registers.Groups[1].Value : null;
             if (method == null && log.Contains("LLVM ERROR", StringComparison.Ordinal))
             {
-                var (_, trace) = Capture(clang, [.. mos, .. whole, .. separate, .. extra, runtime, saveBasic, "-o", output,
+                var (_, trace) = Capture(clang, [.. mos, .. options, .. whole, .. separate, .. extra, runtime, saveBasic, "-o", output,
                     "-Wl,-mllvm,-debug-pass=Executions"]);
                 MatchCollection steps = Regex.Matches(trace, @"Executing Pass '.*?' on Function '(.*?)'");
                 if (steps.Count > 0)
@@ -224,7 +235,7 @@ static class C64
             if (module != null)
             {
                 Console.Error.WriteLine($"[{platform}]   {name}: {method} is too much for the 6502's registers once optimized with the rest; compiling its module on its own");
-                Tools.Run(clang, [.. mos, "-fno-lto", "-c", module, "-o", module + ".o"], $"compiling {Path.GetFileName(module)}");
+                Tools.Run(clang, [.. mos, .. options, "-fno-lto", "-c", module, "-o", module + ".o"], $"compiling {Path.GetFileName(module)}");
                 separate.Add(module + ".o");
                 whole.Remove(module);
                 continue;
@@ -232,7 +243,11 @@ static class C64
 
             Match tooBig = Regex.Match(log, @"will not fit in region.*?overflowed by (.*)");
             if (tooBig.Success)
+            {
+                if (platform == "cx16" && X16MoveToBanks(ref banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos), tooBig.Value, options))
+                    continue;
                 throw Fail($"{name} doesn't fit in {(platform == "c64" ? "a C64's" : "the " + platform + "'s")} memory:\n  too big by {tooBig.Groups[1].Value.Trim()}");
+            }
             var missing = Regex.Matches(log, @"undefined symbol: cs_([A-Za-z0-9_]*)").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal).ToList();
             if (missing.Count > 0)
                 throw Fail($"{name} calls functions the runtime ({platform}/runtime.c) doesn't have:\n  {string.Join(" ", missing)}");

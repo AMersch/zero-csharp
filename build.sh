@@ -170,9 +170,9 @@ C64_SAMPLES=(
     Paddles
 )
 # A Commander X16 has 38 KB of fixed RAM for a program and its memory, 12 KB
-# less than a C64: these fit. SmallBuilders, SmallDoubles, SmallFloats,
-# SmallFormats and SmallDoubleFormats don't, by 0.6 to 3.4 KB. Nothing here
-# uses the X16's banked RAM yet. CX16Demo is for the X16 only (lib/CX16.cs: the
+# less than a C64: these fit, the last five (SmallBuilders ... SmallDoubleFormats)
+# by keeping some of their code in banked RAM (sdk/ZeroCSharp.Bitcode/Banking.cs).
+# CX16Demo is for the X16 only (lib/CX16.cs: the
 # screen, sprites, sound, keyboard); it checks itself, at the key tests/input types.
 CX16_SAMPLES=(
     Tiny
@@ -193,10 +193,16 @@ CX16_SAMPLES=(
     SmallEncoding
     SmallDecimalFormats
     SmallKeys
+    SmallBuilders
+    SmallDoubles
+    SmallFloats
+    SmallFormats
+    SmallDoubleFormats
     CX16Demo
     BanksDemo
     BankedDemo
     BankedListDemo
+    BanksWithCode
 )
 # A microcontroller has no SIMD to benchmark, and Vga is a PC game. Blink is
 # for microcontrollers only (lib/Board.cs: the LED, registers, a timer). The Uno R4

@@ -51,7 +51,7 @@ if ! emulator=$(find_x16_emulator); then
     exit 1
 fi
 
-options=(-prg "$program" -run)
+options=(-prg "$program" -run -fsroot "$(dirname "$program")")
 [ -n "${X16_ROM:-}" ] && options+=(-rom "$X16_ROM")
 
 if [ "$window" = 1 ]; then

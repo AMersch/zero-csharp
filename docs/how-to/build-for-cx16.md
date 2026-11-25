@@ -13,9 +13,9 @@ platform. [Build for the Commodore 64](build-for-c64.html) explains the pipeline
 
 The X16 has far more memory than a C64 (512 KB of banked RAM as the emulator starts, up to 2 MB), but a
 program's pointers are 16 bits, so what it can address directly is the fixed RAM from $0801 to $9EFF:
-38 KB, against about 50 KB on the C64. The rest is banked through an 8 KB window at $A000, which the
-compiled code doesn't use: the heap and the program's data can't span banks. `lib/Banks.cs` is for
-explicit use of the rest, below.
+38 KB, against about 50 KB on the C64. The rest is banked through an 8 KB window at $A000. Code that
+doesn't fit goes there (see "Code in banks"), but the heap and the program's data can't span banks.
+`lib/Banks.cs` is for explicit use of the rest, below.
 
 ## Get the tools
 
@@ -115,14 +115,36 @@ and capacity are kept in the banks too. It doubles when full, in place while it 
 ./test.sh --cx16                  # every X16 sample, compared with tests/expected
 ```
 
-`SmallBuilders`, `SmallDoubles`, `SmallFloats`, `SmallFormats` and `SmallDoubleFormats` are too big
-for 38 KB, by 0.6 to 3.4 KB, and the build says by how much. It is their code alone: more than 38 KB of it.
+## Code in banks
 
-Putting the program's writable data in the 8 KB at $A000 (RAM bank 1, which the KERNAL selects at
-startup) doesn't help. The program is loaded from a file into $0801-$9EFF, since the I/O area at $9F00
-is in the way of anything bigger, and the window can't hold code that comes in through that load. The
-data would also be limited to 8 KB, which `SmallUnicode`'s tables already exceed. What would work is code
-in other banks, loaded or copied there before it runs, with the compiler placing methods in them.
+A program with more code than the 38 KB of fixed RAM (`SmallBuilders`, `SmallDoubles`, `SmallFloats`,
+`SmallFormats` and `SmallDoubleFormats` are) keeps its largest functions in RAM banks. The build does
+it by itself when the first link is too big:
+
+1. It links once with room to spare, to see how big each function is.
+2. It moves the largest functions (150 bytes or more, up to 8 KB) into banks, about as much as is
+   over plus 4 KB for the heap and the stack, and links again, moving more if it was not enough.
+3. A moved function `f` becomes `f__bank`, placed at $A000 in a bank of its own. A small function `f`
+   stays in fixed RAM: it saves the bank register (the byte at $00), selects the bank, calls
+   `f__bank`, and puts the old bank back. Calls, function pointers and virtual calls all go
+   through it, so nothing else in the program changes. Each costs about 20 cycles and 40 bytes of
+   fixed RAM.
+
+The banks are written to a second file next to the program, `bin/cx16/NAME.BNK` (the program's name in
+capitals, at most 12 characters). At startup the program loads it from the disk it came from, in one
+KERNAL `LOAD` into $A000, which carries on into the next bank when one is full. So the two files have to
+be together: on an SD card, and for `x16emu` in the folder `run.sh` points it at (`-fsroot`). `./run.sh
+--cx16` and `./test.sh --cx16` do that.
+
+A call through a thunk costs about 33 cycles more (measured in `x16emu`: 60,000 calls of a small
+function took 183 jiffies in fixed RAM and 198 banked, 407 and 440 cycles a call, so a call that does
+little gets 8% slower). The build moves the largest functions, which are rarely the ones that loop;
+`ZERO_CX16_BANK=Name ./build.sh --cx16 Sample` moves the functions whose names contain `Name`, whether
+the program needs it or not, for trying that.
+
+Only code moves: the data, the heap and the stack stay in fixed RAM. The data banks of `lib/Banks.cs`
+start after the code banks, so such a program has that many fewer. A program that fits has no `.BNK`
+file, and nothing is different. The work is in `sdk/ZeroCSharp.Bitcode/X16.cs`.
 
 An X16 has no standard output and no exit code, so `run.sh --cx16` uses the emulator's debug
 registers, which `cx16/runtime.c` finds by reading $9FBE and $9FBF ("1" and "6" in the emulator):

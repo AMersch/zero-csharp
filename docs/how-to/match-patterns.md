@@ -41,6 +41,60 @@ Check("foreach over the matches", total == 60);
 A match is a `ref struct` that refers to the text, so it lives only as long as that span does. To keep
 a match's text, copy it, for example with `Str.Format(arena, $"{m.Value}")`.
 
+## Replace and split
+
+`Replace` takes .NET's replacement patterns, and writes the result as a new string in the arena you
+pass:
+
+<!-- sample: samples/Patterns.cs replace -->
+```csharp
+string swapped = date.Replace(arena,
+    "on 2026-11-25 and 2025-01-02", "$3/$2/$1");
+// "on 25/11/2026 and 02/01/2025"
+```
+
+| In the replacement | Stands for |
+|---|---|
+| `$1`, `${1}` | group 1 (empty if it didn't take part) |
+| `$&` | the whole match |
+| `` $` ``, `$'` | the input before the match, after it |
+| `$+` | the last group |
+| `$_` | the whole input |
+| `$$` | a `$` |
+
+Anything else after a `$`, such as `$x` or a group the pattern doesn't have, is kept as it is, as
+.NET does. A last argument limits how many matches are replaced. Other overloads append to a
+`StrBuilder` instead, or to a `ScratchText` inside `Arena.Scratch`.
+
+For a replacement that depends on the match, pass a function, as .NET's `MatchEvaluator`. It
+appends what replaces each match to the builder it is given, so nothing is allocated per match:
+
+<!-- sample: samples/Patterns.cs evaluator -->
+```csharp
+// A MatchEvaluator: appends what replaces each match.
+static void Doubled(RegexMatch match, StrBuilder output)
+{
+    Str.TryParse(match.Value, out long number);
+    output.Append(2 * number);
+}
+```
+
+<!-- sample: samples/Patterns.cs evaluator-use -->
+```csharp
+string doubled = R(@"\d+").Replace(arena, "3 apples, 12 pears", &Doubled);
+```
+
+`Split` gives the pieces of the input between matches, as slices of it, so it allocates nothing. As
+in .NET, the text of each group that took part in a match comes between the pieces around it, and a
+count above 0 limits the number of pieces, the last one being the rest of the input:
+
+<!-- sample: samples/Patterns.cs split -->
+```csharp
+int fields = 0;
+foreach (ReadOnlySpan<char> field in R(@"\s*,\s*").Split("a , b,c,,d"))
+    fields++;           // "a", "b", "c", "", "d"
+```
+
 ## What the patterns can say
 
 - Literals, and escapes: `\t \n \r \f \v \e \0 \xHH \uHHHH`, and `\` before punctuation.

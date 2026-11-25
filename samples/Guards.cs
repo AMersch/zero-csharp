@@ -43,6 +43,10 @@ public static class Program
             Out.Line("  scratch-outer-text   a ScratchText appended to inside a nested Arena.Scratch");
             Out.Line("  ptr-null             the Value of a null Ptr");
             Out.Line("  ptr-after-reset      a Ptr used after its arena was reset (DebugChecks)");
+            Out.Line("  pool-removed         a Pool handle used after its item was removed");
+            Out.Line("  pool-moved           a copy of a Pool handle used after Move");
+            Out.Line("  scratch-pool-outer   a ScratchPool added to inside a nested Arena.Scratch");
+            Out.Line("  pool-other           a Pool handle used with another pool");
             return 0;
         }
 
@@ -73,6 +77,10 @@ public static class Program
             case "ptr-after-reset": PtrAfterReset(); break;
             case "custom-format": Out.Line(Opaque(1.5).ToString("0.00")); break;
             case "bad-format-item": Out.Line(string.Format("{0:F2", Opaque(1.5))); break;
+            case "pool-removed": PoolRemoved(); break;
+            case "pool-moved": PoolMoved(); break;
+            case "scratch-pool-outer": ScratchPoolOuter(); break;
+            case "pool-other": PoolOther(); break;
             default:
                 Out.Line("Unknown case");
                 return 0;
@@ -325,6 +333,46 @@ public static class Program
         item.Value = 8;
     }
 
+    static void PoolRemoved()
+    {
+        var pool = Pool<int>.Create(Arena.Create(4096));
+        Handle<int> item = pool.Add(1);
+        pool.Remove(item);
+        pool.Add(2); // the same slot, a new generation
+        pool[item] = 3;
+    }
+
+    static void PoolMoved()
+    {
+        var pool = Pool<int>.Create(Arena.Create(4096));
+        Handle<int> item = pool.Add(1);
+        Handle<int> copy = item;
+        pool.Move(ref item);
+        pool[copy] = 2;
+    }
+
+    static void PoolOther()
+    {
+        Arena arena = Arena.Create(4096);
+        var first = Pool<int>.Create(arena);
+        var second = Pool<int>.Create(arena);
+        second.Add(0);
+        Handle<int> item = first.Add(1); // slot 0, generation 1, as second's item
+        second[item] = 2;
+    }
+
+    static void ScratchPoolOuter()
+    {
+        Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            var outer = new OuterScratch { Pool = scratch.Pool<int>() };
+            Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref OuterScratch state) =>
+            {
+                state.Pool.Add(1);
+            });
+        });
+    }
+
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     static int Opaque(int value) => value;
 }
@@ -334,6 +382,7 @@ public ref struct OuterScratch
     public ScratchScope Scope;
     public ScratchList<int> Items;
     public ScratchText Text;
+    public ScratchPool<int> Pool;
 }
 
 public struct Left { public int Value; }

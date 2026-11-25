@@ -50,7 +50,7 @@ line of input are: the program grows until memory runs out. The same goes for bo
 strings, which also call `calloc`.
 
 `NativeMemory.Alloc` and `Free` also work, for a block you free yourself, as in C (see
-[Limits](limits.html#nativememory)). They suit code shared with .NET that already uses them;
+[Free memory yourself](../how-to/free-memory-yourself.html)). They suit code shared with .NET that already uses them;
 otherwise an arena is the better tool.
 
 ## Arenas free by lifetime

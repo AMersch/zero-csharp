@@ -42,6 +42,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   `ref` and `in`, return a ref, and keep the ref from outliving a list's buffer or an arena scope.
 - [Catch arena mistakes](catch-arena-mistakes.html): turn on `Arena.DebugChecks`, name your arenas, and
   see what the library stops the program for.
+- [Free memory yourself](free-memory-yourself.html): `NativeMemory.Alloc` and `Free` for a block with
+  its own lifetime, a struct that frees it with `using`, and what nothing checks.
 
 ## Targets
 

@@ -23,7 +23,7 @@ exports:
                    _aligned_alloc, _arc4random, _arc4random_buf,
                    _arc4random_uniform, _asin, _asinf, _atan, _atan2, _atan2f,
                    _atanf, _atexit, _atof, _atoi, _atol, _atoll, _bsearch,
-                   _bzero, _calloc, _cbrt, _cbrtf, _ceil, _ceilf, _chdir,
+                   _bzero, _calloc, _cbrt, _cbrtf, _ceil, _ceilf, _cfmakeraw, _chdir,
                    _clock, _clock_gettime, _clock_gettime_nsec_np, _close,
                    _cos, _cosf, _cosh, _coshf, _difftime, _dlclose, _dlerror,
                    _dlopen, _dlsym, _dup, _dup2, _dyld_stub_binder, _execve,
@@ -38,7 +38,7 @@ exports:
                    _localtime, _localtime_r, _log, _log10, _log10f, _log1p,
                    _log2, _log2f, _logf, _lseek, _malloc, _memchr, _memcmp,
                    _memcpy, _memmove, _memset, _mktime, _mmap, _modf,
-                   _mprotect, _munmap, _nanosleep, _open, _perror, _pipe,
+                   _mprotect, _munmap, _nanosleep, _open, _perror, _pipe, _poll,
                    _posix_memalign, _pow, _powf, _printf, _pthread_create,
                    _pthread_detach, _pthread_getspecific, _pthread_join,
                    _pthread_key_create, _pthread_key_delete,
@@ -53,7 +53,7 @@ exports:
                    _strlen, _strncat, _strncmp, _strncpy, _strndup, _strnlen,
                    _strrchr, _strspn, _strstr, _strtod, _strtof, _strtok_r,
                    _strtol, _strtoll, _strtoul, _strtoull, _sysconf, _system,
-                   _tan, _tanf, _tanh, _tanhf, _time, _trunc, _truncf, _unlink,
+                   _tan, _tanf, _tanh, _tanhf, _tcgetattr, _tcsetattr, _time, _trunc, _truncf, _unlink,
                    _unsetenv, _usleep, _vfprintf, _vprintf, _vsnprintf,
                    _vsprintf, _waitpid, _write ]
 ...

@@ -53,6 +53,7 @@ SMALL_SAMPLES=(
     SmallFormats
     SmallDoubleFormats
     SmallDecimalFormats
+    SmallKeys
 )
 SAMPLES=(
     Tiny
@@ -87,6 +88,7 @@ SAMPLES=(
     Unicode
     Numerics
     Formats
+    Keys
     Tensors
     TensorsAvx
     "${SMALL_SAMPLES[@]}"
@@ -131,6 +133,7 @@ DOS_SAMPLES=(
     Unicode
     Numerics
     Formats
+    Keys
     Tensors
     "${SMALL_SAMPLES[@]}"
     Vga
@@ -183,6 +186,7 @@ ARM_SAMPLES=(
     Unicode
     Numerics
     Formats
+    Keys
     Tensors
     "${SMALL_SAMPLES[@]}"
     Blink

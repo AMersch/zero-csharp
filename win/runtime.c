@@ -52,14 +52,21 @@ i64 write(int fd, const void *buffer, u64 count)
     return (i64)count;
 }
 
+#define KEYS_READ ReadConsoleInputW
+#define KEYS_PEEK PeekConsoleInputW
+#include "console-keys.h"
+
 // A console hands over typed lines ending in "\r\n", so carriage returns from
-// a console are dropped. A file or a pipe is passed through as it is: its
+// a console are dropped. In raw mode (Console.ReadKey) it hands over keys, as
+// console-keys.h has them. A file or a pipe is passed through as it is: its
 // bytes may not be text (lib/In's Read), and In's ReadLine handles "\r\n".
 i64 read(int fd, void *buffer, u64 count)
 {
     Handle file = handle_for(fd);
     char *bytes = buffer;
     u32 chunk = count > 0x40000000 ? 0x40000000 : (u32)count;
+    if (fd == 0 && keys_raw)
+        return keys_read(buffer, chunk);
     u32 mode;
     int console = GetConsoleMode(file, &mode);
     for (;;) {

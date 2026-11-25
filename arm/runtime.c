@@ -34,6 +34,50 @@ static void fatal(const char *message)
     abort();
 }
 
+// ---- the terminal ---------------------------------------------------------------
+//
+// Console.ReadKey and KeyAvailable (lib/InKeys.cs) ask for raw mode with
+// these. A board's standard input is a semihosting file or console, not a
+// terminal, so ReadKey reads the next character of it. Weak, in case the C
+// library has some of them.
+
+struct pollfd {
+    int fd;
+    short events, revents;
+};
+
+__attribute__((weak)) int isatty(int fd)
+{
+    (void)fd;
+    return 0;
+}
+
+__attribute__((weak)) int tcgetattr(int fd, void *termios)
+{
+    (void)fd;
+    (void)termios;
+    return -1;
+}
+
+__attribute__((weak)) int tcsetattr(int fd, int when, const void *termios)
+{
+    (void)fd;
+    (void)when;
+    (void)termios;
+    return -1;
+}
+
+__attribute__((weak)) void cfmakeraw(void *termios) { (void)termios; }
+
+// Standard input can always be read: there is a next character, or the end.
+__attribute__((weak)) int poll(struct pollfd *fds, unsigned long count, int timeout)
+{
+    (void)timeout;
+    for (unsigned long i = 0; i < count; i++)
+        fds[i].revents = fds[i].events & 1;
+    return (int)count;
+}
+
 // ---- threads: there are none (see dos/runtime.c) --------------------------------
 
 #define MAX_KEYS 8

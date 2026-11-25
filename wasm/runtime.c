@@ -39,6 +39,28 @@ int clock_gettime(int clock, long long *timespec)
     return 0;
 }
 
+// ---- the terminal --------------------------------------------------------
+
+// Console.ReadKey (lib/InKeys.cs) asks for raw mode with these. WASI has no
+// terminal to set (its C library has isatty and poll, not these), so they
+// fail, and ReadKey reads the next character of the input instead.
+int tcgetattr(int fd, void *termios)
+{
+    (void)fd;
+    (void)termios;
+    return -1;
+}
+
+int tcsetattr(int fd, int when, const void *termios)
+{
+    (void)fd;
+    (void)when;
+    (void)termios;
+    return -1;
+}
+
+void cfmakeraw(void *termios) { (void)termios; }
+
 // zerocore's startup (Runtime/Startup.cs) needs the module header to set up
 // static fields of reference types. C# can't take a data symbol's address on
 // WASM, so it asks for it here.

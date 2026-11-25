@@ -5,9 +5,10 @@ index: 1
 
 # Read input from the user
 
-zerocore has no `Console`, so there is no `Console.ReadLine()` returning a new string. `lib/In.cs` reads
-a line into a `Span<char>` you pass instead. Nothing is allocated per line, which matters when nothing
-is ever freed. This guide reads answers the way `samples/Quiz.cs` does.
+`Console.ReadLine()` works, but it returns a new string each time, and nothing frees it. `lib/In.cs`
+reads a line into a `Span<char>` you pass instead. Nothing is allocated per line, which matters when
+nothing is ever freed. This guide reads answers the way `samples/Quiz.cs` does, and then
+[keys one at a time](#read-keys-one-at-a-time) with `Console.ReadKey`.
 
 ## Give the line somewhere to go
 
@@ -187,6 +188,38 @@ through untouched.
 
 `ReadLine` and `Read` can be mixed: `Read` starts with whatever `ReadLine` had read ahead of the line
 it returned.
+
+## Read keys one at a time
+
+`Console.ReadKey` returns a key as soon as it is pressed, without waiting for Enter, as a
+`ConsoleKeyInfo`: its character, its `ConsoleKey` and its modifiers. `ReadKey(intercept: true)` doesn't
+show the key; `Console.KeyAvailable` says whether one waits, without waiting:
+
+<!-- sample: samples/Keys.cs readkey -->
+```csharp
+while (true)
+{
+    ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+    if (key.KeyChar == 'q')
+        break;
+    Console.WriteLine($"key {(int)key.Key,3} char {(int)key.KeyChar,4} "
+        + $"shift {Has(key, ConsoleModifiers.Shift)} "
+        + $"alt {Has(key, ConsoleModifiers.Alt)} "
+        + $"ctrl {Has(key, ConsoleModifiers.Control)}");
+}
+```
+
+It works on every target. In a terminal on Linux and macOS it puts the terminal in raw mode for the one
+read; Windows and DOS read the console's key events, UEFI the firmware's keyboard, and the C64 the
+KERNAL's keyboard buffer. Arrows, Home, End, Page Up and Down, Insert, Delete and F1-F12 come as their
+`ConsoleKey`, with Shift, Alt and Control where the system reports them (not on UEFI or the C64).
+On DOS, reading from the keyboard is untested: the tests feed it input from a file, which works as
+below.
+
+When standard input isn't a terminal (a pipe or a file, as in `./test.sh`), a key is the next character
+of the input, and a terminal's escape sequences in it (`ESC [ A`) are keys too, as on .NET for Unix.
+At the end of that input, `ReadKey` ends the program with `InvalidOperationException`. WebAssembly and
+the microcontrollers have no terminal, so they always read keys this way.
 
 ## Watch out for
 

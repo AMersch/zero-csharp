@@ -25,7 +25,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-public static class In
+public static partial class In
 {
     [DllImport("libc")]
     static unsafe extern nint read(int fd, byte* buffer, nuint count);

@@ -285,10 +285,134 @@ static void read_line(void)
     }
 }
 
+// ---- keys one at a time, for Console.ReadKey (lib/InKeys.cs) -----------------
+//
+// The POSIX calls ReadKey and KeyAvailable make, for the firmware's keyboard.
+// A "termios" is one byte, 1 for raw; tcsetattr remembers it, and in raw mode
+// read() returns the next key press as the bytes a Unix terminal sends: its
+// character in UTF-8, or an escape sequence (ESC [ A for the up arrow) for a
+// key without one. The keyboard protocol doesn't report Shift, Ctrl or Alt
+// with those keys. Input from a file (the shell's "<") isn't a terminal.
+
+struct pollfd {
+    int fd;
+    short events, revents;
+};
+
+static int keys_raw;
+
+int isatty(int fd) { return fd == 0 && !input_file; }
+
+int tcgetattr(int fd, u8 *termios)
+{
+    if (!isatty(fd))
+        return -1;
+    termios[0] = 0;
+    return 0;
+}
+
+void cfmakeraw(u8 *termios) { termios[0] = 1; }
+
+int tcsetattr(int fd, int when, const u8 *termios)
+{
+    (void)when;
+    if (!isatty(fd))
+        return -1;
+    keys_raw = termios[0];
+    return 0;
+}
+
+// A key press as a terminal's bytes (out has room for 8), or 0 bytes.
+static usize key_bytes(InputKey key, u8 *out)
+{
+    // Scan codes 1-6: up, down, right, left, home, end.
+    static const char finals[] = { 'A', 'B', 'C', 'D', 'H', 'F' };
+    // 7-0x16: insert, delete, page up, page down, F1-F12.
+    static const u8 numbers[] = { 2, 3, 5, 6, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 23, 24 };
+    usize n = 0;
+    if (key.scan_code >= 1 && key.scan_code <= 6) {
+        out[n++] = 0x1B;
+        out[n++] = '[';
+        out[n++] = (u8)finals[key.scan_code - 1];
+        return n;
+    }
+    if (key.scan_code >= 7 && key.scan_code <= 0x16) {
+        u8 number = numbers[key.scan_code - 7];
+        out[n++] = 0x1B;
+        out[n++] = '[';
+        if (number >= 10)
+            out[n++] = (u8)('0' + number / 10);
+        out[n++] = (u8)('0' + number % 10);
+        out[n++] = '~';
+        return n;
+    }
+    if (key.scan_code == 0x17) { // escape
+        out[n++] = 0x1B;
+        return n;
+    }
+    u32 c = key.unicode_char;
+    if (c == 0)
+        return 0;
+    if (c < 0x80) {
+        out[n++] = (u8)c;
+    } else if (c < 0x800) {
+        out[n++] = (u8)(0xC0 | (c >> 6));
+        out[n++] = (u8)(0x80 | (c & 0x3F));
+    } else {
+        out[n++] = (u8)(0xE0 | (c >> 12));
+        out[n++] = (u8)(0x80 | ((c >> 6) & 0x3F));
+        out[n++] = (u8)(0x80 | (c & 0x3F));
+    }
+    return n;
+}
+
+static i64 keys_read(void *buffer, usize count)
+{
+    TextInput *keyboard = efi_system->con_in;
+    for (;;) {
+        InputKey key;
+        Status status = keyboard->read_key_stroke(keyboard, &key);
+        if (status == EFI_NOT_READY) {
+            usize index;
+            efi_system->boot_services->wait_for_event(1, &keyboard->wait_for_key, &index);
+            continue;
+        }
+        if (EFI_ERROR(status))
+            return -1;
+        u8 bytes[8];
+        usize n = key_bytes(key, bytes);
+        if (n == 0)
+            continue;
+        if (n > count)
+            n = count;
+        memcpy(buffer, bytes, n);
+        return (i64)n;
+    }
+}
+
+// Only standard input is asked about, and only whether it can be read now.
+int poll(struct pollfd *fds, unsigned long count, int timeout)
+{
+    (void)timeout;
+    int ready = 0;
+    for (unsigned long i = 0; i < count; i++) {
+        fds[i].revents = 0;
+        if (fds[i].fd != 0 || !(fds[i].events & 1))
+            continue;
+        if (!isatty(0) || efi_system->boot_services->check_event(efi_system->con_in->wait_for_key) == EFI_SUCCESS) {
+            fds[i].revents = 1;
+            ready++;
+        }
+    }
+    return ready;
+}
+
 i64 read(int fd, void *buffer, usize count)
 {
     if (fd != 0)
         return -1;
+    if (keys_raw && !input_file)
+        return keys_read(buffer, count);
     if (input_file) {
         usize size = count;
         return EFI_ERROR(input_file->read(input_file, &size, buffer)) ? -1 : (i64)size;

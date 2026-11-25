@@ -64,8 +64,8 @@ else
 
 ## Out: formatting straight to stdout
 
-zerocore has no `Console`. `lib/Out.cs` is a buffered writer that encodes text as UTF-8 and hands each
-line to `write()` in one call. `Out.Line($"...")` uses a custom interpolated string handler, so every
+`lib/Out.cs` is a buffered writer that encodes text as UTF-8 and hands each line to `write()` in one
+call; `Console.Write` and `Console.WriteLine` go through it too. `Out.Line($"...")` uses a custom interpolated string handler, so every
 hole is formatted straight into the output buffer and no string is built:
 
 <!-- sample: samples/Strings.cs table -->

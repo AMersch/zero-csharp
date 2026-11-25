@@ -42,6 +42,9 @@ IMPORT u32 WINAPI GetFileSize(void *file, u32 *size_high);
 IMPORT int WINAPI DeleteFileA(const char *path);
 IMPORT int WINAPI GetNumberOfConsoleInputEvents(void *console, u32 *count);
 IMPORT int WINAPI ReadConsoleInputA(void *console, void *records, u32 capacity, u32 *count);
+IMPORT int WINAPI PeekConsoleInputA(void *console, void *records, u32 capacity, u32 *count);
+IMPORT int WINAPI GetConsoleMode(void *console, u32 *mode);
+IMPORT u32 WINAPI GetFileType(void *file);
 
 #define STD_INPUT_HANDLE ((u32)-10)
 #define STD_OUTPUT_HANDLE ((u32)-11)
@@ -117,12 +120,21 @@ int write(int fd, const void *buffer, size_t count)
     return (int)written;
 }
 
+// Console.ReadKey's keys, from HX's console as from Windows' (see there).
+#define KEYS_READ ReadConsoleInputA
+#define KEYS_PEEK PeekConsoleInputA
+#define KEYS_ANSI
+#include "../win/console-keys.h"
+
 // Standard input, whatever fd is: the keyboard through HX's console, or a
 // file given with "<" (what test.sh uses). Returns 0 at the end of input.
+// In raw mode (Console.ReadKey), a key at a time: see console-keys.h.
 int read(int fd, void *buffer, size_t count)
 {
     u32 got = 0;
     (void)fd;
+    if (keys_raw)
+        return keys_read(buffer, count);
     if (!ReadFile(GetStdHandle(STD_INPUT_HANDLE), buffer, count, &got, 0))
         return -1;
     return (int)got;

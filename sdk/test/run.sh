@@ -244,6 +244,7 @@ test_payload_complete() {
              ref/fsharp/System.Runtime.dll ref/fsharp/System.Runtime.Extensions.dll ref/fsharp/FSharp.Core.dll \
              native/linux-x64/zerocore.o native/linux-x64/library.o \
              native/linux-arm64/zerocore.o native/linux-arm64/library.o \
+             native/linux-x64/cuda.o native/linux-arm64/cuda.o \
              native/win-x64/start.obj native/win-x64/runtime.obj native/win-x64/library.obj native/win-x64/zerocore.obj \
              native/osx-arm64/start.o native/osx-arm64/runtime.o native/osx-arm64/library.o native/osx-arm64/zerocore.o \
              native/osx-arm64/libSystem.tbd VERSIONS.txt \
@@ -260,6 +261,8 @@ test_payload_complete() {
     if ! is_elf "$payload/native/linux-arm64/zerocore.o" aarch64; then fail "payload complete" "linux-arm64 object isn't aarch64"; return; fi
     if ! is_elf "$payload/native/linux-x64/library.o" x86-64; then fail "payload complete" "linux-x64 library.o isn't x86-64"; return; fi
     if ! is_elf "$payload/native/linux-arm64/library.o" aarch64; then fail "payload complete" "linux-arm64 library.o isn't aarch64"; return; fi
+    if ! is_elf "$payload/native/linux-x64/cuda.o" x86-64; then fail "payload complete" "linux-x64 cuda.o isn't x86-64"; return; fi
+    if ! is_elf "$payload/native/linux-arm64/cuda.o" aarch64; then fail "payload complete" "linux-arm64 cuda.o isn't aarch64"; return; fi
     for f in start.obj runtime.obj library.obj; do
         if ! is_coff_x64 "$payload/native/win-x64/$f"; then fail "payload complete" "win-x64/$f isn't COFF"; return; fi
     done
@@ -433,6 +436,58 @@ test_gpu_errors() {
         if run_in "$dir" gpu-host build -p:ZeroGpu=Metal -p:ZeroTarget=osx-arm64; then fail "$name" "ZeroGpu=Metal built off a Mac"; return; fi
         if ! grep -q "ZeroGpu=Metal builds on an Apple Silicon Mac" "$LOG"; then fail "$name" "no message about the host"; return; fi
     fi
+    pass "$name"
+}
+
+# ZeroGpu=Cuda (experimental): the zerogpu template's program, built for
+# NVIDIA GPUs on Linux. It needs a clang 18 or later with the NVPTX backend
+# (Ubuntu 24.04's runners have one) and NativeAOT-LLVM (Docker on a Mac). No
+# runner has an NVIDIA GPU, so on Linux the program must say there's no
+# driver and exit 1, which checks that it links and starts; the kernels are
+# checked as PTX (and by ptxas, where there is one) while it builds.
+test_cuda_build() {
+    local name="cuda build" dir=$WORK/cudabuild app out target c clang=
+    can_build "$name" || return
+    for c in clang clang-22 clang-21 clang-20 clang-19 clang-18 /opt/homebrew/opt/llvm/bin/clang; do
+        if "$c" --print-targets 2>/dev/null | grep -q nvptx64 \
+            && [ "$("$c" --version | sed -n 's/.*clang version \([0-9]*\).*/\1/p' | head -1)" -ge 18 ] 2>/dev/null; then
+            clang=$c; break
+        fi
+    done
+    if [ -z "$clang" ]; then skip "$name" "no clang 18 or later with the NVPTX backend"; return; fi
+    if [ "$HOST_RID" = osx-arm64 ] && ! docker info > /dev/null 2>&1; then skip "$name" "on a Mac the kernels need Docker, which isn't running"; return; fi
+    case "$HOST_RID" in linux-arm64) target=linux-arm64 ;; *) target=linux-x64 ;; esac
+    rm -rf "$dir" && mkdir -p "$dir"
+    fixture hello cudabuild-config > /dev/null    # just for its nuget.config
+    cp "$WORK/cudabuild-config/nuget.config" "$dir/"
+    dotnet new uninstall ZeroCSharp.Templates > /dev/null 2>&1 || true
+    if ! run_in "$dir" cuda-install new install "$FEED/ZeroCSharp.Templates.$VERSION.nupkg"; then fail "$name" "install failed"; return; fi
+    if ! run_in "$dir" cuda-new new zerogpu -o Cuda.Kernels; then fail "$name" "dotnet new zerogpu failed"; return; fi
+    app=$dir/Cuda.Kernels
+    if ! run_in "$app" cuda-build build -p:ZeroGpu=Cuda -p:ZeroTarget=$target -p:ZeroCudaClang="$clang"; then fail "$name" "dotnet build failed"; return; fi
+    out=$app/bin/Debug/$TFM/$target/Cuda.Kernels
+    [ -f "$out" ] || out=$app/bin/Debug/$TFM/Cuda.Kernels
+    if [ ! -f "$out" ]; then fail "$name" "no program"; return; fi
+    if ! grep -q "Saxpy" "$app/obj/Debug/$TFM/$target/gpu/kernels.ptx" 2>/dev/null \
+        && ! grep -rq "\.entry Saxpy" "$app/obj" 2>/dev/null; then fail "$name" "no Saxpy kernel in the PTX"; return; fi
+    if [ "$HOST_OS" = Linux ] && [ "$HOST_RID" = "$target" ]; then
+        if out=$("$out" 2>&1); then fail "$name" "the program said it ran on a GPU: $out"; return; fi
+        if [[ "$out" != *"gpu: no NVIDIA driver"* ]] || [[ "$out" != *"No GPU."* ]]; then fail "$name" "printed '$out'"; return; fi
+    fi
+    pass "$name"
+}
+
+# What ZeroGpu=Cuda says where it can't build, on any host.
+test_cuda_errors() {
+    local name="cuda errors" dir
+    can_build "$name" || return
+    dir=$(fixture native cudaerrors)
+    if run_in "$dir" cuda-mac build -p:ZeroGpu=Cuda -p:ZeroTarget=osx-arm64; then fail "$name" "ZeroGpu=Cuda built for osx-arm64"; return; fi
+    if ! grep -q "ZeroGpu=Cuda builds for ZeroTarget linux-x64 or linux-arm64" "$LOG"; then fail "$name" "no message about the target"; return; fi
+    # The clang is checked before NativeAOT-LLVM runs, so this one is quick.
+    if run_in "$dir" cuda-clang build -p:ZeroGpu=Cuda -p:ZeroTarget=linux-x64 -p:ZeroCudaClang=no-such-clang; then fail "$name" "built with no clang"; return; fi
+    if ! grep -q "ZeroCudaClang no-such-clang: not found" "$LOG"; then fail "$name" "no message about the clang"; return; fi
+    if grep -q "gpu-bitcode" "$LOG"; then fail "$name" "NativeAOT-LLVM ran before the clang was checked"; return; fi
     pass "$name"
 }
 
@@ -1958,7 +2013,7 @@ test_fsharp_native_library_errors() {
 }
 
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
-    native_hello_runs cross_targets c64_target arm_target gpu_template gpu_errors bad_target path_with_spaces compile_items incremental
+    native_hello_runs cross_targets c64_target arm_target gpu_template gpu_errors cuda_build cuda_errors bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size strip_symbols debug_unoptimized mac_debug_object_kept windows_debugger macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild

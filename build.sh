@@ -1378,6 +1378,12 @@ case "$TARGET" in
         done
         "$WIN_CLANG" -target arm64-apple-macos12 -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/osx-arm64/zerocore.o"
         cp mac/libSystem.tbd "$PAYLOAD_DIR/native/osx-arm64/"
+        # ZeroGpu=Cuda: gpu/cuda.c for each Linux architecture, from the same
+        # clang (it declares the few libc functions it calls, so no headers).
+        # arm64: atomics inline, as bflat's link has no libgcc for the calls.
+        echo "[clang] gpu/cuda.c -> $PAYLOAD_DIR/native/linux-{x64,arm64}/cuda.o"
+        "$WIN_CLANG" -target x86_64-linux-gnu -ffreestanding -O2 -Wall -Wextra -c gpu/cuda.c -o "$PAYLOAD_DIR/native/linux-x64/cuda.o"
+        "$WIN_CLANG" -target aarch64-linux-gnu -ffreestanding -mno-outline-atomics -O2 -Wall -Wextra -c gpu/cuda.c -o "$PAYLOAD_DIR/native/linux-arm64/cuda.o"
         # zero-bitcode, which builds C64 programs from the IL (a .NET program,
         # the same on every host).
         echo "[dotnet] sdk/ZeroCSharp.Bitcode -> $PAYLOAD_DIR/tools/zero-bitcode"

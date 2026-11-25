@@ -12,6 +12,10 @@ The program then runs it on thousands of GPU threads at once, each working on it
 `ZeroGpu` and `dotnet new zerogpu` are in the SDK from 0.13.0 on. This is experimental. The kernels are compiled to AIR, the format Apple's Metal compiler reads, which
 Apple doesn't document, so a new version of Xcode can break it.
 
+The same kernels can also run on an NVIDIA GPU on Linux, through CUDA: see
+[NVIDIA GPUs](#nvidia-gpus-cuda). That's newer still, from 0.14.0 on, and hasn't yet run on a real
+NVIDIA GPU.
+
 ## What you need
 
 - **An Apple Silicon Mac with Xcode**, from the App Store, and its Metal Toolchain, which Xcode
@@ -45,7 +49,7 @@ Sum:   4718580 (the CPU says 4718580), 85 us on the GPU
 The project is a program with one more property, `ZeroGpu`:
 
 ```xml
-<Project Sdk="ZeroCSharp.Sdk/0.13.0">
+<Project Sdk="ZeroCSharp.Sdk/0.14.0">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <ZeroGpu>Metal</ZeroGpu>
@@ -395,6 +399,34 @@ for (uint i = 0; i < N; i++)
 A kernel that needs real threadgroups (barriers, threadgroup memory that threads share) doesn't work
 one thread at a time: check it against plain C# instead, as the template does.
 
+## NVIDIA GPUs (CUDA)
+
+`<ZeroGpu>Cuda</ZeroGpu>` builds the same program for Linux, with its kernels for NVIDIA GPUs. It is
+experimental: the kernels are checked as PTX, the code NVIDIA's driver compiles, but no kernel has yet
+run on an NVIDIA GPU. Reports from someone who has one are welcome.
+
+```xml
+<PropertyGroup>
+  <ZeroGpu>Cuda</ZeroGpu>
+  <ZeroTarget>linux-x64</ZeroTarget>   <!-- or linux-arm64 -->
+</PropertyGroup>
+```
+
+It needs:
+
+- **clang 18 or later with the NVPTX backend**, which compiles the kernels to PTX. Linux
+  distributions' clang has it (Ubuntu 24.04: `apt install clang`), and so do LLVM's own builds and
+  Homebrew's `llvm`; Apple's clang doesn't. The build looks for `clang`, `clang-22` down to `clang-18`
+  and Homebrew's, or takes the one in `<ZeroCudaClang>`.
+- **NativeAOT-LLVM**, as for Metal: downloaded on the first build, and run in Docker on a Mac.
+- Nothing from NVIDIA to build. The program opens the CUDA driver (`libcuda.so.1`) when it starts, so
+  it runs on any Linux machine with NVIDIA's driver; on one without, `Gpu.Open()` returns false and
+  says why. If `ptxas`, from the CUDA toolkit, is on the `PATH`, the build checks the PTX with it.
+
+The kernels are PTX for `sm_70` (Volta, 2017) and later; `<ZeroCudaArch>` picks another. CUDA runs a
+grid in whole blocks, so each kernel starts by ending the threads that fall outside it, as Metal never
+starts them. Buffers are CUDA managed memory, which the CPU and GPU share, as with Metal.
+
 ## In this repository
 
 The repository builds GPU programs without the SDK packages:
@@ -404,10 +436,13 @@ The repository builds GPU programs without the SDK packages:
 ./run.sh --gpu Gpu
 ./test.sh --gpu
 ./test.sh --gpu-air        # any machine: the kernels up to AIR, no Metal
+./build.sh --cuda-ptx Gpu  # the kernels as PTX, checked by ptxas
+./build.sh --cuda Gpu      # bin/cuda/Gpu, for Linux with an NVIDIA GPU
 ```
 
 CI runs `--gpu-air`, since its runners have no Metal: it catches a change that the rewriter to AIR
-doesn't understand, but nothing after it. Run `./test.sh --gpu` on a Mac before merging changes to
+doesn't understand, but nothing after it. It also builds `--cuda`, which checks the PTX with `ptxas`,
+but no runner has an NVIDIA GPU to run it. Run `./test.sh --gpu` on a Mac before merging changes to
 zerocore, `lib/` or the compiler.
 
 `samples/Gpu.cs` has eleven kernels: adding, the Collatz sequence, SAXPY, a reduction, a plain and a

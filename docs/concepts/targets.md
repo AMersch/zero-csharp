@@ -11,7 +11,8 @@ that the firmware starts with no operating system. WebAssembly and DOS need a di
 their last step, but all six share the same first step and the same core library. This page explains how each path works and what changes
 along it. A seventh target takes the programs that are small enough: the
 [Commodore 64](#the-commodore-64), an 8-bit machine with 50 KB for a program. And on an Apple Silicon Mac,
-a program's kernels can also run on [the GPU](#the-gpu-metal).
+a program's kernels can also run on [the GPU](#the-gpu-metal), and, experimentally, on
+[NVIDIA GPUs](#nvidia-gpus-cuda) under Linux.
 
 ## The shared first step
 
@@ -302,3 +303,23 @@ package's lld can't read the library descriptions in Xcode's newest SDK. AIR isn
 Apple, so a new Xcode can break this target.
 
 [Run code on the GPU](../how-to/run-code-on-the-gpu.html) shows how to write and launch kernels.
+
+## NVIDIA GPUs (CUDA)
+
+`./build.sh --cuda` builds the same kernels for NVIDIA GPUs, into a Linux program. It is experimental:
+no kernel has yet run on an NVIDIA GPU. The bitcode is the same as for Metal; **`zero-bitcode
+ll2ptx`** rewrites it for LLVM's NVPTX backend instead. The built-ins become NVIDIA's special
+registers, the barrier `__syncthreads`, threadgroup memory CUDA's shared memory, and the atomics LLVM's
+own. LLVM then compiles it to PTX, which `ptxas` checks, and the program carries it inside. There,
+`gpu/cuda.c` gives `lib/Gpu.cs` the same C functions as `gpu/metal.m`, through CUDA's driver API,
+which it opens when the program starts: building needs nothing from NVIDIA.
+
+```bash
+./build.sh --cuda-ptx Gpu   # the kernels as PTX, checked by ptxas
+./build.sh --cuda Gpu       # bin/cuda/Gpu
+```
+
+It takes `llc`, `ptxas` and a C compiler from the `PATH`, or from a container
+(`docker/cuda.Dockerfile`). The SDK builds it with `<ZeroGpu>Cuda</ZeroGpu>`, which needs only a clang
+18 or later with the NVPTX backend: its `cuda.c` comes compiled, and zero-bitcode writes the object
+that holds the PTX itself.

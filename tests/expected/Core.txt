@@ -12,6 +12,6 @@ PASS comparers (9 checks)
 PASS HashCode (5 checks)
 PASS UnscopedRef (1 checks)
 PASS span copy and fill (6 checks)
-PASS NativeMemory (11 checks)
+PASS NativeMemory (12 checks)
 
 All checks passed.

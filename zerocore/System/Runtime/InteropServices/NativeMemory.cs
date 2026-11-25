@@ -17,6 +17,13 @@ namespace System.Runtime.InteropServices
                 Platform.free(ptr);
         }
 
+        public static void Clear(void* ptr, nuint byteCount) => Platform.memset(ptr, 0, byteCount);
+
+        // memmove: the two blocks may overlap, as .NET allows.
+        public static void Copy(void* source, void* destination, nuint byteCount) => Platform.memmove(destination, source, byteCount);
+
+        public static void Fill(void* ptr, nuint byteCount, byte value) => Platform.memset(ptr, value, byteCount);
+
         // Keeps the first byteCount bytes, or as many as the block had. Unlike
         // Alloc, the memory past the old end isn't zeroed: realloc doesn't
         // say how large the block was. A null ptr is Alloc; if it runs out,

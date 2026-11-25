@@ -54,9 +54,9 @@ With zerocore, as `build.sh` builds it:
   `ref` receivers in `extension(...)` blocks.
 - **Indices and ranges**: `span[^1]`, `span[1..^1]`, and on strings and arrays, where a range
   makes a copy.
-- **`NativeMemory`**: `Alloc`, `AllocZeroed`, `Realloc` and `Free`, and `AlignedAlloc`,
-  `AlignedRealloc` and `AlignedFree`, for memory you free yourself, and the `SupportedOSPlatform`,
-  `UnsupportedOSPlatform` and `ConstantExpected` attributes, so code shared with .NET builds compiles (see [below](#nativememory)).
+- **`NativeMemory`**: all of it, for memory you free yourself (`Alloc`, `Realloc`, `Free`, the
+  aligned ones, `Clear`, `Copy` and `Fill`), and the `SupportedOSPlatform`, `UnsupportedOSPlatform`
+  and `ConstantExpected` attributes, so code shared with .NET builds compiles (see [below](#nativememory)).
 - **`char`'s methods and `System.Text.Encoding`**, with .NET's results for every character:
   `char.IsLetter`, `IsDigit`, `ToUpper`, `GetUnicodeCategory` and the rest (Unicode 16.0), and UTF-8,
   ASCII, Latin-1, UTF-16 and UTF-32 encodings (see [Strings without a GC](strings.html#characters-and-encodings)).

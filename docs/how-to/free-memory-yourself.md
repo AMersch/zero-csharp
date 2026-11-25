@@ -154,7 +154,6 @@ Two things to keep in mind:
 - **`Alloc(0)` returns a valid pointer** that `Free` takes, and `Free(null)` does nothing, as in .NET.
 - **`Realloc` doesn't zero what it adds**, as in .NET, though `Alloc` does here. Clear it as
   `Resize` does above. If `Realloc` runs out, the program ends.
-- **No `Clear`, `Copy` or `Fill`.** Use a span's `Clear`, `CopyTo` and `Fill` instead.
 - **Some targets have little to give.** On the C64 one block can't be larger than 65,520 bytes, and
   the Arduino Uno R4 has 32 KB of RAM for everything ([Build for
   microcontrollers](build-for-microcontrollers.html)).

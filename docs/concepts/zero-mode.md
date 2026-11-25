@@ -87,7 +87,8 @@ passes it to bflat with `--stdlib:none`, so nothing AGPL-licensed ends up in the
 - startup: storage for static fields that hold references, static constructors and
   `Main(string[] args)`;
 - `Math`, `MathF`, `Interlocked`, `Volatile`, and the SIMD types `lib/Kernels.cs` uses;
-- `Half`, `BitOperations`, `BitArray` and `BitConverter`'s bit conversions.
+- `Half`, `BitOperations`, `BitArray` and `BitConverter`'s bit conversions;
+- `System.Numerics`: `Complex`, the vectors, `Matrix3x2`, `Matrix4x4`, `Quaternion` and `Plane`.
 
 Much of it is a contract with the compiler, which looks types, methods and fields up by name. Those
 names can't be changed. Compared with zerolib, zerocore adds casts to interfaces, interface calls the

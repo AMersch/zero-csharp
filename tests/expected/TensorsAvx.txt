@@ -1,0 +1,6 @@
+PASS element-wise (12 checks)
+PASS reductions (9 checks)
+PASS functions (9 checks)
+PASS fast functions (4 checks)
+
+All checks passed.

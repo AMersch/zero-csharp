@@ -195,7 +195,8 @@ jobs:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: |
           source ./env.sh
-          eval "$(grep -E '^(SMALL_SAMPLES|ALL_SAMPLES)=' build.sh)"
+          # The lists span several lines each, one sample per line.
+          eval "$(awk '/^(SMALL_SAMPLES|ALL_SAMPLES)=\(/,/\)$/' build.sh)"
           ./build.sh --native-mac-objects "${ALL_SAMPLES[@]}"
       - uses: actions/upload-artifact@v4
         with:

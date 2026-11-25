@@ -762,10 +762,40 @@ int dos_file_delete(const char *path) { return DeleteFileA(path) != 0; }
 // The C library's file functions, which lib/File.cs calls on every target,
 // over the same kernel32 functions. A FILE * is the kernel32 handle itself:
 // there is no buffering, so each fread or fwrite is one call to DOS.
+//
+// The mode is C's: "r", "w" or "a", then "+" to read and write both, and "x"
+// (with "w") to fail if the file exists. A "b" anywhere changes nothing.
 void *fopen(const char *path, const char *mode)
 {
-    int how = mode[0] == 'r' ? 0 : mode[0] == 'w' ? 1 : mode[0] == 'a' ? 2 : -1;
-    return dos_file_open(path, how);
+    int plus = 0, exclusive = 0;
+    for (const char *m = mode + 1; *m; m++) {
+        plus |= *m == '+';
+        exclusive |= *m == 'x';
+    }
+    u32 access = plus ? 0xC0000000 : mode[0] == 'r' ? 0x80000000 : 0x40000000; // GENERIC_READ, GENERIC_WRITE
+    u32 disposition;
+    switch (mode[0]) {
+    case 'r': disposition = 3; break;                  // OPEN_EXISTING
+    case 'w': disposition = exclusive ? 1 : 2; break;  // CREATE_NEW, CREATE_ALWAYS
+    case 'a': disposition = 4; break;                  // OPEN_ALWAYS
+    default: return 0;
+    }
+    void *file = CreateFileA(path, access, 1, 0, disposition, 0x80, 0);
+    if (file == (void *)-1)
+        return 0;
+    if (mode[0] == 'a')
+        SetFilePointer(file, 0, 0, 2);
+    return file;
+}
+
+// Nothing is buffered here, so there's nothing to write out.
+int fflush(void *file) { (void)file; return 0; }
+
+// FileStream turns the C library's buffering off; there is none here.
+int setvbuf(void *file, char *buffer, int how, size_t size)
+{
+    (void)file; (void)buffer; (void)how; (void)size;
+    return 0;
 }
 
 size_t fread(void *buffer, size_t size, size_t count, void *file)

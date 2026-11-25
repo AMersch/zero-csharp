@@ -45,6 +45,8 @@ public struct File
     [DllImport("libc")] static unsafe extern long ftello(nint stream);
     [DllImport("libc")] static unsafe extern int fclose(nint stream);
     [DllImport("libc")] static unsafe extern int remove(byte* path);
+    [DllImport("libc")] static unsafe extern int setvbuf(nint stream, byte* buffer, int how, nuint size);
+    [DllImport("libc")] static unsafe extern int fflush(nint stream);
 
     // The longest path, in UTF-8 bytes, that can be opened.
     const int MaxPath = 1024;
@@ -83,13 +85,19 @@ public struct File
         return OpenC(name, how, false);
     }
 
-    static File OpenC(Span<byte> name, char how, bool exclusive)
+    static File OpenC(Span<byte> name, char how, bool exclusive, bool plus = false)
     {
-        Span<byte> mode = stackalloc byte[4];
-        mode[0] = (byte)how;
-        mode[1] = (byte)'b'; // no newline translation on Windows
-        mode[2] = exclusive ? (byte)'x' : (byte)0;
-        mode[3] = 0;
+        // C's mode: r, w or a; + to read and write both; b for no newline
+        // translation on Windows; x to fail if the file exists.
+        Span<byte> mode = stackalloc byte[5];
+        int at = 0;
+        mode[at++] = (byte)how;
+        if (plus)
+            mode[at++] = (byte)'+';
+        mode[at++] = (byte)'b';
+        if (exclusive)
+            mode[at++] = (byte)'x';
+        mode[at] = 0;
         unsafe
         {
             // SAFETY: both are null-terminated; fopen only reads them.
@@ -102,7 +110,7 @@ public struct File
     // Opening with an error: the system's error number says why fopen failed,
     // and a directory, which fopen opens for reading on Linux and macOS, is
     // refused.
-    static File Open(ReadOnlySpan<char> path, char how, bool exclusive, out FileError error)
+    internal static File Open(ReadOnlySpan<char> path, char how, bool exclusive, out FileError error, bool plus = false)
     {
         Span<byte> name = stackalloc byte[FileSystem.MaxPath];
         if (FileSystem.ToC(path, name) < 0)
@@ -110,8 +118,15 @@ public struct File
             error = FileError.InvalidPath;
             return default;
         }
+        // fopen's "x" makes creating a new file atomic, but semihosting (on
+        // microcontrollers) ignores it and empties the file: look first too.
+        if (exclusive && Exists(path))
+        {
+            error = FileError.AlreadyExists;
+            return default;
+        }
         FileSystem.ClearError();
-        File file = OpenC(name, how, exclusive);
+        File file = OpenC(name, how, exclusive, plus);
         error = file.IsOpen ? FileError.None : FileSystem.LastError();
         // A directory: Linux and macOS open one for reading, Windows says
         // access denied. Either way, say what it is.
@@ -135,6 +150,28 @@ public struct File
 
     /// <summary>Whether the file was opened.</summary>
     public bool IsOpen => _stream != 0;
+
+    // Turns the C library's buffering off for this file: FileStream buffers
+    // in C# instead, so no C code keeps a pointer into memory that may be an
+    // arena's. Call it before the first read or write. _IONBF is 4 in the
+    // Universal CRT, 2 elsewhere.
+    internal void Unbuffer()
+    {
+        int how = FileSystem.System == SystemKind.Windows ? 4 : 2;
+        unsafe
+        {
+            // SAFETY: the stream is open; with _IONBF the C library takes no buffer.
+            if (_stream != 0)
+                setvbuf(_stream, null, how, 0);
+        }
+    }
+
+    // Writes out what the C library has buffered. Between a write and a
+    // read on the same file, C requires this or a seek.
+    internal bool Flush()
+    {
+        unsafe { return _stream != 0 && fflush(_stream) == 0; } // SAFETY: the stream is open
+    }
 
     /// <summary>
     /// Reads up to buffer.Length bytes and returns how many it read: fewer at the end of

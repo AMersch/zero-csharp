@@ -26,6 +26,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   written piece by piece, and what differs on each target.
 - [Work with paths and directories](work-with-paths-and-directories.html): the parts of a path,
   `Path.Combine` and `Normalize`; creating, listing and deleting directories.
+- [Use streams](use-streams.html): `Stream`, `MemoryStream` and `FileStream`, as in .NET, with
+  buffers of a size you choose, from an arena.
 - [Use the clock and random numbers](use-the-clock-and-random-numbers.html): measure a duration, tell
   the date and time, and roll dice with numbers that are the same on every target.
 - [Read environment variables and exit](use-the-environment.html): `Environment.GetEnvironmentVariable`,

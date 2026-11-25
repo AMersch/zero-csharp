@@ -776,6 +776,14 @@ public sealed class Pipe
     public bool Write(string text) => Write(text.AsSpan());
 
     /// <summary>
+    /// The pipe as a System.IO.Stream, for code that takes one: Read and Write
+    /// wait as the pipe's do, letting the other fibers run. It can't seek.
+    /// Writing to a closed pipe ends the program (IOException); disposing the
+    /// stream closes the pipe.
+    /// </summary>
+    public System.IO.Stream AsStream() => new PipeStream(this);
+
+    /// <summary>
     /// Reads up to buffer.Length bytes and returns how many it read, waiting
     /// while the pipe is empty: at least 1, or 0 once the pipe is closed and
     /// empty (or the buffer is empty).
@@ -874,4 +882,47 @@ public sealed class Pipe
             }
         }
     }
+}
+
+// Pipe.AsStream's stream.
+sealed class PipeStream : System.IO.Stream
+{
+    readonly Pipe _pipe;
+
+    public PipeStream(Pipe pipe) => _pipe = pipe;
+
+    public override bool CanRead => true;
+    public override bool CanWrite => !_pipe.IsClosed;
+    public override bool CanSeek => false;
+    public override long Length => throw new NotSupportedException("a pipe has no length");
+    public override long Position
+    {
+        get => throw new NotSupportedException("a pipe has no position");
+        set => throw new NotSupportedException("a pipe has no position");
+    }
+
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        return _pipe.Read(new Span<byte>(buffer, offset, count));
+    }
+
+    public override int Read(Span<byte> buffer) => _pipe.Read(buffer);
+
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        Write(new ReadOnlySpan<byte>(buffer, offset, count));
+    }
+
+    public override void Write(ReadOnlySpan<byte> buffer)
+    {
+        if (!_pipe.Write(buffer))
+            throw new System.IO.IOException("Pipe: written after it was closed");
+    }
+
+    public override void Flush() { }
+    public override long Seek(long offset, System.IO.SeekOrigin origin) => throw new NotSupportedException("a pipe can't seek");
+    public override void SetLength(long value) => throw new NotSupportedException("a pipe has no length");
+    protected override void Dispose(bool disposing) => _pipe.Close();
 }

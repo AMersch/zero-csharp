@@ -34,12 +34,6 @@ namespace System
         public InvalidOperationException(string message) : base(message) { }
     }
 
-    // Using an object after it was disposed (lib/Streams.cs throws it).
-    public class ObjectDisposedException : InvalidOperationException
-    {
-        public ObjectDisposedException(string objectName) : base("Cannot access a disposed object: " + objectName) { }
-    }
-
     public class NotSupportedException : Exception
     {
         public NotSupportedException() : base("NotSupportedException") { }

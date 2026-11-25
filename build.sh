@@ -38,6 +38,9 @@
 #
 # Usage:  ./build.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --uefi] [Sample ...]
 #         ./build.sh --gpu-air [Sample ...]  the GPU build up to AIR, without a Mac (no program)     default: all samples
+#         ./build.sh --cuda-ptx [Sample ...] experimental: the kernels as PTX for NVIDIA GPUs, checked by ptxas
+#         ./build.sh --cuda [Sample ...]     experimental: Linux programs that run them through CUDA;
+#                                            not yet run on an NVIDIA GPU (see "CUDA (experimental)")
 #         ./build.sh --sdk-payload <dir>     what the ZeroCSharp.Sdk package carries (sdk/)
 #         ./build.sh --must-not-compile      check that tests/must-not-compile/*.cs are refused
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh),
@@ -1061,6 +1064,9 @@ build_must_not_compile() {
 # links a Linux program with the PTX in it and gpu/cuda.c, which runs it
 # through the CUDA driver (libcuda, opened at run time).
 #
+# Untested on hardware: CI checks that the PTX assembles and the program
+# links, but no kernel has yet run on an NVIDIA GPU.
+#
 # llc (with the NVPTX target), ptxas and a C compiler come from the PATH when
 # there (CI: apt's llvm-15 and pip's nvidia-cuda-nvcc-cu12), else from the
 # zero-cuda-tools image (docker/cuda.Dockerfile), built on first use.
@@ -1119,7 +1125,7 @@ build_cuda_link() {
     build_lib
     mkdir -p bin/cuda
     for name in "$@"; do
-        echo "[bflat] $name -> bin/cuda/$name"
+        echo "[bflat] $name -> bin/cuda/$name (experimental: untested on an NVIDIA GPU)"
         # shellcheck disable=SC2046
         "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none "${CSHARP_FLAGS[@]}" \
             "${NATIVE_FLAGS[@]}" --arch "$BFLAT_ARCH" $(bflat_flags "$name") "${LINK_FLAGS[@]}" \

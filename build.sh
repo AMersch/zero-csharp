@@ -1062,7 +1062,7 @@ build_must_not_compile() {
 # through the CUDA driver (libcuda, opened at run time).
 #
 # llc (with the NVPTX target), ptxas and a C compiler come from the PATH when
-# there (CI: apt's llvm-18 and pip's nvidia-cuda-nvcc-cu12), else from the
+# there (CI: apt's llvm-15 and pip's nvidia-cuda-nvcc-cu12), else from the
 # zero-cuda-tools image (docker/cuda.Dockerfile), built on first use.
 CUDA_OBJ=bin/cuda/obj
 CUDA_ARCH=${CUDA_ARCH:-sm_70}

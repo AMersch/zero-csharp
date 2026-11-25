@@ -272,11 +272,13 @@ jobs:
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: |
+          # This job is on Ubuntu 22.04, whose newest LLVM is 15; its llc reads
+          # the kernels' IR.
           sudo apt-get update -qq
-          sudo apt-get install -y -qq llvm-18
-          pip install --quiet --break-system-packages nvidia-cuda-nvcc-cu12
+          sudo apt-get install -y -qq llvm-15
+          pip install --quiet nvidia-cuda-nvcc-cu12
           nvcc_dir=$(python3 -c 'import nvidia.cuda_nvcc as m; print(m.__path__[0])')
-          export PATH="/usr/lib/llvm-18/bin:$nvcc_dir/bin:$PATH"
+          export PATH="/usr/lib/llvm-15/bin:$nvcc_dir/bin:$PATH"
           ./build.sh --cuda
 
   # The Commodore 64: llvm-mos (x64 Linux build) and VICE from Ubuntu, with the

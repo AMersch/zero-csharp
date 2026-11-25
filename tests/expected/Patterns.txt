@@ -6,5 +6,7 @@ PASS classes and escapes (7 checks)
 PASS options (4 checks)
 PASS errors (11 checks)
 PASS cost (3 checks)
+PASS replace (11 checks)
+PASS split (5 checks)
 
 All checks passed.

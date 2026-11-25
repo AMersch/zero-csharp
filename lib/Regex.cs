@@ -2,8 +2,10 @@
 //
 //   Regex date = Regex.Create(arena, @"(\d{4})-(\d\d)-(\d\d)");
 //   RegexMatch m = date.Match(line);
-//   if (m.Success) Out.Line("year: ", m.Groups[1].Value);
+//   if (m.Success) Console.WriteLine($"year: {m.Groups[1].Value}");
 //   foreach (RegexMatch number in Regex.Create(arena, @"\d+").Matches(text)) ...
+//   string swapped = date.Replace(arena, line, "$3/$2/$1");
+//   foreach (ReadOnlySpan<char> field in Regex.Create(arena, @"\s*,\s*").Split(line)) ...
 //
 // A subset of .NET's syntax, with .NET's results where the two overlap:
 // literals and escapes (\t \n \r \f \v \e \xHH \uHHHH, \ before punctuation);
@@ -22,8 +24,16 @@
 // ages, as (a+)+b can in a backtracking engine. When several matches start at
 // the same place, the one chosen is the one .NET's engine would find first.
 //
+// Replace takes .NET's substitutions: $1 and ${1} for a group, $$ for a $,
+// $& for the match, $` and $' for the input before and after it, $+ for the
+// last group and $_ for the whole input; anything else after a $ is kept as
+// it is. It writes into an arena, a StrBuilder or a ScratchText you pass, or
+// calls a function you give for each match. Split gives the pieces between
+// matches as slices of the input, with the text of any groups in between, as
+// .NET's Split does.
+//
 // Create allocates the program and the memory matching works in, in the arena
-// you pass; matching allocates nothing. That working memory is shared, so use
+// you pass; matching and Split allocate nothing. That working memory is shared, so use
 // a Regex from one thread at a time. An invalid pattern ends the program, as
 // .NET throws ArgumentException; TryCreate returns the reason instead.
 
@@ -230,6 +240,162 @@ public struct Regex
         foreach (RegexMatch _ in Matches(input))
             count++;
         return count;
+    }
+
+    /// <summary>
+    /// <paramref name="input"/> with each match replaced by
+    /// <paramref name="replacement"/> ($1, ${1}, $$, $&amp;, $`, $', $+, $_), as a
+    /// new string in <paramref name="arena"/>; the first <paramref name="count"/>
+    /// matches only, if it isn't -1. Null if the arena is out of memory.
+    /// </summary>
+    public string Replace(Arena arena, ReadOnlySpan<char> input, ReadOnlySpan<char> replacement, int count = -1)
+    {
+        StrBuilder output = StrBuilder.Create(arena, input.Length + 16);
+        return Replace(output, input, replacement, count) ? output.TakeString() : null;
+    }
+
+    /// <summary>
+    /// The same, appended to <paramref name="output"/>. False if it isn't
+    /// created or its arena is out of memory.
+    /// </summary>
+    public bool Replace(StrBuilder output, ReadOnlySpan<char> input, ReadOnlySpan<char> replacement, int count = -1)
+    {
+        if (!output.IsCreated)
+            return false;
+        bool ok = true;
+        int last = 0;
+        if (count != 0)
+        {
+            foreach (RegexMatch found in Matches(input))
+            {
+                RegexMatch match = found;
+                ok &= output.Append(input.Slice(last, match.Index - last));
+                ok &= AppendReplacement(output, replacement, ref match, input);
+                last = match.Index + match.Length;
+                if (--count == 0)
+                    break;
+            }
+        }
+        return output.Append(input.Slice(last)) && ok;
+    }
+
+    /// <summary>The same, appended to <paramref name="output"/>, inside Arena.Scratch.</summary>
+    public void Replace(ScratchText output, ReadOnlySpan<char> input, ReadOnlySpan<char> replacement, int count = -1)
+        => Replace(output.BuilderToAppendTo(), input, replacement, count); // the scratch arena stops the program rather than fail
+
+    /// <summary>
+    /// <paramref name="input"/> with each match replaced by what
+    /// <paramref name="evaluator"/> appends to the builder it is given, as a new
+    /// string in <paramref name="arena"/>, like .NET's MatchEvaluator:
+    /// <code>
+    /// static void Double(RegexMatch m, StrBuilder output)
+    /// {
+    ///     Str.TryParse(m.Value, out long number);
+    ///     output.Append(2 * number);
+    /// }
+    /// string doubled = numbers.Replace(arena, text, &amp;Double);
+    /// </code>
+    /// Null if the arena is out of memory.
+    /// </summary>
+    public string Replace(Arena arena, ReadOnlySpan<char> input, delegate*<RegexMatch, StrBuilder, void> evaluator, int count = -1)
+    {
+        StrBuilder output = StrBuilder.Create(arena, input.Length + 16);
+        return Replace(output, input, evaluator, count) ? output.TakeString() : null;
+    }
+
+    /// <summary>The same, appended to <paramref name="output"/>. False if it isn't created or its arena is full.</summary>
+    public bool Replace(StrBuilder output, ReadOnlySpan<char> input, delegate*<RegexMatch, StrBuilder, void> evaluator, int count = -1)
+    {
+        if (!output.IsCreated || evaluator == null)
+            return false;
+        bool ok = true;
+        int last = 0;
+        if (count != 0)
+        {
+            foreach (RegexMatch match in Matches(input))
+            {
+                ok &= output.Append(input.Slice(last, match.Index - last));
+                unsafe { evaluator(match, output); } // SAFETY: a function pointer the caller gave.
+                last = match.Index + match.Length;
+                if (--count == 0)
+                    break;
+            }
+        }
+        return output.Append(input.Slice(last)) && ok;
+    }
+
+    /// <summary>
+    /// For foreach: the pieces of <paramref name="input"/> between matches, as
+    /// slices of it, with the text of each group that took part in a match
+    /// between the pieces before and after it, as .NET's Split. With a
+    /// <paramref name="count"/> above 0, at most that many pieces: the last is
+    /// the rest of the input.
+    /// </summary>
+    public RegexSplit Split(ReadOnlySpan<char> input, int count = 0) => new RegexSplit(this, input, count);
+
+    // Appends the replacement pattern for one match.
+    static bool AppendReplacement(StrBuilder output, ReadOnlySpan<char> replacement, scoped ref RegexMatch match, ReadOnlySpan<char> input)
+    {
+        bool ok = true;
+        int groups = match.GroupsInMatch;
+        int literal = 0;
+        int i = 0;
+        while (i < replacement.Length)
+        {
+            if (replacement[i] != '$' || i + 1 == replacement.Length)
+            {
+                i++;
+                continue;
+            }
+            int end = i + 2;    // just past the substitution
+            int group = -1;     // the group it stands for, if it does
+            ReadOnlySpan<char> text = default;
+            bool substituted = true;
+            char c = replacement[i + 1];
+            if (c == '$')
+                text = "$";
+            else if (c == '&')
+                group = 0;
+            else if (c == '`')
+                text = input.Slice(0, match.Index);
+            else if (c == '\'')
+                text = input.Slice(match.Index + match.Length);
+            else if (c == '+')
+                group = groups - 1;
+            else if (c == '_')
+                text = input;
+            else
+            {
+                // $n or ${n}: every digit is part of the number, and it must be a group.
+                bool braced = c == '{';
+                int digits = braced ? i + 2 : i + 1;
+                int number = 0;
+                int j = digits;
+                while (j < replacement.Length && replacement[j] >= '0' && replacement[j] <= '9' && j - digits < 9)
+                    number = number * 10 + (replacement[j++] - '0');
+                if (j < replacement.Length && replacement[j] >= '0' && replacement[j] <= '9')
+                    number = int.MaxValue; // too many digits: no such group
+                bool closed = !braced || (j < replacement.Length && replacement[j] == '}');
+                substituted = j > digits && closed && number < groups;
+                if (substituted)
+                {
+                    group = number;
+                    end = braced ? j + 1 : j;
+                }
+            }
+            if (!substituted)
+            {
+                i++;
+                continue;
+            }
+            if (group >= 0)
+                text = match.Groups[group].Value; // empty if the group didn't take part
+            ok &= output.Append(replacement.Slice(literal, i - literal));
+            ok &= output.Append(text);
+            i = end;
+            literal = end;
+        }
+        return output.Append(replacement.Slice(literal)) && ok;
     }
 
     // ---- the Pike VM ---------------------------------------------------------
@@ -504,6 +670,9 @@ public ref struct RegexMatch
 
     public bool Success => _groups > 0;
 
+    // The pattern's groups, group 0 included (0 for no match).
+    internal int GroupsInMatch => _groups;
+
     /// <summary>Where the match starts in the input (0 if there is none).</summary>
     public int Index => Success ? _captures[0] : 0;
 
@@ -611,6 +780,81 @@ public readonly ref struct RegexMatches
         }
 
         public RegexMatch Current => _current;
+    }
+}
+
+/// <summary>For foreach over Regex.Split: the pieces of the input, and the text of groups between them.</summary>
+public readonly ref struct RegexSplit
+{
+    readonly Regex _regex;
+    readonly ReadOnlySpan<char> _input;
+    readonly int _count;
+
+    internal RegexSplit(Regex regex, ReadOnlySpan<char> input, int count)
+    {
+        _regex = regex;
+        _input = input;
+        _count = count;
+    }
+
+    /// <summary>For foreach: the pieces, in order.</summary>
+    public Enumerator GetEnumerator() => new Enumerator(_regex, _input, _count);
+
+    public ref struct Enumerator
+    {
+        readonly ReadOnlySpan<char> _input;
+        RegexMatch _match;     // the match after the piece last given
+        int _start;            // where the next piece starts
+        int _remaining;        // pieces still allowed, or -1 for no limit
+        int _group;            // the next group of _match to give, or 0
+        bool _done;
+        ReadOnlySpan<char> _current;
+
+        internal Enumerator(Regex regex, ReadOnlySpan<char> input, int count)
+        {
+            _input = input;
+            _remaining = count > 0 ? count : -1;
+            _match = _remaining == 1 ? default : regex.Match(input);
+            _start = 0;
+            _group = 0;
+            _done = false;
+            _current = default;
+        }
+
+        public bool MoveNext()
+        {
+            if (_group > 0)
+            {
+                // The groups of the match after the last piece, then the next match.
+                while (_group < _match.GroupsInMatch)
+                {
+                    RegexGroup group = _match.Groups[_group++];
+                    if (group.Success)
+                    {
+                        _current = group.Value;
+                        return true;
+                    }
+                }
+                _group = 0;
+                _match = _remaining == 1 ? default : _match.NextMatch();
+            }
+            if (_done)
+                return false;
+            if (_match.Success)
+            {
+                _current = _input.Slice(_start, _match.Index - _start);
+                _start = _match.Index + _match.Length;
+                if (_remaining > 0)
+                    _remaining--;
+                _group = 1;
+                return true;
+            }
+            _current = _input.Slice(_start);
+            _done = true;
+            return true;
+        }
+
+        public ReadOnlySpan<char> Current => _current;
     }
 }
 

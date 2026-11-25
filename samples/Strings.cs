@@ -16,7 +16,7 @@ public static class Program
 
     static void End(string section)
     {
-        Out.Line($"{(s_sectionFailures == 0 ? "PASS" : "FAIL")} {section} ({s_sectionChecks} checks)");
+        Console.WriteLine($"{(s_sectionFailures == 0 ? "PASS" : "FAIL")} {section} ({s_sectionChecks} checks)");
         s_failures += s_sectionFailures;
         s_sectionChecks = 0;
         s_sectionFailures = 0;
@@ -28,7 +28,7 @@ public static class Program
         if (!ok)
         {
             s_sectionFailures++;
-            Out.Line($"  failed: {name}");
+            Console.WriteLine($"  failed: {name}");
         }
     }
 
@@ -38,7 +38,7 @@ public static class Program
         if (!got.SequenceEqual(want))
         {
             s_sectionFailures++;
-            Out.Line($"  failed: {name}: got \"{got}\", want \"{want}\"");
+            Console.WriteLine($"  failed: {name}: got \"{got}\", want \"{want}\"");
         }
     }
 
@@ -90,7 +90,7 @@ public static class Program
         s_arena = Arena.Create(1 << 16);
         if (!s_arena.IsCreated)
         {
-            Out.Line("Arena.Create failed");
+            Console.WriteLine("Arena.Create failed");
             return 1;
         }
 
@@ -342,15 +342,15 @@ public static class Program
         End("StrBuilder");
 
         // ---- Out: $"..." straight to stdout ----
-        Out.Line();
+        Console.WriteLine();
         // docs:table
-        Out.Line($"{"item",-8}|{"qty",5}|{"price",9}");
-        Out.Line($"{"apple",-8}|{3,5}|{1.25,9:F2}");
-        Out.Line($"{"melon",-8}|{12,5}|{0.5,9:F2}");
+        Console.WriteLine($"{"item",-8}|{"qty",5}|{"price",9}");
+        Console.WriteLine($"{"apple",-8}|{3,5}|{1.25,9:F2}");
+        Console.WriteLine($"{"melon",-8}|{12,5}|{0.5,9:F2}");
         // docs:end
-        Out.Line($"UTF-8: héllo wörld, 世界, 🎉 ({"🎉".Length} UTF-16 chars)");
-        Out.Line();
-        Out.Line($"failures: {s_failures}");
+        Console.WriteLine($"UTF-8: héllo wörld, 世界, 🎉 ({"🎉".Length} UTF-16 chars)");
+        Console.WriteLine();
+        Console.WriteLine($"failures: {s_failures}");
         return s_failures;
     }
 

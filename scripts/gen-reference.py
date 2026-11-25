@@ -39,6 +39,7 @@ PAGES = [
     ('In.cs', ['In'], 'in', 'Reading lines from standard input.'),
     ('File.cs', ['File', 'FileInfo'], 'file', 'Reading and writing files, whole or piece by piece; copying, moving and looking at them.'),
     ('FileSystem.cs', ['FileError'], 'file-error', 'Why a file or directory operation failed.'),
+    ('Streams.cs', ['Stream', 'MemoryStream', 'FileStream', 'SeekOrigin', 'FileMode', 'FileAccess', 'FileShare', 'IOException', 'EndOfStreamException'], 'stream', 'System.IO streams: Stream, MemoryStream and FileStream.'),
     ('Path.cs', ['Path'], 'path', 'The parts of a path, joining paths, and tidying them up.'),
     ('Directory.cs', ['Directory', 'DirectoryEntries', 'DirectoryEntry'], 'directory', 'Creating, listing, moving and deleting directories; the current directory.'),
     ('Clock.cs', ['Clock', 'CalendarTime'], 'clock', 'The monotonic clock for durations, and the date and time of day.'),
@@ -50,7 +51,7 @@ PAGES = [
 ]
 # Public nested types that are compiler plumbing: readers never name them.
 PLUMBING = {'Enumerator', 'InterpolatedHandler'}
-TYPE_DECL = re.compile(r'^(\s*)((?:public|internal|private)\s+)?((?:static|readonly|ref|unsafe|sealed|partial)\s+)*'
+TYPE_DECL = re.compile(r'^(\s*)((?:public|internal|private)\s+)?((?:static|readonly|ref|unsafe|sealed|partial|abstract)\s+)*'
                        r'(class|struct|interface|enum|record(?:\s+struct|\s+class)?)\s+(\w+)')
 warnings = []
 

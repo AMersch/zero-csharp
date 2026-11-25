@@ -30,6 +30,7 @@ public sealed class Transfer
     public Pipe Pipe;
     public int Sent, Received, Wrong, MostBuffered;
     public bool WriteRefused;
+    public System.IO.MemoryStream Copy;
 }
 
 public sealed class PingPong
@@ -235,7 +236,25 @@ public static class Program
         Check("UTF-8 text", text.Received == 6);
         Check("Write refused after Close", text.WriteRefused);
         Check("closed", text.Pipe.IsClosed);
-        unsafe { arena.Destroy(); } // SAFETY: both pipes are done with
+        // docs:pipe-stream
+        // AsStream makes the pipe a System.IO.Stream, for code that takes one:
+        // CopyTo here reads until the writer disposes its end.
+        var streamed = new Transfer
+        {
+            Pipe = new Pipe(arena, 16),
+            Copy = new System.IO.MemoryStream(),
+        };
+        Fiber.Spawn(streamed, static t =>
+        {
+            using System.IO.Stream output = t.Pipe.AsStream();
+            for (int i = 0; i < 10; i++)
+                output.Write("0123456789"u8);
+        });
+        Fiber.Spawn(streamed, static t => t.Pipe.AsStream().CopyTo(t.Copy));
+        Fiber.Run();
+        // docs:end
+        Check("streamed 100 bytes", streamed.Copy.Length == 100 && streamed.Copy.AsSpan()[99] == (byte)'9');
+        unsafe { arena.Destroy(); } // SAFETY: the pipes are done with
         Section("Pipe");
 
         // Unbuffered channels hand each value straight to a waiting fiber.

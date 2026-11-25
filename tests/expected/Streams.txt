@@ -1,0 +1,5 @@
+PASS MemoryStream (15 checks)
+PASS FileStream (10 checks)
+PASS File modes (6 checks)
+PASS Arena (2 checks)
+PASS Stream (3 checks)

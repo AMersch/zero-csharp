@@ -457,10 +457,38 @@ int uefi_file_delete(const u8 *path)
 // The C library's file functions, which lib/File.cs calls on every target,
 // over the same protocol. A FILE * is the protocol's File itself: there is no
 // buffering, so each fread or fwrite is one call to the firmware.
+//
+// The mode is C's: "r", "w" or "a", then "+" to read and write both, and "x"
+// (with "w") to fail if the file exists. Writing always opens the file for
+// reading too, so "+" only matters with "r".
 void *fopen(const char *path, const char *mode)
 {
+    int plus = 0, exclusive = 0;
+    for (const char *m = mode + 1; *m; m++) {
+        plus |= *m == '+';
+        exclusive |= *m == 'x';
+    }
+    if (mode[0] == 'r' && plus)
+        return open_path((const u8 *)path, FILE_MODE_READ | FILE_MODE_WRITE);
+    if (mode[0] == 'w' && exclusive) {
+        File *existing = open_path((const u8 *)path, FILE_MODE_READ);
+        if (existing) {
+            existing->close(existing);
+            return 0;
+        }
+    }
     int how = mode[0] == 'r' ? ForReading : mode[0] == 'w' ? ForWriting : mode[0] == 'a' ? ForAppending : -1;
     return uefi_file_open((const u8 *)path, how);
+}
+
+// Nothing is buffered here, so there's nothing to write out.
+int fflush(void *file) { (void)file; return 0; }
+
+// FileStream turns the C library's buffering off; there is none here.
+int setvbuf(void *file, char *buffer, int how, usize size)
+{
+    (void)file; (void)buffer; (void)how; (void)size;
+    return 0;
 }
 
 usize fread(void *buffer, usize size, usize count, File *file)

@@ -69,6 +69,7 @@ SAMPLES=(
     Bits
     Files
     Paths
+    Streams
     Directories
     Dice
     Pipe
@@ -126,6 +127,7 @@ DOS_SAMPLES=(
     Bits
     Files
     Paths
+    Streams
     Dice
     Pipe
     Env
@@ -184,6 +186,7 @@ ARM_SAMPLES=(
     Bits
     Files
     Paths
+    Streams
     Dice
     Pipe
     Env

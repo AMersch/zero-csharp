@@ -127,6 +127,29 @@ pipe, so don't take it from a fiber's `Arena.Scratch`, which is freed when that 
 fibers can write to one pipe, but a write bigger than the room left goes in as room appears, so
 another fiber's bytes can land in the middle of it.
 
+`AsStream` makes the pipe a `System.IO.Stream`, for code that takes one (see
+[Use streams](use-streams.html)). Disposing the writer's stream closes the pipe, which ends the
+reader's `CopyTo`:
+
+<!-- sample: samples/Fibers.cs pipe-stream -->
+```csharp
+// AsStream makes the pipe a System.IO.Stream, for code that takes one:
+// CopyTo here reads until the writer disposes its end.
+var streamed = new Transfer
+{
+    Pipe = new Pipe(arena, 16),
+    Copy = new System.IO.MemoryStream(),
+};
+Fiber.Spawn(streamed, static t =>
+{
+    using System.IO.Stream output = t.Pipe.AsStream();
+    for (int i = 0; i < 10; i++)
+        output.Write("0123456789"u8);
+});
+Fiber.Spawn(streamed, static t => t.Pipe.AsStream().CopyTo(t.Copy));
+Fiber.Run();
+```
+
 ## Sleep
 
 `Fiber.Sleep` lets the other fibers run for at least that many milliseconds. When nothing else is

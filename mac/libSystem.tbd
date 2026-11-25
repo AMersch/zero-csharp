@@ -46,7 +46,7 @@ exports:
                    _pthread_mutex_lock, _pthread_mutex_unlock, _pthread_self,
                    _pthread_setspecific, _putchar, _puts, _qsort, _raise,
                    _rand, _read, _readdir, _realloc, _remove, _rename, _rewind, _rint, _rmdir,
-                   _rintf, _round, _roundf, _scanf, _sched_yield, _setenv,
+                   _rintf, _round, _roundf, _scanf, _sched_yield, _setenv, _setvbuf,
                    _signal, _sin, _sinf, _sinh, _sinhf, _sleep, _snprintf,
                    _sprintf, _sqrt, _sqrtf, _srand, _sscanf, _stat, _strcat, _strchr,
                    _strcmp, _strcpy, _strcspn, _strdup, _strerror, _strftime,

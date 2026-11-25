@@ -1,7 +1,8 @@
 # Builds the samples and runs ./test.sh on every target CI can run:
 # Linux x64 and arm64, macOS on Apple Silicon, Windows x64 (under Wine),
 # WebAssembly, and UEFI x64 and arm64 (in QEMU, on OVMF). DOS isn't here: it runs under an emulated 386 for 15 minutes
-# and more, so run ./test.sh --dos locally.
+# and more, so run ./test.sh --dos locally. The GPU's kernels are checked up to
+# Metal (./test.sh --gpu-air), not run: run ./test.sh --gpu on a Mac.
 #
 # bflat comes from the fork (see README, "Getting bflat"). It has no release to
 # download, so the first job builds its layouts from source when the fork's
@@ -248,6 +249,18 @@ jobs:
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
         run: ./test.sh --wasm
+      # The GPU kernels go through the same bitcode. No runner here has Metal
+      # (GitHub's Macs have no Docker for NativeAOT-LLVM either), so this
+      # checks everything before it: every kernel of samples/Gpu.cs must still
+      # become AIR. ./test.sh --gpu, on a Mac, compiles and runs them.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test the GPU kernels up to AIR
+        working-directory: zero-csharp
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-x64
+        run: ./test.sh --gpu-air
 
   # The Commodore 64: llvm-mos (x64 Linux build) and VICE from Ubuntu, with the
   # ROMs ./setup.sh --c64 fetches from VICE's source release. VICE has no mode

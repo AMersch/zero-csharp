@@ -1,0 +1,12 @@
+<!-- dotnet run runs two kernels on the GPU and checks them against the CPU.
+     ZeroGpu=Metal compiles the [RuntimeExport] methods for the GPU too. It
+     builds on an Apple Silicon Mac with Xcode, its Metal Toolchain
+     (xcodebuild -downloadComponent MetalToolchain) and Docker, which runs
+     NativeAOT-LLVM, the first of the kernels' compilers; the first build
+     downloads NativeAOT-LLVM. -->
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ZeroGpu>Metal</ZeroGpu>
+  </PropertyGroup>
+</Project>

@@ -27,7 +27,8 @@
 // of the caller's. For data that only goes in, or spans the callback fills,
 // there are overloads with an input passed by value.
 //
-// Besides spans, the scope makes growable lists and text that live as long:
+// Besides spans, the scope makes growable lists and text, and pools (items
+// found by a Handle<T>, removed one by one), that live as long:
 //
 //   ScratchList<int> evens = s.List<int>();
 //   ScratchText line = s.Text();
@@ -118,6 +119,10 @@ public ref struct ScratchScope
     public ScratchList<T> List<T>(int initialCapacity = 16) where T : unmanaged
         => new ScratchList<T>(global::List<T>.Create(Allocator(), initialCapacity), _thread, _depth);
 
+    /// <summary>An empty pool whose items live until the callback returns.</summary>
+    public ScratchPool<T> Pool<T>(int chunkSize = 64) where T : unmanaged
+        => new ScratchPool<T>(global::Pool<T>.Create(Allocator(), chunkSize), _thread, _depth);
+
     /// <summary>Empty text, for building a string that lives until the callback returns.</summary>
     public ScratchText Text(int initialCapacity = 64)
         => new ScratchText(StrBuilder.Create(Allocator(), initialCapacity), _thread, _depth);
@@ -192,6 +197,67 @@ public ref struct ScratchList<T> where T : unmanaged
 
     void CheckInnermost() => ScratchThread.CheckInnermost(_thread, _depth,
         "Arena.Scratch: a ScratchList added to inside a nested Arena.Scratch, which would free its memory early");
+}
+
+/// <summary>
+/// A pool from <see cref="ScratchScope.Pool{T}"/>, freed when the Arena.Scratch
+/// callback returns: items found by a Handle&lt;T&gt;, removed one by one, and
+/// moved out with MoveTo into a pool you keep. Copies share the same items.
+/// </summary>
+/// <remarks>
+/// A handle is a plain struct and can outlive the callback, but it finds
+/// nothing without its pool, which can't.
+/// </remarks>
+public ref struct ScratchPool<T> where T : unmanaged
+{
+    readonly Pool<T> _pool;
+    readonly ScratchThread* _thread;
+    readonly int _depth;
+
+    internal ScratchPool(Pool<T> pool, ScratchThread* thread, int depth)
+    {
+        _pool = pool;
+        _thread = thread;
+        _depth = depth;
+    }
+
+    /// <summary>How many items the pool holds.</summary>
+    public int Count => _pool.Count;
+
+    /// <summary>Adds an item and returns its handle.</summary>
+    public Handle<T> Add(T item)
+    {
+        ScratchThread.CheckInnermost(_thread, _depth,
+            "Arena.Scratch: a ScratchPool added to inside a nested Arena.Scratch, which would free its memory early");
+        return _pool.Add(item); // the scratch arena stops the program rather than fail
+    }
+
+    /// <summary>The item the handle finds; one removed or moved stops the program.</summary>
+    public ref T this[Handle<T> handle] => ref _pool[handle];
+
+    /// <summary>Whether the handle finds an item.</summary>
+    public bool Contains(Handle<T> handle) => _pool.Contains(handle);
+
+    /// <summary>The item the handle finds, if it finds one.</summary>
+    public bool TryGet(Handle<T> handle, out T item) => _pool.TryGet(handle, out item);
+
+    /// <summary>Removes the item the handle finds. False if it finds none.</summary>
+    public bool Remove(Handle<T> handle) => _pool.Remove(handle);
+
+    /// <summary>Gives the item a new handle; the old one and its copies are refused from then on.</summary>
+    public Handle<T> Move(ref Handle<T> handle) => _pool.Move(ref handle);
+
+    /// <summary>
+    /// Moves the item into <paramref name="target"/>, a pool you keep, and
+    /// returns its handle there: how a result leaves the callback.
+    /// </summary>
+    public Handle<T> MoveTo(Pool<T> target, ref Handle<T> handle) => _pool.MoveTo(target, ref handle);
+
+    /// <summary>Removes every item.</summary>
+    public void Clear() => _pool.Clear();
+
+    /// <summary>For foreach: the handle of each item.</summary>
+    public Pool<T>.Enumerator GetEnumerator() => _pool.GetEnumerator();
 }
 
 /// <summary>

@@ -22,6 +22,8 @@ values, and three hold references. Which one you need depends on what you store 
 | any value | a string's text | `StrDict<TValue>` | keys copied into the map's arena |
 | strings, objects, arrays | an unmanaged key | `RefDict<TKey, TValue>` | values stored as references |
 | structs that point at each other | following a link | `Ptr<T>` from `arena.New` | linked lists, trees, graphs; see below |
+| structs removed one by one | a handle | `Pool<T>` and `Handle<T>` | reuses removed slots; refuses out-of-date handles |
+| unmanaged values in order | a node's handle | `LinkedList<T>` | `AddFirst`, `AddLast`, `AddAfter`, `AddBefore`, `Remove`, `Find` |
 
 `List<T>` and `Dict` take only unmanaged types because they keep items in arena memory through a `T*`.
 A reference in zero mode is just an address (no garbage collector moves or tracks objects), so
@@ -137,6 +139,76 @@ static Ptr<TreeNode> Insert(Arena arena, Ptr<TreeNode> node, int key)
   destroyed or restored to before the item was made. Under `Arena.DebugChecks`, a `Ptr` used after
   that stops the program. A `ref` from `Value` kept in a local isn't checked, so take `Value` again
   after anything that frees memory.
+
+## Remove items one by one
+
+A `Ptr`'s item lives as long as its arena. When items come and go, a graph whose nodes are deleted or
+jobs that finish, use a `Pool<T>`: `Add` returns a `Handle<T>`, `pool[handle]` is a `ref` to the item,
+and `Remove` frees the slot for the next `Add`. Items can hold handles to each other, as with `Ptr`:
+
+<!-- sample: samples/Links.cs task -->
+```csharp
+// A task that waits for another: items in a pool point at each other with
+// handles, which are plain structs too.
+public struct Job
+{
+    public int Id;
+    public Handle<Job> WaitsFor;
+}
+```
+
+A handle remembers the slot's generation, which `Remove` changes, so a handle kept after its item was
+removed finds nothing, even once the slot holds a new item. `pool[handle]` then stops the program
+with `Pool: the handle's item was removed or moved`; `Contains` and `TryGet` ask without stopping:
+
+<!-- sample: samples/Links.cs pool -->
+```csharp
+var jobs = Pool<Job>.Create(arena);
+Handle<Job> build = jobs.Add(new Job { Id = 1 });
+Handle<Job> test = jobs.Add(new Job { Id = 2, WaitsFor = build });
+Handle<Job> ship = jobs.Add(new Job { Id = 3, WaitsFor = test });
+jobs.Remove(test);
+// ship still holds the handle, but it no longer finds anything,
+// even once the slot is used again for another job.
+Handle<Job> docs = jobs.Add(new Job { Id = 4 });
+bool waiting = jobs.Contains(jobs[ship].WaitsFor);   // false
+```
+
+`Move` hands an item to a new owner: the item stays where it is, but it gets a new handle and every
+copy of the old one is refused from then on. `MoveTo` does the same into another pool:
+
+<!-- sample: samples/Links.cs move -->
+```csharp
+Handle<Job> mine = jobs.Add(new Job { Id = 7 });
+Handle<Job> copy = mine;
+Handle<Job> theirs = jobs.Move(ref mine);
+// mine is now null, and every copy of it is refused: only the new
+// owner reaches the job.
+```
+
+- **A handle belongs to its pool.** Each pool has an id of its own, and a handle used with another
+  pool is refused with `Pool: the handle is from another pool`.
+- **Items don't move.** The pool grows by chunks and never copies items, so a `ref` from
+  `pool[handle]` stays good while it grows. After a `Remove`, though, the next `Add` may reuse the
+  slot: take the `ref` again rather than keep one across a `Remove`.
+- **A handle is 12 bytes:** the pool's id, the slot and its generation.
+
+`LinkedList<T>` is built on a pool, with .NET's names. Each `Add` returns the node's handle, so
+`AddAfter`, `AddBefore` and `Remove` take O(1), and a removed node's handle is refused rather than
+unlinking whatever took its slot. `list[node]` is the node: its `Value`, `Previous` and `Next`.
+
+<!-- sample: samples/Links.cs linked-list -->
+```csharp
+var list = LinkedList<int>.Create(arena);
+var two = list.AddLast(2);
+list.AddFirst(1);
+var four = list.AddAfter(two, 4);
+list.AddBefore(four, 3);
+list.AddLast(5);
+list.Remove(two);
+foreach (ref int item in list)
+    item *= 10;                         // 10, 30, 40, 50
+```
 
 ## Key by an id, not by an object
 

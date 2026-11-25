@@ -223,6 +223,29 @@ string report = Arena.Scratch(ref keep,
     });
 ```
 
+A `ScratchPool<T>` from `scratch.Pool<T>()` holds items found by handles, as a `Pool<T>` does. Its
+`MoveTo` moves an item into a pool of yours, which is how a result made in scratch memory is kept:
+
+<!-- sample: samples/Links.cs scratch-pool -->
+```csharp
+// Work in a scratch pool, then move the one result to keep into a
+// pool of yours; the rest goes with the scratch memory.
+var results = Pool<Job>.Create(arena);
+Handle<Job> best = Arena.Scratch(ref results,
+    static (scoped ScratchScope scratch, scoped ref Pool<Job> keep) =>
+    {
+        ScratchPool<Job> tries = scratch.Pool<Job>();
+        Handle<Job> top = default;
+        for (int id = 1; id <= 20; id++)
+        {
+            Handle<Job> next = tries.Add(new Job { Id = id * 7 % 20 });
+            if (top.IsNull || tries[next].Id > tries[top].Id)
+                top = next;
+        }
+        return tries.MoveTo(keep, ref top);
+    });
+```
+
 One rule is beyond the compiler. A state passed by `ref` to a nested `Arena.Scratch` can carry the
 outer scope, or a list or text it made, and anything they allocated in there would be freed with the
 inner call's memory. So they allocate only while their own callback is the innermost one running:

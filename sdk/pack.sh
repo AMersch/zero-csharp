@@ -5,7 +5,7 @@
 #                                Windows sdk/trim-windows-layout.sh from the linux-x64 one)
 #   ZeroCSharp.Stories260K       the Llama sample's model, as a zero library
 #   ZeroCSharp.SDL3              SDL 3 bindings, a zero library, with SDL for Windows
-#   ZeroCSharp.Templates         dotnet new zero, zerolib, zerollama and zerosdl
+#   ZeroCSharp.Templates         dotnet new zero, zerolib, zerollama, zerosdl, zeropico and zerogpu
 #
 # Usage:  sdk/pack.sh
 # Env:    ZERO_HOSTS     the hosts to pack bflat for (default "linux-x64 linux-arm64 win-x64

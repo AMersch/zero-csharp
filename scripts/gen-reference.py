@@ -30,7 +30,7 @@ PAGES = [
     ('RefList.cs', ['RefList'], 'reflist', 'List of references: strings, classes, arrays.'),
     ('StrDict.cs', ['StrDict'], 'strdict', 'Hash map with string keys compared by text, values of any type.'),
     ('RefDict.cs', ['RefDict'], 'refdict', 'Hash map with unmanaged keys and reference values.'),
-    ('Regex.cs', ['Regex', 'RegexMatch', 'RegexGroups', 'RegexGroup', 'RegexMatches', 'RegexOptions'], 'regex', 'Regular expressions compiled into an arena, matched in linear time.'),
+    ('Regex.cs', ['Regex', 'RegexMatch', 'RegexGroups', 'RegexGroup', 'RegexMatches', 'RegexSplit', 'RegexOptions'], 'regex', 'Regular expressions compiled into an arena, matched in linear time.'),
     ('Seq.cs', ['Seq', 'Query'], 'seq', 'Allocation-free query operators over spans: Where, Select, Sum, ...'),
     ('Threads.cs', ['Parallel'], 'parallel', 'Loops whose iterations run on every processor.'),
     ('Str.cs', ['Str', 'MemoryExtensions'], 'str', 'Parsing, comparing and arena strings; span and string operations.'),

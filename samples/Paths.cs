@@ -14,9 +14,15 @@ public static class Program
     static int s_sectionChecks;
     static int s_sectionFailures;
 
-    static void Section(string section)
+    // count: false leaves the number of checks out, for a section whose
+    // checks differ between systems (the output must be the same everywhere).
+    static void Section(string section, bool count = true)
     {
-        Out.Line($"{(s_sectionFailures == 0 ? "PASS" : "FAIL")} {section} ({s_sectionChecks} checks)");
+        string result = s_sectionFailures == 0 ? "PASS" : "FAIL";
+        if (count)
+            Out.Line($"{result} {section} ({s_sectionChecks} checks)");
+        else
+            Out.Line($"{result} {section}");
         s_sectionChecks = 0;
         s_sectionFailures = 0;
     }
@@ -150,13 +156,13 @@ public static class Program
             Same("share normalize", Path.Normalize("\\\\server\\share\\a\\..\\..\\b"), "\\\\server\\share\\b");
             Same("drive combine", Path.Combine("C:", "x"), "C:x");
             Same("mixed separators", Path.Normalize("a\\b/c"), "a\\b\\c");
-            Section("Windows paths");
+            Section("Separators", count: false);
         }
         else
         {
             Same("'\\' is part of a name", Path.GetFileName("a\\b"), "a\\b");
             Check("'\\' doesn't root", !Path.IsRooted("\\a") && !Path.IsRooted("C:a"));
-            Section("Unix paths");
+            Section("Separators", count: false);
         }
 
         return s_failures;

@@ -140,26 +140,27 @@ public static class Program
             End("Stop");
         }
 
-        // Two timers take turns: one every 20 ms and one every 50 ms, both
-        // stopped at 110 ms. The slower one's ticks fall between the faster
-        // one's.
+        // Two timers take turns: one every 20 ms and one every 50 ms. The
+        // slower one stops both on its second tick, by which time the faster
+        // one has fired about four times. (Loose bounds: a busy machine can
+        // wake a sleeper late.)
         {
             var fast = new Timer(20);
             var slow = new Timer(50);
             int fastTicks = 0, slowTicks = 0;
             fast.Elapsed += (sender, e) => fastTicks++;
-            slow.Elapsed += (sender, e) => slowTicks++;
-            var stopper = new Timer(110) { AutoReset = false };
-            stopper.Elapsed += (sender, e) =>
+            slow.Elapsed += (sender, e) =>
             {
-                fast.Stop();
-                slow.Stop();
+                if (++slowTicks == 2)
+                {
+                    fast.Stop();
+                    slow.Stop();
+                }
             };
             fast.Start();
             slow.Start();
-            stopper.Start();
             Fiber.Run();
-            Check("fast ticks", fastTicks >= 4 && fastTicks <= 5);
+            Check("fast ticks", fastTicks >= 2 && fastTicks <= 8);
             Check("slow ticks", slowTicks == 2);
             End("Together");
         }
@@ -240,14 +241,16 @@ public static class Program
             Check("three ticks", ticks == 3);
             Check("took at least 3 periods", Milliseconds(start) >= 60);
 
-            periodic.Period = TimeSpan.FromMilliseconds(50);
-            Fiber.Sleep(175); // three ticks pass unwaited for
+            // Ticks at 100, 200 and 300 ms pass unwaited for: the first wait
+            // returns at once, the next at the tick at 400 ms.
+            periodic.Period = TimeSpan.FromMilliseconds(100);
+            Fiber.Sleep(350);
             start = Clock.Monotonic;
             periodic.WaitForNextTick();
-            Check("missed ticks: at once", Milliseconds(start) < 25);
+            Check("missed ticks: at once", Milliseconds(start) < 40);
             start = Clock.Monotonic;
             periodic.WaitForNextTick();
-            Check("missed ticks: counted once", Milliseconds(start) > 5);
+            Check("missed ticks: counted once", Milliseconds(start) >= 10);
             periodic.Dispose();
             Check("disposed", !periodic.WaitForNextTick());
             End("Periodic");

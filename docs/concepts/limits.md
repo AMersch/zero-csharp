@@ -564,7 +564,8 @@ NativeMemory: the size overflows
 ```
 
 Nothing checks a block after it is freed: using it then, or freeing it twice, is the same mistake
-it is in C.
+it is in C. [Free memory yourself](../how-to/free-memory-yourself.html) wraps a block in a struct
+that frees it with `using`.
 
 `[SupportedOSPlatform]`, `[UnsupportedOSPlatform]` and `[ConstantExpected]` are there for code
 shared with .NET builds, whose analyzers read them. In zero mode they compile and do nothing.

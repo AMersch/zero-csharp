@@ -221,8 +221,9 @@ ARM_SAMPLES=(
     Blink
 )
 # Arena, Collections, Files, Strings, Queries, Threads, Fibers, Patterns,
-# Scratch and Unicode need more (Arena, for one, allocates a 16 KB array;
-# Fibers runs three fibers of 5 KB at once).
+# Scratch, Links and Unicode need more (Arena, for one, allocates a 16 KB
+# array; Fibers runs three fibers of 5 KB at once). Links passes, but with
+# less than 2 KB to spare, so a small change elsewhere would break it.
 R4_SAMPLES=(
     Tiny
     Minimal

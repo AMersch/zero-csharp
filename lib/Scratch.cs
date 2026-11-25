@@ -568,6 +568,16 @@ public partial struct Arena
     static nuint s_scratchKey;
     static int s_scratchKeyState; // 0 none, 1 being created, 2 ready
 
+    [DllImport("libc")] static safe extern int getpagesize();
+
+    // A scratch arena's first block. Scratch frees with Restore, so a scope
+    // that goes past the first block mallocs and frees a block each time:
+    // 16 KB keeps that rare where memory is plentiful. On a microcontroller
+    // or a C64 (whose runtimes report pages of 1 KB and 256 bytes, as Fibers
+    // relies on too) 16 KB is most of the heap, and every fiber has a
+    // scratch arena of its own, so the first block is 2 KB and grows from there.
+    static nuint ScratchBlockSize => getpagesize() <= 1024 ? (nuint)(2 * 1024) : 16 * 1024;
+
     /// <summary>
     /// Runs <paramref name="action"/> with a scope to allocate temporary memory
     /// from, and frees it all when the action returns. The compiler stops
@@ -643,7 +653,7 @@ public partial struct Arena
             ScratchThread* thread = (ScratchThread*)Platform.pthread_getspecific(s_scratchKey);
             if (thread == null)
             {
-                Arena arena = Create(16 * 1024, "scratch", stopOnOutOfMemory: true);
+                Arena arena = Create(ScratchBlockSize, "scratch", stopOnOutOfMemory: true);
                 thread = arena.Alloc<ScratchThread>();
                 thread->Arena = arena;
                 if (Platform.pthread_setspecific(s_scratchKey, thread) != 0)

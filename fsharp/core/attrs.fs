@@ -377,9 +377,37 @@ namespace Microsoft.FSharp.Core
     type ValueAsStaticPropertyAttribute() =
         inherit Attribute()
 
-    [<AttributeUsage(AttributeTargets.Method ||| AttributeTargets.Property, AllowMultiple=false)>]
+    // With a reason, this is zero mode's [<Safety "...">] (below).
+    [<AttributeUsage(AttributeTargets.Method ||| AttributeTargets.Property ||| AttributeTargets.Constructor, AllowMultiple=false)>]
     [<Sealed>]
-    type NoCompilerInliningAttribute() =
+    type NoCompilerInliningAttribute(reason: string) =
+        inherit Attribute()
+        new() = NoCompilerInliningAttribute(null)
+        member _.Reason = reason
+
+    // Zero mode's own, for calls to members that C# marks `unsafe` (lib's
+    // Arena.Reset, OpenObjectScope and the like), which the SDK's check
+    // reports for F# as ZERO007 (sdk: ZeroFSharpNative.cs.txt). F# has no
+    // unsafe block to put them in.
+    //
+    // [<Safety "why">] is the block and its SAFETY comment in one: on a
+    // function or a member, it says why the unsafe calls inside are used
+    // correctly, and the check accepts them. On a top-level `do` it covers the
+    // file's top-level code.
+    //
+    // It is NoCompilerInlining under another name, because the mark has to
+    // stay with the code: fsc copies a small function into its callers, and
+    // the unsafe call would turn up in a function nobody marked. The check
+    // reads it as NoCompilerInliningAttribute with a reason.
+    type SafetyAttribute = NoCompilerInliningAttribute
+
+    // [<RequiresUnsafe>] is `unsafe` on a C# method: the function may call
+    // unsafe members, and calling it is unsafe in turn, so the check reports
+    // its callers instead.
+    [<AttributeUsage (AttributeTargets.Method ||| AttributeTargets.Property ||| AttributeTargets.Constructor,
+                      AllowMultiple=false)>]
+    [<Sealed>]
+    type RequiresUnsafeAttribute() =
         inherit Attribute()
 
     [<AttributeUsage (AttributeTargets.Method, AllowMultiple=false)>]

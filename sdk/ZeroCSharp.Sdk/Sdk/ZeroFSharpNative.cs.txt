@@ -25,6 +25,11 @@
 // outlives the callback. An input passed by value (ScratchActionIn,
 // ScratchFuncIn) is a copy, so those may be ref structs.
 //
+// It also warns, ZERO007, where F# code calls a member C# marks `unsafe`
+// (the compiler puts [RequiresUnsafe] on those) outside a function or member
+// marked [<Safety "...">] or [<RequiresUnsafe>]: C# asks for an unsafe block
+// there, and F# has none to ask for.
+//
 // System.Reflection.Metadata isn't available to inline tasks, so the tables
 // are read here; only what these files need.
 using System;
@@ -43,6 +48,10 @@ public class ZeroFSharpNative : Task
     /// <summary>For Check: the assemblies the project references, where the
     /// types its IL names from other assemblies are defined.</summary>
     public ITaskItem[] References { get; set; }
+    /// <summary>For Check: whether it reported nothing. The target then notes
+    /// that the assembly is checked, and skips it until it changes; one with
+    /// warnings is checked, and warned about, in every build.</summary>
+    [Output] public bool Clean { get; set; }
     public bool Library { get; set; }
     /// <summary>Windows libraries: where to write the .def file.</summary>
     public string DefFile { get; set; }
@@ -53,7 +62,7 @@ public class ZeroFSharpNative : Task
     public bool NoArguments { get; set; }
 
     private byte[] _pe;
-    private int _strings, _blobs, _stringIndex, _guidIndex, _blobIndex;
+    private int _strings, _blobs, _stringIndex, _guidIndex, _blobIndex, _sections, _sectionCount;
     private readonly int[] _rows = new int[64];
     private readonly int[] _tableStart = new int[64];
     private readonly int[] _rowSize = new int[64];
@@ -61,7 +70,8 @@ public class ZeroFSharpNative : Task
     private readonly int[][] _columnSizes = new int[64][];
 
     private const int TypeRef = 0x01, TypeDef = 0x02, MethodDef = 0x06, MemberRef = 0x0A,
-        CustomAttribute = 0x0C, TypeSpec = 0x1B, AssemblyTable = 0x20, AssemblyRef = 0x23, NestedClass = 0x29;
+        CustomAttribute = 0x0C, Property = 0x17, MethodSemantics = 0x18, TypeSpec = 0x1B, AssemblyTable = 0x20,
+        AssemblyRef = 0x23, NestedClass = 0x29, MethodSpec = 0x2B;
 
     // Coded indexes (II.24.2.6): the tag bits and the tables they select.
     private static readonly int[] TypeDefOrRef = { 0x02, 0x01, 0x1B };
@@ -77,8 +87,9 @@ public class ZeroFSharpNative : Task
     private static readonly int[] Implementation = { 0x26, 0x23, 0x27 };
     private static readonly int[] CustomAttributeType = { -1, -1, 0x06, 0x0A, -1 };
     private static readonly int[] ResolutionScope = { 0x00, 0x1A, 0x23, 0x01 };
+    private static readonly int[] TypeOrMethodDef = { 0x02, 0x06 };
 
-    // The columns of tables 0x00-0x29: a byte count, "s" (string), "g" (guid),
+    // The columns of tables 0x00-0x2C: a byte count, "s" (string), "g" (guid),
     // "b" (blob), a table index (int), or a coded index (int[]).
     private static readonly object[][] Schema =
     {
@@ -124,6 +135,9 @@ public class ZeroFSharpNative : Task
         new object[] { 4, 4, "s", "s", Implementation },                 // 27 ExportedType
         new object[] { 4, 4, "s", Implementation },                      // 28 ManifestResource
         new object[] { T(0x02), T(0x02) },                               // 29 NestedClass
+        new object[] { 2, 2, TypeOrMethodDef, "s" },                     // 2A GenericParam
+        new object[] { MethodDefOrRef, "b" },                            // 2B MethodSpec
+        new object[] { T(0x2A), TypeDefOrRef },                          // 2C GenericParamConstraint
     };
 
     private sealed class TableIndex { public int Table; }
@@ -139,7 +153,18 @@ public class ZeroFSharpNative : Task
         _pe = File.ReadAllBytes(Assembly);
         int cli = ReadHeaders();
         if (Check)
-            return CheckScratchStates();
+        {
+            bool ok = CheckScratchStates();
+            Clean = ok;
+            try { CheckUnsafeCalls(); }
+            catch (Exception e)
+            {
+                // A warning the build can do without: IL this reader doesn't
+                // follow mustn't stop it.
+                Log.LogMessage(MessageImportance.Low, "ZeroCSharp.Sdk: the check for unsafe calls (ZERO007) was skipped: " + e.Message);
+            }
+            return ok;
+        }
         string code;
         if (Library)
         {
@@ -428,18 +453,384 @@ public class ZeroFSharpNative : Task
     }
 
     // Whether the TypeDef has an attribute of this name (any namespace).
-    private bool HasAttribute(int type, string attribute)
+    private bool HasAttribute(int type, string attribute) => HasAttribute(3, type, attribute);
+
+    // The same for a row of another table, by its HasCustomAttribute tag:
+    // 0 MethodDef, 3 TypeDef, 9 Property.
+    private bool HasAttribute(int tag, int row, string attribute) => AttributeParents(attribute).Contains(row << 5 | tag);
+
+    private readonly Dictionary<string, HashSet<int>> _attributeParents = new Dictionary<string, HashSet<int>>();
+
+    // Everything that has an attribute of this name, as HasCustomAttribute values.
+    private HashSet<int> AttributeParents(string attribute)
     {
-        int parent = type << 5 | 3;    // HasCustomAttribute: TypeDef is tag 3
+        if (_attributeParents.TryGetValue(attribute, out HashSet<int> parents)) return parents;
+        parents = new HashSet<int>();
         for (int row = 1; row <= _rows[CustomAttribute]; row++)
         {
-            if (Cell(CustomAttribute, row, 0) != parent) continue;
             int typeToken = AttributeType(Cell(CustomAttribute, row, 1));
             int table = typeToken >> 24, typeRow = typeToken & 0xFFFFFF;
             if ((table == TypeRef || table == TypeDef) && Str(Cell(table, typeRow, 1)) == attribute)
+                parents.Add(Cell(CustomAttribute, row, 0));
+        }
+        _attributeParents.Add(attribute, parents);
+        return parents;
+    }
+
+    // ---- Check: calls to unsafe members (ZERO007) -----------------------------
+
+    private int[] _methodOwner;          // MethodDef row -> TypeDef row
+    private int[] _fieldOwner;           // Field row -> TypeDef row
+    private int[] _enclosing;            // TypeDef row -> the TypeDef it's nested in, or 0
+    private Dictionary<int, int> _propertyOfAccessor;
+
+    // Each call in a method's IL to a member with [RequiresUnsafe] is reported
+    // unless the method is acknowledged: it, or its property, has [<Safety>]
+    // or [<RequiresUnsafe>], or it is code fsc made for an acknowledged
+    // method. That code is a closure class or a lifted inner function, with
+    // '@' in its name; it belongs to the methods whose IL mentions it (which
+    // create the closure or call the function).
+    //
+    // [<Safety "why">] is FSharp.Core's NoCompilerInlining under another name
+    // (fsharp/core/attrs.fs), so that fsc leaves the marked function in one
+    // piece: a small one copied into its callers would put the unsafe call
+    // in methods nobody marked. It reaches the IL as NoCompilerInlining with
+    // the reason, which is how it's told from the plain attribute.
+    private void CheckUnsafeCalls()
+    {
+        int methods = _rows[MethodDef], types = _rows[TypeDef];
+        _methodOwner = Owners(5, methods);
+        _fieldOwner = Owners(4, _rows[0x04]);
+        _enclosing = new int[types + 1];
+        for (int row = 1; row <= _rows[NestedClass]; row++)
+            _enclosing[Cell(NestedClass, row, 0)] = Cell(NestedClass, row, 1);
+        var acknowledged = new bool[methods + 1];
+        var generatedMethod = new bool[methods + 1];
+        var generatedType = new bool[types + 1];
+        for (int t = 1; t <= types; t++)
+        {
+            int enclosing = _enclosing[t];    // an enclosing type has the smaller row
+            string name = Str(Cell(TypeDef, t, 1));
+            generatedType[t] = name.IndexOf('@') >= 0 || (enclosing != 0 && generatedType[enclosing]);
+        }
+        HashSet<int> safety = SafetyParents();
+        for (int m = 1; m <= methods; m++)
+        {
+            generatedMethod[m] = generatedType[_methodOwner[m]] || MethodName(m).IndexOf('@') >= 0;
+            acknowledged[m] = IsMarked(m, safety) || IsMarked(m, AttributeParents("RequiresUnsafeAttribute"));
+        }
+
+        // What each method's IL mentions: unsafe members it calls, and the
+        // generated types and methods that are its own code.
+        var unsafeCalls = new List<KeyValuePair<string, int>>[methods + 1];    // the member, and the call's IL offset
+        var usersOfType = new List<int>[types + 1];
+        var usersOfMethod = new List<int>[methods + 1];
+        var unsafeRefs = new Dictionary<int, string>();    // MemberRef row -> the member's name, or null
+        for (int m = 1; m <= methods; m++)
+        {
+            int rva = Cell(MethodDef, m, 0);
+            if (rva == 0) continue;
+            int p = FileOffset(rva), end;
+            if ((_pe[p] & 3) == 2) { end = p + 1 + (_pe[p] >> 2); p++; }
+            else { int size = U32(p + 4); p += (U16(p) >> 12) * 4; end = p + size; }
+            int code = p;
+            while (p < end)
+            {
+                int offset = p - code;
+                int op = _pe[p++];
+                if (op == 0xFE) op = 0xFE00 | _pe[p++];
+                int operand = OperandSize(op, p);
+                if (!HasToken(op)) { p += operand; continue; }
+                int token = U32(p);
+                p += 4;
+                bool call = op == 0x28 || op == 0x6F || op == 0x73 || op == 0x27 || op == 0xFE06 || op == 0xFE07;
+                int table = (int)((uint)token >> 24), row = token & 0xFFFFFF;
+                if (table == MethodSpec)
+                {
+                    int coded = Cell(MethodSpec, row, 0);
+                    table = MethodDefOrRef[coded % 2];
+                    row = coded >> 1;
+                }
+                if (table == MethodDef)
+                {
+                    Uses(usersOfType, generatedType, _methodOwner[row], m);
+                    if (generatedMethod[row] && row != m) Add(usersOfMethod, row, m);
+                    if (call && (IsMarked(row, "RequiresUnsafeAttribute")))
+                        Add(unsafeCalls, m, Call(DisplayName(RuntimeTypeName(_methodOwner[row]).Replace("+", "."), MethodName(row)), offset));
+                }
+                else if (table == 0x04)
+                    Uses(usersOfType, generatedType, _fieldOwner[row], m);
+                else if (table == MemberRef)
+                {
+                    int parent = Cell(MemberRef, row, 0);
+                    int parentTable = MemberRefParent[parent % 8], parentRow = parent >> 3;
+                    if (parentTable == TypeSpec)
+                    {
+                        // GENERICINST (CLASS | VALUETYPE) type ...: the generic type's member
+                        int q = _blobs + Cell(TypeSpec, parentRow, 0);
+                        CompressedLength(q, out q);
+                        if (_pe[q] != 0x15) continue;
+                        q += 2;
+                        int coded = CompressedInt(ref q);
+                        parentTable = TypeDefOrRef[coded % 4];
+                        parentRow = coded >> 2;
+                    }
+                    if (parentTable == TypeDef)
+                    {
+                        Uses(usersOfType, generatedType, parentRow, m);
+                        if (call && UnsafeMethodNamed(parentRow, Str(Cell(MemberRef, row, 1)), ParameterCount(_blobs + Cell(MemberRef, row, 2))))
+                            Add(unsafeCalls, m, Call(DisplayName(RuntimeTypeName(parentRow).Replace("+", "."), Str(Cell(MemberRef, row, 1))), offset));
+                    }
+                    else if (parentTable == TypeRef && call)
+                    {
+                        if (!unsafeRefs.TryGetValue(row, out string member))
+                        {
+                            member = UnsafeMemberRef(parentRow, row);
+                            unsafeRefs.Add(row, member);
+                        }
+                        if (member != null) Add(unsafeCalls, m, Call(member, offset));
+                    }
+                }
+            }
+        }
+
+        // Generated code is acknowledged with the code it belongs to.
+        for (bool changed = true; changed;)
+        {
+            changed = false;
+            for (int m = 1; m <= methods; m++)
+            {
+                if (acknowledged[m] || !generatedMethod[m]) continue;
+                bool covered = AnyAcknowledged(usersOfMethod[m], acknowledged);
+                for (int t = _methodOwner[m]; t != 0 && !covered; t = _enclosing[t])
+                    covered = generatedType[t] && AnyAcknowledged(usersOfType[t], acknowledged);
+                if (covered) { acknowledged[m] = true; changed = true; }
+            }
+        }
+
+        var reported = new HashSet<string>();
+        Pdb pdb = null;
+        for (int m = 1; m <= methods; m++)
+        {
+            if (unsafeCalls[m] == null || acknowledged[m]) continue;
+            if (pdb == null) pdb = Pdb.Read(Path.ChangeExtension(Assembly, ".pdb"));
+            // A lambda's call is reported for the function it's written in,
+            // which is the one to mark.
+            int function = m;
+            for (int step = 0; step < 32 && generatedMethod[function]; step++)
+            {
+                List<int> users = usersOfMethod[function];
+                for (int t = _methodOwner[function]; t != 0 && users == null; t = _enclosing[t])
+                    if (generatedType[t]) users = usersOfType[t];
+                if (users == null) break;
+                function = users[0];
+            }
+            foreach (KeyValuePair<string, int> call in unsafeCalls[m])
+            {
+                string member = call.Key, file = Assembly;
+                int line = 0, column = 0;
+                bool located = pdb != null && pdb.Locate(m, call.Value, out file, out line, out column);
+                if (!located) file = Assembly;
+                // One warning for a line, or without lines for a function.
+                if (!reported.Add(function + " " + member + " " + line)) continue;
+                string where = function == m ? "" : " (in a lambda or an inner function" + (located ? "" : LineOf(m)) + ")";
+                Clean = false;
+                Log.LogWarning(null, "ZERO007", null, file, line, column, 0, 0,
+                    CallerName(function) + " calls " + member + where + ", which is unsafe: the compiler can't check that it's used correctly,"
+                    + " and C# asks for an unsafe block around it. Read the member's safety rules, then mark the function"
+                    + " [<Safety \"why this use is correct\">], or [<RequiresUnsafe>] to make it unsafe to call in turn.");
+            }
+        }
+    }
+
+    private static KeyValuePair<string, int> Call(string member, int offset) => new KeyValuePair<string, int>(member, offset);
+
+    private static void Add<T>(List<T>[] lists, int index, T item)
+    {
+        if (lists[index] == null) lists[index] = new List<T>();
+        lists[index].Add(item);
+    }
+
+    // Method user mentions a member of type: recorded for generated types,
+    // unless it is the type's own code.
+    private void Uses(List<int>[] usersOfType, bool[] generatedType, int type, int user)
+    {
+        if (type == 0 || !generatedType[type]) return;
+        for (int t = _methodOwner[user]; t != 0; t = _enclosing[t])
+            if (t == type) return;
+        Add(usersOfType, type, user);
+    }
+
+    private static bool AnyAcknowledged(List<int> users, bool[] acknowledged)
+    {
+        if (users != null)
+            foreach (int user in users)
+                if (acknowledged[user]) return true;
+        return false;
+    }
+
+    // What has [<Safety "why">]: NoCompilerInliningAttribute, made with a
+    // reason that isn't empty (II.23.3: the prolog, then the string).
+    private HashSet<int> SafetyParents()
+    {
+        var parents = new HashSet<int>();
+        for (int row = 1; row <= _rows[CustomAttribute]; row++)
+        {
+            int typeToken = AttributeType(Cell(CustomAttribute, row, 1));
+            int table = typeToken >> 24, typeRow = typeToken & 0xFFFFFF;
+            if ((table != TypeRef && table != TypeDef) || Str(Cell(table, typeRow, 1)) != "NoCompilerInliningAttribute") continue;
+            int length = CompressedLength(_blobs + Cell(CustomAttribute, row, 2), out int p);
+            if (length < 5 || U16(p) != 1 || _pe[p + 2] == 0xFF) continue;    // no argument, or null
+            p += 2;
+            string reason = SerString(ref p);
+            if (reason != null && reason.Trim().Length > 0) parents.Add(Cell(CustomAttribute, row, 0));
+        }
+        return parents;
+    }
+
+    private bool IsMarked(int method, string attribute) => IsMarked(method, AttributeParents(attribute));
+
+    // Whether the method, or the property it's an accessor of, is among the
+    // marked (HasCustomAttribute values: tag 0 MethodDef, 9 Property).
+    private bool IsMarked(int method, HashSet<int> marked)
+    {
+        if (marked.Contains(method << 5)) return true;
+        if (_propertyOfAccessor == null)
+        {
+            _propertyOfAccessor = new Dictionary<int, int>();
+            for (int row = 1; row <= _rows[MethodSemantics]; row++)
+            {
+                int association = Cell(MethodSemantics, row, 2);
+                if ((association & 1) == 1) _propertyOfAccessor[Cell(MethodSemantics, row, 1)] = association >> 1;
+            }
+        }
+        return _propertyOfAccessor.TryGetValue(method, out int property) && marked.Contains(property << 5 | 9);
+    }
+
+    // For each row of a table whose rows TypeDefs own in runs (Field: TypeDef
+    // column 4, MethodDef: column 5), the TypeDef that owns it.
+    private int[] Owners(int column, int rows)
+    {
+        var owners = new int[rows + 1];
+        int types = _rows[TypeDef];
+        for (int t = 1; t <= types; t++)
+        {
+            int first = Cell(TypeDef, t, column), next = t < types ? Cell(TypeDef, t + 1, column) : rows + 1;
+            for (int row = first; row < next && row <= rows; row++) owners[row] = t;
+        }
+        return owners;
+    }
+
+    // Whether the type has a method of this name and parameter count with
+    // [RequiresUnsafe] (on it or its property).
+    private bool UnsafeMethodNamed(int type, string name, int parameters)
+    {
+        if (_methodOwner == null) _methodOwner = Owners(5, _rows[MethodDef]);
+        int first = Cell(TypeDef, type, 5), next = type < _rows[TypeDef] ? Cell(TypeDef, type + 1, 5) : _rows[MethodDef] + 1;
+        for (int m = first; m < next; m++)
+            if (MethodName(m) == name && ParameterCount(_blobs + Cell(MethodDef, m, 4)) == parameters
+                && IsMarked(m, "RequiresUnsafeAttribute"))
+                return true;
+        return false;
+    }
+
+    // A member of a type another assembly defines: Type.Member if that
+    // assembly marks it unsafe, or null.
+    private string UnsafeMemberRef(int typeRef, int memberRef)
+    {
+        var path = new List<string>();
+        int r = typeRef;
+        while (true)
+        {
+            path.Insert(0, Str(Cell(TypeRef, r, 1)));
+            int scope = Cell(TypeRef, r, 0);
+            if (ResolutionScope[scope % 4] != TypeRef) break;
+            r = scope >> 2;
+        }
+        ZeroFSharpNative other = ReferenceNamed(ReferencedAssembly(typeRef));
+        if (other == null) return null;
+        int type = other.FindType(Str(Cell(TypeRef, r, 2)), path);
+        string name = Str(Cell(MemberRef, memberRef, 1));
+        if (type == 0 || !other.UnsafeMethodNamed(type, name, ParameterCount(_blobs + Cell(MemberRef, memberRef, 2))))
+            return null;
+        return DisplayName(path[path.Count - 1], name);
+    }
+
+    // Arena.Reset, List.AsSpan, Game.Peak (for get_Peak).
+    private static string DisplayName(string type, string member)
+    {
+        if (member.StartsWith("get_") || member.StartsWith("set_")) member = member.Substring(4);
+        return type.Split('`')[0] + "." + member;
+    }
+
+    // The F# function for the message. Top-level code is main@ or a static
+    // constructor in <StartupCode$assembly>.$File.
+    private string CallerName(int method)
+    {
+        int type = _methodOwner[method];
+        if (Str(Cell(TypeDef, type, 2)).StartsWith("<StartupCode$"))
+            return "The top-level code of " + Str(Cell(TypeDef, type, 1)).TrimStart('$');
+        return DisplayName(RuntimeTypeName(type).Replace("+", "."), MethodName(method));
+    }
+
+    // ", line 8" for code fsc named xs@8 or clo@8-1 (a closure class, or a
+    // lifted function), or "".
+    private string LineOf(int method)
+    {
+        string name = MethodName(method);
+        for (int t = _methodOwner[method]; t != 0 && name.IndexOf('@') < 0; t = _enclosing[t])
+            name = Str(Cell(TypeDef, t, 1));
+        int at = name.IndexOf('@'), end = at + 1;
+        if (at < 0) return "";
+        while (end < name.Length && char.IsDigit(name[end])) end++;
+        return end > at + 1 ? ", line " + name.Substring(at + 1, end - at - 1) : "";
+    }
+
+    // A method signature's parameter count (II.23.2.1, 23.2.2).
+    private int ParameterCount(int blob)
+    {
+        CompressedLength(blob, out int p);
+        int convention = _pe[p++];
+        if ((convention & 0x10) != 0) CompressedInt(ref p);    // the generic parameter count
+        return CompressedInt(ref p);
+    }
+
+    // Whether the instruction's operand is a metadata token of a member or a
+    // type: the calls, the field instructions, ldtoken.
+    private static bool HasToken(int op)
+    {
+        switch (op)
+        {
+            case 0x27: case 0x28: case 0x6F: case 0x73:                           // jmp, call, callvirt, newobj
+            case 0x7B: case 0x7C: case 0x7D: case 0x7E: case 0x7F: case 0x80:     // the field instructions
+            case 0xD0: case 0xFE06: case 0xFE07:                                  // ldtoken, ldftn, ldvirtftn
                 return true;
         }
         return false;
+    }
+
+    // The size of an instruction's operand (III.1.2.1, and each instruction's
+    // description); p is where the operand starts.
+    private int OperandSize(int op, int p)
+    {
+        if (op >= 0xFE00)
+        {
+            switch (op & 0xFF)
+            {
+                case 0x06: case 0x07: case 0x15: case 0x16: case 0x1C: return 4;    // ldftn, ldvirtftn, initobj, constrained., sizeof
+                case 0x09: case 0x0A: case 0x0B: case 0x0C: case 0x0D: case 0x0E: return 2;    // ldarg .. stloc
+                case 0x12: case 0x19: return 1;    // unaligned., no.
+                default: return 0;
+            }
+        }
+        if (op == 0x45) return 4 + 4 * U32(p);    // switch
+        if (op == 0x21 || op == 0x23) return 8;   // ldc.i8, ldc.r8
+        if ((op >= 0x0E && op <= 0x13) || op == 0x1F || (op >= 0x2B && op <= 0x37) || op == 0xDE) return 1;
+        if (op == 0x20 || op == 0x22 || (op >= 0x27 && op <= 0x29) || (op >= 0x38 && op <= 0x44)
+            || (op >= 0x6F && op <= 0x75) || op == 0x79 || (op >= 0x7B && op <= 0x81) || op == 0x8C || op == 0x8D
+            || op == 0x8F || (op >= 0xA3 && op <= 0xA5) || op == 0xC2 || op == 0xC6 || op == 0xD0 || op == 0xDD)
+            return 4;
+        return 0;
     }
 
     // The method that takes the state (the callback F# made of the lambda),
@@ -723,6 +1114,144 @@ public class ZeroFSharpNative : Task
         return b.ToString();
     }
 
+    // ---- Source lines, from the portable PDB --------------------------------
+
+    // The PDB the F# compiler wrote next to the assembly, for the file and
+    // line of a call: its Document and MethodDebugInformation tables (the
+    // Portable PDB format, in dotnet/runtime's docs/design/specs). Without one
+    // (DebugType none or embedded), warnings name the function only.
+    private sealed class Pdb
+    {
+        private byte[] _data;
+        private int _blobs, _blobIndex, _documentIndex, _documents, _documentRow, _methods, _methodRows;
+
+        public static Pdb Read(string path)
+        {
+            var pdb = new Pdb();
+            try
+            {
+                if (!File.Exists(path) || !pdb.ReadTables(File.ReadAllBytes(path))) pdb._methodRows = 0;
+            }
+            catch (Exception) { pdb._methodRows = 0; }
+            return pdb;
+        }
+
+        private int U16(int o) => _data[o] | _data[o + 1] << 8;
+        private int U32(int o) => _data[o] | _data[o + 1] << 8 | _data[o + 2] << 16 | _data[o + 3] << 24;
+
+        private bool ReadTables(byte[] data)
+        {
+            _data = data;
+            if (U32(0) != 0x424A5342) return false;    // "BSJB": not a portable PDB (an old Windows one)
+            int streamList = 16 + U32(12), streamCount = U16(streamList + 2), cursor = streamList + 4, tables = 0;
+            for (int i = 0; i < streamCount; i++)
+            {
+                int offset = U32(cursor), nameStart = cursor + 8, nameEnd = nameStart;
+                while (_data[nameEnd] != 0) nameEnd++;
+                string name = Encoding.ASCII.GetString(_data, nameStart, nameEnd - nameStart);
+                if (name == "#~") tables = offset;
+                else if (name == "#Blob") _blobs = offset;
+                cursor = nameStart + ((nameEnd - nameStart + 4) & ~3);
+            }
+            if (tables == 0) return false;
+            int heapSizes = _data[tables + 6];
+            int guidIndex = (heapSizes & 2) != 0 ? 4 : 2;
+            _blobIndex = (heapSizes & 4) != 0 ? 4 : 2;
+            long valid = (long)(uint)U32(tables + 8) | (long)(uint)U32(tables + 12) << 32;
+            int counts = tables + 24, documentRows = 0;
+            for (int t = 0; t < 64; t++)
+            {
+                if ((valid >> t & 1) == 0) continue;
+                if (t < 0x30) return false;    // a table before Document: not the layout read here
+                if (t == 0x30) documentRows = U32(counts);
+                if (t == 0x31) _methodRows = U32(counts);
+                counts += 4;
+            }
+            // Document: Name (blob), HashAlgorithm (guid), Hash (blob), Language (guid).
+            // MethodDebugInformation: Document, SequencePoints (blob).
+            _documentIndex = documentRows > 0xFFFF ? 4 : 2;
+            _documentRow = 2 * _blobIndex + 2 * guidIndex;
+            _documents = counts;
+            _methods = counts + documentRows * _documentRow;
+            return true;
+        }
+
+        private int Index(int o, int size) => size == 4 ? U32(o) : U16(o);
+
+        private int Compressed(ref int p)
+        {
+            int b = _data[p];
+            if ((b & 0x80) == 0) { p += 1; return b; }
+            if ((b & 0xC0) == 0x80) { p += 2; return (b & 0x3F) << 8 | _data[p - 1]; }
+            p += 4;
+            return (b & 0x1F) << 24 | _data[p - 3] << 16 | _data[p - 2] << 8 | _data[p - 1];
+        }
+
+        // A signed compressed integer (II.23.2): the sign is the lowest bit.
+        private int Signed(ref int p)
+        {
+            int start = p, raw = Compressed(ref p), value = raw >> 1;
+            if ((raw & 1) == 0) return value;
+            int width = p - start;
+            return value - (width == 1 ? 0x40 : width == 2 ? 0x2000 : 0x10000000);
+        }
+
+        // The source file, line and column of the instruction at ilOffset in
+        // the method (a MethodDef row): the last sequence point at or before it
+        // that isn't hidden.
+        public bool Locate(int method, int ilOffset, out string file, out int line, out int column)
+        {
+            file = null;
+            line = column = 0;
+            if (method > _methodRows) return false;
+            int row = _methods + (method - 1) * (_documentIndex + _blobIndex);
+            int document = Index(row, _documentIndex), blob = Index(row + _documentIndex, _blobIndex);
+            if (blob == 0) return false;
+            int p = _blobs + blob, length = Compressed(ref p), end = p + length;
+            Compressed(ref p);    // the local signature
+            if (document == 0) document = Compressed(ref p);
+            int offset = 0, startLine = 0, startColumn = 0, foundDocument = 0;
+            bool first = true, anyLine = false;
+            while (p < end)
+            {
+                int delta = Compressed(ref p);
+                if (!first && delta == 0) { document = Compressed(ref p); continue; }    // the document changes
+                first = false;
+                offset += delta;
+                int lines = Compressed(ref p);
+                int columns = lines == 0 ? Compressed(ref p) : Signed(ref p);
+                if (lines == 0 && columns == 0) continue;    // a hidden sequence point
+                if (!anyLine) { startLine = Compressed(ref p); startColumn = Compressed(ref p); anyLine = true; }
+                else { startLine += Signed(ref p); startColumn += Signed(ref p); }
+                if (offset > ilOffset) break;
+                line = startLine;
+                column = startColumn;
+                foundDocument = document;
+            }
+            if (foundDocument == 0) return false;
+            file = DocumentName(foundDocument);
+            return file != null;
+        }
+
+        // A document's name: a separator, then the blobs of its parts.
+        private string DocumentName(int document)
+        {
+            int p = _blobs + Index(_documents + (document - 1) * _documentRow, _blobIndex);
+            int length = Compressed(ref p), end = p + length;
+            if (length == 0) return null;
+            char separator = (char)_data[p++];
+            var name = new StringBuilder();
+            for (bool firstPart = true; p < end; firstPart = false)
+            {
+                if (!firstPart && separator != 0) name.Append(separator);
+                int part = _blobs + Compressed(ref p);
+                int partLength = Compressed(ref part);
+                name.Append(Encoding.UTF8.GetString(_data, part, partLength));
+            }
+            return name.ToString();
+        }
+    }
+
     // ---- The file and its tables --------------------------------------------
 
     private int U16(int o) => _pe[o] | _pe[o + 1] << 8;
@@ -766,19 +1295,10 @@ public class ZeroFSharpNative : Task
         int sectionCount = U16(peHeader + 6);
         int optional = peHeader + 24;
         int dataDirectories = optional + (U16(optional) == 0x20B ? 112 : 96);
-        int sections = optional + U16(peHeader + 20);
-        Func<int, int> fileOffset = rva =>
-        {
-            for (int i = 0; i < sectionCount; i++)
-            {
-                int section = sections + i * 40, va = U32(section + 12);
-                if (rva >= va && rva < va + Math.Max(U32(section + 8), U32(section + 16)))
-                    return rva - va + U32(section + 20);
-            }
-            throw new InvalidDataException("An address outside every section of " + Assembly);
-        };
-        int cli = fileOffset(U32(dataDirectories + 14 * 8));
-        int root = fileOffset(U32(cli + 8));
+        _sections = optional + U16(peHeader + 20);
+        _sectionCount = sectionCount;
+        int cli = FileOffset(U32(dataDirectories + 14 * 8));
+        int root = FileOffset(U32(cli + 8));
         int streamList = root + 16 + U32(root + 12);
         int streamCount = U16(streamList + 2), tables = 0, cursor = streamList + 4;
         for (int i = 0; i < streamCount; i++)
@@ -819,6 +1339,18 @@ public class ZeroFSharpNative : Task
             position += _rows[t] * size;
         }
         return cli;
+    }
+
+    // Where the file holds a relative virtual address.
+    private int FileOffset(int rva)
+    {
+        for (int i = 0; i < _sectionCount; i++)
+        {
+            int section = _sections + i * 40, va = U32(section + 12);
+            if (rva >= va && rva < va + Math.Max(U32(section + 8), U32(section + 16)))
+                return rva - va + U32(section + 20);
+        }
+        throw new InvalidDataException("An address outside every section of " + Assembly);
     }
 
     private int ColumnSize(object column)

@@ -66,6 +66,10 @@ public struct BadChar { public int Position; }
 public union ParseResult(Parsed, BadChar);
 // docs:end
 
+// Items of 3 and 24 bytes, for the span copy and fill checks.
+public struct Three { public byte A, B, C; }
+public struct Big { public long A, B, C; }
+
 // docs:equatable-struct
 public readonly struct Point : IEquatable<Point>
 {
@@ -174,6 +178,75 @@ public static class Program
         BadChar => -1,
     };
     // docs:end
+
+    // Every overlapping copy of up to 40 bytes, both ways, against copying
+    // through a temporary buffer.
+    static bool CopiesLikeALoop()
+    {
+        Span<byte> actual = stackalloc byte[96];
+        Span<byte> expected = stackalloc byte[96];
+        Span<byte> temp = stackalloc byte[40];
+        for (int length = 0; length <= 40; length++)
+        {
+            for (int shift = -20; shift <= 20; shift += 1)
+            {
+                for (int i = 0; i < 96; i++)
+                    actual[i] = expected[i] = (byte)(i * 7 + 1);
+                int from = 28;
+                int to = 28 + shift;
+                for (int i = 0; i < length; i++)
+                    temp[i] = expected[from + i];
+                for (int i = 0; i < length; i++)
+                    expected[to + i] = temp[i];
+                actual.Slice(from, length).CopyTo(actual.Slice(to, length));
+                if (!SameBytes(actual, expected))
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    static bool SameBytes(Span<byte> left, Span<byte> right)
+    {
+        for (int i = 0; i < left.Length; i++)
+        {
+            if (left[i] != right[i])
+                return false;
+        }
+        return true;
+    }
+
+    // Fill (or Clear, for a zero value) of 0 to 40 items: each one holds the
+    // value's bytes, and the items around them are untouched.
+    static bool FillsLikeALoop<T>(T value) where T : unmanaged
+    {
+        Span<T> items = stackalloc T[42];
+        int size = Unsafe.SizeOf<T>();
+        bool zero = true;
+        for (int b = 0; b < size; b++)
+            zero &= ByteOf(ref value, b) == 0;
+        for (int count = 0; count <= 40; count++)
+        {
+            Span<byte> all = System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref Unsafe.As<T, byte>(ref items[0]), 42 * size);
+            for (int i = 0; i < all.Length; i++)
+                all[i] = 0xAB;
+            Span<T> middle = items.Slice(1, count);
+            if (zero && count % 2 == 0)
+                middle.Clear();
+            else
+                middle.Fill(value);
+            for (int i = 0; i < all.Length; i++)
+            {
+                int item = i / size;
+                byte want = item >= 1 && item <= count ? ByteOf(ref value, i % size) : (byte)0xAB;
+                if (all[i] != want)
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    static byte ByteOf<T>(ref T value, int index) => Unsafe.Add(ref Unsafe.As<T, byte>(ref value), index);
 
     public static int Main()
     {
@@ -375,6 +448,21 @@ public static class Program
         count += 2;
         Check("a ref to a struct's own field", clicks.Value == 3);
         Section("UnscopedRef");
+
+        Check("CopyTo, overlapping either way", CopiesLikeALoop());
+        Check("Fill and Clear, bytes", FillsLikeALoop<byte>(0x5A) && FillsLikeALoop<byte>(0));
+        Check("Fill and Clear, short and int", FillsLikeALoop<short>(-2) && FillsLikeALoop(0x01020304) && FillsLikeALoop(0));
+        Check("Fill and Clear, 3-byte struct", FillsLikeALoop(new Three { A = 1, B = 2, C = 3 }) && FillsLikeALoop(new Three()));
+        Check("Fill and Clear, long and 24-byte struct",
+            FillsLikeALoop(-1L) && FillsLikeALoop(new Big { A = 1, B = 0, C = 3 }) && FillsLikeALoop(new Big()));
+        Span<long> sevens = stackalloc long[300];
+        sevens.Fill(7);
+        bool allSeven = true;
+        foreach (long item in sevens)
+            allSeven &= item == 7;
+        sevens.Slice(10, 280).Clear();
+        Check("big Fill and Clear", allSeven && sevens[9] == 7 && sevens[10] == 0 && sevens[289] == 0 && sevens[290] == 7);
+        Section("span copy and fill");
 
         Console.WriteLine();
         if (s_failures == 0)

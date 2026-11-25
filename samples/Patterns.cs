@@ -16,7 +16,7 @@ public static class Program
 
     static void Section(string section)
     {
-        Out.Line($"{(s_sectionFailures == 0 ? "PASS" : "FAIL")} {section} ({s_sectionChecks} checks)");
+        Console.WriteLine($"{(s_sectionFailures == 0 ? "PASS" : "FAIL")} {section} ({s_sectionChecks} checks)");
         s_sectionChecks = 0;
         s_sectionFailures = 0;
     }
@@ -28,7 +28,7 @@ public static class Program
         {
             s_failures++;
             s_sectionFailures++;
-            Out.Line($"  FAIL: {name}");
+            Console.WriteLine($"  FAIL: {name}");
         }
     }
 
@@ -43,7 +43,7 @@ public static class Program
     {
         bool ok = !Regex.TryCreate(s_arena, pattern, RegexOptions.None, out _, out string error, out int at);
         if (ok && (error != reason || at != position))
-            Out.Line($"  {pattern}: \"{error}\" at {at}");
+            Console.WriteLine($"  {pattern}: \"{error}\" at {at}");
         return ok && error == reason && at == position;
     }
 
@@ -167,11 +167,11 @@ public static class Program
             words == 400 && arena.Used == used && GC.GetTotalAllocatedBytes() == allocated);
         Section("cost");
 
-        Out.Line();
+        Console.WriteLine();
         if (s_failures == 0)
-            Out.Line("All checks passed.");
+            Console.WriteLine("All checks passed.");
         else
-            Out.Line($"{s_failures} checks FAILED.");
+            Console.WriteLine($"{s_failures} checks FAILED.");
         return s_failures;
     }
 }

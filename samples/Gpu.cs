@@ -195,10 +195,10 @@ public static class Program
     {
         if (!Gpu.Open()) return 1;
         Span<char> name = stackalloc char[64];
-        Out.Line($"GPU: {Gpu.DeviceName(name)}");
+        Console.WriteLine($"GPU: {Gpu.DeviceName(name)}");
 
         int failures = CheckAdd() + CheckCollatz() + CheckSaxpy() + CheckSum() + CheckMatMul() + CheckAtomics();
-        Out.Line(failures == 0 ? "OK: GPU matches CPU" : $"FAILED: {failures} differences");
+        Console.WriteLine(failures == 0 ? "OK: GPU matches CPU" : $"FAILED: {failures} differences");
         return failures == 0 ? 0 : 1;
     }
 
@@ -207,7 +207,7 @@ public static class Program
     // waiting; the second launch, so the one-time pipeline compile isn't in
     // it), and a plain C# loop doing the same work on one CPU core.
     static void Report(string kernel, double gpuMs, double runMs, double loopMs) =>
-        Out.Line($"{kernel}: GPU {Us(gpuMs)} us, Gpu.Run {Us(runMs)} us, C# loop {Us(loopMs)} us (1 core)");
+        Console.WriteLine($"{kernel}: GPU {Us(gpuMs)} us, Gpu.Run {Us(runMs)} us, C# loop {Us(loopMs)} us (1 core)");
 
     static long Us(double ms) => (long)(ms * 1000);
 
@@ -271,7 +271,7 @@ public static class Program
         int failures = Compare("Collatz", gpu.Span, cpu.Span);
         int longest = 0;
         for (int i = 1; i < N; i++) if (gpu.Span[i] > gpu.Span[longest]) longest = i;
-        Out.Line($"         longest chain starts at {longest + 1} ({gpu.Span[longest]} steps)");
+        Console.WriteLine($"         longest chain starts at {longest + 1} ({gpu.Span[longest]} steps)");
         gpu.Free(); cpu.Free();
         return failures;
     }
@@ -304,7 +304,7 @@ public static class Program
         }
 
         int failures = Compare("Saxpy", gpu.Span, cpu.Span);
-        if (gpu.Span[N - 1] != -(N - 1)) { Out.Line("Saxpy wrote past n"); failures++; }
+        if (gpu.Span[N - 1] != -(N - 1)) { Console.WriteLine("Saxpy wrote past n"); failures++; }
         x.Free(); gpu.Free(); cpu.Free();
         return failures;
     }
@@ -337,7 +337,7 @@ public static class Program
         int failures = Compare("Sum", partial.Span, cpu.Span);
         long sum = 0;
         for (int g = 0; g < groups; g++) sum += (long)partial.Span[g];
-        Out.Line($"         {groups} threadgroups of {group}, total {sum}");
+        Console.WriteLine($"         {groups} threadgroups of {group}, total {sum}");
         x.Free(); partial.Free(); cpu.Free();
         return failures;
     }
@@ -387,7 +387,7 @@ public static class Program
         double gflop = 2.0 * n * n * n / 1e9;
         Report("MatMulNaive", naiveGpuMs, naiveRunMs, loopMs);
         Report("MatMul     ", tiledGpuMs, tiledRunMs, loopMs);
-        Out.Line($"         {n} x {n}: naive {(long)(gflop / naiveRunMs * 1000)} GFLOP/s, tiled {(long)(gflop / tiledRunMs * 1000)} GFLOP/s, C# loop {(long)(gflop / loopMs * 1000 * 10) / 10.0} GFLOP/s");
+        Console.WriteLine($"         {n} x {n}: naive {(long)(gflop / naiveRunMs * 1000)} GFLOP/s, tiled {(long)(gflop / tiledRunMs * 1000)} GFLOP/s, C# loop {(long)(gflop / loopMs * 1000 * 10) / 10.0} GFLOP/s");
 
         int failures = Compare("MatMulNaive", naive.Span, cpu.Span) + Compare("MatMul", tiled.Span, cpu.Span);
         a.Free(); b.Free(); naive.Free(); tiled.Free(); cpu.Free();
@@ -433,8 +433,8 @@ public static class Program
         long lost = 0;
         for (int b = 0; b < 256; b++)
             if (bins.Span[b] != cpu.Span[b]) { wrong++; lost += cpu.Span[b] - bins.Span[b]; }
-        Out.Line($"         {bytes} bytes; without atomics {wrong} of 256 bins are wrong ({lost} counts lost)");
-        if (wrong == 0) { Out.Line("HistogramRacy: no lost counts, so the histogram test doesn't show the atomics work"); failures++; }
+        Console.WriteLine($"         {bytes} bytes; without atomics {wrong} of 256 bins are wrong ({lost} counts lost)");
+        if (wrong == 0) { Console.WriteLine("HistogramRacy: no lost counts, so the histogram test doesn't show the atomics work"); failures++; }
 
         // Floats: small integers whose total stays below 2^24, so every partial
         // sum is exact and the order the GPU adds them in doesn't matter.
@@ -456,9 +456,9 @@ public static class Program
         result.Span[0] = -1e30f;
         Gpu.Run(nameof(Kernels.FloatMax), N, x, result);
         float max = result.Span[0];
-        Out.Line($"Floats : total {(long)total} (want {(long)want}), max {(long)max} (want {(long)wantMax})");
-        if (total != want) { Out.Line("FloatTotal differs"); failures++; }
-        if (max != wantMax) { Out.Line("FloatMax differs"); failures++; }
+        Console.WriteLine($"Floats : total {(long)total} (want {(long)want}), max {(long)max} (want {(long)wantMax})");
+        if (total != want) { Console.WriteLine("FloatTotal differs"); failures++; }
+        if (max != wantMax) { Console.WriteLine("FloatMax differs"); failures++; }
 
         data.Free(); bins.Free(); cpu.Free(); x.Free(); result.Free();
         return failures;
@@ -469,7 +469,7 @@ public static class Program
         int failures = 0;
         for (int i = 0; i < gpu.Length; i++)
             if (!gpu[i].Equals(cpu[i]))
-                if (failures++ < 5) Out.Line($"{kernel}[{i}] differs");
+                if (failures++ < 5) Console.WriteLine($"{kernel}[{i}] differs");
         return failures;
     }
 }

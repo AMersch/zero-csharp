@@ -2,7 +2,7 @@
 //
 //   Regex date = Regex.Create(arena, @"(\d{4})-(\d\d)-(\d\d)");
 //   RegexMatch m = date.Match(line);
-//   if (m.Success) Out.Line("year: ", m.Groups[1].Value);
+//   if (m.Success) Console.WriteLine($"year: {m.Groups[1].Value}");
 //   foreach (RegexMatch number in Regex.Create(arena, @"\d+").Matches(text)) ...
 //
 // A subset of .NET's syntax, with .NET's results where the two overlap:

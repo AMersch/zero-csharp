@@ -1,7 +1,7 @@
 # TODO
 
 What is left to do for the Commander X16 target (`./build.sh --cx16`, `lib/CX16.cs`, `cx16/`), most
-important first. Priority is value for programs written in C# divided by the work and the risk;
+important first. (What is done is listed first.) Priority is value for programs written in C# divided by the work and the risk;
 **Effort** is S (an hour or two: a wrapper and a test), M (a day) or L (several days).
 
 The X16's own hardware is reached from `lib/CX16.cs` through functions in `cx16/runtime.c`
@@ -14,32 +14,24 @@ output and no mouse: what can only be heard or seen needs a check in a window, o
 
 - **Real-time clock:** `Clock.UtcNow` and `UnixMilliseconds` read it; `CX16.SetDateTime` sets it.
 - **Bitmap:** `Bitmap` (clear, plot, get, fill, rectangle, line, circle, text) and the palette (`CX16.SetColor`) in 320x240 with 256 colors, directly on the VERA; sprite shapes moved to $13000 to keep clear of the bitmap. (`samples/BitmapDemo.cs`) Not yet: other depths (4, 2, 1 bit), 640x480, speed with VERA FX.
+- **Tiles:** `Tiles` (map and tile pictures in 2, 4 and 8 bits, 8x8 and 16x16, flips and palette offsets, scrolling) on layer 0. (`samples/TileDemo.cs`) Not yet: the 1-bit text-like tile mode, layer 1 as tiles (it is the text), a second layer of tiles.
 - **Screen modes:** `CX16.SetMode`, `CX16.Mode` (all of the KERNAL's modes, sprites and the mouse follow). (`samples/ScreenModes.cs`)
 - **Hardware random seed:** `CX16.Entropy`, and `Clock.Monotonic` starts at a random moment, so
   `Random.FromClock()` differs from run to run. (`samples/ClockSeed.cs`)
 
-## 2. Next: the screen
+## 2. Next: sound
 
 | # | Task | Effort | Why |
 |---|------|--------|-----|
-| 5 | **Tile layers**: map and tile set, scrolling, per-tile palette offset and flips | M | What games on the X16 are made of (a scrolling background in layer 0 behind the text in layer 1). The API is a layer's configuration (`CX16.Layer0.Tiles(...)`), a tile set copied to VRAM, a map, and `Scroll(x, y)`. The VRAM plan is in `docs/how-to/build-for-cx16.md` ("Bitmap and palette"): $00000 to $12BFF is free when no bitmap is used. |
+| 1 | **YM2151 FM chip** ($9F40: register select, data, a busy flag): 8 voices of 4 operators | S for raw registers, L for instruments | `CX16.Tone` drives only the VERA's simple voices. Start with `Fm.Write(register, value)` that waits for the chip to be ready, then key on/off, volume and pitch for a voice, then a few preset instruments (the ROM's audio bank has ready ones, but that needs the bank switched in with interrupts off). Checkable in the emulator with `-wav` (the recording isn't silent). |
+| 2 | **PCM audio** (VERA FIFO: format, rate, `audio.data`) | M | Samples, speech, and music played as wave data. The FIFO has to be fed faster than it is drained, from a frame interrupt or a tight loop; an interrupt handler written in C# is a new thing here, and the KERNAL's own handler must still run. Needs a plan for where the data is (a file read in chunks, or `Banks`). `-wav` to test. |
 
-Test: read the layer registers and the VRAM back (as `samples/CX16Demo.cs` does for text and sprites);
-a picture check by a window or `-gif`.
-
-## 3. Sound
-
-| # | Task | Effort | Why |
-|---|------|--------|-----|
-| 6 | **YM2151 FM chip** ($9F40: register select, data, a busy flag): 8 voices of 4 operators | S for raw registers, L for instruments | `CX16.Tone` drives only the VERA's simple voices. Start with `Fm.Write(register, value)` that waits for the chip to be ready, then key on/off, volume and pitch for a voice, then a few preset instruments (the ROM's audio bank has ready ones, but that needs the bank switched in with interrupts off). Checkable in the emulator with `-wav` (the recording isn't silent). |
-| 7 | **PCM audio** (VERA FIFO: format, rate, `audio.data`) | M | Samples, speech, and music played as wave data. The FIFO has to be fed faster than it is drained, from a frame interrupt or a tight loop; an interrupt handler written in C# is a new thing here, and the KERNAL's own handler must still run. Needs a plan for where the data is (a file read in chunks, or `Banks`). `-wav` to test. |
-
-## 4. Later, and what needs finding out
+## 3. Later, and what needs finding out
 
 | # | Task | Effort | Why it is last |
 |---|------|--------|----------------|
-| 8 | **VERA FX** (line drawing, polygon filling, affine transformation, a 32-bit multiplier and the cache, through `DCSEL` 2 to 6) | L | Fast, and the most interesting for demos, but niche, specific to VERA 0.3.1 and later (check the emulator and real boards), and useful only on top of 4 and 5. |
-| 9 | **Mouse wheel** | S once known | `mouse_get` in this KERNAL's documentation returns position and buttons only; the wheel isn't in it. Find out first (a newer KERNAL's `mouse_get`, or the PS/2 packets of a 4-byte mouse, read through the I/O chip). Low value next to the rest. |
+| 3 | **VERA FX** (line drawing, polygon filling, affine transformation, a 32-bit multiplier and the cache, through `DCSEL` 2 to 6) | L | Fast, and the most interesting for demos, but niche, specific to VERA 0.3.1 and later (check the emulator and real boards), and useful only on top of the bitmap and the tiles. |
+| 4 | **Mouse wheel** | S once known | `mouse_get` in this KERNAL's documentation returns position and buttons only; the wheel isn't in it. Find out first (a newer KERNAL's `mouse_get`, or the PS/2 packets of a 4-byte mouse, read through the I/O chip). Low value next to the rest. |
 
 ## Also open
 

@@ -986,6 +986,25 @@ void cs_cx16_vcopy(u32 address, const unsigned char *source, i32 count)
         VERA.data0 = source[i];
 }
 
+// Two bytes at an address of the video memory: a tile map's entry is two bytes.
+void cs_cx16_vpoke2(u32 address, i32 first, i32 second)
+{
+    vera_at(address, 1);
+    VERA.data0 = (unsigned char)first;
+    VERA.data0 = (unsigned char)second;
+}
+
+// `count` pairs of bytes, from an address: a whole tile map of one tile.
+void cs_cx16_vfill2(u32 address, i32 count, i32 first, i32 second)
+{
+    unsigned char a = (unsigned char)first, b = (unsigned char)second;
+    vera_at(address, 1);
+    for (unsigned n = (unsigned)count; n != 0; n--) {
+        VERA.data0 = a;
+        VERA.data0 = b;
+    }
+}
+
 // The text screen is ISO text: a character's code in screen memory is its
 // Latin-1 code, and the KERNAL's own "clear screen" character empties it and
 // puts the cursor that Out writes at in the top left corner.

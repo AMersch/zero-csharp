@@ -164,6 +164,41 @@ row of 100 pixels 2,000; `Line` across the picture 116,000; `Circle` of radius 1
 character; `Plot` 1,500 (mostly the call). A picture is redrawn a few times a second, not 60. `samples/BitmapDemo.cs`
 draws one and checks every function against the video memory.
 
+## Tiles
+
+`Tiles` (`lib/Tiles.cs`) is layer 0 of the video chip as a map of tiles that scrolls smoothly: the background
+of most games. It is behind the text and the sprites, and it is the layer the bitmap uses, so each takes it from
+the other; a screen mode change switches it off (`Enable` again after one).
+
+```csharp
+Tiles.Enable(64, 64, 8, 4);          // 64 by 64 tiles of 8x8 pixels, 4 bits a pixel
+Tiles.SetTile(1, brick);             // tile 1's picture: 32 bytes, two pixels a byte, the left one in the high bits
+Tiles.Fill(1);
+Tiles.Set(5, 3, 2, paletteOffset: 1, flipHorizontally: true);     // column, row, tile
+Tiles.Scroll(frame, 0);              // the picture moves left
+```
+
+- **Map:** 32, 64, 128 or 256 tiles each way (two bytes a tile, from `MapAddress`), tiles of 8x8 or 16x16
+  pixels, 2, 4 or 8 bits a pixel, a tile index of 0 to 1023. The 1-bit mode of the video chip, which works
+  like text, isn't there.
+- **Colors:** pixel color 0 is see-through (tile 0, empty at first, shows what is behind the layer, black).
+  With 4 bits a pixel a map entry's palette offset (0-15) adds 16 times itself to the colors 1-15; colors
+  above 15 are not changed.
+- **Where in the video memory:** with `Enable`'s defaults the map starts at $00000 and the tile pictures
+  follow it at the next multiple of 2048 (`TileAddress`): in the 75 KB below the sprites ($13000), which
+  the bitmap uses too. `mapAddress` and `tileAddress` choose other places (multiples of 512 and 2048); the
+  map and the tiles can go anywhere up to $1F9C0, so keep them clear of the sprite shapes, the text
+  screen and the character set (see the table under "Bitmap and palette").
+- **Scrolling:** `Scroll(x, y)` takes 0 to 4095 (more wraps round), the picture moves left and up as they
+  grow, and the map repeats where it ends; `ScrollX` and `ScrollY` read it back.
+- `Enable` clears the map, `Fill` and `Clear` set all of it, `Hide` and `Show` switch the layer, and what
+  doesn't fit (a size, an index, an address, a picture of the wrong length) gives `false` and changes nothing.
+- **Speed**, at 8 MHz (a frame is 133,000 cycles): `Fill` of a 64x64 map 120,000; `Set` and `Get` about 1,000
+  a tile; `Scroll` 400; `SetTile` 2,700 for 32 bytes. A frame can change a hundred tiles and scroll.
+
+`samples/TileDemo.cs` draws four tiles in code into a map that scrolls, and checks the registers and the
+video memory for every function and for other sizes.
+
 ## Date, time and random numbers
 
 - **`Clock.UtcNow`, `Clock.UnixMilliseconds`:** the X16's real-time clock, read once when a program first

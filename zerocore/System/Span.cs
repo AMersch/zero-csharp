@@ -86,6 +86,9 @@ namespace System
 
         public void CopyTo(Span<T> destination) => ((ReadOnlySpan<T>)this).CopyTo(destination);
 
+        /// <summary>A new array holding a copy of the elements. Zero mode never frees it.</summary>
+        public T[] ToArray() => ((ReadOnlySpan<T>)this).ToArray();
+
         // For `fixed (T* p = span)`.
         public ref T GetPinnableReference() => ref _reference;
 
@@ -197,6 +200,16 @@ namespace System
                 ref Unsafe.As<T, byte>(ref destination._reference),
                 ref Unsafe.As<T, byte>(ref _reference),
                 (nuint)_length * (nuint)Unsafe.SizeOf<T>());
+        }
+
+        /// <summary>A new array holding a copy of the elements (an empty span gives Array.Empty). Zero mode never frees it.</summary>
+        public T[] ToArray()
+        {
+            if (_length == 0)
+                return Array.Empty<T>();
+            T[] array = new T[_length];
+            CopyTo(array);
+            return array;
         }
 
         // For `fixed (T* p = span)`.

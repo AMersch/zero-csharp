@@ -59,14 +59,16 @@ public static class VecExtensions
 
 // docs:union-declaration
 public struct Parsed { public int Value; }
-public struct Three { public byte A, B, C; }
-public struct Big { public long A, B, C; }
 public struct BadChar { public int Position; }
 
 // A ParseResult holds either a Parsed or a BadChar, and a switch on it must
 // handle both.
 public union ParseResult(Parsed, BadChar);
 // docs:end
+
+// Items of 3 and 24 bytes, for the span copy and fill checks.
+public struct Three { public byte A, B, C; }
+public struct Big { public long A, B, C; }
 
 // docs:equatable-struct
 public readonly struct Point : IEquatable<Point>

@@ -107,19 +107,19 @@ programs `./test.sh --c64` runs:
 
 | Sample | Size | What is left for heap and stack |
 |---|---|---|
-| `Tiny`, `Minimal` | 7 KB | 42 KB |
-| `QuizStep1` | 13 KB | 36 KB |
-| `VirtualTest` | 15 KB | 34 KB |
-| `SmallNative`, `SmallIntegers` | 17 to 18 KB | 31 to 32 KB |
-| `QuizStep2` | 20 KB | 29 KB |
-| `SmallText`, `SmallArena`, `SmallDicts`, `SmallStrings`, `SmallEncoding` | 25 to 28 KB | 21 to 24 KB |
-| `Refs`, `SmallLists`, `SmallStrDicts`, `SmallObjects` | 32 to 34 KB | 15 to 17 KB |
-| `C64Demo` | 36 KB | 13 KB |
-| `SmallUnicode` | 37 KB | 12 KB |
-| `SmallChannels`, `SmallFibers` | 42 to 43 KB | 7 to 8 KB |
-| `SmallBuilders` | 43 KB | 6 KB |
-| `SmallDoubles` | 47 KB | 2.4 KB |
-| `SmallFloats` | 49 KB | 0.6 KB |
+| `Tiny`, `Minimal` | 6 KB | 44 KB |
+| `Hello` | 7 KB | 43 KB |
+| `QuizStep1` | 11 KB | 39 KB |
+| `VirtualTest` | 13 KB | 37 KB |
+| `SmallIntegers`, `SmallNative`, `QuizStep2` | 17 to 18 KB | 32 to 33 KB |
+| `SmallKeys` | 20 KB | 30 KB |
+| `SmallEncoding`, `SmallStrings`, `SmallDicts` | 26 to 28 KB | 22 to 24 KB |
+| `Refs`, `SmallStrDicts`, `SmallObjects` | 31 to 32 KB | 18 to 19 KB |
+| `SmallDecimalFormats`, `SmallLists`, `SmallText`, `SmallUnicode`, `Paddles`, `C64Demo`, `SmallArena` | 34 to 36 KB | 14 to 16 KB |
+| `SmallBuilders` | 39 KB | 11 KB |
+| `SmallFibers`, `SmallChannels`, `SmallDoubleFormats` | 40 to 41 KB | 9 to 10 KB |
+| `SmallFloats` | 43 KB | 7 KB |
+| `SmallDoubles`, `SmallFormats` | 45 KB | 4.6 to 5.4 KB |
 
 The size includes the 2 KB shadow stack NativeAOT-LLVM's code keeps object references on. The Small
 samples are tests written to fit: each covers a piece of what Strings, Casts, Collections and the
@@ -475,7 +475,7 @@ that `c64/runtime.c` defines with 32-bit parameters: C#'s `calloc` is `cs_calloc
 - **Tested in VICE only:** 3.10 on macOS, and 3.7.1 on Ubuntu 24.04 x64, where CI runs
   `./test.sh --c64` on every change. Nothing has run on a real C64 yet. The disk image route was
   checked in VICE with its drive emulation.
-- **Programs that fit can still run out of memory.** `SmallFloats` runs with 0.6 KB to spare.
+- **Programs that fit can still run out of memory.** `SmallFormats` runs with 4.6 KB to spare.
 - **A long method can be too much for llvm-mos:** the 6502 has three registers, and the error is
   "ran out of registers". `build.sh` then compiles that method's module separately and tries again; if
   it still fails, split the method.

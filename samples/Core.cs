@@ -436,6 +436,34 @@ public static class Program
         }
     }
 
+    // Clear, Copy and Fill, as memset and memmove: Copy allows overlap in
+    // either direction.
+    static bool ClearsCopiesFills(int count)
+    {
+        unsafe
+        {
+            byte* bytes = (byte*)NativeMemory.Alloc((nuint)count * 2);
+            NativeMemory.Fill(bytes, (nuint)count * 2, 0xCD);
+            bool ok = bytes[0] == 0xCD && bytes[count * 2 - 1] == 0xCD;
+            NativeMemory.Clear(bytes + 1, (nuint)count - 2);
+            ok &= bytes[0] == 0xCD && bytes[1] == 0 && bytes[count - 2] == 0 && bytes[count - 1] == 0xCD;
+            for (int i = 0; i < count; i++)
+                bytes[i] = (byte)i;
+            NativeMemory.Copy(bytes, bytes + count, (nuint)count);
+            for (int i = 0; i < count; i++)
+                ok &= bytes[count + i] == (byte)i;
+            NativeMemory.Copy(bytes, bytes + 3, (nuint)count); // up, overlapping
+            for (int i = 0; i < count; i++)
+                ok &= bytes[3 + i] == (byte)i;
+            NativeMemory.Copy(bytes + 3, bytes + 1, (nuint)count); // down, overlapping
+            for (int i = 0; i < count; i++)
+                ok &= bytes[1 + i] == (byte)i;
+            NativeMemory.Clear(bytes, 0);
+            NativeMemory.Free(bytes);
+            return ok;
+        }
+    }
+
     // Realloc keeps what fits as a block grows and shrinks; null is Alloc,
     // and 0 bytes is still a valid pointer.
     static bool Reallocates(int count)
@@ -779,6 +807,7 @@ public static class Program
         Check("AlignedAlloc, AlignedFree", AlignsBlocks(Opaque(100)));
         Check("Realloc keeps what fits", Reallocates(Opaque(256)));
         Check("AlignedRealloc keeps the bytes and the alignment", ReallocatesAligned(Opaque(100)));
+        Check("Clear, Copy, Fill", ClearsCopiesFills(Opaque(200)));
         Section("NativeMemory");
 
         Console.WriteLine();

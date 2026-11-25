@@ -162,6 +162,25 @@ public static class Program
         }
     }
 
+    // Clear, Copy and Fill: on the C64 through cs_memset and cs_memmove.
+    static bool NativeClearCopyFill()
+    {
+        unsafe
+        {
+            byte* bytes = (byte*)NativeMemory.Alloc(64);
+            NativeMemory.Fill(bytes, 64, 7);
+            NativeMemory.Clear(bytes + 8, 8);
+            bool ok = bytes[7] == 7 && bytes[8] == 0 && bytes[15] == 0 && bytes[16] == 7;
+            for (int i = 0; i < 32; i++)
+                bytes[i] = (byte)i;
+            NativeMemory.Copy(bytes, bytes + 2, 32);
+            for (int i = 0; i < 32; i++)
+                ok &= bytes[2 + i] == i;
+            NativeMemory.Free(bytes);
+            return ok;
+        }
+    }
+
     public static int Main()
     {
         Check("NativeMemory.Alloc, AllocZeroed, Free", NativeAllocAndFree());
@@ -170,6 +189,7 @@ public static class Program
         Check("Free gives the memory back", NativeFreeGivesBack());
         Check("AlignedAlloc, AlignedFree", NativeAligned());
         Check("Realloc, AlignedRealloc", NativeRealloc());
+        Check("Clear, Copy, Fill", NativeClearCopyFill());
         End("NativeMemory");
 
         Console.WriteLine();

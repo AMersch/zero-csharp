@@ -23,6 +23,9 @@ namespace System.Runtime
         internal static extern void* memmove(void* destination, void* source, nuint count);
 
         [DllImport("*"), SuppressGCTransition]
+        internal static extern void* memset(void* destination, int value, nuint count);
+
+        [DllImport("*"), SuppressGCTransition]
         internal static extern nint write(int fd, void* buffer, nuint count);
 
         [DllImport("*"), SuppressGCTransition]

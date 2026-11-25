@@ -1,5 +1,5 @@
 // The Commander X16: its text screen (80x60 characters, 16 colors), sprites,
-// the keyboard, joysticks, a clock, and sound. Only for programs built with
+// the keyboard, the mouse, joysticks, a clock, and sound. Only for programs built with
 // ./build.sh --cx16; the functions are in cx16/runtime.c, and a program for
 // another target that calls them won't link.
 //
@@ -39,6 +39,9 @@ public static class CX16
     // on the keyboard; Fire2 is B, or Ctrl.
     public const int Up = 1, Down = 2, Left = 4, Right = 8, Fire = 16, Fire2 = 32;
 
+    // Mouse: what MouseButtons returns, added up.
+    public const int LeftButton = 1, RightButton = 2, MiddleButton = 4;
+
     // Sound: the shape of a voice's wave.
     public const int Pulse = 0, Sawtooth = 1, Triangle = 2, Noise = 3;
 
@@ -61,6 +64,8 @@ public static class CX16
     [DllImport("libc")] static safe extern int cx16_key();
     [DllImport("libc")] static safe extern uint cx16_ticks();
     [DllImport("libc")] static safe extern int cx16_joystick(int number);
+    [DllImport("libc")] static safe extern void cx16_mouse_config(int show);
+    [DllImport("libc")] static safe extern int cx16_mouse(int field);
     [DllImport("libc")] static safe extern void cx16_voice(int voice, int frequency, int volume, int waveform);
 
     // ---- memory ------------------------------------------------------------------
@@ -157,26 +162,49 @@ public static class CX16
 
     // ---- sprites -------------------------------------------------------------------
 
-    /// <summary>Gives sprite 0-127 a shape and shows it in front of the text. The shape is 128 bytes: 16 rows of 16 pixels, 4 bits a pixel, two pixels to a byte, the left one in the high bits. A pixel's value picks one of 16 colors from the palette, from the 16 that start at 16 times the palette offset (0-15); 0 is see-through. There is room for 64 shapes (slot 0-63); sprites can share one.</summary>
+    /// <summary>Gives sprite 0-127 a shape and shows it in front of the text. The shape is 128 bytes: 16 rows of 16 pixels, 4 bits a pixel, two pixels to a byte, the left one in the high bits. A pixel's value picks one of 16 colors from the palette, from the 16 that start at 16 times the palette offset (0-15); 0 is see-through. There is room for 64 shapes (slot 0-63); sprites can share one. For other sizes and 256 colors, see the next one.</summary>
     public static void Sprite(int sprite, int slot, ReadOnlySpan<byte> shape, int paletteOffset = 0)
     {
-        if ((uint)sprite > 127 || (uint)slot > 63 || shape.Length != 128 || (uint)paletteOffset > 15)
+        if ((uint)slot > 63)
             return;
-        int address = SpriteShapes + slot * 128;
+        Sprite(sprite, SpriteShapes + slot * 128, shape, 16, 16, 4, paletteOffset);
+    }
+
+    /// <summary>
+    /// Gives sprite 0-127 a shape of any size and shows it in front of the text.
+    /// The shape goes to an address of the video chip's memory (a multiple of 32, below
+    /// $1F9C0; the text screen and its font are above $1B000, and lib/CX16.cs's own
+    /// shapes at $4000). Its width and height are each 8, 16, 32 or 64 pixels, with 4 or
+    /// 8 bits a pixel, the leftmost pixel in the highest bits, row after row. With 8
+    /// bits a pixel, a pixel's value is a color of the palette (0 is see-through); with
+    /// 4, it is one of the 16 colors that start at 16 times the palette offset (0-15).
+    /// Returns false, and changes nothing, if the shape's size doesn't fit these.
+    /// </summary>
+    public static bool Sprite(int sprite, int address, ReadOnlySpan<byte> shape, int width, int height, int bitsPerPixel = 4, int paletteOffset = 0)
+    {
+        int w = SizeCode(width), h = SizeCode(height);
+        if ((uint)sprite > 127 || w < 0 || h < 0 || (bitsPerPixel != 4 && bitsPerPixel != 8)
+            || (uint)paletteOffset > 15 || address < 0 || (address & 31) != 0
+            || shape.Length != width * height * bitsPerPixel / 8 || address + shape.Length > 0x1F9C0)
+            return false;
         unsafe
         {
-            // SAFETY: the pointer and length come from the span; the 128
-            // bytes land in the slot's block of video memory.
+            // SAFETY: the pointer and length come from the span, which fits
+            // below the sound chip's registers in video memory (checked above).
             fixed (byte* p = shape)
                 cx16_vcopy(address, p, shape.Length);
         }
         int attributes = SpriteAttributes + sprite * 8;
-        cx16_vpoke(attributes, address >> 5);           // address bits 12-5
-        cx16_vpoke(attributes + 1, address >> 13);      // bits 16-13, and 4 bits a pixel
-        cx16_vpoke(attributes + 6, 0x0C);               // in front of both layers
-        cx16_vpoke(attributes + 7, 0x50 | paletteOffset);   // 16 pixels high and wide
+        cx16_vpoke(attributes, address >> 5);                                   // address bits 12-5
+        cx16_vpoke(attributes + 1, (address >> 13) | (bitsPerPixel == 8 ? 0x80 : 0));   // bits 16-13, and the color depth
+        cx16_vpoke(attributes + 6, 0x0C);                                       // in front of both layers
+        cx16_vpoke(attributes + 7, h << 6 | w << 4 | paletteOffset);
         cx16_poke(VideoRegister, cx16_peek(VideoRegister) | 0x40);
+        return true;
     }
+
+    // A sprite's width or height as the video chip has it: 8, 16, 32 and 64 are 0-3.
+    static int SizeCode(int pixels) => pixels == 8 ? 0 : pixels == 16 ? 1 : pixels == 32 ? 2 : pixels == 64 ? 3 : -1;
 
     /// <summary>Moves a sprite. Its top left corner is at the screen's top left corner when x and y are 0; the picture is 640 by 480.</summary>
     public static void MoveSprite(int sprite, int x, int y)
@@ -196,6 +224,23 @@ public static class CX16
         if ((uint)sprite <= 127)
             cx16_vpoke(SpriteAttributes + sprite * 8 + 6, 0);   // z-depth 0: off
     }
+
+    // ---- the mouse -----------------------------------------------------------------
+
+    /// <summary>Switches the mouse on, with the pointer drawn by sprite 0, which the KERNAL then moves in every frame's interrupt. With defaultCursor the sprite is the KERNAL's arrow; without, it is whatever the program gave sprite 0 (see Sprite). It needs the machine's interrupts: it does nothing in the emulator's headless mode.</summary>
+    public static void MouseOn(bool defaultCursor = true) => cx16_mouse_config(defaultCursor ? 1 : 0xFF);
+
+    /// <summary>Switches the mouse, and its pointer, off.</summary>
+    public static void MouseOff() => cx16_mouse_config(0);
+
+    /// <summary>The pointer's column in pixels, 0 at the left edge of the screen: 0-639 with the 80x60 text screen.</summary>
+    public static int MouseX => cx16_mouse(0);
+
+    /// <summary>The pointer's row in pixels, 0 at the top.</summary>
+    public static int MouseY => cx16_mouse(1);
+
+    /// <summary>The buttons held down: LeftButton, RightButton and MiddleButton, added up.</summary>
+    public static int MouseButtons => cx16_mouse(2);
 
     // ---- timing --------------------------------------------------------------------
 

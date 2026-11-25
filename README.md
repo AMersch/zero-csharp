@@ -69,7 +69,7 @@ More: [Coming from .NET](https://onurgumus.github.io/zero-csharp/get-started/com
 | DOS, 386 with a 387 | `./build.sh --dos` | 16 KB to 93 KB |
 | UEFI x64 and arm64, no OS | `./build.sh --uefi` | 10 KB to 72 KB |
 | Commodore 64 | `./build.sh --c64` | 7 KB to 49 KB, of the 50 KB there are |
-| Commander X16 (65C02, 38 KB of fixed RAM), in x16emu, with `lib/CX16.cs`: text, sprites, sound | `./build.sh --cx16` | 6 KB to 35 KB |
+| Commander X16 (65C02, 38 KB of fixed RAM), in x16emu, with `lib/CX16.cs`: text, sprites, mouse, sound | `./build.sh --cx16` | 6 KB to 35 KB |
 | Raspberry Pi Pico 2 (Cortex-M33), in QEMU | `./build.sh --pico2` | 9 KB to 88 KB of flash |
 | Arduino Uno R4 (Cortex-M4, 32 KB of RAM), in QEMU | `./build.sh --r4` | 9 KB to 62 KB of flash |
 

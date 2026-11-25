@@ -50,16 +50,23 @@ while (CX16.ReadKey() == 0)
   program switches back for BASIC.
 - **Video memory:** the VERA has 128 KB of its own, which `Peek` and `Poke` don't reach: `VPeek` and
   `VPoke` do.
-- **Sprites:** 128 of them, 16x16 pixels, in front of the text; `Sprite`, `MoveSprite`, `HideSprite`.
+- **Sprites:** 128 of them, in front of the text; `Sprite`, `MoveSprite`, `HideSprite`. The short form
+  takes a 16x16 shape of 4 bits a pixel; the long one any size from 8 to 64 pixels, 4 or 8 bits a
+  pixel (256 colors), at an address of the video memory you choose, and says false for a shape that
+  doesn't fit.
+- **Mouse:** `MouseOn` switches the KERNAL's mouse driver on, which then moves sprite 0 as the pointer
+  in every frame's interrupt: `MouseOn()` shows its arrow, `MouseOn(defaultCursor: false)` keeps
+  whatever picture the program gave sprite 0. `MouseX`, `MouseY` and `MouseButtons` read it.
 - **Sound:** `Tone` plays a note on one of the 16 voices of the VERA's sound generator (pulse, sawtooth,
   triangle or noise).
 - **Input:** `ReadKey`, and `Joystick(0)` for the keyboard's cursor keys, Ctrl and Alt, or 1-4 for
   controllers.
 - **Time:** `WaitFrame` and `Ticks`, at 60 Hz.
 
-`samples/CX16Demo.cs` uses all of it: `./run.sh --cx16 --window CX16Demo`. The headless runs
+`samples/CX16Demo.cs` uses most of it: `./run.sh --cx16 --window CX16Demo`. `samples/Mouse.cs` is a
+pointer, an arrow as an 8-bit sprite that the mouse moves: `./run.sh --cx16 --window Mouse`. The headless runs
 (`./test.sh --cx16`) draw nothing and have no frame interrupt, so there `WaitFrame` gives up after about
-two frames' time, and the clock and the joysticks stand still; the demo's checks read the video memory
+two frames' time, and the clock, the joysticks and the mouse stand still; the demo's checks read the video memory
 back, and leave those two to a run in a window. The YM2151 FM chip, the PCM audio, the bitmap layers
 have no API yet.
 

@@ -787,6 +787,25 @@ i32 cs_cx16_joystick(i32 number)
         | (d1 & 128 ? 16 : 0) | (d0 & 128 ? 32 : 0);
 }
 
+// The mouse, through the KERNAL's driver: with a cursor to show, it moves
+// sprite 0 itself, in every frame's interrupt. show: 0 off, 1 the default
+// arrow, $FF the sprite as the program left it. The area is the screen's
+// pixels divided by 8.
+void cs_cx16_mouse_config(i32 show)
+{
+    screen_mode_info_t info;
+    cx16_k_screen_mode_get(&info);
+    cx16_k_mouse_config((unsigned char)show, info.columns, info.rows);
+}
+
+// 0: the pointer's x, 1: its y, 2: the buttons (1 left, 2 right, 4 middle).
+i32 cs_cx16_mouse(i32 field)
+{
+    mouse_pos_t position;
+    unsigned char buttons = cx16_k_mouse_get(&position);
+    return field == 0 ? position.x : field == 1 ? position.y : buttons;
+}
+
 // The sound chip's 16 voices: 4 bytes each at $1F9C0 in the video memory.
 void cs_cx16_voice(i32 voice, i32 frequency, i32 volume, i32 waveform)
 {

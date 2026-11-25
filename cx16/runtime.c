@@ -1620,6 +1620,29 @@ i32 cs_cx16_mouse(i32 field)
     return field == 0 ? position.x : field == 1 ? position.y : buttons;
 }
 
+// The YM2151 (FM): an address register at $9F40, a data register at $9F41 (which reads as the status:
+// bit 7 is "busy" for about 150 cycles after a write). The chip drops a write that comes while it is
+// busy, and wants a pause between the address and the data. The registers can't be read back.
+#define YM_ADDRESS (*(volatile unsigned char *)0x9F40)
+#define YM_DATA (*(volatile unsigned char *)0x9F41)
+
+void cs_cx16_ym_write(i32 reg, i32 value)
+{
+    for (unsigned spin = 0; (YM_DATA & 0x80) && spin < 30000u; spin++) {}      // not for ever, if no chip is there
+    YM_ADDRESS = (unsigned char)reg;
+    __asm__ volatile("nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop" ::: "memory");
+    YM_DATA = (unsigned char)value;
+}
+
+i32 cs_cx16_in_emulator(void) { return in_emulator; }
+
+// The emulator can record what it plays (started with -wav FILE): this makes it start now.
+void cs_cx16_start_recording(void)
+{
+    if (in_emulator)
+        *(volatile unsigned char *)0x9FB6 = 1;
+}
+
 // The sound chip's 16 voices: 4 bytes each at $1F9C0 in the video memory.
 void cs_cx16_voice(i32 voice, i32 frequency, i32 volume, i32 waveform)
 {

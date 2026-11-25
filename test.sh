@@ -18,6 +18,8 @@
 #                              samples that fit in it, which the Small ones are made to
 #         ./test.sh --cx16     Commander X16, in x16emu (needs ./setup.sh --c64 and x16emu,
 #                              see env.sh): the samples that fit in it
+#         ./test.sh --cx16-audio  its sound: records SoundDemo in the emulator, with a window, and
+#                              measures pitch, partials, speaker and volume (needs numpy)
 #         ./test.sh --pico2    Raspberry Pi Pico 2 (Cortex-M33), in QEMU (needs ./setup.sh --arm)
 #         ./test.sh --r4       Arduino Uno R4 (Cortex-M4, 32 KB of RAM), in QEMU: the
 #                              samples that fit in it
@@ -200,6 +202,7 @@ CX16_SAMPLES=(
     BitmapDemo
     TileDemo
     BitmapShapes
+    SoundDemo
 )
 # Microcontrollers: no SIMD to benchmark, no PC screen for Vga. Blink is
 # theirs only, and checks itself. The Uno R4
@@ -501,6 +504,7 @@ case "${1:-}" in
     --dos)    test_dos ;;
     --c64)    test_c64 ;;
     --cx16)   test_cx16 ;;
+    --cx16-audio) cx16/test-audio.sh ;;
     --pico2)  test_pico2 ;;
     --r4)     test_r4 ;;
     --win)    test_win ;;
@@ -569,7 +573,7 @@ case "${1:-}" in
             echo "(skipping the microcontrollers: run ./setup.sh --arm first)"
         fi
         ;;
-    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --cx16 | --pico2 | --r4 | --win | --mac | --gpu | --gpu-air | --uefi | --all | --update]" >&2; exit 2 ;;
+    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --cx16 | --cx16-audio | --pico2 | --r4 | --win | --mac | --gpu | --gpu-air | --uefi | --all | --update]" >&2; exit 2 ;;
 esac
 
 echo

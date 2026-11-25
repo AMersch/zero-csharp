@@ -110,6 +110,7 @@ exit with their number of failed checks), and those whose output doesn't vary mu
 ./test.sh --dos      # DOS, on an emulated 386 with 4 MB
 ./test.sh --c64      # Commodore 64, in VICE: the samples that fit in it
 ./test.sh --cx16     # Commander X16, in x16emu: the samples that fit in it
+./test.sh --cx16-audio  # its sound, recorded in the emulator (opens a window; needs numpy)
 ./test.sh --mac      # macOS
 ./test.sh --win      # Windows, under Wine
 ./test.sh --uefi     # UEFI, in QEMU on OVMF, for BFLAT_ARCH (x64 or arm64)

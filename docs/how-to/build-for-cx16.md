@@ -240,6 +240,44 @@ Tiles.Scroll(frame, 0);              // the picture moves left
 `samples/TileDemo.cs` draws four tiles in code into a map that scrolls, and checks the registers and the
 video memory for every function and for other sizes.
 
+## Sound
+
+The X16 has two sound chips, both reached from C#.
+
+- **The video chip's sound generator (PSG)**, `CX16.Tone(voice, hertz, volume, waveform)`: 16 voices of pulse, sawtooth,
+  triangle or noise waves, `CX16.Silence(voice)`. The frequency is rounded to the chip's steps of 0.37 Hz.
+- **The FM chip (YM2151)**, `Fm` (`lib/Fm.cs`): 8 channels of 4 operators that modulate each other.
+
+```csharp
+Fm.Reset();                       // silences everything, sets every channel to a sine
+Fm.SetPatch(0, Fm.Organ);         // an instrument on channel 0
+Fm.NoteOn(0, 69);                 // a note: MIDI 69 is the A of 440 Hz (13 to 108 are in the chip's range)
+Fm.SetVolume(0, 100);             // 0 to 127, 127 the instrument's own level
+Fm.SetPan(0, left: true, right: false);
+Fm.NoteOff(0);                    // it dies away as the instrument's release says
+```
+
+- **Instruments:** `Fm.Sine` (one pure tone, to hear a pitch with) and `Fm.Organ` (four operators an octave apart) are
+  built in. Others are 26 bytes in the order of the chip's registers (`SetPatch` documents the layout): the
+  algorithm, feedback and speakers; vibrato; and for each of the four operators the ratio (MUL, DT1), level
+  (TL, 0 loudest to 127 silent) and envelope (KS, AR, D1R, D2R, D1L, RR). What the sound of such numbers is, the
+  YM2151's manual says. The ROM's 162 presets (`ym_loadpatch`) are not reachable yet; and the ROM's audio routines
+  keep a copy of the chip's registers of their own, so don't drive the chip with both.
+- **`Fm.NoteOn(channel, note, fine)`:** `fine` is 0 to 63 sixty-fourths of a semitone above the note. The chip is
+  tuned for the X16's 3.58 MHz clock.
+- **`Fm.Write(register, value)`** is the chip's own interface for what has no call (the LFO, noise, the timers). It
+  waits until the chip is ready: a write that comes while it is busy (150 cycles) is dropped. Its registers can't be
+  read back, so `Fm` keeps what it needs (the algorithm of each channel, the levels, the volume) and `Write` should
+  stay off the registers $20-$27 and $60-$7F.
+
+**Testing sound.** The emulator makes no sound without a window, and cannot record without one either, so
+`./test.sh --cx16` only runs `samples/SoundDemo.cs` through and checks what `Fm` refuses. `./test.sh --cx16-audio`
+(`cx16/test-audio.sh`) opens the emulator for about ten seconds with `-wav`, which records what it plays, lets the
+program start the recording itself (`CX16.StartRecording()`, the emulator's debug register $9FB6) and measures the
+file (`cx16/audio-check.py`, with numpy): the pitch of the PSG tone and of the FM notes within 1.5 Hz, the partials of
+the organ, a fifth as two peaks, a note in the left speaker only, and the volume ratio of two volumes to a few percent
+of what 0.75 dB a step gives. That is how the pitch formulas were checked, and a regression in them shows there.
+
 ## Date, time and random numbers
 
 - **`Clock.UtcNow`, `Clock.UnixMilliseconds`:** the X16's real-time clock, read once when a program first

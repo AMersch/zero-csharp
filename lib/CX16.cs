@@ -75,6 +75,8 @@ public static class CX16
     [DllImport("libc")] static safe extern int cx16_mouse(int field);
     [DllImport("libc")] static safe extern void cx16_set_date_time(int year, int month, int day, int hour, int minute, int second);
     [DllImport("libc")] static safe extern int cx16_entropy();
+    [DllImport("libc")] static safe extern int cx16_in_emulator();
+    [DllImport("libc")] static safe extern void cx16_start_recording();
     [DllImport("libc")] static safe extern int cx16_has_fx();
     [DllImport("libc")] static safe extern int cx16_use_fx(int on);
     [DllImport("libc")] static safe extern void cx16_set_color(int index, int red, int green, int blue);
@@ -186,6 +188,14 @@ public static class CX16
         return column >= 0 && column < columns && row >= 0 && row < cx16_rows()
             && row * columns + column + count <= columns * cx16_rows();
     }
+
+    // ---- the emulator ------------------------------------------------------------------------
+
+    /// <summary>Whether the program is running in the emulator (x16emu), which has debug registers a real X16 doesn't.</summary>
+    public static bool InEmulator => cx16_in_emulator() != 0;
+
+    /// <summary>In the emulator started with -wav FILE: starts recording what it plays, from now on. This is how the sound is tested (cx16/test-audio.sh). Does nothing on a real X16.</summary>
+    public static void StartRecording() => cx16_start_recording();
 
     // ---- the video chip's helpers ----------------------------------------------------------
 
@@ -356,7 +366,7 @@ public static class CX16
         if ((uint)voice > 15 || (uint)waveform > 3)
             return;
         // The chip's frequency word: hertz * 2^17 / 48828 (its sample rate).
-        int word = (int)((uint)hertz * 2684 / 1000);
+        int word = (int)(((uint)hertz * 2684 + 500) / 1000);      // rounded: 440 Hz is 1181, which plays 439.96
         cx16_voice(voice, word, volume, waveform);
     }
 

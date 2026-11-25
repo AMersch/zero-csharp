@@ -49,6 +49,8 @@ public static class Program
             Console.WriteLine("  pool-moved           a copy of a Pool handle used after Move");
             Console.WriteLine("  scratch-pool-outer   a ScratchPool added to inside a nested Arena.Scratch");
             Console.WriteLine("  pool-other           a Pool handle used with another pool");
+            Console.WriteLine("  scratch-dict-outer   a new key in a ScratchDict inside a nested Arena.Scratch");
+            Console.WriteLine("  scratch-set-outer    a new item in a ScratchHashSet inside a nested Arena.Scratch");
             return 0;
         }
 
@@ -83,6 +85,8 @@ public static class Program
             case "pool-moved": PoolMoved(); break;
             case "scratch-pool-outer": ScratchPoolOuter(); break;
             case "pool-other": PoolOther(); break;
+            case "scratch-dict-outer": ScratchDictOuter(); break;
+            case "scratch-set-outer": ScratchSetOuter(); break;
             default:
                 Console.WriteLine("Unknown case");
                 return 0;
@@ -363,6 +367,34 @@ public static class Program
         second[item] = 2;
     }
 
+    static void ScratchDictOuter()
+    {
+        Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            var outer = new OuterScratch { Dict = scratch.Dict<int, int>() };
+            outer.Dict.Set(1, 1);
+            Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref OuterScratch state) =>
+            {
+                state.Dict.Set(1, 2); // allowed: the key is there
+                state.Dict.Set(2, 2); // a new key: stops
+            });
+        });
+    }
+
+    static void ScratchSetOuter()
+    {
+        Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            var outer = new OuterScratch { Set = scratch.HashSet<int>() };
+            outer.Set.Add(1);
+            Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref OuterScratch state) =>
+            {
+                state.Set.Add(1); // allowed: already there
+                state.Set.Add(2); // a new item: stops
+            });
+        });
+    }
+
     static void ScratchPoolOuter()
     {
         Arena.Scratch(static (scoped ScratchScope scratch) =>
@@ -385,6 +417,8 @@ public ref struct OuterScratch
     public ScratchList<int> Items;
     public ScratchText Text;
     public ScratchPool<int> Pool;
+    public ScratchDict<int, int> Dict;
+    public ScratchHashSet<int> Set;
 }
 
 public struct Left { public int Value; }

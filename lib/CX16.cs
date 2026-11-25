@@ -51,7 +51,7 @@ public static class CX16
     public const int Text40x15 = 0x04, Text20x30 = 0x05, Text20x15 = 0x06, Graphics320x240 = 0x80;
 
     // Where things are in the video chip's memory.
-    const int SpriteShapes = 0x4000;        // 128 bytes a shape, up to 64 shapes
+    const int SpriteShapes = 0x13000;       // 128 bytes a shape, up to 64 shapes: $13000-$14FFF, in the KERNAL's sprite area
     const int SpriteAttributes = 0x1FC00;   // 8 bytes a sprite, 128 sprites
     const int VideoRegister = 0x9F29;       // bit 6: sprites on
     const int BorderRegister = 0x9F2C;      // the border's palette index
@@ -75,6 +75,8 @@ public static class CX16
     [DllImport("libc")] static safe extern int cx16_mouse(int field);
     [DllImport("libc")] static safe extern void cx16_set_date_time(int year, int month, int day, int hour, int minute, int second);
     [DllImport("libc")] static safe extern int cx16_entropy();
+    [DllImport("libc")] static safe extern void cx16_set_color(int index, int red, int green, int blue);
+    [DllImport("libc")] static safe extern int cx16_get_color(int index);
     [DllImport("libc")] static safe extern void cx16_voice(int voice, int frequency, int volume, int waveform);
 
     // ---- memory ------------------------------------------------------------------
@@ -183,6 +185,18 @@ public static class CX16
             && row * columns + column + count <= columns * cx16_rows();
     }
 
+    // ---- the palette ------------------------------------------------------------------
+
+    /// <summary>Sets one of the 256 colors of the palette (all text, sprites and the bitmap take theirs from it) to an amount of red, green and blue, each 0-15. Colors 0-15 start as the C64's (Black ... LightGray), 16-31 as a ramp of grays, the rest as hues.</summary>
+    public static void SetColor(int index, int red, int green, int blue)
+    {
+        if ((uint)index < 256)
+            cx16_set_color(index, red, green, blue);
+    }
+
+    /// <summary>The amount of red, green and blue of a palette color, as 12 bits: red in bits 8-11, green 4-7, blue 0-3.</summary>
+    public static int GetColor(int index) => (uint)index < 256 ? cx16_get_color(index) : 0;
+
     // ---- sprites -------------------------------------------------------------------
 
     /// <summary>Gives sprite 0-127 a shape and shows it in front of the text. The shape is 128 bytes: 16 rows of 16 pixels, 4 bits a pixel, two pixels to a byte, the left one in the high bits. A pixel's value picks one of 16 colors from the palette, from the 16 that start at 16 times the palette offset (0-15); 0 is see-through. There is room for 64 shapes (slot 0-63); sprites can share one. For other sizes and 256 colors, see the next one.</summary>
@@ -197,7 +211,7 @@ public static class CX16
     /// Gives sprite 0-127 a shape of any size and shows it in front of the text.
     /// The shape goes to an address of the video chip's memory (a multiple of 32, below
     /// $1F9C0; the text screen and its font are above $1B000, and lib/CX16.cs's own
-    /// shapes at $4000). Its width and height are each 8, 16, 32 or 64 pixels, with 4 or
+    /// shapes at $13000-$14FFF; the KERNAL keeps sprites in $13000-$1AFFF and a bitmap in $00000-$12BFF). Its width and height are each 8, 16, 32 or 64 pixels, with 4 or
     /// 8 bits a pixel, the leftmost pixel in the highest bits, row after row. With 8
     /// bits a pixel, a pixel's value is a color of the palette (0 is see-through); with
     /// 4, it is one of the 16 colors that start at 16 times the palette offset (0-15).

@@ -174,7 +174,7 @@ public static class Program
         Check("printing off the screen does nothing", CX16.Print(78, 59, "abc") == 78);
 
         Check("sprites are on", (CX16.Peek(0x9F29) & 0x40) != 0);
-        Check("its shape was copied", CX16.VPeek(0x4000 + 7 * 8 + 3) == 0x11 && CX16.VPeek(0x4000) == 0);
+        Check("its shape was copied", CX16.VPeek(0x13000 + 7 * 8 + 3) == 0x11 && CX16.VPeek(0x13000) == 0);
         Check("it is where the last frame put it", CX16.VPeek(0x1FC00 + 4) == (y & 255)
             && CX16.VPeek(0x1FC00 + 2) == (x & 255) && CX16.VPeek(0x1FC00 + 3) == (x >> 8));
         Check("the voice plays", CX16.VPeek(0x1F9C0 + 2) == (0xC0 | 20));

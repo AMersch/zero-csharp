@@ -124,8 +124,45 @@ follow it. The modes (the KERNAL's, as BASIC's `SCREEN` has them):
   new size (`MouseOn` need not be called again). A program that has set the video chip's own registers has
   to do that again.
 - `SetMode` says false, and changes nothing, for a number that isn't a mode.
-- `Graphics320x240` switches to the bitmap mode, but there is nothing to draw with yet.
+- `Graphics320x240` is the mode with the bitmap (see below).
 - `samples/ScreenModes.cs` tests every mode.
+
+## Bitmap and palette
+
+`Bitmap.Enable()` switches to the mode with a bitmap (`Graphics320x240`): 320 by 240 pixels of 256 colors,
+a byte a pixel, with the 40x30 text screen in front (text color 0 is see-through there). `lib/Bitmap.cs`:
+
+```csharp
+Bitmap.Enable();
+Bitmap.Clear(0);
+CX16.SetColor(40, 15, 8, 0);                  // palette color 40 is orange: red, green, blue, 0-15
+Bitmap.Line(10, 10, 300, 200, 40);            // the colors of the palette
+Bitmap.Fill(100, 50, 40, 30, 8);              // x, y, width, height
+Bitmap.Rectangle(0, 0, Bitmap.Width, Bitmap.Height, 15);
+Bitmap.Circle(160, 120, 50, 5);
+Bitmap.Text(8, 8, "drawn", 1);                // or with a background color: Text(8, 8, "x", 1, 0)
+```
+
+`Plot`, `Get`, `Fill`, `Rectangle`, `Line`, `Circle` and `Text` cut off what is outside the picture, and do
+nothing in another screen mode. The palette is `CX16.SetColor` and `GetColor`: 12 bits a color, and
+colors 0 to 15 start as the C64's (`CX16.Black` ... `LightGray`).
+
+**Where things are in the video memory** (the KERNAL's own layout, which the VERA leaves to the program:
+anything from $00000 to $1F9BF is free):
+
+| Address | What |
+|---------|------|
+| $00000 to $12BFF | the bitmap (and, in other layer setups, tile maps and tiles) |
+| $13000 to $14FFF | the 64 shapes of `CX16.Sprite(sprite, slot, ...)`, 128 bytes each |
+| $15000 to $1AFFF | free for sprite shapes at an address of your own (`Sprite(sprite, address, ...)`) |
+| $1B000 to $1EBFF | the text screen |
+| $1F000 to $1F7FF | the character set |
+| $1F9C0 to $1FFFF | the video chip's own registers: sound, palette, sprite attributes |
+
+Speed, measured at 8 MHz (a frame is 133,000 cycles): `Clear` 460,000; `Fill` of the whole picture 650,000, of a
+row of 100 pixels 2,000; `Line` across the picture 116,000; `Circle` of radius 100 133,000; `Text` 12,000 a
+character; `Plot` 1,500 (mostly the call). A picture is redrawn a few times a second, not 60. `samples/BitmapDemo.cs`
+draws one and checks every function against the video memory.
 
 ## Date, time and random numbers
 

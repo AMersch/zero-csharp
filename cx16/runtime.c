@@ -1016,6 +1016,8 @@ void cs_cx16_mouse_config(i32 show);
 // or PETSCII, as it was); what a program would not expect to lose is put back: the
 // sprites stay on, and the mouse gets the new screen's size. Returns 1, or 0 for a mode
 // that isn't one.
+static signed char current_mode = -1;   // the mode as last set here; -1 until asked
+
 i32 cs_cx16_mode(i32 mode)
 {
     VERA.control &= ~2;                             // DCSEL 0: the register with the sprite bit
@@ -1024,6 +1026,7 @@ i32 cs_cx16_mode(i32 mode)
         return 0;
     VERA.control &= ~2;
     VERA.display.video |= sprites;
+    current_mode = (signed char)mode;
     if (mouse_on)
         cs_cx16_mouse_config(mouse_show);
     return 1;
@@ -1033,7 +1036,214 @@ i32 cs_cx16_mode_number(void)
 {
     screen_mode_info_t info;
     cx16_k_screen_mode_get(&info);
+    current_mode = (signed char)info.mode;
     return info.mode;
+}
+
+// ---- the palette and the bitmap -----------------------------------------------------
+//
+// Colors: 256 entries of 2 bytes at $1FA00 in the video memory, a green and a blue
+// nibble, then a red one. The bitmap of mode $80: 320 by 240 pixels, a byte each,
+// row after row from address 0 (the KERNAL's own place for it). Everything that
+// draws does nothing in another mode.
+
+void cs_cx16_set_color(i32 index, i32 red, i32 green, i32 blue)
+{
+    unsigned char bytes[2];
+    bytes[0] = (unsigned char)((green & 15) << 4 | (blue & 15));
+    bytes[1] = (unsigned char)(red & 15);
+    cs_cx16_vcopy(0x1FA00ul + (unsigned)(index & 255) * 2, bytes, 2);
+}
+
+i32 cs_cx16_get_color(i32 index)        // 12 bits: red, green, blue, 4 each
+{
+    unsigned lo = (unsigned)cs_cx16_vpeek(0x1FA00ul + (unsigned)(index & 255) * 2);
+    unsigned hi = (unsigned)cs_cx16_vpeek(0x1FA00ul + (unsigned)(index & 255) * 2 + 1);
+    return (i32)(((hi & 15) << 8) | lo);
+}
+
+#define BITMAP_WIDTH 320
+#define BITMAP_HEIGHT 240
+
+static char in_bitmap(void)
+{
+    if (current_mode < 0)
+        cs_cx16_mode_number();
+    return (unsigned char)current_mode == 0x80;
+}
+
+// Points the data port at pixel (x, y): y * 320 + x is up to 76,799, a bit more than 16 bits,
+// so it is added in 16 and the carry becomes the 17th bit. (A 32-bit sum is slow here.)
+static void vera_at_pixel(unsigned x, unsigned y, unsigned char step)
+{
+    unsigned above = y << 8, below = (y << 6) + x, low = above + below;
+    VERA.control &= ~1;
+    VERA.address = low;
+    VERA.address_hi = (unsigned char)((low < above) | (unsigned char)(step << 4));
+}
+
+void cs_cx16_bitmap_clear(i32 color)
+{
+    if (!in_bitmap())
+        return;
+    unsigned char value = (unsigned char)color;
+    vera_at(0, 1);
+    for (unsigned i = 0; i < 9600u; i++) {          // 76,800 pixels, 8 at a time (an int has 16 bits: no 320 * 240)
+        VERA.data0 = value; VERA.data0 = value; VERA.data0 = value; VERA.data0 = value;
+        VERA.data0 = value; VERA.data0 = value; VERA.data0 = value; VERA.data0 = value;
+    }
+}
+
+void cs_cx16_bitmap_plot(i32 x, i32 y, i32 color)
+{
+    if (x < 0 || x >= BITMAP_WIDTH || y < 0 || y >= BITMAP_HEIGHT || !in_bitmap())
+        return;
+    vera_at_pixel((unsigned)x, (unsigned)y, 0);
+    VERA.data0 = (unsigned char)color;
+}
+
+i32 cs_cx16_bitmap_get(i32 x, i32 y)
+{
+    if (x < 0 || x >= BITMAP_WIDTH || y < 0 || y >= BITMAP_HEIGHT || !in_bitmap())
+        return -1;
+    vera_at_pixel((unsigned)x, (unsigned)y, 0);
+    return VERA.data0;
+}
+
+// Writes `count` bytes of one value to the video memory from the address the data port is
+// at (it goes up by one each time): eight at a time, then the rest.
+static void run_of(unsigned char value, unsigned count)
+{
+    for (; count >= 8; count -= 8) {
+        VERA.data0 = value; VERA.data0 = value; VERA.data0 = value; VERA.data0 = value;
+        VERA.data0 = value; VERA.data0 = value; VERA.data0 = value; VERA.data0 = value;
+    }
+    while (count-- != 0)
+        VERA.data0 = value;
+}
+
+// A filled rectangle, cut to the screen.
+void cs_cx16_bitmap_fill(i32 x, i32 y, i32 width, i32 height, i32 color)
+{
+    if (width <= 0 || height <= 0 || !in_bitmap())
+        return;
+    i32 x1 = x + width, y1 = y + height;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x1 > BITMAP_WIDTH) x1 = BITMAP_WIDTH;
+    if (y1 > BITMAP_HEIGHT) y1 = BITMAP_HEIGHT;
+    if (x >= x1 || y >= y1)
+        return;
+    unsigned count = (unsigned)(x1 - x);
+    for (i32 row = y; row < y1; row++) {
+        vera_at_pixel((unsigned)x, (unsigned)row, 1);
+        run_of((unsigned char)color, count);
+    }
+}
+
+// A pixel, cut to the screen, with the mode already known to be right.
+static void plot_checked(int x, int y, unsigned char color)
+{
+    if ((unsigned)x >= BITMAP_WIDTH || (unsigned)y >= BITMAP_HEIGHT)
+        return;
+    vera_at_pixel((unsigned)x, (unsigned)y, 0);
+    VERA.data0 = color;
+}
+
+// A coordinate as a 16-bit int, cut to a range that keeps the arithmetic below inside 16
+// bits: a point that far off the picture is as good as any other for what is drawn.
+static int near_screen(i32 v) { return v < -8000 ? -8000 : v > 8000 ? 8000 : (int)v; }
+
+// A line from one point to another (Bresenham), cut to the screen pixel by pixel.
+void cs_cx16_bitmap_line(i32 x0, i32 y0, i32 x1, i32 y1, i32 color)
+{
+    if (!in_bitmap())
+        return;
+    if (y0 == y1) {                                 // across: one run
+        i32 left = x0 < x1 ? x0 : x1, right = x0 < x1 ? x1 : x0;
+        cs_cx16_bitmap_fill(left, y0, right - left + 1, 1, color);
+        return;
+    }
+    int ax = near_screen(x0), ay = near_screen(y0), bx = near_screen(x1), by = near_screen(y1);
+    int dx = bx > ax ? bx - ax : ax - bx, dy = by > ay ? ay - by : by - ay;     // dy is minus the height
+    int sx = ax < bx ? 1 : -1, sy = ay < by ? 1 : -1, error = dx + dy;
+    for (;;) {
+        plot_checked(ax, ay, (unsigned char)color);
+        if (ax == bx && ay == by)
+            return;
+        int twice = 2 * error;
+        if (twice >= dy) { error += dy; ax += sx; }
+        if (twice <= dx) { error += dx; ay += sy; }
+    }
+}
+
+// The outline of a circle (the midpoint algorithm, an eighth of it at a time).
+void cs_cx16_bitmap_circle(i32 cx, i32 cy, i32 radius, i32 color)
+{
+    if (radius < 0 || !in_bitmap())
+        return;
+    unsigned char c = (unsigned char)color;
+    int px = near_screen(cx), py = near_screen(cy);
+    int x = radius > 8000 ? 8000 : (int)radius, y = 0, error = 1 - x;
+    while (x >= y) {
+        plot_checked(px + x, py + y, c); plot_checked(px - x, py + y, c);
+        plot_checked(px + x, py - y, c); plot_checked(px - x, py - y, c);
+        plot_checked(px + y, py + x, c); plot_checked(px - y, py + x, c);
+        plot_checked(px + y, py - x, c); plot_checked(px - y, py - x, c);
+        y++;
+        if (error < 0) {
+            error += 2 * y + 1;
+        } else {
+            x--;
+            error += 2 * (y - x) + 1;
+        }
+    }
+}
+
+// Text: the glyphs of the character set in the video memory (8 bytes a character, from
+// $1F000, the screen codes of ISO text), in a color, on a background color or, if that
+// is below 0, on what is there. Cut to the screen.
+void cs_cx16_bitmap_text(i32 x, i32 y, const unsigned short *text, i32 count, i32 foreground, i32 background)
+{
+    unsigned char glyph[8], line[8];
+    if (!in_bitmap())
+        return;
+    if (!iso_mode) {
+        cbm_k_chrout(0x0F);
+        iso_mode = 1;
+    }
+    for (i32 i = 0; i < count; i++, x += 8) {
+        if (x <= -8 || x >= BITMAP_WIDTH || y <= -8 || y >= BITMAP_HEIGHT)
+            continue;
+        unsigned short c = text[i] < 256 ? text[i] : '?';
+        vera_at(0x1F000ul + (unsigned)c * 8, 1);
+        for (int row = 0; row < 8; row++)
+            glyph[row] = VERA.data0;
+        char inside = x >= 0 && x + 8 <= BITMAP_WIDTH;
+        for (int row = 0; row < 8; row++) {
+            i32 py = y + row;
+            if (py < 0 || py >= BITMAP_HEIGHT)
+                continue;
+            unsigned char bits = glyph[row];
+            if (inside && background >= 0) {        // a whole row of 8 in one go
+                for (int bit = 0; bit < 8; bit++)
+                    line[bit] = (bits & (0x80 >> bit)) ? (unsigned char)foreground : (unsigned char)background;
+                vera_at_pixel((unsigned)x, (unsigned)py, 1);
+                for (int bit = 0; bit < 8; bit++)
+                    VERA.data0 = line[bit];
+                continue;
+            }
+            for (int bit = 0; bit < 8; bit++) {
+                i32 px = x + bit;
+                if (px < 0 || px >= BITMAP_WIDTH)
+                    continue;
+                if (bits & (0x80 >> bit))
+                    plot_checked((int)px, (int)py, (unsigned char)foreground);
+                else if (background >= 0)
+                    plot_checked((int)px, (int)py, (unsigned char)background);
+            }
+        }
+    }
 }
 
 i32 cs_cx16_columns(void)

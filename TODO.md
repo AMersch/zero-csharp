@@ -13,6 +13,7 @@ output and no mouse: what can only be heard or seen needs a check in a window, o
 ## 1. Done
 
 - **Real-time clock:** `Clock.UtcNow` and `UnixMilliseconds` read it; `CX16.SetDateTime` sets it.
+- **Bitmap:** `Bitmap` (clear, plot, get, fill, rectangle, line, circle, text) and the palette (`CX16.SetColor`) in 320x240 with 256 colors, directly on the VERA; sprite shapes moved to $13000 to keep clear of the bitmap. (`samples/BitmapDemo.cs`) Not yet: other depths (4, 2, 1 bit), 640x480, speed with VERA FX.
 - **Screen modes:** `CX16.SetMode`, `CX16.Mode` (all of the KERNAL's modes, sprites and the mouse follow). (`samples/ScreenModes.cs`)
 - **Hardware random seed:** `CX16.Entropy`, and `Clock.Monotonic` starts at a random moment, so
   `Random.FromClock()` differs from run to run. (`samples/ClockSeed.cs`)
@@ -21,8 +22,7 @@ output and no mouse: what can only be heard or seen needs a check in a window, o
 
 | # | Task | Effort | Why |
 |---|------|--------|-----|
-| 4 | **Bitmap layer**: pixels, lines, rectangles, fill, in 2, 4 and 8 bits a pixel (320x240x256 first) | M | The most visible gap: a program can write text and sprites but not draw. The KERNAL's graphics driver (`GRAPH_*`, `FB_*`) has lines, rectangles and text; or write the VERA bytes directly, which is faster. Decide first which VRAM addresses the program owns, so that a bitmap doesn't overwrite sprite shapes ($4000, `lib/CX16.cs`) or the text screen ($1B000). |
-| 5 | **Tile layers**: map and tile set, scrolling, per-tile palette offset and flips | M | What games on the X16 are made of (a scrolling background in layer 0 behind the text in layer 1). The API is a layer's configuration (`CX16.Layer0.Tiles(...)`), a tile set copied to VRAM, a map, and `Scroll(x, y)`. Shares the VRAM planning of 4. |
+| 5 | **Tile layers**: map and tile set, scrolling, per-tile palette offset and flips | M | What games on the X16 are made of (a scrolling background in layer 0 behind the text in layer 1). The API is a layer's configuration (`CX16.Layer0.Tiles(...)`), a tile set copied to VRAM, a map, and `Scroll(x, y)`. The VRAM plan is in `docs/how-to/build-for-cx16.md` ("Bitmap and palette"): $00000 to $12BFF is free when no bitmap is used. |
 
 Test: read the layer registers and the VRAM back (as `samples/CX16Demo.cs` does for text and sprites);
 a picture check by a window or `-gif`.

@@ -51,8 +51,9 @@ public static class Program
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     };
 
-    // The pointer's picture is kept in video memory at $14000.
-    const int ArrowAddress = 0x14000;
+    // The pointer's picture is kept in video memory at $15000: past the 64 shapes of the short Sprite
+    // ($13000-$14FFF), in the KERNAL's sprite area.
+    const int ArrowAddress = 0x15000;
 
     // docs:mouse
     // Writes a label and a number, and blanks the rest of its field.
@@ -104,7 +105,7 @@ public static class Program
         Check("an odd address", !CX16.Sprite(1, ArrowAddress + 1, Arrow, 16, 16, 8));
         Check("an odd size", !CX16.Sprite(1, ArrowAddress, Arrow, 15, 17, 8));
         Check("over the sound chip", !CX16.Sprite(1, 0x1F9A0, Arrow, 16, 16, 8));
-        Check("a bigger shape", CX16.Sprite(1, 0x15000, new byte[32 * 32 / 2], 32, 32, 4)
+        Check("a bigger shape", CX16.Sprite(1, 0x15200, new byte[32 * 32 / 2], 32, 32, 4)
             && CX16.VPeek(0x1FC08 + 7) == 0xA0);
 
         Check("the pointer is on the screen", (uint)CX16.MouseX < 640 && (uint)CX16.MouseY < 480);

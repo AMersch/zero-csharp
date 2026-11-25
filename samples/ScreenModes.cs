@@ -77,7 +77,7 @@ public static class Program
         Check("a sprite is shown", (CX16.Peek(0x9F29) & 0x40) != 0);
         CX16.SetMode(CX16.Text40x30);
         Check("sprites stay on", (CX16.Peek(0x9F29) & 0x40) != 0);
-        Check("the sprite is still there", CX16.VPeek(0x1FC00 + 3 * 8 + 7) == 0x50 && CX16.VPeek(0x4000 + 128) == 0x11);
+        Check("the sprite is still there", CX16.VPeek(0x1FC00 + 3 * 8 + 7) == 0x50 && CX16.VPeek(0x13000 + 128) == 0x11);
         Check("ISO text stays ISO", Glyph(97) == iso);
         CX16.SetMode(CX16.Text80x60);
 

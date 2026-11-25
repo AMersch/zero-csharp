@@ -229,6 +229,7 @@ void *realloc(void *pointer, size_t size)
 void *cs_calloc(u32 count, u32 size) { return (count | size) > 0xFFF0 ? 0 : calloc((size_t)count, (size_t)size); }
 void *cs_malloc(u32 size) { return size > 0xFFF0 ? 0 : malloc((size_t)size); }
 void cs_free(void *pointer) { free(pointer); }
+void *cs_realloc(void *pointer, u32 size) { return size > 0xFFF0 ? 0 : realloc(pointer, (size_t)size); }
 
 void *cs_memset(void *destination, i32 value, u32 count) { return memset(destination, (int)value, (size_t)count); }
 void *cs_memmove(void *destination, const void *source, u32 count) { return memmove(destination, source, (size_t)count); }

@@ -54,9 +54,9 @@ With zerocore, as `build.sh` builds it:
   `ref` receivers in `extension(...)` blocks.
 - **Indices and ranges**: `span[^1]`, `span[1..^1]`, and on strings and arrays, where a range
   makes a copy.
-- **`NativeMemory`**: `Alloc`, `AllocZeroed`, `Free`, `AlignedAlloc` and `AlignedFree`, for
-  memory you free yourself, and the `SupportedOSPlatform`, `UnsupportedOSPlatform` and
-  `ConstantExpected` attributes, so code shared with .NET builds compiles (see [below](#nativememory)).
+- **`NativeMemory`**: `Alloc`, `AllocZeroed`, `Realloc` and `Free`, and `AlignedAlloc`,
+  `AlignedRealloc` and `AlignedFree`, for memory you free yourself, and the `SupportedOSPlatform`,
+  `UnsupportedOSPlatform` and `ConstantExpected` attributes, so code shared with .NET builds compiles (see [below](#nativememory)).
 - **`char`'s methods and `System.Text.Encoding`**, with .NET's results for every character:
   `char.IsLetter`, `IsDigit`, `ToUpper`, `GetUnicodeCategory` and the rest (Unicode 16.0), and UTF-8,
   ASCII, Latin-1, UTF-16 and UTF-32 encodings (see [Strings without a GC](strings.html#characters-and-encodings)).
@@ -563,10 +563,13 @@ mode ends the program:
 NativeMemory: the size overflows
 ```
 
+`Realloc` keeps a block's bytes, up to the new size, and may move it. What it adds isn't zeroed, as
+in .NET: `realloc` doesn't say how large the block was.
+
 `AlignedAlloc(size, alignment)` returns a block whose address is a multiple of `alignment`, which
-must be a power of two, for a cache line or a page; free it with `AlignedFree`, not `Free`. It is
-built on `calloc` too, so it works on every target and zeroes its memory. An alignment that isn't a
-power of two ends the program, where .NET throws `ArgumentException`:
+must be a power of two, for a cache line or a page. Resize it with `AlignedRealloc` and free it
+with `AlignedFree`, not `Realloc` or `Free`. `AlignedAlloc` is built on `calloc` too, so it works
+on every target and zeroes its memory. An alignment that isn't a power of two ends the program, where .NET throws `ArgumentException`:
 
 ```text
 NativeMemory: the alignment isn't a power of two

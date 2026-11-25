@@ -72,18 +72,19 @@ public struct NativeBuffer<T> : IDisposable where T : unmanaged
         unsafe { return new Span<T>(_items, _length); }
     }
 
-    // Zero mode has no NativeMemory.Realloc: allocate, copy, free.
+    // Realloc keeps the items and may move them; what it adds
+    // isn't zeroed, so Resize clears it.
     public void Resize(int length)
     {
-        T* items = Allocate(length);
-        int kept = Math.Min(length, _length);
         unsafe
         {
-            // SAFETY: both blocks hold at least `kept` items.
-            new Span<T>(_items, kept).CopyTo(new Span<T>(items, kept));
-            NativeMemory.Free(_items);
+            // SAFETY: _items came from NativeMemory, and the new block
+            // holds `length` items.
+            _items = (T*)NativeMemory.Realloc(
+                _items, (nuint)length * (nuint)sizeof(T));
+            if (length > _length)
+                new Span<T>(_items + _length, length - _length).Clear();
         }
-        _items = items;
         _length = length;
     }
 
@@ -131,8 +132,9 @@ static bool GrowsAndFrees(int count)
 
 Two things to keep in mind:
 
-- **`AsSpan` is `unsafe`**, like `List<T>.AsSpan` in `lib/`. `Resize` frees the old block, so a span
-  taken before it points at freed memory. Take a new span after every `Resize`.
+- **`AsSpan` is `unsafe`**, like `List<T>.AsSpan` in `lib/`. `Realloc` may move the block and free
+  the old one, so a span taken before `Resize` may point at freed memory. Take a new span after
+  every `Resize`.
 - **Don't copy the struct.** Assigning it, or passing it by value, gives two structs with the same
   pointer. Disposing one leaves the other dangling, and disposing both frees the block twice. Pass it
   with `ref` instead ([Pass structs by reference](pass-structs-by-ref.html)).
@@ -150,9 +152,9 @@ Two things to keep in mind:
 
   There's no exception to catch, so check a size that comes from input before you allocate it.
 - **`Alloc(0)` returns a valid pointer** that `Free` takes, and `Free(null)` does nothing, as in .NET.
-- **Only `Alloc`, `AllocZeroed`, `Free`, `AlignedAlloc` and `AlignedFree`.** `Realloc`,
-  `AlignedRealloc`, `Clear`, `Copy` and `Fill` aren't there. Grow a block as `Resize` does above,
-  and use a span's `Clear`, `CopyTo` and `Fill` for the rest.
+- **`Realloc` doesn't zero what it adds**, as in .NET, though `Alloc` does here. Clear it as
+  `Resize` does above. If `Realloc` runs out, the program ends.
+- **No `Clear`, `Copy` or `Fill`.** Use a span's `Clear`, `CopyTo` and `Fill` instead.
 - **Some targets have little to give.** On the C64 one block can't be larger than 65,520 bytes, and
   the Arduino Uno R4 has 32 KB of RAM for everything ([Build for
   microcontrollers](build-for-microcontrollers.html)).

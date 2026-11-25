@@ -113,18 +113,19 @@ public struct NativeBuffer<T> : IDisposable where T : unmanaged
         unsafe { return new Span<T>(_items, _length); }
     }
 
-    // Zero mode has no NativeMemory.Realloc: allocate, copy, free.
+    // Realloc keeps the items and may move them; what it adds
+    // isn't zeroed, so Resize clears it.
     public void Resize(int length)
     {
-        T* items = Allocate(length);
-        int kept = Math.Min(length, _length);
         unsafe
         {
-            // SAFETY: both blocks hold at least `kept` items.
-            new Span<T>(_items, kept).CopyTo(new Span<T>(items, kept));
-            NativeMemory.Free(_items);
+            // SAFETY: _items came from NativeMemory, and the new block
+            // holds `length` items.
+            _items = (T*)NativeMemory.Realloc(
+                _items, (nuint)length * (nuint)sizeof(T));
+            if (length > _length)
+                new Span<T>(_items + _length, length - _length).Clear();
         }
-        _items = items;
         _length = length;
     }
 
@@ -435,6 +436,69 @@ public static class Program
         }
     }
 
+    // Realloc keeps what fits as a block grows and shrinks; null is Alloc,
+    // and 0 bytes is still a valid pointer.
+    static bool Reallocates(int count)
+    {
+        unsafe
+        {
+            int* items = (int*)NativeMemory.Realloc(null, (nuint)count * sizeof(int));
+            for (int i = 0; i < count; i++)
+                items[i] = i * 7;
+            items = (int*)NativeMemory.Realloc(items, (nuint)count * 4 * sizeof(int));
+            bool ok = true;
+            for (int i = 0; i < count; i++)
+                ok &= items[i] == i * 7;
+            for (int i = count; i < count * 4; i++)
+                items[i] = -i;
+            items = (int*)NativeMemory.Realloc(items, (nuint)(count / 2) * sizeof(int));
+            for (int i = 0; i < count / 2; i++)
+                ok &= items[i] == i * 7;
+            items = (int*)NativeMemory.Realloc(items, 0);
+            ok &= items != null;
+            NativeMemory.Free(items);
+            return ok;
+        }
+    }
+
+    // AlignedRealloc keeps the bytes and the new alignment, also when the
+    // alignment changes, which moves the data within the block.
+    static bool ReallocatesAligned(int count)
+    {
+        unsafe
+        {
+            bool ok = true;
+            byte* block = (byte*)NativeMemory.AlignedRealloc(null, (nuint)count, 16);
+            for (int i = 0; i < count; i++)
+                block[i] = (byte)(i * 5);
+            int size = count;
+            bool grow = true;
+            // Up to 1 KB: an aligned block takes up to its alignment more,
+            // and realloc may hold the old and the new block at once, in the
+            // Uno R4's 32 KB.
+            for (nuint alignment = 1024; alignment >= 1; alignment /= 2)
+            {
+                // Grows and shrinks in turn, alignment from 1 KB down to 1.
+                int next = grow ? size * 3 : size / 2 + 1;
+                grow = !grow;
+                int kept = Math.Min(size, next);
+                block = (byte*)NativeMemory.AlignedRealloc(block, (nuint)next, alignment);
+                ok &= ((nuint)block & (alignment - 1)) == 0;
+                for (int i = 0; i < kept; i++)
+                    ok &= block[i] == (byte)(i * 5);
+                for (int i = kept; i < next; i++)
+                    block[i] = (byte)(i * 5);
+                size = next;
+            }
+            block = (byte*)NativeMemory.AlignedRealloc(block, (nuint)size, 1024);
+            for (int i = 0; i < size; i++)
+                ok &= block[i] == (byte)(i * 5);
+            ok &= ((nuint)block & 1023) == 0;
+            NativeMemory.AlignedFree(block);
+            return ok;
+        }
+    }
+
     // Every alignment from 1 to a page gives an aligned, zeroed, writable
     // block, whose neighbours are left alone; AlignedFree(null) does nothing.
     static bool AlignsBlocks(int count)
@@ -713,6 +777,8 @@ public static class Program
         Check("platform and ConstantExpected attributes", AttributesKeepTheirValues());
         Check("a buffer that grows and frees itself", GrowsAndFrees(Opaque(100)));
         Check("AlignedAlloc, AlignedFree", AlignsBlocks(Opaque(100)));
+        Check("Realloc keeps what fits", Reallocates(Opaque(256)));
+        Check("AlignedRealloc keeps the bytes and the alignment", ReallocatesAligned(Opaque(100)));
         Section("NativeMemory");
 
         Console.WriteLine();

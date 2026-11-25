@@ -24,7 +24,7 @@ dotnet new zerolib -lang F# -o Shapes
 ```
 
 ```xml
-<Project Sdk="ZeroCSharp.Sdk/0.12.0">
+<Project Sdk="ZeroCSharp.Sdk/0.13.0">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
   </PropertyGroup>

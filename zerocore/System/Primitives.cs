@@ -194,6 +194,18 @@ namespace System
             get => sizeof(nint);
         }
 
+        public static nint MaxValue => sizeof(nint) == 8 ? (nint)long.MaxValue : (nint)int.MaxValue;
+        public static nint MinValue => sizeof(nint) == 8 ? (nint)long.MinValue : (nint)int.MinValue;
+
+        public static nint Min(nint x, nint y) => x <= y ? x : y;
+        public static nint Max(nint x, nint y) => x >= y ? x : y;
+
+        public static (nint Quotient, nint Remainder) DivRem(nint left, nint right)
+        {
+            nint quotient = left / right;
+            return (quotient, left - quotient * right);
+        }
+
         public override bool Equals(object obj) => obj is nint other && (nint)this == other;
         public override int GetHashCode() => unchecked((int)(long)(nint)this ^ (int)((long)(nint)this >> 32));
         public override string ToString() => Number.FormatInt64((nint)this);

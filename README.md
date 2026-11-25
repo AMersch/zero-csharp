@@ -168,12 +168,13 @@ nothing AGPL is linked into them.
 | `Pipe` | `In.Read`: standard input as bytes, checked byte for byte through a pipe | 19 KB |
 | `Records` | `record struct` and `record class`, `with`, `ToString`, `typeof`, anonymous types | 34 KB |
 | `Refs` | Structs in an arena passed and returned by `ref` | 24 KB |
+| `TensorTypes` | `Tensor<T>` and `TensorSpan<T>` as in .NET: broadcasting, views, a matrix product from `Dot`, SoftMax per row, temporaries freed with an arena | 105 KB |
 | `Llama` | Karpathy's stories260K language model, compiled into the program; it tells the same story on every target, DOS and UEFI included | 1.1 MB |
 | `Vga` | DOS and UEFI only: a small game in 320x200 with 256 colors | 36 KB |
 | `SmallStrings`, `SmallIntegers`, `SmallObjects` and seven more | Tests sized for a small machine: what Strings, Casts, Collections and the others check, in pieces that each fit in a Commodore 64 | 17 to 36 KB |
 | `C64Demo` | Commodore 64 only: text, a sprite and raster bars, with objects, a list and a lambda behind them | 36 KB |
 | `Paddles` | Commodore 64 only: a paddle-and-ball game against the computer, with sprites, SID sound, records and unions | 34 KB |
-| `Gpu` | GPU only (`--gpu`): kernels for adding, Collatz, SAXPY, a reduction, matrix multiply (plain and tiled), histograms and float atomics, each checked against the CPU and timed against a plain C# loop on one core | 118 KB (macOS) |
+| `Gpu` | GPU only (`--gpu`): kernels for adding, Collatz, SAXPY, a reduction, matrix multiply (plain and tiled, and on tensors), histograms and float atomics, each checked against the CPU and timed against a plain C# loop on one core | 118 KB (macOS) |
 | `Blink` | Microcontrollers only: the board's LED, blinked by a C# interrupt handler, and a check that a busy handler leaves the interrupted code's references alone | 18 KB of flash |
 
 Sizes are for Linux arm64. `build.sh` leaves out debug information and the symbol table and turns off

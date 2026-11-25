@@ -104,6 +104,7 @@ ALL_SAMPLES=(
     Formats
     Tensors
     TensorsAvx
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
 )
 # Programs with kernels for the GPU (Metal): only --gpu builds them.
@@ -142,6 +143,7 @@ DOS_SAMPLES=(
     Numerics
     Formats
     Tensors
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
     Vga
 )
@@ -195,6 +197,7 @@ ARM_SAMPLES=(
     Numerics
     Formats
     Tensors
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
     Blink
 )

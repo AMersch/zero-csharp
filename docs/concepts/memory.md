@@ -486,6 +486,45 @@ program couldn't carry on anyway, create the arena with `stopOnOutOfMemory: true
 program with a message instead, so nothing built on that arena has to check. That matters most on DOS
 and WebAssembly, where memory really does run out.
 
+On Linux and macOS it rarely does: malloc promises memory the system doesn't have, and a runaway loop
+eats RAM until the system kills the program. Give an arena a budget with `maxCapacity`, and it fails
+at that size instead, the same way it fails when memory runs out:
+
+<!-- sample: samples/Arena.cs max-capacity -->
+```csharp
+// A budget: past 64 KB of blocks, allocations fail as if memory had
+// run out, even on systems where malloc never says no.
+Arena request = Arena.Create(4096, "request", maxCapacity: 64 * 1024);
+int* small = request.AllocArray<int>(1000);      // fine
+int* huge = request.AllocArray<int>(100_000);    // null: over budget
+```
+
+The cap counts the bytes of all blocks together. When the next block would cross it, the block shrinks
+to what is left, so an allocation fails only when it can't fit at all. Use it for an arena that holds
+what input you don't control turns into (a parsed request, a decoded file) and to give each part of a
+small machine its share.
+
+### An arena in a buffer of your own
+
+`Arena.FromBuffer` puts the arena in memory you hand it: a static array, `stackalloc`, or a region of a
+microcontroller's RAM. It never calls malloc or free, keeps its bookkeeping at the start of the buffer,
+and can't grow, so a full buffer fails like running out of memory. `Destroy()` only ends the handle,
+because the memory is yours.
+
+<!-- sample: samples/Arena.cs from-buffer -->
+```csharp
+// An arena in memory you provide: here 1 KB of stack. It never calls
+// malloc and never grows; when the buffer is full, allocations fail.
+Span<byte> memory = stackalloc byte[1024];
+Arena local;
+// SAFETY: local isn't used after this method returns.
+unsafe { local = Arena.FromBuffer(memory, "local"); }
+Point* p = local.Alloc<Point>();
+```
+
+`FromBuffer` is unsafe because the arena can't check that the memory outlives it: an arena on the stack
+must not be used after the method that made it returns.
+
 ## Seeing what an arena does
 
 - **Names.** `Arena.Create(size, "frame")` names an arena, and failure messages then say which arena

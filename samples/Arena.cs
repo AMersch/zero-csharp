@@ -260,6 +260,19 @@ public static class Program
         Console.WriteLine();
         unsafe { scoped.Destroy(); } // SAFETY: nothing points into it.
 
+        // docs:max-capacity
+        // A budget: past 64 KB of blocks, allocations fail as if memory had
+        // run out, even on systems where malloc never says no.
+        Arena request = Arena.Create(4096, "request", maxCapacity: 64 * 1024);
+        int* small = request.AllocArray<int>(1000);      // fine
+        int* huge = request.AllocArray<int>(100_000);    // null: over budget
+        // docs:end
+        Console.WriteLine();
+        Console.WriteLine($"maxCapacity 65536: 4000 bytes {(small != null ? "allocated" : "refused")}, 400000 bytes {(huge != null ? "allocated" : "refused")}, capacity {request.Capacity}");
+        unsafe { request.Destroy(); } // SAFETY: small isn't used after this.
+
+        InBuffer();
+
         // docs:debug-checks
         // Debugging aid: arenas created while DebugChecks is on fill freed memory
         // with 0xDD, so a stale pointer reads an obvious pattern instead of the
@@ -282,6 +295,22 @@ public static class Program
         unsafe { debug.Destroy(); } // SAFETY: stale is not used after this.
         Arena.DebugChecks = false;
         return 0;
+    }
+
+    static void InBuffer()
+    {
+        // docs:from-buffer
+        // An arena in memory you provide: here 1 KB of stack. It never calls
+        // malloc and never grows; when the buffer is full, allocations fail.
+        Span<byte> memory = stackalloc byte[1024];
+        Arena local;
+        // SAFETY: local isn't used after this method returns.
+        unsafe { local = Arena.FromBuffer(memory, "local"); }
+        Point* p = local.Alloc<Point>();
+        // docs:end
+        unsafe { p->X = 3; } // SAFETY: p points at a Point in the buffer.
+        Console.WriteLine($"FromBuffer 1024: capacity {local.Capacity}, 2000 bytes {(local.Alloc(2000) != null ? "allocated" : "refused")}");
+        local.Dump();
     }
 
     // Returns its argument, out of the compiler's sight, so that `+` in Main

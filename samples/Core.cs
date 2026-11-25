@@ -1,8 +1,8 @@
 // Example: the smaller parts of the core library (zerocore): Math and MathF,
 // Interlocked, Volatile, interface calls from one call site to many classes,
 // extension members, C# 15 unions (zerocore/System/Exceptions.cs and Unions.cs
-// explain what those two need from the library), caller-info attributes, and
-// indices and ranges.
+// explain what those two need from the library), caller-info attributes,
+// indices and ranges, and NativeMemory.
 // Exit code = number of failed checks.
 // Build: ./build.sh Core
 
@@ -10,6 +10,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Threading;
 
 namespace CoreSample;
@@ -248,6 +250,50 @@ public static class Program
 
     static byte ByteOf<T>(ref T value, int index) => Unsafe.Add(ref Unsafe.As<T, byte>(ref value), index);
 
+    [SupportedOSPlatform("linux"), SupportedOSPlatform("windows"), UnsupportedOSPlatform("browser")]
+    static bool AllocatesAndFrees(int count)
+    {
+        unsafe
+        {
+            int* items = (int*)NativeMemory.Alloc((nuint)count, sizeof(int));
+            for (int i = 0; i < count; i++)
+                items[i] = i * 3;
+            bool kept = true;
+            for (int i = 0; i < count; i++)
+                kept &= items[i] == i * 3;
+            NativeMemory.Free(items);
+            return kept;
+        }
+    }
+
+    static bool AllocatesZeroed([ConstantExpected(Min = 1)] int count)
+    {
+        unsafe
+        {
+            long* items = (long*)NativeMemory.AllocZeroed((nuint)count, sizeof(long));
+            bool zero = true;
+            for (int i = 0; i < count; i++)
+                zero &= items[i] == 0;
+            NativeMemory.Free(items);
+            byte* bytes = (byte*)NativeMemory.AllocZeroed((nuint)count);
+            for (int i = 0; i < count; i++)
+                zero &= bytes[i] == 0;
+            NativeMemory.Free(bytes);
+            return zero;
+        }
+    }
+
+    static bool AllocatesNothing()
+    {
+        unsafe
+        {
+            void* empty = NativeMemory.Alloc(0);
+            NativeMemory.Free(empty);
+            NativeMemory.Free(null);
+            return empty != null;
+        }
+    }
+
     public static int Main()
     {
         Check("Sqrt", Math.Sqrt(Opaque(2.0)) * Math.Sqrt(Opaque(2.0)) > 1.9999999999 && Math.Sqrt(Opaque(144.0)) == 12);
@@ -463,6 +509,11 @@ public static class Program
         sevens.Slice(10, 280).Clear();
         Check("big Fill and Clear", allSeven && sevens[9] == 7 && sevens[10] == 0 && sevens[289] == 0 && sevens[290] == 7);
         Section("span copy and fill");
+
+        Check("Alloc, then Free", AllocatesAndFrees(Opaque(1000)));
+        Check("AllocZeroed", AllocatesZeroed(Opaque(4096)));
+        Check("Alloc(0) is a valid pointer, Free(null) does nothing", AllocatesNothing());
+        Section("NativeMemory");
 
         Console.WriteLine();
         if (s_failures == 0)

@@ -104,6 +104,11 @@
          first; building for the machine's own system, its usual library
          folders follow (Homebrew's on macOS). -->
     <!-- ZeroInstructionSet: passed to bflat as -m (x86-64-v3, dotprod, ...). -->
+    <!-- ZeroGpu: Metal compiles the program's [RuntimeExport("Name")] methods
+         for the GPU as well, as kernels lib/Gpu.cs launches (Gpu.Run("Name", ...)).
+         For ZeroTarget osx-arm64, on an Apple Silicon Mac with Xcode, its Metal
+         Toolchain (xcodebuild -downloadComponent MetalToolchain) and Docker,
+         which runs NativeAOT-LLVM, the compiler of the kernels' first step. -->
 
     <!-- dotnet pack: the dll goes to lib/<framework>/ by a target in Sdk.targets,
          because NuGet's pack rejects build output for a framework it doesn't know. -->

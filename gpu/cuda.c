@@ -1,19 +1,33 @@
 // What lib/Gpu.cs calls on Linux with an NVIDIA GPU: CUDA's driver API, behind
 // the same small C API as gpu/metal.m. The kernels are PTX (zero-bitcode
-// ll2ptx, then llc), embedded in the program as gpu_ptx (gpu/cuda-kernels.s);
-// the driver compiles them for the GPU it finds when gpu_open loads them.
+// ll2ptx, then llc or clang), embedded in the program as gpu_ptx, a
+// zero-terminated string (build.sh's kernels.s, or the object zero-bitcode
+// cuda-kernels writes); the driver compiles them for the GPU it finds when
+// gpu_open loads them.
 //
 // libcuda is opened at run time (dlopen), so building needs no CUDA headers or
 // libraries, and a program run where there is no NVIDIA driver says so and
 // Gpu.Open returns false.
 //
+// No libc headers either: the few libc functions are declared here, so any
+// clang can compile this for Linux (the SDK's payload is built on a Mac).
+//
 // Buffers are CUDA managed memory: one address for the CPU and the GPU, which
 // the driver moves to whichever touches it. gpu_run waits for the kernel, so
 // the CPU may read a buffer as soon as Gpu.Run returns, as with Metal.
-#include <dlfcn.h>
+#include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <string.h>
+
+// From glibc (and musl): <dlfcn.h>, <stdio.h>, <string.h>.
+#define RTLD_NOW 2
+void* dlopen(const char* file, int mode);
+void* dlsym(void* handle, const char* name);
+char* dlerror(void);
+typedef struct _IO_FILE FILE;
+extern FILE* stderr;
+int fprintf(FILE* stream, const char* format, ...);
+int strcmp(const char* a, const char* b);
+char* strcpy(char* to, const char* from);
 
 extern const char gpu_ptx[];
 

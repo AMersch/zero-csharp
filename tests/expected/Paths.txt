@@ -1,0 +1,4 @@
+PASS Parts (21 checks)
+PASS Combine (12 checks)
+PASS Normalize (10 checks)
+PASS Separators

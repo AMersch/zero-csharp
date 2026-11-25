@@ -173,3 +173,13 @@ ___start___modules:
     .space 8 * 16
 ___stop___modules:
     .quad 0
+
+// Which system this is, for lib/FileSystem.cs: 3, macOS. (1 Linux x64,
+// 2 Linux arm64, 3 macOS, 4 Windows, 5 UEFI, 6 WebAssembly, 7 DOS,
+// 8 a microcontroller, 9 the Commodore 64.)
+    .text
+    .globl _ZeroSystem
+    .p2align 2
+_ZeroSystem:
+    mov     w0, #3
+    ret

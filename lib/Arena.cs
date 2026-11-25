@@ -20,6 +20,13 @@
 // - Allocations fail by returning null; arena state is untouched on failure.
 //   An arena created with stopOnOutOfMemory: true ends the program instead
 //   when memory runs out, so nothing has to check for that.
+// - Create(maxCapacity: n) caps the arena at n bytes of blocks: past that,
+//   allocations fail as if memory had run out, even where malloc never
+//   says no (Linux and macOS promise memory they don't have). For input you
+//   don't control, and for giving each part of a small machine a budget.
+// - FromBuffer() makes an arena in memory you provide (a static array,
+//   stackalloc, a region of a microcontroller's RAM) and never calls malloc.
+//   It can't grow: when the buffer is full, allocations fail.
 // - Save() and Restore() free only what was allocated in between, for
 //   temporary work in an arena that also holds longer-lived data. Don't let
 //   an older collection grow in between (see Restore). OpenScope() pairs the
@@ -77,12 +84,14 @@ public partial struct Arena
         public int BlockCount;
         public uint Generation;    // bumped by Reset, to catch marks from before it
         public bool Poison;        // DebugChecks was on when the arena was created
+        public bool StopOnOutOfMemory;
+        public bool InBuffer;      // from FromBuffer: the caller owns the memory
         public nuint Used;         // bytes handed out, padding excluded
         public nuint Capacity;     // sum of all block sizes
         public nuint PeakUsed;     // the highest Used and Capacity so far;
         public nuint PeakCapacity; // Reset and Restore don't lower them
+        public nuint MaxCapacity;  // 0: no limit
         public nint Name;          // address of the name string, or 0
-        public bool StopOnOutOfMemory;
     }
 
     /// <summary>A point in an arena's history, from Save(). Restore() frees everything allocated after it.</summary>
@@ -156,8 +165,14 @@ public partial struct Arena
     /// returning null (and instead of List.Add and the like returning false).
     /// Use it wherever the program couldn't carry on anyway. Requests that are
     /// wrong in themselves (a bad alignment, a negative count) still return null.
+    /// A nonzero <paramref name="maxCapacity"/> caps Capacity, the bytes of all
+    /// blocks together (not counting a 32-byte header per block): an allocation
+    /// that would need more fails as if memory had run out. Blocks shrink to
+    /// fit under the cap, so it fails only when the request itself doesn't fit
+    /// in what is left. A first block bigger than the cap is cut down to it.
     /// </summary>
-    public static Arena Create(nuint blockSize = 4096, string name = null, bool stopOnOutOfMemory = false)
+    public static Arena Create(nuint blockSize = 4096, string name = null, bool stopOnOutOfMemory = false,
+        nuint maxCapacity = 0)
     {
         State* state = (State*)malloc((nuint)sizeof(State));
         if (state == null)
@@ -172,6 +187,9 @@ public partial struct Arena
             // SAFETY: state holds sizeof(State) bytes.
             memset(state, 0, (nuint)sizeof(State));
             state->InitialSize = blockSize == 0 ? 4096 : blockSize;
+            if (maxCapacity != 0 && state->InitialSize > maxCapacity)
+                state->InitialSize = maxCapacity;
+            state->MaxCapacity = maxCapacity;
             state->LastNormal = state->InitialSize;
             state->Poison = DebugChecks;
             state->Name = Unsafe.As<string, nint>(ref name);
@@ -186,6 +204,90 @@ public partial struct Arena
         }
         return new Arena { _state = state };
     }
+
+    /// <summary>
+    /// Returns an arena that lives in <paramref name="size"/> bytes at
+    /// <paramref name="memory"/> and never calls malloc or free: for a static
+    /// array, stackalloc, or a region of RAM on a machine without a heap. The
+    /// arena keeps its bookkeeping at the start of the buffer (about 150 bytes
+    /// on 64-bit targets), and Capacity says what is left for allocations. It
+    /// can't grow: an allocation
+    /// that doesn't fit in what is left fails, as out of memory does (null, or
+    /// the end of the program with <paramref name="stopOnOutOfMemory"/>).
+    /// Reset, Restore and Save work as usual; Destroy just ends the handle.
+    /// Returns a not-created arena if the buffer is too small for the
+    /// bookkeeping.
+    /// </summary>
+    /// <safety>
+    /// The <paramref name="size"/> bytes at <paramref name="memory"/> must be
+    /// writable, used for nothing else, and outlive the arena and everything
+    /// allocated from it. For stackalloc, that means the arena must not be used
+    /// after the method that allocated the buffer returns.
+    /// </safety>
+    public static unsafe Arena FromBuffer(void* memory, nuint size, string name = null, bool stopOnOutOfMemory = false)
+    {
+        byte* start = (byte*)memory;
+        byte* aligned = AlignUp(start, DefaultAlign);
+        nuint header = (nuint)(aligned - start) + StateSize + (nuint)sizeof(Block);
+        if (memory == null || aligned < start || size <= header)
+        {
+            if (stopOnOutOfMemory)
+                Environment.FailFast("Arena.FromBuffer: the buffer is too small for the arena's bookkeeping");
+            return default;
+        }
+
+        State* state = (State*)aligned;
+        Block* block = (Block*)(aligned + StateSize);
+        unsafe
+        {
+            // SAFETY: the caller promised size writable bytes at memory, and
+            // the state, the block header and the data fit in them.
+            memset(state, 0, (nuint)sizeof(State));
+            nuint capacity = size - header;
+            state->InitialSize = capacity;
+            state->LastNormal = capacity;
+            state->MaxCapacity = capacity;  // which also means no other block
+            state->InBuffer = true;
+            state->Poison = DebugChecks;
+            state->Name = Unsafe.As<string, nint>(ref name);
+            state->StopOnOutOfMemory = stopOnOutOfMemory;
+
+            block->Next = null;
+            block->Start = (byte*)block + sizeof(Block);
+            block->End = block->Start + capacity;
+            block->Size = capacity;
+            Poison(state, block->Start, block->End);
+
+            state->First = block;
+            state->Current = block;
+            state->Ptr = block->Start;
+            state->BlockCount = 1;
+            state->Capacity = capacity;
+            state->PeakCapacity = capacity;
+        }
+        return new Arena { _state = state };
+    }
+
+    /// <summary>FromBuffer over a span's memory.</summary>
+    /// <safety>
+    /// As for FromBuffer(void*, nuint): the span's memory must outlive the
+    /// arena and everything allocated from it, and be used for nothing else.
+    /// </safety>
+    public static unsafe Arena FromBuffer(Span<byte> buffer, string name = null, bool stopOnOutOfMemory = false)
+    {
+        unsafe
+        {
+            // SAFETY: the pointer and length come from the span; nothing moves
+            // memory in zero mode, so the pointer stays valid after `fixed`,
+            // for as long as the caller promised the memory lives.
+            fixed (byte* p = buffer)
+                return FromBuffer(p, (nuint)buffer.Length, name, stopOnOutOfMemory);
+        }
+    }
+
+    // The state's size rounded up, so a buffer arena's block header and data
+    // stay 16-byte aligned behind it.
+    static nuint StateSize => ((nuint)sizeof(State) + (DefaultAlign - 1)) & ~(DefaultAlign - 1);
 
     public bool IsCreated => _state != null;
 
@@ -247,6 +349,20 @@ public partial struct Arena
         }
     }
 
+    /// <summary>
+    /// The most Capacity may reach: maxCapacity from Create, or what a
+    /// FromBuffer arena holds. 0 means no limit.
+    /// </summary>
+    public nuint MaxCapacity
+    {
+        get
+        {
+            if (_state == null)
+                return 0;
+            unsafe { return _state->MaxCapacity; }
+        }
+    }
+
     /// <summary>The name given to Create, or null.</summary>
     public string Name
     {
@@ -297,6 +413,10 @@ public partial struct Arena
 
                 nuint needed = size + align - 1; // worst-case padding in a fresh block
                 nuint normal = NextNormalSize(state);
+                // Under a limit, a normal block shrinks to what is left, so
+                // the request fails only if it doesn't fit in that.
+                if (state->MaxCapacity != 0 && normal > state->MaxCapacity - state->Capacity)
+                    normal = state->MaxCapacity - state->Capacity;
                 bool dedicated = needed > normal;
 
                 if (AddBlock(state, dedicated ? needed : normal) == null)
@@ -724,7 +844,15 @@ public partial struct Arena
             Out.Write((long)state->PeakCapacity);
             Out.Write("), ");
             Out.Write(state->BlockCount);
-            Out.Line(state->BlockCount == 1 ? " block" : " blocks");
+            Out.Write(state->BlockCount == 1 ? " block" : " blocks");
+            if (state->InBuffer)
+                Out.Write(", in a buffer");
+            else if (state->MaxCapacity != 0)
+            {
+                Out.Write(", limit ");
+                Out.Write((long)state->MaxCapacity);
+            }
+            Out.Line();
 
             int index = 1;
             for (Block* block = state->First; block != null; block = block->Next)
@@ -805,9 +933,18 @@ public partial struct Arena
 
         unsafe
         {
-            // SAFETY: the state and its blocks come from malloc and are freed exactly once here.
-            FreeAllBlocks(state);
-            free(state);
+            if (state->InBuffer)
+            {
+                // The memory is the caller's: nothing to free, but a stale
+                // pointer into it should still stand out.
+                Poison(state, state->First->Start, state->Ptr);
+            }
+            else
+            {
+                // SAFETY: the state and its blocks come from malloc and are freed exactly once here.
+                FreeAllBlocks(state);
+                free(state);
+            }
         }
         _state = null;
     }
@@ -837,6 +974,12 @@ public partial struct Arena
     {
         if (size > MaxSize - (nuint)sizeof(Block))
             return null;
+        unsafe
+        {
+            // SAFETY: callers pass a live state.
+            if (state->MaxCapacity != 0 && size > state->MaxCapacity - state->Capacity)
+                return null; // over the limit: leave the arena exactly as it was
+        }
 
         byte* memory = (byte*)malloc((nuint)sizeof(Block) + size);
         if (memory == null)
@@ -882,7 +1025,13 @@ public partial struct Arena
         {
             // SAFETY: callers pass a live state.
             if (state->StopOnOutOfMemory)
+            {
+                if (state->InBuffer)
+                    Fail(state, "Arena: out of memory (its buffer is full)");
+                if (state->MaxCapacity != 0)
+                    Fail(state, "Arena: out of memory (it reached its maxCapacity)");
                 Fail(state, "Arena: out of memory");
+            }
         }
         return null;
     }

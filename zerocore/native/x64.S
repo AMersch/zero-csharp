@@ -196,4 +196,15 @@ ZeroFiberStart:
     call    r13
     ud2
 
+
+// Which system this is, for lib/FileSystem.cs: 1, Linux on x64. (1 Linux x64,
+// 2 Linux arm64, 3 macOS, 4 Windows, 5 UEFI, 6 WebAssembly, 7 DOS,
+// 8 a microcontroller, 9 the Commodore 64.)
+    .text
+    .global ZeroSystem
+    .type ZeroSystem, @function
+ZeroSystem:
+    mov     eax, 1
+    ret
+
     .section .note.GNU-stack, "", @progbits

@@ -12,9 +12,14 @@
 // addressed. Native code entering managed code (main -> __managed__Main) hands
 // it the shadow stack, and every C# method takes it as a hidden first argument.
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 #include <wasi/api.h>
+
+#undef readdir64 // a macro for readdir here; defined below with glibc's layout
 
 // ---- entry ----------------------------------------------------------------
 
@@ -137,3 +142,68 @@ void RhpCheckedAssignRef(void **destination, void *reference) { *destination = r
 // first call. Nothing calls it: compiled code asks zerocore for the method
 // (RhpResolveInterfaceDispatch) instead.
 void RhpInitialDynamicInterfaceDispatch(void) { abort(); }
+
+// ---- files ----------------------------------------------------------------
+
+// Which system this is, for lib/FileSystem.cs: 6, WebAssembly.
+int ZeroSystem(void) { return 6; }
+
+// lib/FileSystem.cs calls glibc's names, with glibc's layouts: these give
+// WASI's answers in them. glibc's struct stat as on arm64: the mode at 16,
+// the size at 48, the modification time at 88 (seconds) and 96 (nanoseconds),
+// with Linux's numbers for the file types. (errno keeps WASI's numbers, which
+// lib/FileSystem.cs knows; WASI's C library has __errno_location.)
+static int to_glibc_stat(int result, const struct stat *st, unsigned char *out)
+{
+    if (result != 0)
+        return result;
+    unsigned mode = S_ISDIR(st->st_mode) ? 0x4000 : S_ISLNK(st->st_mode) ? 0xA000
+                  : S_ISREG(st->st_mode) ? 0x8000 : 0;
+    long long size = st->st_size, seconds = st->st_mtim.tv_sec, nanoseconds = st->st_mtim.tv_nsec;
+    memset(out, 0, 128);
+    memcpy(out + 16, &mode, 4);
+    memcpy(out + 48, &size, 8);
+    memcpy(out + 88, &seconds, 8);
+    memcpy(out + 96, &nanoseconds, 8);
+    return 0;
+}
+
+int __xstat64(int version, const char *path, unsigned char *out)
+{
+    (void)version;
+    struct stat st;
+    return to_glibc_stat(stat(path, &st), &st, out);
+}
+
+int __lxstat64(int version, const char *path, unsigned char *out)
+{
+    (void)version;
+    struct stat st;
+    return to_glibc_stat(lstat(path, &st), &st, out);
+}
+
+// glibc's struct dirent64: d_type at 18, with Linux's numbers, and d_name
+// from 19. Good until the next readdir64, as readdir's entry is.
+struct glibc_dirent64 {
+    unsigned long long d_ino;
+    long long d_off;
+    unsigned short d_reclen;
+    unsigned char d_type;
+    char d_name[1024];
+};
+
+void *readdir64(DIR *dir)
+{
+    static struct glibc_dirent64 out;
+    struct dirent *entry = readdir(dir);
+    if (!entry)
+        return 0;
+    out.d_type = entry->d_type == DT_DIR ? 4 : entry->d_type == DT_REG ? 8
+               : entry->d_type == DT_LNK ? 10 : 0;
+    size_t length = strlen(entry->d_name);
+    if (length > 1023)
+        length = 1023;
+    memcpy(out.d_name, entry->d_name, length);
+    out.d_name[length] = 0;
+    return &out;
+}

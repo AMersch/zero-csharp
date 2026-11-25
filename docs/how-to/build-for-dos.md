@@ -87,7 +87,9 @@ times faster than a real 386; `DOS_IPS=6000000` is about a 386DX-33.
 A program needs 2 MB or more. Each one reserves 256 KB for its stack and 256 KB for the shadow stack
 NativeAOT-LLVM's code keeps. Most samples run with 2 MB; Strings needs more for its arenas and runs
 with 4 MB. Memory really does run out here, so consider arenas created with
-`stopOnOutOfMemory: true` (see [Catch arena mistakes](catch-arena-mistakes.html)).
+`stopOnOutOfMemory: true` (see [Catch arena mistakes](catch-arena-mistakes.html)), and give arenas
+that grow with their input a `maxCapacity`, so one of them can't take the memory the others need (see
+[Running out of memory](../concepts/memory.html#running-out-of-memory)).
 
 ## Run on a real machine or another emulator
 

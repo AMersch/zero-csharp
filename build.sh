@@ -86,6 +86,8 @@ ALL_SAMPLES=(
     Core
     Bits
     Files
+    Paths
+    Directories
     Dice
     Pipe
     Env
@@ -135,6 +137,7 @@ DOS_SAMPLES=(
     Core
     Bits
     Files
+    Paths
     Dice
     Pipe
     Env
@@ -194,6 +197,7 @@ ARM_SAMPLES=(
     Core
     Bits
     Files
+    Paths
     Dice
     Pipe
     Env
@@ -248,8 +252,14 @@ R4_SAMPLES=(
     "${SMALL_SAMPLES[@]}"
     Blink
 )
-# UEFI gets every sample, and Vga too (lib/Uefi.cs has what it uses of lib/Dos.cs).
-UEFI_SAMPLES=("${ALL_SAMPLES[@]}" Vga)
+# UEFI gets every sample but these, and Vga too (lib/Uefi.cs has what it uses
+# of lib/Dos.cs). Directories needs directories, which lib/ has only on Linux,
+# macOS, Windows and WebAssembly.
+NOT_UEFI=" Directories "
+UEFI_SAMPLES=(Vga)
+for name in "${ALL_SAMPLES[@]}"; do
+    [[ "$NOT_UEFI" == *" $name "* ]] || UEFI_SAMPLES+=("$name")
+done
 
 # Language version and memory safety rules for every sample.
 CSHARP_FLAGS=(--langversion preview --compiler-feature updated-memory-safety-rules)
@@ -821,7 +831,7 @@ build_win() {
         # shellcheck disable=SC2046
         "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none \
             "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os windows --arch x64 $(BFLAT_ARCH=x64 bflat_flags "$name") \
-            --ldflags "/entry:zero_start /wrap:getenv /wrap:fopen /wrap:remove $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
+            --ldflags "/entry:zero_start /wrap:getenv /wrap:fopen /wrap:remove /wrap:mkdir /wrap:rmdir /wrap:rename /wrap:getcwd /wrap:chdir $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
         rm -f "bin/win/$name.pdb"
     done
 }
@@ -1381,6 +1391,12 @@ case "$TARGET" in
         done
         "$WIN_CLANG" -target arm64-apple-macos12 -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/osx-arm64/zerocore.o"
         cp mac/libSystem.tbd "$PAYLOAD_DIR/native/osx-arm64/"
+        # ZeroGpu=Cuda: gpu/cuda.c for each Linux architecture, from the same
+        # clang (it declares the few libc functions it calls, so no headers).
+        # arm64: atomics inline, as bflat's link has no libgcc for the calls.
+        echo "[clang] gpu/cuda.c -> $PAYLOAD_DIR/native/linux-{x64,arm64}/cuda.o"
+        "$WIN_CLANG" -target x86_64-linux-gnu -ffreestanding -O2 -Wall -Wextra -c gpu/cuda.c -o "$PAYLOAD_DIR/native/linux-x64/cuda.o"
+        "$WIN_CLANG" -target aarch64-linux-gnu -ffreestanding -mno-outline-atomics -O2 -Wall -Wextra -c gpu/cuda.c -o "$PAYLOAD_DIR/native/linux-arm64/cuda.o"
         # zero-bitcode, which builds C64 programs from the IL (a .NET program,
         # the same on every host).
         echo "[dotnet] sdk/ZeroCSharp.Bitcode -> $PAYLOAD_DIR/tools/zero-bitcode"

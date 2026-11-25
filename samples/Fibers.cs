@@ -1,5 +1,5 @@
 // Example: fibers (lib/Fibers.cs), green threads that take turns on one
-// system thread, and channels between them. Exit code = number of failed checks.
+// system thread, and channels and pipes between them. Exit code = number of failed checks.
 // Build: ./build.sh Fibers
 //
 // `Fibers overflow` overflows a fiber's stack on purpose, and must be stopped:
@@ -18,11 +18,18 @@ public sealed class Log
     public void Add(int value) => Entries[Count++] = value;
 }
 
-public sealed class Pipe
+public sealed class Stages
 {
     public Channel<int> Numbers = new Channel<int>(4);
     public Channel<int> Squares = new Channel<int>();
     public long Total;
+}
+
+public sealed class Transfer
+{
+    public Pipe Pipe;
+    public int Sent, Received, Wrong, MostBuffered;
+    public bool WriteRefused;
 }
 
 public sealed class PingPong
@@ -92,6 +99,16 @@ public static class Program
         Out.Line("not stopped: ", big[seed]);
     }
 
+    static bool Same(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
+    {
+        if (a.Length != b.Length)
+            return false;
+        for (int i = 0; i < a.Length; i++)
+            if (a[i] != b[i])
+                return false;
+        return true;
+    }
+
     static int Depth(int n) => n == 0 ? 0 : 1 + Depth(n - 1);
 
     public static int Main(string[] args)
@@ -134,28 +151,92 @@ public static class Program
         // A pipeline: one fiber produces numbers, one squares them, and one
         // adds them up. Receive returns false once its channel is closed and
         // drained, which ends each loop.
-        var pipe = new Pipe();
-        Fiber.Spawn(pipe, static p =>
+        var stages = new Stages();
+        Fiber.Spawn(stages, static p =>
         {
             for (int i = 1; i <= 100; i++)
                 p.Numbers.Send(i);
             p.Numbers.Close();
         });
-        Fiber.Spawn(pipe, static p =>
+        Fiber.Spawn(stages, static p =>
         {
             while (p.Numbers.Receive(out int n))
                 p.Squares.Send(n * n);
             p.Squares.Close();
         });
-        Fiber.Spawn(pipe, static p =>
+        Fiber.Spawn(stages, static p =>
         {
             while (p.Squares.Receive(out int square))
                 p.Total += square;
         });
         Fiber.Run();
         // docs:end
-        Check("sum of squares 1..100", pipe.Total == 338350);
+        Check("sum of squares 1..100", stages.Total == 338350);
         Section("Channels");
+
+        // docs:pipe
+        // A pipe streams bytes through a buffer of fixed size from an arena:
+        // here 64 bytes carry 10,000. The writer waits whenever the buffer is
+        // full, so it never runs more than 64 bytes ahead of the reader.
+        Arena arena = Arena.Create(4096);
+        var transfer = new Transfer { Pipe = new Pipe(arena, 64) };
+        Fiber.Spawn(transfer, static t =>
+        {
+            Span<byte> chunk = stackalloc byte[100];
+            while (t.Sent < 10_000)
+            {
+                int n = Math.Min(chunk.Length, 10_000 - t.Sent);
+                for (int i = 0; i < n; i++)
+                    chunk[i] = (byte)(t.Sent + i);
+                t.Pipe.Write((ReadOnlySpan<byte>)chunk.Slice(0, n));
+                t.Sent += n;
+            }
+            t.Pipe.Close();
+        });
+        Fiber.Spawn(transfer, static t =>
+        {
+            Span<byte> buffer = stackalloc byte[37];
+            int n;
+            while ((n = t.Pipe.Read(buffer)) > 0)
+            {
+                for (int i = 0; i < n; i++)
+                    if (buffer[i] != (byte)(t.Received + i))
+                        t.Wrong++;
+                t.Received += n;
+                t.MostBuffered = Math.Max(t.MostBuffered, t.Pipe.Count + n);
+            }
+        });
+        Fiber.Run();
+        // docs:end
+        Check("all 10,000 bytes", transfer.Received == 10_000);
+        Check("in order", transfer.Wrong == 0);
+        Check("never more than 64 held", transfer.MostBuffered <= 64);
+
+        // Text goes in as UTF-8. A reader that closes the pipe early makes
+        // the writer's next Write return false instead of waiting forever.
+        var text = new Transfer { Pipe = new Pipe(arena, 8) };
+        Fiber.Spawn(text, static t =>
+        {
+            t.Pipe.Write("h\u00e9llo");
+            for (int i = 0; i < 100 && !t.WriteRefused; i++)
+                t.WriteRefused = !t.Pipe.Write("more");
+        });
+        Fiber.Spawn(text, static t =>
+        {
+            Span<byte> word = stackalloc byte[6];
+            int got = 0;
+            while (got < 6)
+                got += t.Pipe.Read(word.Slice(got));
+            if (Same(word, "h\u00e9llo"u8))
+                t.Received = got;
+            t.Pipe.Close();
+        });
+        Fiber.Run();
+        Check("UTF-8 text", text.Received == 6);
+        Check("Write refused after Close", text.WriteRefused);
+        Check("closed", text.Pipe.IsClosed);
+        unsafe { arena.Destroy(); } // SAFETY: both pipes are done with
+        Section("Pipe");
 
         // Unbuffered channels hand each value straight to a waiting fiber.
         var game = new PingPong();

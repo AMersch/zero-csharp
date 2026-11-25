@@ -44,5 +44,10 @@ Every round ran: True
 Objects freed with their scope, 1000 rounds: heap growth 0 bytes, arena blocks 1
 Only the scopes' objects freed: True
 
+maxCapacity 65536: 4000 bytes allocated, 400000 bytes refused, capacity 4096
+FromBuffer 1024: capacity 880, 2000 bytes refused
+Arena "local": 16 of 880 bytes used (peak 16 of 880), 1 block, in a buffer
+  block 1: 880 bytes, 864 free (current)
+
 DebugChecks: pointer is live before Reset: True
 After Reset the stale pointer reads 0xDDDDDDDD, IsLive: False

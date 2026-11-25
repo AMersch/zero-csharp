@@ -30,10 +30,10 @@
 // call and destroyed when it ends, so a fiber can wait inside Scratch.
 //
 // Rules:
-// - Yield, Sleep, Send and Receive block only inside a fiber. Outside one
-//   (in Main, before or after Run), Yield and Sleep return at once, and a
-//   Send or Receive that would wait stops the program.
-// - When every fiber left is waiting on a channel, none can ever run again:
+// - Yield, Sleep, Send and Receive (and a Pipe's Read and Write) block only
+//   inside a fiber. Outside one (in Main, before or after Run), Yield and
+//   Sleep return at once, and a call that would wait stops the program.
+// - When every fiber left is waiting on a channel or a pipe, none can ever run again:
 //   Run stops the program with a message saying so.
 // - Linux (x64, arm64), macOS (arm64), Windows (x64), UEFI (x64, arm64) and
 //   Cortex-M microcontrollers. UEFI and microcontrollers have no guard page:
@@ -684,6 +684,194 @@ public sealed class Channel<T>
             list = f->Next;
             f->Next = null;
             return f;
+        }
+    }
+}
+
+/// <summary>
+/// A stream of bytes between fibers, through a buffer of fixed size taken
+/// from an arena: Write waits while the buffer is full, Read while it's empty.
+/// </summary>
+// One ring of bytes, allocated once, so a pipe never holds more than its
+// capacity however fast one side runs ahead: the writer waits for the reader.
+// Waiters are woken together and check again, rather than being handed
+// their bytes as Channel's are: a write can be bigger than the ring, so it
+// goes in as room appears, and a woken fiber that finds the room taken by
+// another simply waits again. Writes from several fibers can interleave
+// where one waits partway through.
+public sealed class Pipe
+{
+    readonly unsafe byte* _buffer;
+    int _head, _count;
+    bool _closed;
+    unsafe Fiber.Record* _readers, _writers;
+
+    /// <summary>
+    /// A pipe that holds up to <paramref name="capacity"/> bytes, taken from
+    /// <paramref name="arena"/>. The arena must outlive every fiber that uses
+    /// the pipe: not a fiber's Arena.Scratch, which goes when that fiber ends.
+    /// </summary>
+    public Pipe(Arena arena, int capacity)
+    {
+        if (capacity < 1)
+            Environment.FailFast("Pipe: the capacity must be at least 1");
+        Capacity = capacity;
+        unsafe
+        {
+            // SAFETY: capacity bytes, alive as long as the arena.
+            _buffer = arena.AllocArray<byte>(capacity, 1, false);
+            if (_buffer == null)
+                Environment.FailFast("Pipe: the arena has no room for the buffer");
+        }
+    }
+
+    /// <summary>How many bytes the pipe holds before Write waits.</summary>
+    public int Capacity { get; }
+
+    /// <summary>Bytes written and not yet read.</summary>
+    public int Count => _count;
+
+    /// <summary>Whether Close has been called.</summary>
+    public bool IsClosed => _closed;
+
+    /// <summary>
+    /// Writes all of <paramref name="bytes"/>, waiting while the pipe is full.
+    /// Returns false if the pipe is closed before all of it went in: what did
+    /// go in stays readable.
+    /// </summary>
+    public bool Write(ReadOnlySpan<byte> bytes)
+    {
+        while (true)
+        {
+            if (_closed)
+                return false;
+            int n = Math.Min(bytes.Length, Capacity - _count);
+            if (n > 0)
+            {
+                Put(bytes.Slice(0, n));
+                bytes = bytes.Slice(n);
+                unsafe { WakeAll(ref _readers, true); } // SAFETY: parked fibers' records
+            }
+            if (bytes.IsEmpty)
+                return true;
+            unsafe { Wait(ref _writers, "Pipe.Write: the pipe is full, and only a fiber can wait"); } // SAFETY: as above
+        }
+    }
+
+    /// <summary>Writes text as UTF-8, as Write(bytes) does.</summary>
+    public bool Write(ReadOnlySpan<char> text)
+    {
+        Span<byte> chunk = stackalloc byte[256];
+        int next = 0;
+        while (next < text.Length)
+        {
+            int length = Utf8.Encode(text, ref next, chunk);
+            if (!Write((ReadOnlySpan<byte>)chunk.Slice(0, length)))
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>Writes a string as UTF-8, as Write(bytes) does.</summary>
+    public bool Write(string text) => Write(text.AsSpan());
+
+    /// <summary>
+    /// Reads up to buffer.Length bytes and returns how many it read, waiting
+    /// while the pipe is empty: at least 1, or 0 once the pipe is closed and
+    /// empty (or the buffer is empty).
+    /// </summary>
+    public int Read(Span<byte> buffer)
+    {
+        if (buffer.IsEmpty)
+            return 0;
+        while (_count == 0)
+        {
+            if (_closed)
+                return 0;
+            unsafe { Wait(ref _readers, "Pipe.Read: the pipe is empty, and only a fiber can wait"); } // SAFETY: parked fibers' records
+        }
+        int n = Take(buffer);
+        unsafe { WakeAll(ref _writers, true); } // SAFETY: as above
+        return n;
+    }
+
+    /// <summary>
+    /// Closes the pipe, from either end: Read drains what's left and then
+    /// returns 0, and Write returns false. Waiting fibers wake up.
+    /// </summary>
+    public void Close()
+    {
+        if (_closed)
+            return;
+        _closed = true;
+        unsafe
+        {
+            // SAFETY: parked fibers' records.
+            WakeAll(ref _readers, false);
+            WakeAll(ref _writers, false);
+        }
+    }
+
+    void Put(ReadOnlySpan<byte> bytes)
+    {
+        int tail = (_head + _count) % Capacity;
+        int first = Math.Min(bytes.Length, Capacity - tail);
+        unsafe
+        {
+            // SAFETY: both pieces lie inside the ring's Capacity bytes.
+            bytes.Slice(0, first).CopyTo(new Span<byte>(_buffer + tail, first));
+            bytes.Slice(first).CopyTo(new Span<byte>(_buffer, bytes.Length - first));
+        }
+        _count += bytes.Length;
+    }
+
+    int Take(Span<byte> buffer)
+    {
+        int n = Math.Min(buffer.Length, _count);
+        int first = Math.Min(n, Capacity - _head);
+        unsafe
+        {
+            // SAFETY: both pieces lie inside the ring's Capacity bytes.
+            new ReadOnlySpan<byte>(_buffer + _head, first).CopyTo(buffer);
+            new ReadOnlySpan<byte>(_buffer, n - first).CopyTo(buffer.Slice(first));
+        }
+        _head = (_head + n) % Capacity;
+        _count -= n;
+        return n;
+    }
+
+    // Joins the end of the list, so waiters wake in the order they came.
+    // Park stops the program, with the message, outside a fiber.
+    static void Wait(ref Fiber.Record* list, string operation)
+    {
+        Fiber.Record* current = Fiber.CurrentRecord;
+        if (current != null)
+        {
+            unsafe
+            {
+                // SAFETY: the current fiber's record, parked until woken.
+                current->Next = null;
+                ref Fiber.Record* link = ref list;
+                while (link != null)
+                    link = ref link->Next;
+                link = current;
+            }
+        }
+        Fiber.Park(operation);
+    }
+
+    static void WakeAll(ref Fiber.Record* list, bool woken)
+    {
+        unsafe
+        {
+            // SAFETY: parked fibers' records.
+            while (list != null)
+            {
+                Fiber.Record* f = list;
+                list = f->Next;
+                f->Next = null;
+                Fiber.Wake(f, woken);
+            }
         }
     }
 }

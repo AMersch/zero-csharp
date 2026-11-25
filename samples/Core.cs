@@ -91,6 +91,62 @@ public struct Counter
 }
 // docs:end
 
+// docs:native-buffer
+// Owns one block from NativeMemory. Dispose frees it, so don't copy it:
+// two copies would free the same block twice.
+public struct NativeBuffer<T> : IDisposable where T : unmanaged
+{
+    T* _items;
+    int _length;
+
+    public NativeBuffer(int length)
+    {
+        _items = Allocate(length);
+        _length = length;
+    }
+
+    public int Length => _length;
+
+    /// <safety>The span is invalidated by Resize and Dispose.</safety>
+    public unsafe Span<T> AsSpan()
+    {
+        unsafe { return new Span<T>(_items, _length); }
+    }
+
+    // Zero mode has no NativeMemory.Realloc: allocate, copy, free.
+    public void Resize(int length)
+    {
+        T* items = Allocate(length);
+        int kept = Math.Min(length, _length);
+        unsafe
+        {
+            // SAFETY: both blocks hold at least `kept` items.
+            new Span<T>(_items, kept).CopyTo(new Span<T>(items, kept));
+            NativeMemory.Free(_items);
+        }
+        _items = items;
+        _length = length;
+    }
+
+    public void Dispose()
+    {
+        // SAFETY: _items is set to null, so a second Dispose frees nothing.
+        unsafe { NativeMemory.Free(_items); }
+        _items = null;
+        _length = 0;
+    }
+
+    static T* Allocate(int length)
+    {
+        unsafe
+        {
+            return (T*)NativeMemory.AllocZeroed(
+                (nuint)length, (nuint)sizeof(T));
+        }
+    }
+}
+// docs:end
+
 public enum Unsigned : uint { Low = 1, High = 0x80000000 }
 public enum Signed : sbyte { Negative = -1, Positive = 1 }
 
@@ -250,6 +306,26 @@ public static class Program
 
     static byte ByteOf<T>(ref T value, int index) => Unsafe.Add(ref Unsafe.As<T, byte>(ref value), index);
 
+    // docs:native-buffer-use
+    static bool GrowsAndFrees(int count)
+    {
+        // Dispose runs when the method returns, by any path.
+        using var squares = new NativeBuffer<int>(count);
+        unsafe
+        {
+            // SAFETY: each span is used before the next Resize.
+            Span<int> items = squares.AsSpan();
+            for (int i = 0; i < items.Length; i++)
+                items[i] = i * i;
+
+            squares.Resize(count * 2);
+            items = squares.AsSpan();
+            return items[count - 1] == (count - 1) * (count - 1)
+                && items[count] == 0;
+        }
+    }
+    // docs:end
+
     // docs:native-memory
     // The attributes are for .NET's analyzers; zero mode ignores them.
     [SupportedOSPlatform("linux"), SupportedOSPlatform("windows")]
@@ -356,6 +432,37 @@ public static class Program
                 apart &= first[i] == i;
             NativeMemory.Free(first);
             return apart;
+        }
+    }
+
+    // Every alignment from 1 to a page gives an aligned, zeroed, writable
+    // block, whose neighbours are left alone; AlignedFree(null) does nothing.
+    static bool AlignsBlocks(int count)
+    {
+        unsafe
+        {
+            bool ok = true;
+            for (nuint alignment = 1; alignment <= 4096; alignment *= 2)
+            {
+                byte* first = (byte*)NativeMemory.AlignedAlloc((nuint)count, alignment);
+                byte* second = (byte*)NativeMemory.AlignedAlloc((nuint)count, alignment);
+                ok &= ((nuint)first & (alignment - 1)) == 0 && ((nuint)second & (alignment - 1)) == 0;
+                for (int i = 0; i < count; i++)
+                {
+                    ok &= first[i] == 0 && second[i] == 0;
+                    first[i] = 0x11;
+                    second[i] = 0x22;
+                }
+                for (int i = 0; i < count; i++)
+                    ok &= first[i] == 0x11 && second[i] == 0x22;
+                NativeMemory.AlignedFree(second);
+                NativeMemory.AlignedFree(first);
+            }
+            void* empty = NativeMemory.AlignedAlloc(0, 64);
+            ok &= empty != null && ((nuint)empty & 63) == 0;
+            NativeMemory.AlignedFree(empty);
+            NativeMemory.AlignedFree(null);
+            return ok;
         }
     }
 
@@ -604,6 +711,8 @@ public static class Program
         Check("AllocZeroed zeroes a freed block's memory", ZeroesReusedMemory(Opaque(4096)));
         Check("blocks alive at once are apart", KeepsBlocksApart(Opaque(256)));
         Check("platform and ConstantExpected attributes", AttributesKeepTheirValues());
+        Check("a buffer that grows and frees itself", GrowsAndFrees(Opaque(100)));
+        Check("AlignedAlloc, AlignedFree", AlignsBlocks(Opaque(100)));
         Section("NativeMemory");
 
         Console.WriteLine();

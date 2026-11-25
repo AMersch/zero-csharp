@@ -114,10 +114,14 @@
     zero-bitcode gpu-kernels makes Metal kernels of them with Xcode's Metal
     compiler, a metallib in kernels.o, and compiles metal.m (Metal behind the
     C functions lib/Gpu.cs calls) to metal.o. ZeroNativeBuild links both.
+    ZeroGpu=Cuda (experimental): the same bitcode; zero-bitcode cuda-kernels
+    makes PTX of the kernels with a clang that has the NVPTX backend, and an
+    ELF object, kernels.o, that holds it. ZeroNativeBuild links that and the
+    payload's cuda.o (gpu/cuda.c: CUDA's driver API, opened at run time).
   -->
-  <Target Name="ZeroGpuKernels" Condition="'$(ZeroGpu)' == 'Metal' and '$(ZeroBuildsNative)' == 'true'"
+  <Target Name="ZeroGpuKernels" Condition="('$(ZeroGpu)' == 'Metal' or '$(ZeroGpu)' == 'Cuda') and '$(ZeroBuildsNative)' == 'true'"
           DependsOnTargets="ZeroNativeCommand"
-          Inputs="@(IntermediateAssembly);@(ZeroLibraryReference);$(ZeroSdkRoot)payload/native/gpu/metal.m"
+          Inputs="@(IntermediateAssembly);@(ZeroLibraryReference);$(ZeroGpuSource)"
           Outputs="$(ZeroGpuObjects)">
     <PropertyGroup>
       <_ZeroDotnet>$(DOTNET_HOST_PATH)</_ZeroDotnet>
@@ -125,9 +129,14 @@
       <_ZeroBitcode>&quot;$(_ZeroDotnet)&quot; &quot;$(ZeroSdkRoot)payload/tools/zero-bitcode/zero-bitcode.dll&quot;</_ZeroBitcode>
     </PropertyGroup>
     <MakeDir Directories="$(ZeroGpuDir)" />
+    <!-- Cuda: a missing or unfit clang is reported before NativeAOT-LLVM runs. -->
+    <Exec Command="$(_ZeroBitcode) cuda-clang &quot;$(ZeroCudaClang)&quot;" Condition="'$(ZeroGpu)' == 'Cuda'" StandardOutputImportance="low" />
     <!-- Against zerocore's build for bitcode targets, the C64's. -->
     <Exec Command="$(_ZeroBitcode) gpu-bitcode &quot;@(IntermediateAssembly->'%(FullPath)')&quot; &quot;$(ZeroGpuDir)bitcode&quot; &quot;$(ZeroSdkRoot)payload/native/c64/System.Private.CoreLib.dll&quot; &quot;$(ZeroRefDir)BflatLib.dll&quot; @(ZeroLibraryReference->'&quot;%(FullPath)&quot;', ' ')" />
-    <Exec Command="$(_ZeroBitcode) gpu-kernels &quot;$(ZeroGpuDir)bitcode&quot; &quot;$(AssemblyName)&quot; &quot;$(ZeroSdkRoot)payload/native/gpu/metal.m&quot; &quot;$(ZeroGpuDir)&quot;" />
+    <Exec Command="$(_ZeroBitcode) gpu-kernels &quot;$(ZeroGpuDir)bitcode&quot; &quot;$(AssemblyName)&quot; &quot;$(ZeroSdkRoot)payload/native/gpu/metal.m&quot; &quot;$(ZeroGpuDir)&quot;" Condition="'$(ZeroGpu)' == 'Metal'" />
+    <!-- Cuda: a clang with the NVPTX backend (ZeroCudaClang, or found), then
+         ptxas if it's on the PATH; the PTX goes into kernels.o. -->
+    <Exec Command="$(_ZeroBitcode) cuda-kernels &quot;$(ZeroGpuDir)bitcode&quot; &quot;$(AssemblyName)&quot; $(ZeroTarget.Substring(6)) &quot;$(ZeroGpuDir)&quot; &quot;$(ZeroCudaClang)&quot; &quot;$(ZeroCudaArch)&quot;" Condition="'$(ZeroGpu)' == 'Cuda'" />
     <ItemGroup>
       <FileWrites Include="$(ZeroGpuDir)**" />
     </ItemGroup>
@@ -255,8 +264,8 @@
            Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64, osx-arm64, uefi-x64, uefi-arm64, c64, pico2, r4." />
     <Error Condition="'$(ZeroTarget)' == 'c64' and '$(ZeroHostRid)' == 'linux-arm64'"
            Text="ZeroTarget c64 builds on Linux x64, Windows x64 or an Apple Silicon Mac: llvm-mos, the compiler for the 6502, has no build for Linux arm64." />
-    <Error Condition="'$(ZeroGpu)' != '' and '$(ZeroGpu)' != 'Metal'"
-           Text="ZeroGpu '$(ZeroGpu)' isn't supported. Use Metal (an Apple Silicon Mac's GPU)." />
+    <Error Condition="'$(ZeroGpu)' != '' and '$(ZeroGpu)' != 'Metal' and '$(ZeroGpu)' != 'Cuda'"
+           Text="ZeroGpu '$(ZeroGpu)' isn't supported. Use Metal (an Apple Silicon Mac's GPU) or Cuda (an NVIDIA GPU on Linux; experimental)." />
     <Error Condition="'$(ZeroGpu)' == 'Metal' and '$(ZeroTarget)' != 'osx-arm64'"
            Text="ZeroGpu=Metal builds for ZeroTarget osx-arm64: the kernels run on an Apple Silicon Mac's GPU, through Metal." />
     <Error Condition="'$(ZeroGpu)' == 'Metal' and '$(ZeroHostRid)' != 'osx-arm64'"
@@ -265,6 +274,12 @@
            Text="ZeroGpu=Metal takes kernels written in C#; an F# project can reference a C# library that has them." />
     <Error Condition="'$(ZeroGpu)' == 'Metal' and '$(ZeroNativeLibrary)' == 'true'"
            Text="ZeroGpu=Metal builds programs; a native library (NativeLib=Shared) can't have GPU kernels." />
+    <Error Condition="'$(ZeroGpu)' == 'Cuda' and '$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64'"
+           Text="ZeroGpu=Cuda builds for ZeroTarget linux-x64 or linux-arm64: the kernels run on an NVIDIA GPU, through the CUDA driver on Linux." />
+    <Error Condition="'$(ZeroGpu)' == 'Cuda' and '$(ZeroLanguage)' == 'FSharp'"
+           Text="ZeroGpu=Cuda takes kernels written in C#; an F# project can reference a C# library that has them." />
+    <Error Condition="'$(ZeroGpu)' == 'Cuda' and '$(ZeroNativeLibrary)' == 'true'"
+           Text="ZeroGpu=Cuda builds programs; a native library (NativeLib=Shared) can't have GPU kernels." />
     <Error Condition="'$(ZeroOptimizeFor)' != 'None' and '$(ZeroOptimizeFor)' != 'Speed' and '$(ZeroOptimizeFor)' != 'Size'"
            Text="ZeroOptimizeFor '$(ZeroOptimizeFor)' isn't supported. Use one of: None, Speed, Size." />
   </Target>
@@ -401,6 +416,9 @@
       <!-- ZeroGpu: the kernels' bitcode, AIR, metallib and objects, in obj/. -->
       <ZeroGpuDir>$(IntermediateOutputPath)gpu/</ZeroGpuDir>
       <ZeroGpuObjects Condition="'$(ZeroGpu)' == 'Metal'">$(ZeroGpuDir)kernels.o;$(ZeroGpuDir)metal.o</ZeroGpuObjects>
+      <ZeroGpuSource Condition="'$(ZeroGpu)' == 'Metal'">$(ZeroSdkRoot)payload/native/gpu/metal.m</ZeroGpuSource>
+      <ZeroGpuObjects Condition="'$(ZeroGpu)' == 'Cuda'">$(ZeroGpuDir)kernels.o</ZeroGpuObjects>
+      <ZeroCudaArch Condition="'$(ZeroCudaArch)' == ''">sm_70</ZeroCudaArch>
       <!-- Microcontrollers: one runtime folder for both boards. The pico2's
            output is the real board's .uf2, with its .elf beside it and the
            QEMU build in qemu/; the r4's is the QEMU build. -->
@@ -492,6 +510,9 @@
       <_ZeroArg Include="--arch arm64" Condition="'$(ZeroTarget)' == 'linux-arm64' or '$(ZeroTarget)' == 'osx-arm64'" />
       <_ZeroArg Include="--ldflags &quot;$(ZeroNativeDir)zerocore.o&quot; --ldflags &quot;-z nostart-stop-gc&quot;" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'" />
       <_ZeroArg Include="--ldflags &quot;-z max-page-size=4096&quot;" Condition="'$(ZeroTarget)' == 'linux-arm64'" />
+      <!-- ZeroGpu=Cuda: the kernels (PTX, in kernels.o) and CUDA's driver API
+           behind lib/Gpu.cs's C functions (cuda.o), which opens libcuda. -->
+      <_ZeroArg Include="--ldflags &quot;$([System.IO.Path]::GetFullPath('$(ZeroGpuDir)kernels.o'))&quot; --ldflags &quot;$(ZeroNativeDir)cuda.o&quot; --ldflags -ldl" Condition="'$(ZeroGpu)' == 'Cuda'" />
       <!-- A Linux native library: bflat links it -shared with a version script
            exporting the entry points; library.o's .init_array entry sets up
            zerocore when it loads. The module list's bounds stay hidden, and
@@ -502,11 +523,11 @@
                 Condition="'$(ZeroNativeLibrary)' == 'true' and ('$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64')" />
       <_ZeroArg Include="--ldflags --soname=$(AssemblyName).so"
                 Condition="'$(ZeroNativeLibrary)' == 'true' and ('$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64') and !$(AssemblyName.Contains(' '))" />
-      <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags /wrap:getenv --ldflags /wrap:fopen --ldflags /wrap:remove --ldflags &quot;$(ZeroNativeDir)start.obj&quot; --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' != 'true'" />
+      <_ZeroArg Include="--os windows --ldflags /entry:zero_start --ldflags /wrap:getenv --ldflags /wrap:fopen --ldflags /wrap:remove --ldflags /wrap:mkdir --ldflags /wrap:rmdir --ldflags /wrap:rename --ldflags /wrap:getcwd --ldflags /wrap:chdir --ldflags &quot;$(ZeroNativeDir)start.obj&quot; --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' != 'true'" />
       <!-- A Windows native library: bflat links it /dll with a .def file of
            the entry points; zero_dll_start (win/library.c) sets up zerocore
            when it loads. -->
-      <_ZeroArg Include="--os windows --target Shared --ldflags /entry:zero_dll_start --ldflags /wrap:getenv --ldflags /wrap:fopen --ldflags /wrap:remove --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)library.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' == 'true'" />
+      <_ZeroArg Include="--os windows --target Shared --ldflags /entry:zero_dll_start --ldflags /wrap:getenv --ldflags /wrap:fopen --ldflags /wrap:remove --ldflags /wrap:mkdir --ldflags /wrap:rmdir --ldflags /wrap:rename --ldflags /wrap:getcwd --ldflags /wrap:chdir --ldflags &quot;$(ZeroNativeDir)runtime.obj&quot; --ldflags &quot;$(ZeroNativeDir)library.obj&quot; --ldflags &quot;$(ZeroNativeDir)zerocore.obj&quot;" Condition="'$(ZeroTarget)' == 'win-x64' and '$(ZeroNativeLibrary)' == 'true'" />
       <!-- UEFI: a program the firmware starts, with no operating system and no
            C library; the payload's efi/ objects and musl's libm stand in for it. -->
       <_ZeroArg Include="--os uefi --arch x64" Condition="'$(ZeroTarget)' == 'uefi-x64'" />

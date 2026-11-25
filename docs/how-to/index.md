@@ -24,6 +24,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   enough, and collect such strings in a list or map.
 - [Read and write files](read-and-write-files.html): whole files in one call, an open file read and
   written piece by piece, and what differs on each target.
+- [Work with paths and directories](work-with-paths-and-directories.html): the parts of a path,
+  `Path.Combine` and `Normalize`; creating, listing and deleting directories.
 - [Use the clock and random numbers](use-the-clock-and-random-numbers.html): measure a duration, tell
   the date and time, and roll dice with numbers that are the same on every target.
 - [Read environment variables and exit](use-the-environment.html): `Environment.GetEnvironmentVariable`,
@@ -42,6 +44,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   `ref` and `in`, return a ref, and keep the ref from outliving a list's buffer or an arena scope.
 - [Catch arena mistakes](catch-arena-mistakes.html): turn on `Arena.DebugChecks`, name your arenas, and
   see what the library stops the program for.
+- [Free memory yourself](free-memory-yourself.html): `NativeMemory.Alloc` and `Free` for a block with
+  its own lifetime, a struct that frees it with `using`, and what nothing checks.
 
 ## Targets
 

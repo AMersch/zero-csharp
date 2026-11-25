@@ -7,9 +7,9 @@ index: 27
 
 `Fiber` from `lib/Fibers.cs` runs many functions on one system thread, each on a stack of its own. They
 take turns: a fiber runs until it yields, sleeps, waits on a channel or ends, and then the next one in
-line runs. `Channel<T>` passes values between them. Switching is cooperative, so fibers need no locks
-among themselves. `samples/Fibers.cs` runs every example below; `SmallFibers` and `SmallChannels`
-test the same on machines too small for it.
+line runs. `Channel<T>` passes values between them, and `Pipe` streams bytes. Switching is
+cooperative, so fibers need no locks among themselves. `samples/Fibers.cs` runs every example below;
+`SmallFibers` and `SmallChannels` test the same on machines too small for it.
 
 Fibers work on Linux (x64 and arm64), macOS, Windows, UEFI, DOS, microcontrollers (the Raspberry Pi
 Pico 2 and the Arduino Uno R4) and the Commodore 64. They need a way to switch stacks, so there are
@@ -52,20 +52,20 @@ returns false.
 // A pipeline: one fiber produces numbers, one squares them, and one
 // adds them up. Receive returns false once its channel is closed and
 // drained, which ends each loop.
-var pipe = new Pipe();
-Fiber.Spawn(pipe, static p =>
+var stages = new Stages();
+Fiber.Spawn(stages, static p =>
 {
     for (int i = 1; i <= 100; i++)
         p.Numbers.Send(i);
     p.Numbers.Close();
 });
-Fiber.Spawn(pipe, static p =>
+Fiber.Spawn(stages, static p =>
 {
     while (p.Numbers.Receive(out int n))
         p.Squares.Send(n * n);
     p.Squares.Close();
 });
-Fiber.Spawn(pipe, static p =>
+Fiber.Spawn(stages, static p =>
 {
     while (p.Squares.Receive(out int square))
         p.Total += square;
@@ -76,6 +76,56 @@ Fiber.Run();
 If every fiber left is waiting on a channel, none of them can run again, and `Run` stops the program
 with a message saying so. `Send` and `Receive` wait only inside a fiber. Outside one, a call that would
 wait stops the program.
+
+## Stream bytes through a pipe
+
+A `Pipe` carries bytes rather than values, through a buffer of fixed size that it takes from an arena
+once. `Write` copies in what fits and waits for the reader to make room for the rest. `Read` returns
+whatever is there, at least one byte, and waits while the pipe is empty. However far the writer
+runs ahead, the pipe never holds more than its capacity:
+
+<!-- sample: samples/Fibers.cs pipe -->
+```csharp
+// A pipe streams bytes through a buffer of fixed size from an arena:
+// here 64 bytes carry 10,000. The writer waits whenever the buffer is
+// full, so it never runs more than 64 bytes ahead of the reader.
+Arena arena = Arena.Create(4096);
+var transfer = new Transfer { Pipe = new Pipe(arena, 64) };
+Fiber.Spawn(transfer, static t =>
+{
+    Span<byte> chunk = stackalloc byte[100];
+    while (t.Sent < 10_000)
+    {
+        int n = Math.Min(chunk.Length, 10_000 - t.Sent);
+        for (int i = 0; i < n; i++)
+            chunk[i] = (byte)(t.Sent + i);
+        t.Pipe.Write((ReadOnlySpan<byte>)chunk.Slice(0, n));
+        t.Sent += n;
+    }
+    t.Pipe.Close();
+});
+Fiber.Spawn(transfer, static t =>
+{
+    Span<byte> buffer = stackalloc byte[37];
+    int n;
+    while ((n = t.Pipe.Read(buffer)) > 0)
+    {
+        for (int i = 0; i < n; i++)
+            if (buffer[i] != (byte)(t.Received + i))
+                t.Wrong++;
+        t.Received += n;
+        t.MostBuffered = Math.Max(t.MostBuffered, t.Pipe.Count + n);
+    }
+});
+Fiber.Run();
+```
+
+`Close` works from either end. After it, `Read` returns what's left and then 0, and `Write` returns
+false instead of waiting, so a reader that has seen enough can close the pipe to stop the writer.
+`Write` also takes text, which goes in as UTF-8. The arena has to outlive every fiber that uses the
+pipe, so don't take it from a fiber's `Arena.Scratch`, which is freed when that fiber ends. Several
+fibers can write to one pipe, but a write bigger than the room left goes in as room appears, so
+another fiber's bytes can land in the middle of it.
 
 ## Sleep
 
@@ -243,5 +293,7 @@ its stack the copy takes.
 - A fiber that never yields keeps the others waiting. Long loops should call `Fiber.Yield`.
 - Fibers spawned on a system thread run on that thread, inside its `Fiber.Run`. To use several
   processors, give each `Parallel.For` part its own fibers and its own `Run`.
-- Reading a file or standard input blocks the whole thread, every fiber on it included.
+- Reading a file or standard input blocks the whole thread, every fiber on it included. That holds
+  for a fiber that feeds a `Pipe` from a file too: only `Pipe`'s own `Read` and `Write` let the other
+  fibers run while one waits.
 - A `throw` ends the program, as it does everywhere in zero mode.

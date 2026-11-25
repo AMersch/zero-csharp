@@ -628,6 +628,12 @@ static int windows_option(int *level, int *name)
 
 int __wrap_setsockopt(int s, int level, int name, const void *value, unsigned length)
 {
+    if (level == 1 && name == 13 && length >= 8) {
+        // SO_LINGER: Linux's struct linger is two ints, Winsock's two u_shorts.
+        unsigned short linger[2] = { (unsigned short)((const int *)value)[0], (unsigned short)((const int *)value)[1] };
+        WINSOCK(int, setsockopt, (Socket, int, int, const void *, int));
+        return setsockopt((Socket)(unsigned)s, 0xFFFF, 0x80, linger, 4) == 0 ? 0 : set_errno_from_winsock();
+    }
     if (!windows_option(&level, &name))
         return 0;
     WINSOCK(int, setsockopt, (Socket, int, int, const void *, int));
@@ -636,6 +642,18 @@ int __wrap_setsockopt(int s, int level, int name, const void *value, unsigned le
 
 int __wrap_getsockopt(int s, int level, int name, void *value, int *length)
 {
+    if (level == 1 && name == 13 && *length >= 8) {
+        // SO_LINGER, as in __wrap_setsockopt.
+        unsigned short linger[2] = { 0, 0 };
+        int size = 4;
+        WINSOCK(int, getsockopt, (Socket, int, int, void *, int *));
+        if (getsockopt((Socket)(unsigned)s, 0xFFFF, 0x80, linger, &size) != 0)
+            return set_errno_from_winsock();
+        ((int *)value)[0] = linger[0];
+        ((int *)value)[1] = linger[1];
+        *length = 8;
+        return 0;
+    }
     if (!windows_option(&level, &name)) {
         *(int *)value = 0;
         return 0;

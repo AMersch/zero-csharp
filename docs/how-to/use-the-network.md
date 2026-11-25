@@ -53,9 +53,15 @@ echo.Listener.Start();
 echo.Port = ((IPEndPoint)echo.Listener.LocalEndpoint).Port;
 Fiber.Spawn(echo, static e =>
 {
-    for (int i = 0; i < e.Clients; i++)
+    while (e.Served < e.Clients)
     {
-        TcpClient client = e.Listener.AcceptTcpClient();
+        // A failure (too many sockets open, say) waits and tries
+        // again, rather than ending the program.
+        if (!e.Listener.TryAcceptTcpClient(out TcpClient client, out _))
+        {
+            Fiber.Sleep(10);
+            continue;
+        }
         e.Served++;
         Fiber.Spawn(client, static c => Serve(c));
     }
@@ -104,9 +110,38 @@ the same connection.
 
 ## When something goes wrong
 
-A `throw` ends the program, so a failure .NET reports with a `SocketException` stops the program with
-its message. Where failing is expected, use a form that returns a `SocketError`. `TryConnect` and
-`TryAccept` are this library's, and `Receive` and `Send` with `out SocketError` are .NET's:
+A `throw` ends the program, so code here can't catch a failure the way a .NET server catches an
+`IOException` per connection. Instead, failures that are part of normal network life come back as
+values, and nothing a client does can end a server:
+
+- A broken connection ends only its own stream. When the other end resets the connection, or its
+  socket is closed under it, `NetworkStream.Read` returns 0, as at the end of the stream, and `Write`
+  drops what it's given. `NetworkStream.Error` says what happened: `ConnectionReset`,
+  `ConnectionAborted`, or `OperationAborted` when the socket was closed. The connection's fiber
+  finishes its loop, and the others carry on.
+- `TryAcceptTcpClient`, `TryAccept`, `TryConnect` and `Dns.TryGetHostAddresses` return the reason
+  instead of ending the program. A server that runs out of sockets (`TooManyOpenSockets`) can wait and
+  try again, as the echo server above does.
+- `Receive` and `Send` with `out SocketError` do the same on a bare `Socket`. A failed `Send` also
+  returns how many bytes went out before the failure.
+
+<!-- sample: samples/Network.cs reset -->
+```csharp
+// Closing with LingerOption(true, 0), or with data still unread,
+// resets the connection: the other end's Read returns 0, with
+// Error ConnectionReset.
+var rude = new TcpClient();
+rude.Connect(IPAddress.Loopback, f.Port);
+rude.GetStream().Write("x"u8);
+Span<byte> peek = stackalloc byte[1];
+rude.Client.Receive(peek, SocketFlags.Peek); // the greeting: left unread
+rude.Client.LingerState = new LingerOption(true, 0);
+rude.Dispose();
+```
+
+The methods without a `Try` or `out SocketError` form end the program on failure, as an uncaught
+`SocketException` would. That covers `Connect`, `AcceptTcpClient`, `Dns.GetHostAddresses` and
+`IPAddress.Parse`, so use them where a failure is a bug rather than a network event:
 
 <!-- sample: samples/Network.cs refused -->
 ```csharp
@@ -124,9 +159,16 @@ bool connected = socket.TryConnect(
 // connected is false, and error is SocketError.ConnectionRefused
 ```
 
-Outside a fiber a call simply waits, as a blocking socket does. Inside one it parks the fiber. There are
-no timeouts yet. To give up on a connection, close its socket from another fiber: the waiting call wakes
-up and fails.
+Writing to a connection the other end has closed returns an error, not the SIGPIPE signal that would
+otherwise end a Unix program.
+
+There are no timeouts yet: a fiber waiting on a peer that has gone silent waits until something
+changes. To give up on it, close its socket from another fiber, such as one that sleeps for the time
+you allow. The waiting call wakes up and fails with `OperationAborted`, or its stream's `Read`
+returns 0. Closing wakes the waiter before the system can give the socket's number to a new socket, so
+the waiter never sees another connection's data. A `throw` anywhere still ends the whole program, every
+fiber included. To survive that, run the program under something that restarts it, such as systemd or
+a container's restart policy.
 
 ## UDP
 

@@ -211,6 +211,23 @@ public class SocketException : Exception
     };
 }
 
+/// <summary>Socket.LingerState: whether, and for how many seconds, Close waits to send what's left.</summary>
+public class LingerOption
+{
+    /// <summary>Lingering on or off, for this many seconds.</summary>
+    public LingerOption(bool enable, int seconds)
+    {
+        Enabled = enable;
+        LingerTime = seconds;
+    }
+
+    /// <summary>Whether Close lingers. On with 0 seconds resets the connection.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>How many seconds Close may wait.</summary>
+    public int LingerTime { get; set; }
+}
+
 /// <summary>
 /// A network endpoint to send and receive through: TCP or UDP, IPv4 or IPv6.
 /// Calls that would wait let other fibers run (see the file's comment).
@@ -283,6 +300,26 @@ public class Socket : IDisposable
         }
     }
 
+    /// <summary>
+    /// What closing does with data not yet sent. LingerOption(true, 0) makes
+    /// Close reset the connection at once (the other end gets ConnectionReset)
+    /// instead of ending it in order.
+    /// </summary>
+    public LingerOption LingerState
+    {
+        get
+        {
+            SocketNative.GetLinger(Fd, out bool on, out int seconds);
+            return new LingerOption(on, seconds);
+        }
+        set
+        {
+            if (value == null)
+                throw new ArgumentNullException(nameof(value));
+            SocketNative.SetLinger(Fd, value.Enabled, value.LingerTime);
+        }
+    }
+
     /// <summary>Whether a UDP socket may send to a broadcast address.</summary>
     public bool EnableBroadcast
     {
@@ -317,7 +354,13 @@ public class Socket : IDisposable
     /// <summary>The next connection, waiting for one, or why there isn't one.</summary>
     public bool TryAccept(out Socket socket, out SocketError error)
     {
-        error = SocketNative.Accept(Fd, out int fd);
+        if (_fd < 0)
+        {
+            socket = null;
+            error = SocketError.OperationAborted;
+            return false;
+        }
+        error = SocketNative.Accept(_fd, out int fd);
         socket = error == SocketError.Success ? new Socket(fd, AddressFamily, SocketType, ProtocolType) : null;
         return socket != null;
     }
@@ -345,7 +388,12 @@ public class Socket : IDisposable
     /// <summary>Connects to the endpoint, or says why it couldn't: ConnectionRefused, TimedOut, HostUnreachable...</summary>
     public bool TryConnect(EndPoint remoteEP, out SocketError error)
     {
-        error = SocketNative.Connect(Fd, ToIP(remoteEP));
+        if (_fd < 0)
+        {
+            error = SocketError.OperationAborted;
+            return false;
+        }
+        error = SocketNative.Connect(_fd, ToIP(remoteEP));
         _connected = error == SocketError.Success;
         return _connected;
     }
@@ -387,7 +435,12 @@ public class Socket : IDisposable
     /// <summary>Sends all of the bytes, or as many as went before a failure, which <paramref name="errorCode"/> says.</summary>
     public int Send(ReadOnlySpan<byte> buffer, SocketFlags socketFlags, out SocketError errorCode)
     {
-        errorCode = SocketNative.Send(Fd, buffer, socketFlags, null, out int sent);
+        if (_fd < 0)
+        {
+            errorCode = SocketError.OperationAborted;
+            return 0;
+        }
+        errorCode = SocketNative.Send(_fd, buffer, socketFlags, null, out int sent);
         if (errorCode != SocketError.Success)
             _connected = false;
         return sent;
@@ -422,7 +475,12 @@ public class Socket : IDisposable
     /// <summary>Receive, saying why it failed (ConnectionReset...) instead of ending the program.</summary>
     public int Receive(Span<byte> buffer, SocketFlags socketFlags, out SocketError errorCode)
     {
-        errorCode = SocketNative.Receive(Fd, buffer, socketFlags, out int received, null);
+        if (_fd < 0)
+        {
+            errorCode = SocketError.OperationAborted;
+            return 0;
+        }
+        errorCode = SocketNative.Receive(_fd, buffer, socketFlags, out int received, null);
         if (errorCode != SocketError.Success)
             _connected = false;
         return received;
@@ -476,7 +534,11 @@ public class Socket : IDisposable
             throw new SocketException((int)error);
     }
 
-    /// <summary>Closes the socket. Fibers waiting on it wake, and their calls fail.</summary>
+    /// <summary>
+    /// Closes the socket. Fibers waiting on it wake, and their calls fail with
+    /// OperationAborted (NetworkStream's Read returns 0): closing a socket from
+    /// another fiber is how to give up on a connection.
+    /// </summary>
     public void Close()
     {
         if (_fd < 0)
@@ -514,7 +576,14 @@ public class Socket : IDisposable
     }
 }
 
-/// <summary>A connected socket as a Stream: Read receives, Write sends.</summary>
+/// <summary>
+/// A connected socket as a Stream: Read receives, Write sends. A broken
+/// connection doesn't end the program: Read returns 0, as at the end of the
+/// stream, Write drops what it's given, and Error says what went wrong.
+/// </summary>
+// .NET throws IOException there, for each connection's code to catch. Here a
+// throw ends the program, so one client resetting its connection would end a
+// server: a broken connection ends its own stream instead.
 public class NetworkStream : Stream
 {
     readonly bool _ownsSocket;
@@ -534,6 +603,13 @@ public class NetworkStream : Stream
 
     /// <summary>The socket underneath.</summary>
     public Socket Socket { get; }
+
+    /// <summary>
+    /// Why the connection broke (ConnectionReset, ConnectionAborted,
+    /// OperationAborted when the socket was closed under it...), or Success.
+    /// The first failure stays.
+    /// </summary>
+    public SocketError Error { get; private set; }
 
     /// <inheritdoc/>
     public override bool CanRead => _open;
@@ -557,13 +633,21 @@ public class NetworkStream : Stream
         return Read(new Span<byte>(buffer, offset, count));
     }
 
-    /// <summary>Receives up to buffer.Length bytes, waiting for some; 0 when the other end is done sending.</summary>
+    /// <summary>
+    /// Receives up to buffer.Length bytes, waiting for some. 0 when the other
+    /// end is done sending, or the connection broke (Error says how).
+    /// </summary>
     public override int Read(Span<byte> buffer)
     {
         EnsureOpen();
+        if (Error != SocketError.Success)
+            return 0;
         int n = Socket.Receive(buffer, SocketFlags.None, out SocketError error);
         if (error != SocketError.Success)
-            throw new IOException(string.Concat("NetworkStream: ", SocketException.Describe(error)));
+        {
+            Error = error;
+            return 0;
+        }
         return n;
     }
 
@@ -574,13 +658,15 @@ public class NetworkStream : Stream
         Write(new ReadOnlySpan<byte>(buffer, offset, count));
     }
 
-    /// <summary>Sends all of the bytes.</summary>
+    /// <summary>Sends all of the bytes; on a broken connection (Error), drops them.</summary>
     public override void Write(ReadOnlySpan<byte> buffer)
     {
         EnsureOpen();
+        if (Error != SocketError.Success)
+            return;
         Socket.Send(buffer, SocketFlags.None, out SocketError error);
         if (error != SocketError.Success)
-            throw new IOException(string.Concat("NetworkStream: ", SocketException.Describe(error)));
+            Error = error;
     }
 
     /// <summary>Nothing to do: sends aren't buffered here.</summary>
@@ -650,8 +736,20 @@ public class TcpListener
     /// <summary>The next connection as a socket, waiting for one (other fibers run meanwhile).</summary>
     public Socket AcceptSocket() => Started.Accept();
 
-    /// <summary>The next connection as a TcpClient, waiting for one (other fibers run meanwhile).</summary>
+    /// <summary>The next connection as a TcpClient, waiting for one (other fibers run meanwhile). Failing ends the program.</summary>
     public TcpClient AcceptTcpClient() => new TcpClient(Started.Accept());
+
+    /// <summary>
+    /// The next connection as a TcpClient, or why there isn't one: the
+    /// program has too many sockets open (TooManyOpenSockets), say, or the
+    /// listener was stopped (OperationAborted). A server loop retries, or
+    /// stops, rather than ending the program.
+    /// </summary>
+    public bool TryAcceptTcpClient(out TcpClient client, out SocketError error)
+    {
+        client = Started.TryAccept(out Socket socket, out error) ? new TcpClient(socket) : null;
+        return client != null;
+    }
 
     Socket Started => _server ?? throw new InvalidOperationException("TcpListener: call Start first");
 }
@@ -971,8 +1069,9 @@ static class SocketNative
     }
 
     // Waits until fd is ready for events: in a fiber, the others run
-    // meanwhile; outside one, poll waits here.
-    static void Wait(int fd, short events)
+    // meanwhile; outside one, poll waits here. False if the socket was closed
+    // while a fiber waited (Close cancels its waiters).
+    static bool Wait(int fd, short events)
     {
         unsafe
         {
@@ -980,12 +1079,14 @@ static class SocketNative
             // the sizes they are told, and keep none of it past the call.
             if (Fiber.Poll == null)
                 Fiber.Poll = &PollAll;
-            if (Fiber.WaitForIO(fd, events) != 0)
-                return;
+            short revents = Fiber.WaitForIO(fd, events);
+            if (revents != 0)
+                return revents != Fiber.Cancelled;
             long one = 0;
             *(int*)&one = fd;
             *((short*)&one + 2) = events;
             poll(&one, 1, -1);
+            return true;
         }
     }
 
@@ -1061,10 +1162,10 @@ static class SocketNative
                     return SocketError.Success;
                 }
                 int e = Errno;
-                if (WouldBlock(e) || Interrupted(e))
-                    Wait(fd, POLLIN);
-                else
+                if (!WouldBlock(e) && !Interrupted(e))
                     return LastError();
+                if (!Wait(fd, POLLIN))
+                    return SocketError.OperationAborted;
             }
         }
     }
@@ -1083,7 +1184,8 @@ static class SocketNative
             if (!InProgress(e) && !WouldBlock(e) && !Interrupted(e))
                 return LastError();
             // Under way: done when the socket can be written, and SO_ERROR says how.
-            Wait(fd, POLLOUT);
+            if (!Wait(fd, POLLOUT))
+                return SocketError.OperationAborted;
             int error = 0;
             uint size = 4;
             if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) != 0)
@@ -1118,10 +1220,10 @@ static class SocketNative
                         continue;
                     }
                     int e = Errno;
-                    if (WouldBlock(e) || Interrupted(e))
-                        Wait(fd, POLLOUT);
-                    else
+                    if (!WouldBlock(e) && !Interrupted(e))
                         return LastError();
+                    if (!Wait(fd, POLLOUT))
+                        return SocketError.OperationAborted;
                 }
             }
             return SocketError.Success;
@@ -1157,13 +1259,11 @@ static class SocketNative
                         return SocketError.Success;
                     }
                     int e = Errno;
-                    if (WouldBlock(e) || Interrupted(e))
-                    {
-                        Wait(fd, POLLIN);
-                        continue;
-                    }
                     received = 0;
-                    return LastError();
+                    if (!WouldBlock(e) && !Interrupted(e))
+                        return LastError();
+                    if (!Wait(fd, POLLIN))
+                        return SocketError.OperationAborted;
                 }
             }
         }
@@ -1176,6 +1276,7 @@ static class SocketNative
 
     internal static void Close(int fd)
     {
+        Fiber.CancelIO(fd); // before the number can go to another socket
         unsafe { close(fd); } // SAFETY: no pointers
     }
 
@@ -1213,6 +1314,36 @@ static class SocketNative
             case Option.NoDelay: level = IPPROTO_TCP; name = TCP_NODELAY; break;
             case Option.V6Only: level = IPPROTO_IPV6; name = IPV6_V6ONLY; break;
             default: level = SOL_SOCKET; name = SO_BROADCAST; break;
+        }
+    }
+
+    // SO_LINGER: Linux's 13; macOS's SO_LINGER_SEC (its SO_LINGER counts
+    // clock ticks). struct linger is two ints: on, and seconds.
+    static int SO_LINGER => Mac ? 0x1080 : 13;
+
+    internal static void GetLinger(int fd, out bool on, out int seconds)
+    {
+        long linger = 0;
+        uint size = 8;
+        unsafe
+        {
+            // SAFETY: linger has room for struct linger's 8 bytes.
+            getsockopt(fd, SOL_SOCKET, SO_LINGER, &linger, &size);
+            on = ((int*)&linger)[0] != 0;
+            seconds = ((int*)&linger)[1];
+        }
+    }
+
+    internal static void SetLinger(int fd, bool on, int seconds)
+    {
+        long linger = 0;
+        unsafe
+        {
+            // SAFETY: struct linger's 8 bytes, on the stack.
+            ((int*)&linger)[0] = on ? 1 : 0;
+            ((int*)&linger)[1] = seconds;
+            if (setsockopt(fd, SOL_SOCKET, SO_LINGER, &linger, 8) != 0)
+                throw new SocketException((int)LastError());
         }
     }
 

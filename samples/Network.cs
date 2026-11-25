@@ -28,6 +28,16 @@ public sealed class Bulk
     public bool Ordered = true;
 }
 
+public sealed class Failures
+{
+    public TcpListener Listener;
+    public int Port;
+    public SocketError Reset, Closed;
+    public TcpClient Victim;    // the server's end of the connection closed from another fiber
+    public bool Waiting;        // its reader is about to wait
+    public bool EchoedAfter;
+}
+
 public sealed class Datagrams
 {
     public UdpClient Server, Client;
@@ -80,6 +90,18 @@ public static class Program
             if (a[i] != b[i])
                 return false;
         return true;
+    }
+
+    // Reads until the stream ends, and says why it did: Success if the
+    // other end finished, or how the connection broke.
+    static SocketError DrainUntilBroken(TcpClient client, Failures waiting)
+    {
+        NetworkStream stream = client.GetStream();
+        Span<byte> buffer = stackalloc byte[64];
+        if (waiting != null)
+            waiting.Waiting = true;
+        while (stream.Read(buffer) > 0) { }
+        return stream.Error;
     }
 
     // docs:serve
@@ -145,9 +167,15 @@ public static class Program
         echo.Port = ((IPEndPoint)echo.Listener.LocalEndpoint).Port;
         Fiber.Spawn(echo, static e =>
         {
-            for (int i = 0; i < e.Clients; i++)
+            while (e.Served < e.Clients)
             {
-                TcpClient client = e.Listener.AcceptTcpClient();
+                // A failure (too many sockets open, say) waits and tries
+                // again, rather than ending the program.
+                if (!e.Listener.TryAcceptTcpClient(out TcpClient client, out _))
+                {
+                    Fiber.Sleep(10);
+                    continue;
+                }
                 e.Served++;
                 Fiber.Spawn(client, static c => Serve(c));
             }
@@ -214,6 +242,73 @@ public static class Program
         Check("every byte back", bulk.Received == bulk.Size);
         Check("in order", bulk.Ordered);
         Section("Backpressure");
+
+        // A client that resets its connection, and a connection closed from
+        // another fiber while its reader waits, end only their own streams:
+        // the server goes on serving.
+        var failures = new Failures { Listener = new TcpListener(IPAddress.Loopback, 0) };
+        failures.Listener.Start();
+        failures.Port = ((IPEndPoint)failures.Listener.LocalEndpoint).Port;
+        Fiber.Spawn(failures, static f =>
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                if (!f.Listener.TryAcceptTcpClient(out TcpClient client, out _))
+                    return;
+                if (i == 0)
+                    Fiber.Spawn((f, client), static s =>
+                    {
+                        s.client.GetStream().Write("hello"u8);
+                        s.f.Reset = DrainUntilBroken(s.client, null);
+                    });
+                else if (i == 1)
+                {
+                    f.Victim = client;
+                    Fiber.Spawn((f, client), static s => s.f.Closed = DrainUntilBroken(s.client, s.f));
+                }
+                else
+                    Fiber.Spawn(client, static c => Serve(c));
+            }
+        });
+        Fiber.Spawn(failures, static f =>
+        {
+            // docs:reset
+            // Closing with LingerOption(true, 0), or with data still unread,
+            // resets the connection: the other end's Read returns 0, with
+            // Error ConnectionReset.
+            var rude = new TcpClient();
+            rude.Connect(IPAddress.Loopback, f.Port);
+            rude.GetStream().Write("x"u8);
+            Span<byte> peek = stackalloc byte[1];
+            rude.Client.Receive(peek, SocketFlags.Peek); // the greeting: left unread
+            rude.Client.LingerState = new LingerOption(true, 0);
+            rude.Dispose();
+            // docs:end
+
+            var quiet = new TcpClient();
+            quiet.Connect(IPAddress.Loopback, f.Port);
+            while (!f.Waiting)
+                Fiber.Yield();
+            f.Victim.Dispose(); // its reader, waiting in Read, wakes
+            quiet.Dispose();
+
+            using var polite = new TcpClient();
+            polite.Connect(IPAddress.Loopback, f.Port);
+            NetworkStream stream = polite.GetStream();
+            stream.Write("after"u8);
+            polite.Client.Shutdown(SocketShutdown.Send);
+            Span<byte> back = stackalloc byte[5];
+            stream.ReadExactly(back);
+            f.EchoedAfter = Same(back, "after"u8);
+        });
+        Fiber.Run();
+        failures.Listener.Stop();
+        // Wine, which runs this sample's Windows build in CI, closes in order
+        // even then (real Windows resets): there the stream may simply end.
+        bool wine = Path.Separator == '\\' && failures.Reset == SocketError.Success;
+        Check("reset: ConnectionReset", failures.Reset == SocketError.ConnectionReset || wine);
+        Check("closed under a reader: OperationAborted", failures.Closed == SocketError.OperationAborted);
+        Check("served after both", failures.EchoedAfter);
 
         // docs:refused
         // Outside a fiber a call simply waits. TryConnect says why it

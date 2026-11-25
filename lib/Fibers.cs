@@ -351,6 +351,36 @@ public static class Fiber
         }
     }
 
+    // What WaitForIO returns to a fiber whose socket was closed while it
+    // waited (CancelIO): not one of poll's bits.
+    internal const short Cancelled = 0x4000;
+
+    // Wakes the fibers waiting on fd, with Cancelled, before it's closed: the
+    // system may give the number to the next socket opened, and a waiter left
+    // in the list would wake for that one's input.
+    internal static void CancelIO(int fd)
+    {
+        Scheduler* s = This;
+        unsafe
+        {
+            // SAFETY: the waiters are parked fibers' records.
+            Record** link = &s->IoWaiters;
+            while (*link != null)
+            {
+                Record* f = *link;
+                if (f->Fd != fd)
+                {
+                    link = &f->Next;
+                    continue;
+                }
+                *link = f->Next;
+                f->Revents = Cancelled;
+                s->IoWaiting--;
+                Enqueue(s, f);
+            }
+        }
+    }
+
     // Asks poll which waiters' input or output is ready, and puts those back
     // in the run queue. With wait, waits until one is, or until the earliest
     // sleeper's time; without, only looks. If poll fails (a socket closed

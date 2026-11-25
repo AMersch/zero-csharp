@@ -506,10 +506,13 @@ small machine its share.
 
 ### An arena in a buffer of your own
 
-`Arena.FromBuffer` puts the arena in memory you hand it: a static array, `stackalloc`, or a region of a
-microcontroller's RAM. It never calls malloc or free, keeps its bookkeeping at the start of the buffer,
-and can't grow, so a full buffer fails like running out of memory. `Destroy()` only ends the handle,
-because the memory is yours.
+`Arena.FromBuffer` puts the arena in memory you hand it. It never calls malloc or free, keeps its
+bookkeeping at the start of the buffer (about 150 bytes on 64-bit targets, less on
+32-bit ones), and can't
+grow, so a full buffer fails like running out of memory. `Destroy()` only ends the handle, because the
+memory is yours.
+
+For a short-lived arena, the buffer can be on the stack:
 
 <!-- sample: samples/Arena.cs from-buffer -->
 ```csharp
@@ -520,6 +523,35 @@ Arena local;
 // SAFETY: local isn't used after this method returns.
 unsafe { local = Arena.FromBuffer(memory, "local"); }
 Point* p = local.Alloc<Point>();
+```
+
+For one that lives as long as the program, or one too big for the stack, use a static buffer: a struct
+with a `fixed` array, kept in a static field. It is part of the program's data, like a global array in
+C, so it costs neither heap nor stack. (A static `byte[]` wouldn't do that: `new byte[512]` comes from
+the heap.)
+
+<!-- sample: samples/SmallArena.cs static-buffer -->
+```csharp
+// 512 bytes in the program's data, like a global array in C: not on
+// the heap, not on the stack.
+struct Pool
+{
+    public fixed byte Bytes[512];
+}
+
+static Pool s_pool;
+```
+
+<!-- sample: samples/SmallArena.cs from-static-buffer -->
+```csharp
+Arena arena;
+unsafe
+{
+    // SAFETY: s_pool is static, so it outlives the arena, and
+    // nothing else uses it.
+    fixed (byte* memory = s_pool.Bytes)
+        arena = Arena.FromBuffer(memory, 512, "pool");
+}
 ```
 
 `FromBuffer` is unsafe because the arena can't check that the memory outlives it: an arena on the stack

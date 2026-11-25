@@ -107,6 +107,8 @@ repository:
 | `list-index` | a list index out of range | no |
 | `builder-index` | a `StrBuilder` index out of range | no |
 | `out-of-memory` | an allocation the system can't satisfy, in a `stopOnOutOfMemory` arena | no |
+| `arena-limit` | an allocation past a `stopOnOutOfMemory` arena's `maxCapacity` | no |
+| `buffer-full` | an allocation that doesn't fit in a `stopOnOutOfMemory` arena from `FromBuffer` | no |
 
 `Guards.fail` holds each case's message. A named arena's name goes to standard output, the message to
 standard error (both to standard output on DOS), and the program aborts with a non-zero exit code.
@@ -151,6 +153,24 @@ arena.Alloc(~(nuint)0 / 2);
 Use it wherever the program couldn't carry on anyway. It matters most on DOS and WebAssembly, where
 memory really does run out. Requests that are wrong in themselves, such as a bad alignment or a
 negative count, still return null.
+
+## Stop at a budget
+
+On Linux and macOS, memory almost never runs out the way `stopOnOutOfMemory` can see: malloc says yes,
+and a runaway loop grows the arena until the system kills the program, with no message. Give the arena
+a `maxCapacity` and it stops there instead, saying which arena and why:
+
+<!-- sample: samples/Guards.cs arena-limit -->
+```csharp
+Arena arena = Arena.Create(256, "budget", stopOnOutOfMemory: true,
+    maxCapacity: 1024);
+arena.Alloc(600);  // fits
+arena.Alloc(600);  // 1200 bytes in all: past the limit
+```
+
+The message is `Arena: out of memory (it reached its maxCapacity)`. An arena from `FromBuffer` stops the
+same way when its buffer is full, with `Arena: out of memory (its buffer is full)`. See
+[Running out of memory](../concepts/memory.html#running-out-of-memory).
 
 ## See where the memory goes
 

@@ -129,10 +129,12 @@ public static class Program
         unsafe { cut.Destroy(); } // SAFETY: nothing was allocated.
 
         // The next normal block would be 256 bytes, more than the 144 left:
-        // it shrinks to 144 instead of failing.
+        // it shrinks to 144 instead of failing. Alignment 1, so that no
+        // padding (which depends on where malloc's memory starts) gets in.
         Arena shrink = Arena.Create(256, maxCapacity: 400);
-        shrink.Alloc(250);
-        Check("a block shrinks to what is left", shrink.Alloc(100) != null && shrink.Capacity == 400);
+        bool first = shrink.Alloc(250, 1) != null && shrink.BlockCount == 1;
+        Check("a block shrinks to what is left",
+            first && shrink.Alloc(100, 1) != null && shrink.BlockCount == 2 && shrink.Capacity == 400);
         unsafe { shrink.Destroy(); } // SAFETY: nothing allocated is used.
 
         Arena arena = Arena.Create(256, maxCapacity: 1024);
@@ -145,6 +147,42 @@ public static class Program
         Check("Reset keeps capacity within the limit", arena.BlockCount == 1 && arena.Capacity == 1024 && arena.Alloc(1000) != null);
         unsafe { arena.Destroy(); } // SAFETY: nothing allocated is used.
         End("maxCapacity");
+    }
+
+    // docs:static-buffer
+    // 512 bytes in the program's data, like a global array in C: not on
+    // the heap, not on the stack.
+    struct Pool
+    {
+        public fixed byte Bytes[512];
+    }
+
+    static Pool s_pool;
+    // docs:end
+
+    // An arena in a static buffer: memory the program has from its start.
+    static void InStaticBuffer()
+    {
+        // docs:from-static-buffer
+        Arena arena;
+        unsafe
+        {
+            // SAFETY: s_pool is static, so it outlives the arena, and
+            // nothing else uses it.
+            fixed (byte* memory = s_pool.Bytes)
+                arena = Arena.FromBuffer(memory, 512, "pool");
+        }
+        // docs:end
+        int* numbers = arena.AllocArray<int>(20);
+        bool inside;
+        unsafe
+        {
+            // SAFETY: only addresses are compared.
+            fixed (byte* start = s_pool.Bytes)
+                inside = (byte*)numbers >= start && (byte*)(numbers + 20) <= start + 512;
+        }
+        Check("a static buffer works the same", arena.IsCreated && inside && arena.Alloc(600) == null);
+        unsafe { arena.Destroy(); } // SAFETY: numbers isn't used after this.
     }
 
     // An arena in a buffer of its own: no malloc, and it never grows.
@@ -192,6 +230,7 @@ public static class Program
         Arena none;
         unsafe { none = Arena.FromBuffer(tiny); } // SAFETY: as above.
         Check("too small a buffer: not created", !none.IsCreated && none.Alloc(1) == null);
+        InStaticBuffer();
         End("FromBuffer");
     }
 

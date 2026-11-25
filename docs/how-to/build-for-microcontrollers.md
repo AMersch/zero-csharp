@@ -93,6 +93,15 @@ String literals go to flash too, so the RAM they would cost is free. Flash is re
 protection unit makes a write to it fault, in QEMU as on a chip, so a bug that writes to a string
 literal or through a null pointer stops the program instead of going unnoticed.
 
+To decide how much of the RAM each part of a program gets, give an arena its own memory with
+`Arena.FromBuffer`: a struct with a `fixed` byte array, in a static field, is part of the program's
+writable data, so `build.sh` counts it in the RAM the program takes before its heap. It costs as much
+flash too, because statics are stored as initialized data and copied to RAM at startup: a 4 KB buffer
+adds 4 KB to both figures. That arena never touches the heap and can't grow past its buffer. Keep `stackalloc` buffers small here: on
+the Uno R4 the whole stack is 4 KB. An arena that does use the heap can still take a budget,
+`Arena.Create(..., maxCapacity: n)`. See
+[An arena in a buffer of your own](../concepts/memory.html#an-arena-in-a-buffer-of-your-own).
+
 ## The LED, registers and interrupts
 
 `Board` (`lib/Board.cs`) is the hardware: the board's LED, the chip's registers, and the SysTick timer,

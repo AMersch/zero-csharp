@@ -13,6 +13,40 @@
 // This file stands alone: the C function names have the prefix cs_ that the
 // build gives imports, and nothing here needs the runtime, so it can be tested
 // on a computer against its own math library (see cx16/test-math.c).
+//
+// Third-party code: much of this file is adapted from FreeBSD's msun
+// (https://github.com/freebsd/freebsd-src, lib/msun/src), shortened and
+// rearranged for the 6502. The notices of the files it comes from:
+//
+//   cs_exp (e_exp.c):
+//     Copyright (C) 2004 by Sun Microsystems, Inc. All rights reserved.
+//
+//     Permission to use, copy, modify, and distribute this
+//     software is freely granted, provided that this notice
+//     is preserved.
+//
+//   cs_log and log_mantissa, which cs_log2 and cs_log10 use (e_log.c);
+//   kernel_sin, kernel_cos, rem_pio2 (k_sin.c, k_cos.c, e_rem_pio2.c);
+//   cs_atan2 (e_atan2.c):
+//     Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+//     Developed at SunSoft, a Sun Microsystems, Inc. business.
+//     Permission to use, copy, modify, and distribute this
+//     software is freely granted, provided that this notice
+//     is preserved.
+//
+//   cs_sin, cs_cos, cs_tan (s_sin.c, s_cos.c, s_tan.c); math_atan (s_atan.c);
+//   cs_expf, cs_logf (e_expf.c, e_logf.c; conversion to float by Ian Lance
+//   Taylor, Cygnus Support, ian@cygnus.com):
+//     Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+//
+//     Developed at SunPro, a Sun Microsystems, Inc. business.
+//     Permission to use, copy, modify, and distribute this
+//     software is freely granted, provided that this notice
+//     is preserved.
+//
+// cs_pow, cs_powf, cs_sinf, cs_cosf, cs_tanhf, the remainders and the helpers
+// are this project's own, under its license.
 #include <stdint.h>
 
 double sqrt(double x);      // the runtime's, or the C library's when tested on a computer

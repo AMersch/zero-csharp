@@ -124,6 +124,7 @@ ALL_SAMPLES=(
     Keys
     Tensors
     TensorsAvx
+    Avx2Ops
     TensorTypes
     "${SMALL_SAMPLES[@]}"
 )
@@ -316,7 +317,7 @@ bflat_flags() {
         # NEON; dotprod (SDOT, for int8) needs ARMv8.2+, e.g. Apple M1 or Cortex-A76.
         # TensorsAvx is Tensors built for AVX, so both of TensorPrimitives' x64
         # paths are tested: SSE2 (Tensors) and AVX (TensorsAvx).
-        Simd | Kernels | Llama | TensorsAvx)
+        Simd | Kernels | Llama | TensorsAvx | Avx2Ops)
             if [ "$BFLAT_ARCH" = x64 ]; then echo -m x86-64-v3; else echo -m dotprod; fi ;;
     esac
 }

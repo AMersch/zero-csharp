@@ -28,6 +28,29 @@ and the emulator, [x16emu](https://github.com/X16Community/x16-emulator) (releas
 doesn't download it, but says whether it and its ROM are found. Put it on the `PATH`, or set `X16_EMULATOR` (`X16_HOME`, `/Applications/X16` and
 `~/X16` are tried too), and `X16_ROM` if its `rom.bin` isn't next to it.
 
+## From a project (`dotnet build`)
+
+The SDK builds for the X16 as for the C64: `dotnet build -p:ZeroTarget=cx16` makes
+`bin/Debug/<framework>/cx16/NAME.prg`, and, for a program whose code doesn't fit the fixed RAM, a `.BNK` file
+next to it, which belongs with it on the disk. The published packages don't have this target yet; pack this
+checkout's for your own machine:
+
+```bash
+sdk/pack-local.sh                  # ZeroCSharp.Sdk and .Templates 0.13.0-local, into sdk/feed/
+dotnet new uninstall ZeroCSharp.Templates      # the published ones, if installed: both would clash
+dotnet new install "$PWD/sdk/feed/ZeroCSharp.Templates.0.13.0-local.nupkg"
+dotnet new zero -o Hello && cd Hello
+dotnet new nugetconfig && dotnet nuget add source <repository>/sdk/feed -n zero-local --configfile nuget.config
+dotnet build -p:ZeroTarget=cx16
+x16emu -prg bin/Debug/zero03/cx16/Hello.prg -run -fsroot bin/Debug/zero03/cx16
+```
+
+`dotnet run` doesn't start an emulator. The first build downloads NativeAOT-LLVM and llvm-mos into the user's
+cache. On a Mac, NativeAOT-LLVM runs in a container: the `docker` command must be there (Docker Desktop, Colima,
+or a `docker` link to Podman), and the project and the package cache must be in folders it can mount. The
+program's classes (`CX16`, `Bitmap`, `Pcm`, `Disk` ...) are in the package's library; calling them in a program
+built for another target fails at the link. Linux arm64 can't build for the X16 (llvm-mos has no build for it).
+
 ## The machine, from C#
 
 `lib/CX16.cs` is the X16's own side, for programs built with `--cx16` (a program for another target that

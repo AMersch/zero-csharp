@@ -1101,6 +1101,10 @@ build_sdk_payload() {
     # native half llvm-mos links in.
     build_core "$dir/native/c64/System.Private.CoreLib.dll" -d WASM
     cp c64/runtime.c "$dir/native/c64/"
+    # The Commander X16: the same zerocore, and cx16/'s runtime with the math
+    # functions zero-bitcode cx16-link compiles from next to it.
+    mkdir -p "$dir/native/cx16"
+    cp "$dir/native/c64/System.Private.CoreLib.dll" cx16/runtime.c cx16/math.c "$dir/native/cx16/"
     # The microcontrollers (pico2, r4): the same zerocore, and arm/'s runtime,
     # boot block and board layouts, which zero-bitcode arm-link compiles.
     mkdir -p "$dir/native/arm"

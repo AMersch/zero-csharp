@@ -250,6 +250,7 @@ test_payload_complete() {
              native/uefi-x64/{start,runtime,machine,stack,zerocore}.obj native/uefi-x64/libm.lib \
              native/uefi-arm64/{start,runtime,machine,stack,zerocore}.obj native/uefi-arm64/libm.lib \
              native/c64/System.Private.CoreLib.dll native/c64/runtime.c native/gpu/metal.m \
+             native/cx16/System.Private.CoreLib.dll native/cx16/runtime.c native/cx16/math.c \
              native/arm/System.Private.CoreLib.dll native/arm/{runtime,semihost,rp2350}.c native/arm/rp2350.S \
              native/arm/{an505,an386,rp2350}.ld.in \
              tools/zero-bitcode/zero-bitcode.dll tools/zero-bitcode/zero-bitcode.runtimeconfig.json \
@@ -382,6 +383,60 @@ test_c64_target() {
     # A second build has nothing to do.
     if ! run_in "$dir" c64-again build -p:ZeroTarget=c64 -v:n; then fail "$name" "the second build failed"; return; fi
     if grep -q "c64-bitcode" "$LOG"; then fail "$name" "the second build compiled again"; return; fi
+    pass "$name"
+}
+
+# ZeroTarget=cx16, the Commander X16: built as for the C64, by the same hosts. A
+# small program is one .prg; samples/SmallMath.cs doesn't fit the X16's fixed
+# RAM, so it comes with its code in banks (NATIVE.BNK, named after the project)
+# and with cx16/math.c from the package. Where x16emu is, it runs.
+test_cx16_target() {
+    local name="cx16 target" dir math out
+    can_build "$name" || return
+    case "$HOST_RID" in
+        linux-x64|win-x64) ;;
+        osx-arm64)
+            if ! docker info > /dev/null 2>&1; then skip "$name" "on a Mac the X16 needs Docker, which isn't running"; return; fi ;;
+        linux-arm64)
+            dir=$(fixture native cx16)
+            if run_in "$dir" cx16 build -p:ZeroTarget=cx16; then fail "$name" "the build succeeded on linux-arm64"; return; fi
+            if ! grep -q "llvm-mos, the compiler for the 6502, has no build for Linux arm64" "$LOG"; then fail "$name" "no message about Linux arm64"; return; fi
+            pass "$name"
+            return ;;
+        *) skip "$name" "not a host for the X16"; return ;;
+    esac
+    dir=$(fixture native cx16)
+    out=$dir/bin/Debug/$TFM/cx16
+    if ! run_in "$dir" cx16 build -p:ZeroTarget=cx16; then fail "$name" "dotnet build failed"; return; fi
+    if [ ! -s "$out/native.prg" ]; then fail "$name" "no $out/native.prg"; return; fi
+    if [ "$(head -c 2 "$out/native.prg" | od -An -tx1 | tr -d ' \n')" != 0108 ]; then fail "$name" "native.prg doesn't load at \$0801"; return; fi
+    if [ -e "$out/NATIVE.BNK" ]; then fail "$name" "a program that fits has a NATIVE.BNK"; return; fi
+    if ! run_in "$dir" cx16-again build -p:ZeroTarget=cx16 -v:n; then fail "$name" "the second build failed"; return; fi
+    if grep -q "c64-bitcode" "$LOG"; then fail "$name" "the second build compiled again"; return; fi
+
+    math=$(fixture native cx16-math)
+    cp samples/SmallMath.cs "$math/Program.cs"
+    out=$math/bin/Debug/$TFM/cx16
+    if ! run_in "$math" cx16-math build -p:ZeroTarget=cx16; then fail "$name" "dotnet build of SmallMath failed"; return; fi
+    if [ ! -s "$out/native.prg" ] || [ ! -s "$out/NATIVE.BNK" ]; then fail "$name" "no native.prg and NATIVE.BNK for SmallMath"; return; fi
+    if ! bash -c 'source ./env.sh && find_x16_emulator > /dev/null' 2> /dev/null; then
+        echo "     (no x16emu: built, not run)"
+    else
+        mkdir -p bin/cx16
+        cp "$out/native.prg" bin/cx16/SdkSmallMath.prg
+        cp "$out/NATIVE.BNK" bin/cx16/NATIVE.BNK
+        LOG=$WORK/cx16-run.log
+        if ! X16_SDCARD= cx16/run.sh SdkSmallMath < /dev/null > "$WORK/cx16.out" 2> "$LOG"; then
+            fail "$name" "SmallMath failed in x16emu: $(tail -3 "$WORK/cx16.out" | tr '\n' ' ')"; return
+        fi
+        rm -f bin/cx16/SdkSmallMath.prg bin/cx16/NATIVE.BNK
+        if ! same_output "$WORK/cx16.out" tests/expected/SmallMath.txt "$WORK/cx16.diff"; then
+            fail "$name" "SmallMath's output: $(cat "$WORK/cx16.diff")"; return
+        fi
+    fi
+    # Cleaning takes the bank file with it.
+    if ! run_in "$math" cx16-clean clean -p:ZeroTarget=cx16; then fail "$name" "dotnet clean failed"; return; fi
+    if [ -e "$out/native.prg" ] || [ -e "$out/NATIVE.BNK" ]; then fail "$name" "dotnet clean left the program behind"; return; fi
     pass "$name"
 }
 
@@ -1958,7 +2013,7 @@ test_fsharp_native_library_errors() {
 }
 
 ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
-    native_hello_runs cross_targets c64_target arm_target gpu_template gpu_errors bad_target path_with_spaces compile_items incremental
+    native_hello_runs cross_targets c64_target cx16_target arm_target gpu_template gpu_errors bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size strip_symbols debug_unoptimized mac_debug_object_kept windows_debugger macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
     custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild

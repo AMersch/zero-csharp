@@ -136,6 +136,9 @@ take care of it. `ZERO_CX16_BANK=Name` forces the functions whose names contain 
 when the program fits, to test banking or to measure what a call costs (about 33 cycles, in
 `x16emu`, with the jiffy clock: run it without `-testbench`, which has no frame interrupt).
 `BanksWithCode`, `BanksDemo`, `BankedDemo`, `BankedListDemo`, `DiskFiles`, `DiskList`, `Mouse` and `CX16Demo` are for the X16 only.
+For `dotnet build -p:ZeroTarget=cx16` the SDK carries `cx16/runtime.c` and `math.c`; `sdk/pack-local.sh`
+packs the checkout for projects on this machine, and `sdk/test/run.sh cx16_target` tests it.
+
 `cx16/math.c` (sin, cos, exp, log, pow, ...) is tested on a computer first, against its math library:
 `cc -O1 -o /tmp/test-math cx16/test-math.c -lm && /tmp/test-math`; `SmallMath` then checks it in the emulator, and on the
 other targets that have the functions.

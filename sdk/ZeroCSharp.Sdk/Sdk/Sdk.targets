@@ -54,7 +54,7 @@
     <ZeroTargetFolder Condition="'$(ZeroTargetChosen)' == 'true' or '$(ZeroTarget)' != '$(ZeroHostRid)'">$(ZeroTarget)/</ZeroTargetFolder>
     <!-- The targets bflat doesn't compile for: it makes IL, NativeAOT-LLVM
          makes LLVM bitcode of that, and zero-bitcode takes it from there. -->
-    <_ZeroBitcodeTarget Condition="'$(ZeroTarget)' == 'c64' or '$(ZeroTarget)' == 'pico2' or '$(ZeroTarget)' == 'r4'">true</_ZeroBitcodeTarget>
+    <_ZeroBitcodeTarget Condition="'$(ZeroTarget)' == 'c64' or '$(ZeroTarget)' == 'cx16' or '$(ZeroTarget)' == 'pico2' or '$(ZeroTarget)' == 'r4'">true</_ZeroBitcodeTarget>
   </PropertyGroup>
 
   <!--
@@ -148,11 +148,14 @@
     The Commodore 64: bflat compiles the sources to IL, NativeAOT-LLVM that to
     LLVM bitcode (zero-bitcode c64-bitcode; on a Mac in Docker), and llvm-mos
     the bitcode, rewritten for the 6502, to a .prg (zero-bitcode c64-link).
+    The Commander X16 (cx16) is the same with another runtime and zero-bitcode
+    cx16-link, which may put code that doesn't fit into a NAME.BNK file next to
+    the .prg: the two belong together on the disk.
     NativeAOT-LLVM and llvm-mos are downloaded on the first such build into a
     per-user cache (zero-bitcode's Tools.cs). Always optimized for size.
   -->
   <Target Name="ZeroC64Build" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="IncrementalClean"
-          Condition="'$(ZeroBuildsNative)' == 'true' and '$(ZeroTarget)' == 'c64'"
+          Condition="'$(ZeroBuildsNative)' == 'true' and ('$(ZeroTarget)' == 'c64' or '$(ZeroTarget)' == 'cx16')"
           DependsOnTargets="ZeroCheckNativeLib;ZeroCheckNativeHost;ZeroNativeCommand;ZeroFSharpEntry"
           Inputs="@(Compile);@(ZeroLibraryReference);@(ZeroNativeInput);$(ZeroNativeArgsFile);@(ZeroFSharpNativeInput)"
           Outputs="$(ZeroNativeOutput)">
@@ -166,7 +169,7 @@
     <Message Text="bflat arguments: $(ZeroNativeArgs)" />
     <Exec Command="&quot;$(ZeroBflatExe)&quot; build-il @&quot;$(ZeroNativeArgsFile)&quot;" />
     <Exec Command="$(_ZeroBitcode) c64-bitcode &quot;$(ZeroBitcodeIl)&quot; &quot;$(ZeroBitcodeDir)bitcode&quot; &quot;$(ZeroNativeDir)System.Private.CoreLib.dll&quot; &quot;$(ZeroRefDir)BflatLib.dll&quot; @(_ZeroBitcodeReference->'&quot;%(Identity)&quot;', ' ') @(ZeroLibraryReference->'&quot;%(FullPath)&quot;', ' ')" />
-    <Exec Command="$(_ZeroBitcode) c64-link &quot;$(ZeroBitcodeDir)bitcode&quot; &quot;$([System.IO.Path]::GetFileNameWithoutExtension('$(ZeroBitcodeIl)'))&quot; &quot;$(ZeroNativeDir)runtime.c&quot; &quot;$(ZeroNativeOutput)&quot;" />
+    <Exec Command="$(_ZeroBitcode) $(ZeroTarget)-link &quot;$(ZeroBitcodeDir)bitcode&quot; &quot;$([System.IO.Path]::GetFileNameWithoutExtension('$(ZeroBitcodeIl)'))&quot; &quot;$(ZeroNativeDir)runtime.c&quot; &quot;$(ZeroNativeOutput)&quot;" />
     <Message Importance="high" Text="$(MSBuildProjectName) -> $(ZeroNativeOutput)" />
   </Target>
 
@@ -251,10 +254,10 @@
            Text="Zero C# builds on Apple Silicon Macs, not Intel ones; build on an Apple Silicon Mac, Linux (x64 or arm64) or Windows x64." />
     <Error Condition="'$(ZeroHostRid)' == '' and !$([MSBuild]::IsOSPlatform('OSX'))"
            Text="Zero C# can't make native programs on this machine yet; build on Linux (x64 or arm64), Windows x64 or an Apple Silicon Mac." />
-    <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64' and '$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'uefi-x64' and '$(ZeroTarget)' != 'uefi-arm64' and '$(ZeroTarget)' != 'c64' and '$(ZeroTarget)' != 'pico2' and '$(ZeroTarget)' != 'r4'"
-           Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64, osx-arm64, uefi-x64, uefi-arm64, c64, pico2, r4." />
-    <Error Condition="'$(ZeroTarget)' == 'c64' and '$(ZeroHostRid)' == 'linux-arm64'"
-           Text="ZeroTarget c64 builds on Linux x64, Windows x64 or an Apple Silicon Mac: llvm-mos, the compiler for the 6502, has no build for Linux arm64." />
+    <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64' and '$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'uefi-x64' and '$(ZeroTarget)' != 'uefi-arm64' and '$(ZeroTarget)' != 'c64' and '$(ZeroTarget)' != 'cx16' and '$(ZeroTarget)' != 'pico2' and '$(ZeroTarget)' != 'r4'"
+           Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64, osx-arm64, uefi-x64, uefi-arm64, c64, cx16, pico2, r4." />
+    <Error Condition="('$(ZeroTarget)' == 'c64' or '$(ZeroTarget)' == 'cx16') and '$(ZeroHostRid)' == 'linux-arm64'"
+           Text="ZeroTarget $(ZeroTarget) builds on Linux x64, Windows x64 or an Apple Silicon Mac: llvm-mos, the compiler for the 6502, has no build for Linux arm64." />
     <Error Condition="'$(ZeroGpu)' != '' and '$(ZeroGpu)' != 'Metal'"
            Text="ZeroGpu '$(ZeroGpu)' isn't supported. Use Metal (an Apple Silicon Mac's GPU)." />
     <Error Condition="'$(ZeroGpu)' == 'Metal' and '$(ZeroTarget)' != 'osx-arm64'"
@@ -397,7 +400,7 @@
       <ZeroNativeOutput>$(OutDir)$(ZeroTargetFolder)$(AssemblyName)</ZeroNativeOutput>
       <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'win-x64'">$(ZeroNativeOutput).exe</ZeroNativeOutput>
       <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'uefi-x64' or '$(ZeroTarget)' == 'uefi-arm64'">$(ZeroNativeOutput).efi</ZeroNativeOutput>
-      <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'c64'">$(ZeroNativeOutput).prg</ZeroNativeOutput>
+      <ZeroNativeOutput Condition="'$(ZeroTarget)' == 'c64' or '$(ZeroTarget)' == 'cx16'">$(ZeroNativeOutput).prg</ZeroNativeOutput>
       <!-- ZeroGpu: the kernels' bitcode, AIR, metallib and objects, in obj/. -->
       <ZeroGpuDir>$(IntermediateOutputPath)gpu/</ZeroGpuDir>
       <ZeroGpuObjects Condition="'$(ZeroGpu)' == 'Metal'">$(ZeroGpuDir)kernels.o;$(ZeroGpuDir)metal.o</ZeroGpuObjects>
@@ -583,13 +586,16 @@
   <!-- Every target's program and command line that a build may have made. -->
   <Target Name="ZeroNativeFiles">
     <ItemGroup>
-      <_ZeroAnyTarget Include="linux-x64;linux-arm64;win-x64;osx-arm64;uefi-x64;uefi-arm64;c64;pico2;r4" />
+      <_ZeroAnyTarget Include="linux-x64;linux-arm64;win-x64;osx-arm64;uefi-x64;uefi-arm64;c64;cx16;pico2;r4" />
       <ZeroNativeFile Include="$(OutDir)$(AssemblyName);$(OutDir)$(AssemblyName).exe" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName)')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName).exe')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName).efi')" />
       <!-- The C64: the program, and the linker's copy with symbols. -->
       <ZeroNativeFile Include="$(OutDir)c64/$(AssemblyName).prg;$(OutDir)c64/$(AssemblyName).prg.elf" />
+      <!-- The Commander X16: the same, and the code in banks, whose file is named
+           by zero-bitcode after the program. -->
+      <ZeroNativeFile Include="$(OutDir)cx16/$(AssemblyName).prg;$(OutDir)cx16/$(AssemblyName).prg.elf;$(OutDir)cx16/*.BNK" />
       <!-- The microcontrollers: the Pico 2's for the board and for QEMU, the
            Uno R4's for QEMU. -->
       <ZeroNativeFile Include="$(OutDir)pico2/$(AssemblyName).uf2;$(OutDir)pico2/$(AssemblyName).elf;$(OutDir)pico2/qemu/$(AssemblyName).elf;$(OutDir)r4/$(AssemblyName).elf" />
@@ -726,7 +732,7 @@
           Inputs="@(IntermediateAssembly)" Outputs="$(ZeroFSharpEntrySource);$(ZeroFSharpDefFile)">
     <ZeroFSharpNative Assembly="@(IntermediateAssembly->'%(FullPath)')" Source="$(ZeroFSharpEntrySource)"
                       Library="$(ZeroNativeLibrary)" DefFile="$(ZeroFSharpDefFile)" DllName="$(AssemblyName).dll"
-                      NoArguments="$([System.String]::Equals('$(ZeroTarget)', 'c64'))" />
+                      NoArguments="$([System.Text.RegularExpressions.Regex]::IsMatch('$(ZeroTarget)', '^(c64|cx16)$'))" />
   </Target>
   <ItemGroup Condition="'$(ZeroLanguage)' == 'FSharp'">
     <ZeroFSharpNativeInput Include="@(IntermediateAssembly)" />

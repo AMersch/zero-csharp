@@ -394,10 +394,10 @@ run_all() {
     fi
 
     # Awaiting a canceled task plainly, ThrowIfCancellationRequested on a
-    # canceled token, and ReceiveAsync on a closed channel must end the
-    # program with .NET's exception message.
+    # canceled token, ReceiveAsync on a closed channel, and a timer's reused
+    # ValueTask a second time must end the program with a message.
     if [[ " ${samples[*]} " == *" Tasks "* ]] && [ "$target" != c64 ]; then
-        for case in "canceled|A task was canceled." "throw|The operation was canceled." "closed|The channel has been closed."; do
+        for case in "canceled|A task was canceled." "throw|The operation was canceled." "closed|The channel has been closed." "twice|awaited after its operation was reused"; do
             arg=${case%%|*}
             message=${case#*|}
             status=0

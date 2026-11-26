@@ -9,7 +9,10 @@
 //   await channel.SendAsync(42);                             // waits while full
 //
 // An async method waiting on a channel costs no fiber: it's a task in the
-// channel's lists, completed by the Send or Receive that serves it. Fibers
+// channel's lists, completed by the Send or Receive that serves it. Those
+// tasks are reused (one per waiter at a time, freed once its result is
+// read), so a loop that awaits a channel allocates nothing: as in .NET, the
+// ValueTask can be awaited once (AsTask() gives a Task to keep). Fibers
 // and async methods can share a channel; when both wait, the fibers are
 // served first. Waits take a CancellationToken; a canceled one leaves the
 // lists, and awaiting it ends the program as .NET's OperationCanceledException
@@ -39,6 +42,7 @@ public sealed partial class Channel<T>
         if (_closed)
             throw new InvalidOperationException("The channel has been closed.");
         return new ValueTask<T>(Waiters().AddReceiver(cancellationToken));
+
     }
 
     /// <summary>
@@ -61,8 +65,9 @@ public sealed partial class Channel<T>
         }
         ChannelWaiters<T> waiters = Waiters();
         Task sent = waiters.AddSender(value, cancellationToken);
+        var result = new ValueTask(sent);
         waiters.Available(); // capacity 0: a value waits to be taken
-        return new ValueTask(sent);
+        return result;
     }
 
     /// <summary>
@@ -94,8 +99,16 @@ public sealed partial class Channel<T>
         return waiters;
     }
 
-    sealed class ReceiveAll(Channel<T> channel, CancellationToken token) : IAsyncEnumerable<T>, IAsyncEnumerator<T>
+    // await foreach's enumerator, by hand rather than an async method, so a
+    // loop allocates nothing: the task it hands out is reused for every
+    // step, and it waits on WaitToReceiveAsync's as a continuation itself.
+    // A continuation, not a plain observer: it runs from the dispatcher's
+    // queue, never inside the Send that woke it (which hasn't parked yet).
+    sealed class ReceiveAll(Channel<T> channel, CancellationToken token) : System.Runtime.CompilerServices.Continuation, IAsyncEnumerable<T>, IAsyncEnumerator<T>
     {
+        Task<bool>? _next;
+        ValueTask<bool> _waiting;
+
         public T Current { get; private set; } = default!;
 
         public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default)
@@ -105,18 +118,67 @@ public sealed partial class Channel<T>
             return this;
         }
 
-        public async ValueTask<bool> MoveNextAsync()
+        public ValueTask<bool> MoveNextAsync()
+        {
+            if (channel.TryReceive(out T value))
+            {
+                Current = value;
+                return new ValueTask<bool>(true);
+            }
+            if (_next == null)
+                _next = new Task<bool> { Reusable = true, Owned = true };
+            else
+                _next.Reset();
+            var next = new ValueTask<bool>(_next);
+            Step();
+            return next;
+        }
+
+        // Takes a value, or waits until there may be one.
+        void Step()
         {
             while (true)
             {
                 if (channel.TryReceive(out T value))
                 {
                     Current = value;
-                    return true;
+                    _next!.TrySetResult(true);
+                    return;
                 }
-                if (!await channel.WaitToReceiveAsync(token))
-                    return false;
+                ValueTask<bool> wait = channel.WaitToReceiveAsync(token);
+                if (!wait.IsCompleted)
+                {
+                    _waiting = wait;
+                    wait._task!.AddObserver(this);
+                    return;
+                }
+                if (!Ended(wait))
+                    continue;
+                return;
             }
+        }
+
+        // WaitToReceiveAsync's task completed (and the dispatcher got to us).
+        internal override void Resume()
+        {
+            if (!Ended(_waiting))
+                Step();
+        }
+
+        // Reads a finished WaitToReceiveAsync: true if that ends the step
+        // (closed, or canceled), having completed _next.
+        bool Ended(ValueTask<bool> wait)
+        {
+            if (wait.IsCanceled)
+            {
+                wait.AsTask(); // frees it
+                _next!.Complete(true);
+                return true;
+            }
+            if (wait.Result)
+                return false;
+            _next!.TrySetResult(false);
+            return true;
         }
 
         public ValueTask DisposeAsync() => default;
@@ -124,29 +186,36 @@ public sealed partial class Channel<T>
 }
 
 // The async methods waiting on one channel, each a task in a list, in order.
+// Every node made is kept (Spare) and reused once its result has been read.
 sealed class ChannelWaiters<T> : Channel<T>.AsyncWaiters
 {
-    Receiver? _receivers, _receiversTail;
-    Sender? _senders, _sendersTail;
-    Waiter? _waiters;
+    Receiver? _receivers, _receiversTail, _spareReceivers;
+    Sender? _senders, _sendersTail, _spareSenders;
+    Waiter? _waiters, _spareWaiters;
 
     sealed class Receiver : Task<T>
     {
-        internal Receiver? Next;
+        internal Receiver? Next, Spare;
         internal CancellationTokenRegistration Registration;
+        internal Registration? OnCancel; // kept: attached for each wait with a token
+        internal ChannelWaiters<T>? Owner;
     }
 
     sealed class Sender : Task
     {
-        internal Sender? Next;
+        internal Sender? Next, Spare;
         internal T Value = default!;
         internal CancellationTokenRegistration Registration;
+        internal Registration? OnCancel;
+        internal ChannelWaiters<T>? Owner;
     }
 
     sealed class Waiter : Task<bool>
     {
-        internal Waiter? Next;
+        internal Waiter? Next, Spare;
         internal CancellationTokenRegistration Registration;
+        internal Registration? OnCancel;
+        internal ChannelWaiters<T>? Owner;
     }
 
     internal override bool HasSender => _senders != null;
@@ -154,36 +223,85 @@ sealed class ChannelWaiters<T> : Channel<T>.AsyncWaiters
 
     internal Task<T> AddReceiver(CancellationToken token)
     {
-        var r = new Receiver();
+        Receiver? r = _spareReceivers;
+        while (r != null && !(r.IsCompleted && !r.Owned))
+            r = r.Spare;
+        if (r == null)
+        {
+            r = new Receiver { Reusable = true, Owned = true, Spare = _spareReceivers };
+            _spareReceivers = r;
+        }
+        else
+        {
+            r.Reset();
+        }
+        r.Next = null;
         if (_receiversTail == null)
             _receivers = r;
         else
             _receiversTail.Next = r;
         _receiversTail = r;
         if (token.CanBeCanceled)
-            r.Registration = token.Register(static s => { var (w, r) = ((ChannelWaiters<T>, Receiver))s!; w.Cancel(r); }, (this, r));
+        {
+            r.OnCancel ??= new Registration(null, null, static o => { var r = (Receiver)o!; r.Owner!.Cancel(r); }, r);
+            r.Owner = this;
+            r.Registration = token.Attach(r.OnCancel);
+        }
         return r;
     }
 
     internal Task AddSender(T value, CancellationToken token)
     {
-        var s = new Sender { Value = value };
+        Sender? s = _spareSenders;
+        while (s != null && !(s.IsCompleted && !s.Owned))
+            s = s.Spare;
+        if (s == null)
+        {
+            s = new Sender { Reusable = true, Owned = true, Spare = _spareSenders };
+            _spareSenders = s;
+        }
+        else
+        {
+            s.Reset();
+        }
+        s.Value = value;
+        s.Next = null;
         if (_sendersTail == null)
             _senders = s;
         else
             _sendersTail.Next = s;
         _sendersTail = s;
         if (token.CanBeCanceled)
-            s.Registration = token.Register(static o => { var (w, s) = ((ChannelWaiters<T>, Sender))o!; w.Cancel(s); }, (this, s));
+        {
+            s.OnCancel ??= new Registration(null, null, static o => { var s = (Sender)o!; s.Owner!.Cancel(s); }, s);
+            s.Owner = this;
+            s.Registration = token.Attach(s.OnCancel);
+        }
         return s;
     }
 
     internal Task<bool> AddWaiter(CancellationToken token)
     {
-        var w = new Waiter { Next = _waiters };
+        Waiter? w = _spareWaiters;
+        while (w != null && !(w.IsCompleted && !w.Owned))
+            w = w.Spare;
+        if (w == null)
+        {
+            w = new Waiter { Reusable = true, Owned = true, Spare = _spareWaiters };
+            _spareWaiters = w;
+        }
+        else
+        {
+            w.Reset();
+        }
+        w.Next = _waiters;
         _waiters = w;
         if (token.CanBeCanceled)
-            w.Registration = token.Register(static o => { var (all, w) = ((ChannelWaiters<T>, Waiter))o!; all.Cancel(w); }, (this, w));
+        {
+            w.OnCancel ??= new Registration(null, null, static o => { var w = (Waiter)o!; w.Owner!.Cancel(w); }, w);
+            w.Owner = this;
+            w.Registration = token.Attach(w.OnCancel);
+        }
         return w;
     }
 
@@ -195,7 +313,8 @@ sealed class ChannelWaiters<T> : Channel<T>.AsyncWaiters
         _receivers = r.Next;
         if (_receivers == null)
             _receiversTail = null;
-        r.Registration.Dispose();
+        r.Next = null;
+        Unregister(ref r.Registration);
         r.TrySetResult(value);
         return true;
     }
@@ -211,9 +330,10 @@ sealed class ChannelWaiters<T> : Channel<T>.AsyncWaiters
         _senders = s.Next;
         if (_senders == null)
             _sendersTail = null;
+        s.Next = null;
         value = s.Value;
         s.Value = default!;
-        s.Registration.Dispose();
+        Unregister(ref s.Registration);
         s.Complete();
         return true;
     }
@@ -222,10 +342,13 @@ sealed class ChannelWaiters<T> : Channel<T>.AsyncWaiters
     {
         Waiter? w = _waiters;
         _waiters = null;
-        for (; w != null; w = w.Next)
+        while (w != null)
         {
-            w.Registration.Dispose();
+            Waiter? next = w.Next;
+            w.Next = null;
+            Unregister(ref w.Registration);
             w.TrySetResult(true);
+            w = next;
         }
     }
 
@@ -237,11 +360,20 @@ sealed class ChannelWaiters<T> : Channel<T>.AsyncWaiters
             Environment.FailFast("Channel.SendAsync: the channel was closed while sending");
         Waiter? w = _waiters;
         _waiters = null;
-        for (; w != null; w = w.Next)
+        while (w != null)
         {
-            w.Registration.Dispose();
+            Waiter? next = w.Next;
+            w.Next = null;
+            Unregister(ref w.Registration);
             w.TrySetResult(false);
+            w = next;
         }
+    }
+
+    static void Unregister(ref CancellationTokenRegistration registration)
+    {
+        registration.Dispose();
+        registration = default;
     }
 
     void Cancel(Receiver r)
@@ -256,6 +388,8 @@ sealed class ChannelWaiters<T> : Channel<T>.AsyncWaiters
                     previous.Next = r.Next;
                 if (_receiversTail == r)
                     _receiversTail = previous;
+                r.Next = null;
+                r.Registration = default;
                 r.Complete(true);
                 return;
             }
@@ -273,7 +407,9 @@ sealed class ChannelWaiters<T> : Channel<T>.AsyncWaiters
                     previous.Next = s.Next;
                 if (_sendersTail == s)
                     _sendersTail = previous;
+                s.Next = null;
                 s.Value = default!;
+                s.Registration = default;
                 s.Complete(true);
                 return;
             }
@@ -289,6 +425,8 @@ sealed class ChannelWaiters<T> : Channel<T>.AsyncWaiters
                     _waiters = w.Next;
                 else
                     previous.Next = w.Next;
+                w.Next = null;
+                w.Registration = default;
                 w.Complete(true);
                 return;
             }

@@ -40,10 +40,12 @@
 //   No SynchronizingObject, Site or BeginInit/EndInit.
 // - System.Threading.Timer: no Dispose(WaitHandle), DisposeAsync or
 //   ActiveCount.
-// - PeriodicTimer: WaitForNextTick, which blocks, in place of
-//   WaitForNextTickAsync(token) (lib/Tasks.cs), which waits on Task.Delay's
-//   timer fiber, so a waiting async method costs no fiber; no TimeProvider. It needs no Fiber.Run: in a fiber the
-//   wait lets the others run, outside one it sleeps the thread.
+// - PeriodicTimer: WaitForNextTick, which blocks, besides .NET's
+//   WaitForNextTickAsync(token), which waits on Task.Delay's timer fiber
+//   and reuses its task, so an async loop over it costs no fiber and
+//   allocates nothing; no TimeProvider. WaitForNextTick needs no Fiber.Run:
+//   in a fiber the wait lets the others run, outside one it sleeps the
+//   thread.
 // - StackSize, the size of the timer's fiber's stack, is new on both.
 // - Not on WebAssembly, which has no fibers.
 
@@ -491,11 +493,15 @@ namespace System.Threading
         bool _disposed;
         bool _waiting;
         Fiber.Record* _waiter;      // the fiber waiting, if one is
-        // WaitForNextTickAsync's wait, if one is on: its task, the delay it
-        // waits on (Task.Delay's timer), and its token's callback.
-        System.Threading.Tasks.TaskCompletionSource<bool>? _pending;
-        System.Threading.Tasks.DelayTimer? _delay;
+        // WaitForNextTickAsync's: the task it hands out (reused: one wait at a
+        // time), the delay it waits on, on Task.Delay's list (reused too), and
+        // the token's callback. So a loop over it allocates nothing.
+        Task<bool>? _tick;
+        TickDelay? _delay;
         CancellationTokenRegistration _registration;
+        Registration? _onCancel;
+
+        bool AsyncWaiting => _tick != null && !_tick.IsCompleted;
 
         /// <summary>
         /// A timer that ticks every <paramref name="period"/>: at least a
@@ -519,7 +525,7 @@ namespace System.Threading
                 _periodNs = value == Timeout.InfiniteTimeSpan ? 0 : milliseconds * 1_000_000;
                 _due = Clock.Monotonic + _periodNs;
                 WakeWaiter(); // to wait for the new time
-                if (_pending != null)
+                if (AsyncWaiting)
                     Arm();
             }
         }
@@ -577,10 +583,21 @@ namespace System.Threading
             if (TryTick())
                 return new ValueTask<bool>(true);
             _waiting = true;
-            _pending = new System.Threading.Tasks.TaskCompletionSource<bool>();
-            _registration = cancellationToken.Register(static t => ((PeriodicTimer)t!).CancelWait(), this);
-            Arm();
-            return new ValueTask<bool>(_pending.Task);
+            if (_tick == null)
+                _tick = new Task<bool> { Reusable = true, Owned = true };
+            else
+                _tick.Reset();
+            if (cancellationToken.CanBeCanceled)
+            {
+                _onCancel ??= new Registration(null, null, static t => ((PeriodicTimer)t!).CancelWait(), this);
+                Arm();
+                _registration = cancellationToken.Attach(_onCancel); // may cancel at once
+            }
+            else
+            {
+                Arm();
+            }
+            return new ValueTask<bool>(_tick);
         }
 
         // A tick has come since the last wait: counts it (all those since
@@ -594,24 +611,20 @@ namespace System.Threading
             return true;
         }
 
-        // Waits on a Task.Delay for the next tick (or 1000 s at a time when
-        // the period is infinite), in place of any earlier one.
+        // Waits on Task.Delay's timer for the next tick (or 1000 s at a time
+        // when the period is infinite), counting from now.
         void Arm()
         {
-            if (_delay != null)
-                System.Threading.Tasks.DelayTimer.Remove(_delay);
+            _delay ??= new TickDelay(this);
+            System.Threading.Tasks.DelayTimer.Remove(_delay);
             long wait = _periodNs == 0 ? 1_000_000 : (_due - Clock.Monotonic + 999_999) / 1_000_000;
-            _delay = System.Threading.Tasks.DelayTimer.Add(wait < 1 ? 1 : wait < 1_000_000 ? (int)wait : 1_000_000);
-            _delay.AddObserver(new DelayDone(this));
+            _delay.Schedule(wait < 1 ? 1 : wait < 1_000_000 ? (int)wait : 1_000_000);
         }
 
-        sealed class DelayDone(PeriodicTimer timer) : System.Threading.Tasks.Observer
+        sealed class TickDelay(PeriodicTimer timer) : System.Threading.Tasks.DelayTimer
         {
-            internal override void Completed(System.Threading.Tasks.Task task)
+            internal override void Due()
             {
-                if (task != timer._delay)
-                    return; // replaced by Arm, or the wait ended
-                timer._delay = null;
                 if (timer.TryTick())
                     timer.Finish(ticked: true, canceled: false);
                 else
@@ -623,23 +636,19 @@ namespace System.Threading
         void Finish(bool ticked, bool canceled)
         {
             if (_delay != null)
-            {
                 System.Threading.Tasks.DelayTimer.Remove(_delay);
-                _delay = null;
-            }
             _registration.Dispose();
+            _registration = default;
             _waiting = false;
-            var pending = _pending!;
-            _pending = null;
             if (canceled)
-                pending.TrySetCanceled();
+                _tick!.Complete(true);
             else
-                pending.TrySetResult(ticked);
+                _tick!.TrySetResult(ticked);
         }
 
         void CancelWait()
         {
-            if (_pending != null)
+            if (AsyncWaiting)
                 Finish(ticked: false, canceled: true);
         }
 
@@ -650,7 +659,7 @@ namespace System.Threading
                 return;
             _disposed = true;
             WakeWaiter();
-            if (_pending != null)
+            if (AsyncWaiting)
                 Finish(ticked: false, canceled: false);
         }
 

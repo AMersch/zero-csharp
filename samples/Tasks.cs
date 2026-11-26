@@ -5,12 +5,14 @@
 // Exit code = number of failed checks.
 //
 // `Tasks canceled` awaits a canceled task plainly, `Tasks throw` calls
-// ThrowIfCancellationRequested on a canceled token, and `Tasks closed`
-// awaits ReceiveAsync on a closed channel: each must end the program with
-// .NET's message. test.sh checks them.
+// ThrowIfCancellationRequested on a canceled token, `Tasks closed` awaits
+// ReceiveAsync on a closed channel, and `Tasks twice` awaits a timer's
+// ValueTask after the timer has reused it: each must end the program with
+// a message. test.sh checks them.
 // Build: ./build.sh Tasks
 
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -188,6 +190,17 @@ public static class Program
             var closed = new Channel<int>();
             closed.Close();
             await closed.ReceiveAsync();
+            return 0;
+        }
+        if (args.Length > 0 && args[0] == "twice")
+        {
+            // Long enough that the second wait never finds a tick already
+            // come (slow emulators): it has to wait, so it reuses the task.
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
+            ValueTask<bool> once = timer.WaitForNextTickAsync();
+            await once;
+            await timer.WaitForNextTickAsync();
+            await once; // its task has been reused
             return 0;
         }
         if (args.Length > 0 && args[0] == "throw")
@@ -518,6 +531,70 @@ public static class Program
         Fiber.Spawn(quiet, static ch => ch.Send(9));
         Check("the channel still works", await quiet.ReceiveAsync() == 9);
         End("Channels, async");
+
+        // Waits that loop forever allocate nothing per round: the timer and
+        // the channel reuse their tasks (a round first, which makes them).
+        int rounds2 = small ? 20 : 200;
+        var cancel = new CancellationTokenSource();
+        using (var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(1)))
+        {
+            await timer.WaitForNextTickAsync(cancel.Token);
+            allocated = GC.GetTotalAllocatedBytes();
+            for (int i = 0; i < rounds2 / 10; i++)
+                await timer.WaitForNextTickAsync(cancel.Token);
+            long timerBytes = GC.GetTotalAllocatedBytes() - allocated;
+            Check($"timer loop: {timerBytes} bytes", timerBytes == 0);
+        }
+        var pipe = new Channel<int>();
+        Fiber.Spawn((pipe, rounds2 + 1), static s =>
+        {
+            for (int i = 0; i <= s.Item2; i++)
+            {
+                Fiber.Yield();
+                s.pipe.Send(i);
+            }
+            s.pipe.Close();
+        });
+        await pipe.ReceiveAsync(cancel.Token);
+        allocated = GC.GetTotalAllocatedBytes();
+        for (int i = 0; i < rounds2 / 2; i++)
+            await pipe.ReceiveAsync(cancel.Token);
+        long receiveBytes = GC.GetTotalAllocatedBytes() - allocated;
+        Check($"ReceiveAsync loop: {receiveBytes} bytes", receiveBytes == 0);
+        IAsyncEnumerator<int> each = pipe.ReceiveAllAsync(cancel.Token).GetAsyncEnumerator();
+        await each.MoveNextAsync();
+        allocated = GC.GetTotalAllocatedBytes();
+        int left = 0;
+        while (await each.MoveNextAsync())
+            left++;
+        long eachBytes = GC.GetTotalAllocatedBytes() - allocated;
+        Check($"await foreach loop: {eachBytes} bytes, {left} values", eachBytes == 0 && left == rounds2 / 2);
+        var sink = new Channel<int>();
+        Fiber.Spawn((sink, rounds2), static s =>
+        {
+            for (int i = 0; i < s.Item2; i++)
+            {
+                Fiber.Yield();
+                s.sink.Receive(out _);
+            }
+        });
+        await sink.SendAsync(0, cancel.Token);
+        allocated = GC.GetTotalAllocatedBytes();
+        for (int i = 1; i < rounds2; i++)
+            await sink.SendAsync(i, cancel.Token);
+        long sendBytes = GC.GetTotalAllocatedBytes() - allocated;
+        Check($"SendAsync loop: {sendBytes} bytes", sendBytes == 0);
+
+        // A reused task's ValueTask is awaited once; AsTask and Preserve keep it.
+        using (var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(1)))
+        {
+            Task<bool> kept = timer.WaitForNextTickAsync().AsTask();
+            Check("AsTask while waiting", await kept);
+            ValueTask<bool> preserved = timer.WaitForNextTickAsync().Preserve();
+            Check("Preserve: awaited twice", await preserved && await preserved);
+            Check("AsTask of a reused task is a copy", await kept && await timer.WaitForNextTickAsync());
+        }
+        End("No allocation per wait");
 
         // Cost: awaits that wait, and ones that don't.
         start = Clock.Monotonic;

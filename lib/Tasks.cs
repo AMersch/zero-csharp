@@ -69,6 +69,37 @@ namespace System.Threading.Tasks
         internal Task? Pending;
         internal bool HasFiber;
 
+        // A task that its owner uses again and again (PeriodicTimer's, a
+        // channel's), handed out only inside a ValueTask, as .NET's
+        // IValueTaskSource is. Each use has a Version, which the ValueTask
+        // keeps; reading the result (GetResult, AsTask) frees the task for its
+        // next use (Owned false). So a loop that awaits one allocates nothing.
+        internal bool Reusable;
+        internal bool Owned;
+        internal int Version;
+
+        // Starts the next use: not completed, a new version, owned until read.
+        internal void Reset()
+        {
+            _completed = false;
+            _canceled = false;
+            Version++;
+            Owned = true;
+        }
+
+        // A ValueTask over this task belongs to this use of it?
+        internal void CheckVersion(int version)
+        {
+            if (Reusable && version != Version)
+                Environment.FailFast("ValueTask: awaited after its operation was reused (a ValueTask from a timer or channel can be awaited only once, as in .NET: use AsTask() to keep it)");
+        }
+
+        internal void Release()
+        {
+            if (Reusable)
+                Owned = false;
+        }
+
         internal Task() { }
         internal Task(bool completed) { _completed = completed; }
 
@@ -558,7 +589,10 @@ namespace System.Threading.Tasks
     // thread that completes them: it sleeps until the earliest is due, and
     // ends when there are none left, so Fiber.Run can return. A canceled
     // delay leaves the list, so it doesn't keep the fiber (or Run) waiting.
-    sealed class DelayTimer : Task
+    // Owners that wait again and again (CancelAfter, PeriodicTimer) keep one
+    // subclass, which overrides Due rather than completing, and Schedule it
+    // each time: no allocation per wait.
+    class DelayTimer : Task
     {
         long _due;
         DelayTimer? _next, _previous;
@@ -584,14 +618,27 @@ namespace System.Threading.Tasks
 
         internal static DelayTimer Add(int milliseconds)
         {
-            DelayTimer task = new DelayTimer { _due = Clock.Monotonic + milliseconds * 1_000_000L, _queued = true };
+            DelayTimer task = new DelayTimer();
+            task.Schedule(milliseconds);
+            return task;
+        }
+
+        // What the timer fiber does when the delay is over: completes the task.
+        internal virtual void Due() => Complete();
+
+        // Puts this delay on the list, due in `milliseconds`. Not while it's on it.
+        internal void Schedule(int milliseconds)
+        {
+            DelayTimer task = this;
+            task._due = Clock.Monotonic + milliseconds * 1_000_000L;
+            task._queued = true;
             if (t_last != null && task._due >= t_last._due)
             {
                 // The usual case, many delays of one length: due last.
                 task._previous = t_last;
                 t_last._next = task;
                 t_last = task;
-                return task;
+                return;
             }
             DelayTimer? before = null, after = t_first;
             while (after != null && after._due <= task._due)
@@ -622,7 +669,6 @@ namespace System.Threading.Tasks
                     WakeFiber();
                 }
             }
-            return task;
         }
 
         // Takes a delay off the list without completing it.
@@ -678,7 +724,7 @@ namespace System.Threading.Tasks
                     DelayTimer due = t_first;
                     Unlink(due);
                     due.Registration.Dispose();
-                    due.Complete();
+                    due.Due();
                 }
                 if (t_first != null)
                     Fiber.Sleep((t_first._due - now + 999_999) / 1_000_000);

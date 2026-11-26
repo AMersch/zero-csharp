@@ -304,14 +304,33 @@ static async Task<int> Sleeper(int times)
 ```
 
 - `ValueTask` and `ValueTask<T>` work as in .NET, and so do `async ValueTask` methods: one that
-  finishes without waiting allocates nothing at all. Unlike .NET's, a `ValueTask` may be awaited
-  twice. `IAsyncEnumerable<T>` works with `await foreach`, but there are no async iterators
-  (`yield return` in an async method).
+  finishes without waiting allocates nothing at all. A timer's or a channel's `ValueTask` reuses
+  its task, so, as in .NET, it can be awaited only once: awaiting it again after the timer or
+  channel has reused it ends the program with a message. `AsTask()` or `Preserve()` gives
+  something to keep. `IAsyncEnumerable<T>` works with `await foreach`, but there are no async
+  iterators (`yield return` in an async method).
 - `throw` ends the program, so a task is never faulted. There's no `ContinueWith` or
   `SynchronizationContext`. `ConfigureAwait(bool)` changes nothing, since there's no context to
   return to.
-- Tasks are ordinary objects. If an arena makes a task, the arena must stay alive until whoever
-  awaits the task has finished with it.
+- Tasks are ordinary objects, and zero mode never frees them. An async method's box is made once
+  and reused for every await in it, and timers and channels reuse their tasks. But `Task.Delay`
+  and an async method that waits return a new `Task` each time, which stays allocated:
+
+  | Each round of a loop | Bytes |
+  |---|---|
+  | `await Task.Yield()` | 0 |
+  | `await timer.WaitForNextTickAsync(token)` | 0 |
+  | `await channel.ReceiveAsync(token)`, `SendAsync`, `await foreach` | 0 |
+  | `channel.Receive` and `Fiber.Sleep` in a fiber | 0 |
+  | `await Task.Delay(1)` | 96 |
+  | `await` an async method that waits | 120 |
+
+  That's fine for a program that does its work and ends. A loop that never ends, on a
+  microcontroller above all, should wait on a timer or a channel, or with the fibers' own calls,
+  rather than `Task.Delay`. An arena doesn't help: after its first wait an async method runs on
+  the dispatcher, under its allocator.
+- If an arena makes a task, the arena must stay alive until whoever awaits the task has finished
+  with it.
 
 ## Await a channel
 
@@ -340,8 +359,9 @@ static async Task<int> Consume(Channel<int> channel)
 ```
 
 `ReceiveAllAsync` and `WaitToReceiveAsync` stop when the channel is closed and empty. Awaiting
-`ReceiveAsync` then ends the program, as .NET's `ReadAsync` throws. A program that never calls
-these methods doesn't link their code.
+`ReceiveAsync` then ends the program, as .NET's `ReadAsync` throws. The channel reuses the tasks
+behind these waits, so a loop over them allocates nothing, and a program that never calls them
+doesn't link their code.
 
 ## Cancel
 

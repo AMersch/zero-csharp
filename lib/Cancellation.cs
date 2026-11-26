@@ -54,7 +54,7 @@ namespace System.Threading
         bool _canceled;
         // Callbacks, the latest first.
         internal Registration? _callbacks;
-        // CancelAfter's timer: a Task.Delay task that nobody else sees.
+        // CancelAfter's timer, on Task.Delay's list.
         DelayTimer? _timer;
         // A linked source's registrations on its parents, removed by Dispose.
         CancellationTokenRegistration[]? _links;
@@ -125,8 +125,8 @@ namespace System.Threading
                 Cancel();
                 return;
             }
-            _timer = DelayTimer.Add(millisecondsDelay);
-            _timer.AddObserver(new CancelOnTimer(this));
+            _timer ??= new CancelTimer(this);
+            _timer.Schedule(millisecondsDelay);
         }
 
         /// <summary>CancelAfter, with the delay rounded up to milliseconds.</summary>
@@ -156,22 +156,13 @@ namespace System.Threading
         void StopTimer()
         {
             if (_timer != null)
-            {
-                DelayTimer.Remove(_timer);
-                _timer = null;
-            }
+                DelayTimer.Remove(_timer); // kept, to schedule again
         }
 
-        sealed class CancelOnTimer(CancellationTokenSource source) : Observer
+        // CancelAfter's timer, one per source, scheduled again by each call.
+        sealed class CancelTimer(CancellationTokenSource source) : DelayTimer
         {
-            internal override void Completed(Task task)
-            {
-                if (source._timer == task)
-                {
-                    source._timer = null;
-                    source.Cancel();
-                }
-            }
+            internal override void Due() => source.Cancel();
         }
 
         /// <summary>A source canceled when any of <paramref name="tokens"/> is (or Cancel is called).</summary>
@@ -204,11 +195,32 @@ namespace System.Threading
                 return null;
             }
             var r = new Registration(this, action, withState, state);
+            Link(r);
+            return r;
+        }
+
+        // Puts a kept registration (not on a list) on this source's: false,
+        // having run it, if the source is canceled already.
+        internal bool Attach(Registration r)
+        {
+            if (_canceled)
+            {
+                r.Invoke();
+                return false;
+            }
+            r.Source = this;
+            Link(r);
+            return true;
+        }
+
+        void Link(Registration r)
+        {
+            r.Removed = false;
+            r.Previous = null;
             r.Next = _callbacks;
             if (_callbacks != null)
                 _callbacks.Previous = r;
             _callbacks = r;
-            return r;
         }
 
         internal void Unlink(Registration r)
@@ -224,11 +236,14 @@ namespace System.Threading
         }
     }
 
-    internal sealed class Registration(CancellationTokenSource source, Action? action, Action<object?>? withState, object? state)
+    // A callback on a source's list. Timers and channels keep one each and
+    // attach it again for every wait (CancellationToken.Attach), so waiting
+    // with a token allocates nothing.
+    internal sealed class Registration(CancellationTokenSource? source, Action? action, Action<object?>? withState, object? state)
     {
-        internal readonly CancellationTokenSource Source = source;
+        internal CancellationTokenSource? Source = source;
         internal Registration? Next, Previous;
-        internal bool Removed;
+        internal bool Removed = true;
 
         internal void Invoke()
         {
@@ -267,6 +282,10 @@ namespace System.Threading
         public CancellationTokenRegistration Register(Action<object?> callback, object? state)
             => new CancellationTokenRegistration(_source?.Register(null, callback, state));
 
+        // Attaches a kept registration (see Registration): what Dispose removes.
+        internal CancellationTokenRegistration Attach(Registration registration)
+            => _source != null && _source.Attach(registration) ? new CancellationTokenRegistration(registration) : default;
+
         /// <summary>Ends the program, with OperationCanceledException's message, if the token is canceled.</summary>
         public void ThrowIfCancellationRequested()
         {
@@ -289,7 +308,7 @@ namespace System.Threading
         internal CancellationTokenRegistration(Registration? registration) { _registration = registration; }
 
         /// <summary>The token the callback was registered on.</summary>
-        public CancellationToken Token => _registration == null ? default : new CancellationToken(_registration.Source);
+        public CancellationToken Token => _registration?.Source == null ? default : new CancellationToken(_registration.Source);
 
         /// <summary>Removes the callback, if it hasn't run.</summary>
         public void Dispose() => Unregister();
@@ -299,7 +318,7 @@ namespace System.Threading
         {
             if (_registration == null || _registration.Removed)
                 return false;
-            _registration.Source.Unlink(_registration);
+            _registration.Source!.Unlink(_registration);
             return true;
         }
     }

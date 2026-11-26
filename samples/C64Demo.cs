@@ -176,6 +176,21 @@ public static class Program
         Check("the clock ran", C64.Ticks > started);
         Check("the joystick is at rest", C64.Joystick == 0);
 
+        // The keyboard, read without the KERNAL. (Typed input goes into the
+        // KERNAL's buffer, so no key is held down now.)
+        int selected = C64.Peek(0xDC00);
+        Check("no key is held", !C64.KeyHeld('a') && !C64.KeyHeld(' ') && !C64.KeyHeld('Q'));
+        Check("reading the keys leaves $DC00 as it was", C64.Peek(0xDC00) == selected);
+        C64.KernalInterrupt = false;
+        uint stopped = C64.Ticks;
+        for (int i = 0; i < 5; i++)
+            C64.WaitFrame();
+        bool stood = C64.Ticks == stopped && !C64.KernalInterrupt;
+        C64.KernalInterrupt = true;
+        for (int i = 0; i < 5; i++)
+            C64.WaitFrame();
+        Check("the clock stands still while the KERNAL's interrupt is off", stood && C64.Ticks > stopped);
+
         // Leave the machine as BASIC expects it.
         C64.HideSprite(0);
         C64.Border(C64.LightBlue);

@@ -1,5 +1,5 @@
 # Builds the samples and runs ./test.sh on every target CI can run:
-# Linux x64 and arm64, macOS on Apple Silicon, Windows x64 (under Wine),
+# Linux x64 and arm64, macOS on Apple Silicon, the iOS simulator, Windows x64 (under Wine),
 # WebAssembly, and UEFI x64 and arm64 (in QEMU, on OVMF). DOS isn't here: it runs under an emulated 386 for 15 minutes
 # and more, so run ./test.sh --dos locally. The GPU's kernels are checked up to
 # Metal (./test.sh --gpu-air) and to CUDA's ptxas (./build.sh --cuda), not run:
@@ -271,6 +271,16 @@ jobs:
         env:
           MAC_OBJECTS_PREBUILT: '1'
         run: ./test.sh --mac
+      # The same objects, linked for the iOS simulator and run in it (the
+      # runner's Xcode has simulators; the first run boots an iPhone). The
+      # objects are retagged by zero-bitcode, which needs .NET 10.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Link and test for the iOS simulator
+        env:
+          MAC_OBJECTS_PREBUILT: '1'
+        run: ./test.sh --ios
 
   wasm:
     needs: bflat

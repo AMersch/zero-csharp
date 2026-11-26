@@ -36,7 +36,10 @@
 # bin/mac/obj (from `./build.sh --native-mac-objects <samples>` on Linux), and
 # needs neither bflat nor Docker: that is how CI's macOS job works.
 #
-# Usage:  ./build.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --uefi] [Sample ...]
+# With --ios (on a Mac with Apple Silicon), builds iOS programs for the
+# simulator (bin/ios/*), from the --mac objects; ./run.sh --ios runs them.
+#
+# Usage:  ./build.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --ios | --gpu | --uefi] [Sample ...]
 #         ./build.sh --gpu-air [Sample ...]  the GPU build up to AIR, without a Mac (no program)     default: all samples
 #         ./build.sh --cuda-ptx [Sample ...] experimental: the kernels as PTX for NVIDIA GPUs, checked by ptxas
 #         ./build.sh --cuda [Sample ...]     experimental: Linux programs that run them through CUDA;
@@ -893,6 +896,41 @@ build_mac_link() {
     done
 }
 
+# ---- iOS simulator -------------------------------------------------------------
+#
+# iOS programs, for the simulator on a Mac with Apple Silicon (bin/ios/*). The
+# program's object is the macOS one (build_mac_objects): iOS runs the same
+# arm64 code, but the object says it was built for macOS, and Apple's linker
+# won't put it in an iOS program, so zero-bitcode macho-platform marks a copy
+# as built for the simulator. mac/'s C files compile again, for the simulator.
+# The programs run with ./run.sh --ios, through `xcrun simctl spawn`, without
+# an app bundle (ios/launch.c starts them in the caller's directory).
+IOS_OBJ=bin/ios/obj
+# The oldest iOS the programs start on.
+IOS_MIN=${IOS_MIN:-17.0}
+
+build_ios_link() {
+    local clang=$1 name sdk target
+    shift
+    sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
+    target=arm64-apple-ios$IOS_MIN-simulator
+    mkdir -p "$IOS_OBJ"
+    echo "[clang] mac/start.c, mac/runtime.c, zerocore/native/mac-arm64.S -> $IOS_OBJ (iOS simulator)"
+    "$clang" -target "$target" -isysroot "$sdk" -O2 -Wall -Wextra -c mac/start.c -o "$IOS_OBJ/start.o"
+    "$clang" -target "$target" -isysroot "$sdk" -O2 -Wall -Wextra -c mac/runtime.c -o "$IOS_OBJ/runtime.o"
+    "$clang" -target "$target" -isysroot "$sdk" -c zerocore/native/mac-arm64.S -o "$IOS_OBJ/zerocore.o"
+    # ios/run.sh's launcher, which starts a program in the caller's directory.
+    "$clang" -target "$target" -isysroot "$sdk" -O2 -Wall -Wextra ios/launch.c -o "$IOS_OBJ/launch"
+    for name in "$@"; do
+        cp "$MAC_OBJ/$name.o" "$IOS_OBJ/$name.o"
+        zero_bitcode macho-platform "$IOS_OBJ/$name.o" ios-simulator "$IOS_MIN"
+        echo "[ld]    $name -> bin/ios/$name"
+        "$clang" -target "$target" -isysroot "$sdk" -o "bin/ios/$name" \
+            "$IOS_OBJ/$name.o" "$IOS_OBJ/start.o" "$IOS_OBJ/runtime.o" "$IOS_OBJ/zerocore.o" -Wl,-dead_strip
+        if [ -z "${KEEP_SYMBOLS:-}" ]; then strip "bin/ios/$name"; fi
+    done
+}
+
 # ---- GPU (Metal) -------------------------------------------------------------
 #
 # A macOS program whose kernels (its [RuntimeExport] methods) also run on the
@@ -1260,6 +1298,7 @@ case "${1:-}" in
     --r4)   TARGET=r4; shift ;;
     --win)  TARGET=win; shift ;;
     --mac)  TARGET=mac; shift ;;
+    --ios)  TARGET=ios; shift ;;
     --gpu)  TARGET=gpu; shift ;;
     --gpu-air) TARGET=gpu-air; shift ;;
     --cuda-ptx) TARGET=cuda-ptx; shift ;;
@@ -1349,6 +1388,7 @@ case "$TARGET" in
     pico2 | r4) output() { echo "bin/$TARGET/$1.elf"; } ;;
     win)    output() { echo "bin/win/$1.exe"; } ;;
     mac)    output() { echo "bin/mac/$1"; } ;;
+    ios)    output() { echo "bin/ios/$1"; } ;;
     gpu)    output() { echo "bin/gpu/$1"; } ;;
     gpu-air) output() { echo "bin/gpu/obj/$1/kernels.ll"; } ;;
     cuda-ptx) output() { echo "bin/cuda/obj/$1/kernels.ptx"; } ;;
@@ -1368,7 +1408,7 @@ in_container() {
         "$IMAGE" ./build.sh "$@"
 }
 
-if [ "$TARGET" = mac ] && [ -n "${MAC_OBJECTS_PREBUILT:-}" ]; then
+if { [ "$TARGET" = mac ] || [ "$TARGET" = ios ]; } && [ -n "${MAC_OBJECTS_PREBUILT:-}" ]; then
     run() { :; } # the objects are in bin/mac/obj already
 elif [ "$(uname -s)" = Darwin ]; then
     check_bflat
@@ -1401,6 +1441,17 @@ case "$TARGET" in
         done
         "$WIN_CLANG" -target arm64-apple-macos12 -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/osx-arm64/zerocore.o"
         cp mac/libSystem.tbd "$PAYLOAD_DIR/native/osx-arm64/"
+        # The iOS simulator: the same C files and stub (which names both
+        # platforms) for ld64.lld, and ios/launch.c, which dotnet run starts
+        # the program through, as ./run.sh --ios does.
+        mkdir -p "$PAYLOAD_DIR/native/iossimulator-arm64"
+        echo "[clang] mac/{start,runtime}.c, ios/launch.c, zerocore/native/mac-arm64.S -> $PAYLOAD_DIR/native/iossimulator-arm64"
+        for name in start runtime; do
+            "$WIN_CLANG" -target "arm64-apple-ios$IOS_MIN-simulator" -O2 -Wall -Wextra -c "mac/$name.c" -o "$PAYLOAD_DIR/native/iossimulator-arm64/$name.o"
+        done
+        "$WIN_CLANG" -target "arm64-apple-ios$IOS_MIN-simulator" -O2 -Wall -Wextra -c ios/launch.c -o "$PAYLOAD_DIR/native/iossimulator-arm64/launch.o"
+        "$WIN_CLANG" -target "arm64-apple-ios$IOS_MIN-simulator" -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/iossimulator-arm64/zerocore.o"
+        cp mac/libSystem.tbd ios/boot.sh "$PAYLOAD_DIR/native/iossimulator-arm64/"
         # ZeroGpu=Cuda: gpu/cuda.c for each Linux architecture, from the same
         # clang (it declares the few libc functions it calls, so no headers).
         # arm64: atomics inline, as bflat's link has no libgcc for the calls.
@@ -1442,6 +1493,19 @@ case "$TARGET" in
         fi
         run mac-objects "$@"
         build_mac_link "${MAC_CC:-clang}" "$@"
+        ;;
+    ios)
+        if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
+            echo "Error: --ios builds on a Mac with Apple Silicon: it links with Apple's linker, for the iOS simulator." >&2
+            exit 1
+        fi
+        if ! xcrun --sdk iphonesimulator --show-sdk-path > /dev/null 2>&1; then
+            echo "Error: no iOS simulator SDK. Install Xcode with the iOS platform (Xcode > Settings > Components)." >&2
+            exit 1
+        fi
+        build_bitcode_tool
+        run mac-objects "$@"
+        build_ios_link "${MAC_CC:-clang}" "$@"
         ;;
     gpu)
         if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then

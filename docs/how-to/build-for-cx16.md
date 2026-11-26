@@ -460,9 +460,13 @@ A program with more code than the 38 KB of fixed RAM (`SmallBuilders`, `SmallDou
 `SmallFormats` and `SmallDoubleFormats` are) keeps its largest functions in RAM banks. The build does
 it by itself when the first link is too big:
 
-1. It links once with room to spare, to see how big each function is.
-2. It moves the largest functions (150 bytes or more, up to 8 KB) into banks, about as much as is
-   over plus 4 KB for the heap and the stack, and links again, moving more if it was not enough.
+1. It links once with room to spare, to see how big each function is. The program's own functions
+   count, `cx16/math.c`'s, and the floating point of the compiler's library (`libcrt.a`, whose
+   members are LLVM IR): about 25 KB for a program that computes with doubles.
+2. It moves the largest functions (150 bytes or more, up to 7 KB) into banks, about as much as is
+   over plus 4 KB, and links again, moving more if it was not enough. Once the program links, it
+   goes on moving while less than 4 KB are left for the heap, and keeps the link that left the
+   most; so a banked program can take a few links more.
 3. A moved function `f` becomes `f__bank`, placed at $A000 in a bank of its own. A small function `f`
    stays in fixed RAM: it saves the bank register (the byte at $00), selects the bank, calls
    `f__bank`, and puts the old bank back. Calls, function pointers and virtual calls all go

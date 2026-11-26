@@ -208,7 +208,19 @@ static partial class C64
             if (code == 0)
             {
                 if (platform == "cx16")
+                {
+                    if (X16Improve(banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos), options))
+                        continue;
                     X16Finish(banks, llvmMos, outDir, output, name);
+                }
+                return;
+            }
+
+            // A try for more heap that doesn't link: what did link before it stays.
+            if (platform == "cx16" && !log.Contains("overflowed by", StringComparison.Ordinal)
+                && X16KeepBest(banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos)))
+            {
+                X16Finish(banks, llvmMos, outDir, output, name);
                 return;
             }
 
@@ -246,6 +258,11 @@ static partial class C64
             {
                 if (platform == "cx16" && X16MoveToBanks(ref banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos), tooBig.Value, options))
                     continue;
+                if (platform == "cx16" && X16KeepBest(banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos)))
+                {
+                    X16Finish(banks, llvmMos, outDir, output, name);
+                    return;
+                }
                 throw Fail($"{name} doesn't fit in {(platform == "c64" ? "a C64's" : "the " + platform + "'s")} memory:\n  too big by {tooBig.Groups[1].Value.Trim()}");
             }
             var missing = Regex.Matches(log, @"undefined symbol: cs_([A-Za-z0-9_]*)").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal).ToList();

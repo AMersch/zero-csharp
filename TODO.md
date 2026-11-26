@@ -28,6 +28,6 @@ output and no mouse: what can only be heard or seen needs a check in a window, o
 - **Real hardware:** nothing here has run on a real X16. Test at least `Mouse`, `DiskFiles` and a program with code in banks (two files on the SD card).
 - **`setup.sh`:** doesn't check for x16emu (only `run.sh` does).
 - **`cx16/math.c` for the C64:** the C64 runtime has no sin, cos, exp, log or pow either; the file stands alone and could be shared.
-- **Heap with code in banks:** a program that just fits (`SmallMath` has 310 bytes of heap) can run out of memory. The build warns below 3 KB; moving more code to get a minimum was tried and made some programs impossible. A smarter choice (the heap as a goal, with moving the largest functions first) is open.
+- **Heap with code in banks:** the build now moves the floating point library too and goes on until 4 KB are left, but it can only move what is code in a function of up to 7 KB: not the runtime (`cx16/runtime.c`, 5 KB for filled triangles), the data (3 KB), the 2 KB shadow stack, or one huge method. The functions are picked by size, not by how often they run.
 - **Files:** four open at once, names up to 37 characters; no directory listing yet (`cbm_opendir` exists).
 - **Headless testing** has no frame interrupt: the clock, joysticks and mouse can't be tested there.

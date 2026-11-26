@@ -19,7 +19,13 @@
 //   - Banks for data (lib/Banks.cs) start after the code banks.
 //
 // The functions are chosen by size, largest first, only when the program
-// doesn't fit without: see C64.Link.
+// doesn't fit without: see C64.Link. That covers the program's own functions,
+// cx16/math.c's, and the floating point of the compiler's library (libcrt's
+// members are LLVM IR: some 25 KB for a program that computes with doubles).
+//
+// Fitting isn't enough: what the code leaves is the heap. After the first link
+// that works, more functions are moved while less than X16Heap bytes are left,
+// and the link that left the most is the one that is kept.
 
 using System.Text;
 using System.Text.RegularExpressions;
@@ -41,6 +47,9 @@ static partial class C64
         public int Next, Saved, Goal, Count;
         public int Headroom = 512;      // left empty in each bank: the sizes measured aren't quite the final ones
         public string Plain = "";
+
+        // Once a link has worked: the one that left the most heap so far, and how the tries for more have gone.
+        public int BestFree = -1, BestCount, Tries, Worse;
     }
 
     /// <summary>What Link has, for the X16 code to link again with.</summary>
@@ -51,12 +60,16 @@ static partial class C64
     // SmallBuilders and SmallDoubleFormats failed (out of memory) with 2 KB.
     const int X16Slack = 4096;
 
+    // What is aimed for: the bytes of heap (with 1 KB for the stack on top of them).
+    const int X16Heap = 4096;
+
     /// <summary>
     /// Links once with room for all of the program, to see how big its functions
     /// are. Null if even that doesn't work.
     /// </summary>
     static X16Banks? X16Measure(X16Context c)
     {
+        X16AddSoftFloat(c);
         string plain = Path.Combine(c.OutDir, "plain");
         Directory.CreateDirectory(plain);
         foreach (string file in c.Whole.Concat(c.Separate.Select(f => f[..^2])).Where(f => f.EndsWith(".ll", StringComparison.Ordinal)))
@@ -75,6 +88,85 @@ static partial class C64
             All = all,
             Candidates = all.Where(f => f.Size >= 150 && f.Size <= Banking.BankSize - 1024).ToList(),
         };
+    }
+
+    /// <summary>
+    /// The floating point routines of the compiler's library, as IR next to the
+    /// program's, so that they can go into banks too. They are what the linker
+    /// would take from libcrt.a otherwise, and the ones not called are dropped
+    /// from the program as they would not have been taken.
+    /// </summary>
+    static void X16AddSoftFloat(X16Context c)
+    {
+        string library = Path.Combine(c.LlvmMos, "mos-platform", "common", "lib", "libcrt.a");
+        string members = Path.Combine(c.OutDir, "crt");
+        Directory.CreateDirectory(members);
+        string ar = Path.Combine(c.LlvmMos, "bin", OperatingSystem.IsWindows() ? "llvm-ar.exe" : "llvm-ar");
+        Tools.Run(ar, ["x", $"--output={members}", library], "unpacking libcrt.a");
+        foreach (string member in Directory.GetFiles(members, "*.c.obj").Order(StringComparer.Ordinal))
+        {
+            string routine = Path.GetFileName(member)[..^".c.obj".Length];
+            if (!Regex.IsMatch(routine, "^(add|sub|mul|div|compare|extend|trunc|fix|fixuns|float|floatun)[a-z]*[sd]f[a-z0-9]*$", RegexOptions.CultureInvariant))
+                continue;
+            string ir = Path.Combine(c.OutDir, "crt_" + routine + ".ll");
+            Tools.Run(c.Clang, [.. c.Mos, "-S", "-emit-llvm", "-x", "ir", member, "-o", ir], $"reading {routine} of libcrt.a");
+            c.Whole.Add(ir);
+        }
+    }
+
+    static string X16Tool(X16Context c, string name) => Path.Combine(c.LlvmMos, "bin", OperatingSystem.IsWindows() ? name + ".exe" : name);
+
+    /// <summary>The bytes the linked program leaves for the heap (1 KB below the top is the stack's), or -1 if that can't be told.</summary>
+    static int X16HeapLeft(X16Context c)
+    {
+        var (code, log) = Capture(X16Tool(c, "llvm-nm"), ["--radix=d", c.Output + ".elf"]);
+        Match heap = Regex.Match(log, @"^\s*(\d+)\s+\w\s+__heap_start\s*$", RegexOptions.Multiline | RegexOptions.CultureInvariant);
+        return code == 0 && heap.Success ? Math.Max(0x9F00 - 1024 - int.Parse(heap.Groups[1].Value), 0) : -1;
+    }
+
+    /// <summary>
+    /// After a link that worked: keeps it if it left more heap than the ones
+    /// before, and says whether to try again with more functions in banks. When
+    /// not, the output is the best link's.
+    /// </summary>
+    static bool X16Improve(X16Banks? banks, X16Context c, List<string> options)
+    {
+        if (banks == null)
+            return false;
+        int free = X16HeapLeft(c);
+        if (free > banks.BestFree)
+        {
+            banks.BestFree = free;
+            banks.BestCount = banks.Count;
+            banks.Worse = 0;
+            File.Copy(c.Output, c.Output + ".best", overwrite: true);
+            File.Copy(c.Output + ".elf", c.Output + ".best.elf", overwrite: true);
+        }
+        else
+        {
+            banks.Worse++;
+        }
+        if (free >= 0 && free < X16Heap && banks.Worse < 3 && banks.Tries++ < 8 && banks.Next < banks.Candidates.Count)
+        {
+            banks.Goal = banks.Saved + (X16Heap - free) + 512;
+            while (banks.Saved < banks.Goal && banks.Next < banks.Candidates.Count)
+                banks.Saved += banks.Candidates[banks.Next++].Size - Banking.ThunkSize;
+            X16Apply(banks, c, options, $"{free} bytes of heap, trying for more");
+            return true;
+        }
+        X16KeepBest(banks, c);
+        return false;
+    }
+
+    /// <summary>Puts the best link back as the output. False if no link has worked yet.</summary>
+    static bool X16KeepBest(X16Banks? banks, X16Context c)
+    {
+        if (banks == null || banks.BestFree < 0)
+            return false;
+        File.Move(c.Output + ".best", c.Output, overwrite: true);
+        File.Move(c.Output + ".best.elf", c.Output + ".elf", overwrite: true);
+        banks.Count = banks.BestCount;
+        return true;
     }
 
     /// <summary>Moves the functions chosen so far, and sets the options for the next link.</summary>
@@ -194,15 +286,8 @@ static partial class C64
         Banking.Extract(llvmMos, output + ".elf", banks.Count, outDir, file);
 
         // What the heap and the stack have is what the code leaves: say if it isn't much.
-        var (code, log) = Capture(Path.Combine(llvmMos, "bin", OperatingSystem.IsWindows() ? "llvm-nm.exe" : "llvm-nm"),
-            ["--radix=d", output + ".elf"]);
-        Match heap = Regex.Match(log, @"^\s*(\d+)\s+\w\s+__heap_start\s*$", RegexOptions.Multiline);
-        if (code == 0 && heap.Success)
-        {
-            int free = 0x9F00 - 1024 - int.Parse(heap.Groups[1].Value);     // 1 KB of it is the stack's
-            if (free < 3072)
-                Console.Error.WriteLine($"[cx16]   {name}: only {Math.Max(free, 0)} bytes are left for the heap; a program that allocates a lot will run out of memory");
-        }
+        if (banks.BestFree is >= 0 and < 3072)
+            Console.Error.WriteLine($"[cx16]   {name}: only {banks.BestFree} bytes are left for the heap; a program that allocates a lot will run out of memory");
     }
 
     static class Banking

@@ -599,6 +599,14 @@ int clock_gettime(int clock, i64 *timespec)
 // One processor, no scheduler: as on DOS, a thread runs to its end when it is
 // created, and joining it just reports that it ended.
 
+// No pipes (lib/FileAsync.cs then reads and writes files without its I/O
+// thread, blocking, as its threads run to their end when created).
+int pipe(int fds[2])
+{
+    (void)fds;
+    return -1;
+}
+
 int pthread_create(void **thread, void *attributes, void *(*start)(void *), void *argument)
 {
     (void)attributes;

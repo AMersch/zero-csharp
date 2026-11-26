@@ -78,6 +78,13 @@ static class FileSystem
     // The longest path, in UTF-8 bytes with its '\0', that these functions take.
     internal const int MaxPath = 4096;
 
+    // Room for a path as a C string: its UTF-8 (at most 3 bytes a char) and
+    // the 0, up to `max`; a longer one doesn't fit, and ToC says so. A fiber
+    // on a microcontroller has 4 KB of stack in all, so a stackalloc of
+    // MaxPath there would overflow it.
+    internal static int PathRoom(ReadOnlySpan<char> path, int max = MaxPath)
+        => path.Length < max / 3 ? path.Length * 3 + 1 : max;
+
     static int s_system;
 
     internal static SystemKind System
@@ -292,7 +299,7 @@ static class FileSystem
 
     internal static FileError Stat(ReadOnlySpan<char> path, bool follow, out Status status)
     {
-        Span<byte> name = stackalloc byte[MaxPath];
+        Span<byte> name = stackalloc byte[PathRoom(path)];
         if (ToC(path, name) < 0)
         {
             status = default;

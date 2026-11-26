@@ -13,9 +13,9 @@
 //   won't open) stops the program with the message. To open a file that may
 //   not be there, use FileStream.TryOpen, which returns a FileError instead.
 // - The async methods (ReadAsync, WriteAsync, CopyToAsync...) of Stream
-//   itself call the blocking ones, so for a file and a MemoryStream they
-//   finish at once, the file having blocked the thread meanwhile. In a fiber,
-//   Pipe.AsStream's (lib/Fibers.cs) lets the other fibers run while it waits.
+//   itself call the blocking ones, so a MemoryStream's finish at once, and in
+//   a fiber Pipe.AsStream's (lib/Fibers.cs) let the other fibers run while
+//   they wait. FileStream's run on another thread (lib/FileAsync.cs), and
 //   NetworkStream's wait with no fiber at all (lib/SocketsAsync.cs).
 // - Memory is bounded and comes from where objects come from: a FileStream's
 //   buffer is a byte[] of the size you give it (4096 by default; the C
@@ -669,13 +669,14 @@ public class MemoryStream : Stream
 // the arena before disposing the stream loses the unwritten bytes but
 // corrupts nothing (the C library flushes open files at exit, and would
 // otherwise write from freed memory).
-public class FileStream : Stream
+public partial class FileStream : Stream
 {
     File _file;
     readonly byte[] _buffer; // null: unbuffered
     int _readPos, _readLen;  // bytes read ahead into _buffer, and how many are used
     int _writeLen;           // bytes in _buffer waiting to be written
     bool _read;              // the file was last read, so a write must seek first (C's rule)
+    bool _busy;              // an async operation is running (lib/FileAsync.cs)
     readonly bool _canRead, _canWrite, _canSeek;
 
     /// <summary>The path the file was opened with.</summary>
@@ -834,16 +835,34 @@ public class FileStream : Stream
             if (_readLen == 0)
                 return 0;
         }
+        return TakeReadAhead(buffer);
+    }
+
+    // Copies what was read ahead into buffer, as much as fits.
+    int TakeReadAhead(Span<byte> buffer)
+    {
         int n = Math.Min(buffer.Length, _readLen - _readPos);
         new ReadOnlySpan<byte>(_buffer, _readPos, n).CopyTo(buffer);
         _readPos += n;
         return n;
     }
 
+    // Before a write after reads: the file is ahead of the stream by what was
+    // read ahead and not used, so go back to the stream's position, which is
+    // also the seek C requires between a read and a write.
+    void LeaveReading()
+    {
+        long position = _file.Position - (_readLen - _readPos);
+        _readPos = _readLen = 0;
+        _read = false;
+        if (_canSeek && !_file.Seek(position))
+            throw new IOException(string.Concat("FileStream: couldn't seek in '", Name, "'"));
+    }
+
     /// <inheritdoc/>
     public override int ReadByte()
     {
-        if (_readPos < _readLen && _file.IsOpen)
+        if (_readPos < _readLen && _file.IsOpen && !_busy)
             return _buffer[_readPos++];
         return base.ReadByte();
     }
@@ -862,16 +881,7 @@ public class FileStream : Stream
         if (!_canWrite)
             throw new NotSupportedException("FileStream: opened without FileAccess.Write");
         if (_read)
-        {
-            // The file is ahead of the stream by what was read ahead and
-            // not used: go back to the stream's position, which is also
-            // the seek C requires between a read and a write.
-            long position = _file.Position - (_readLen - _readPos);
-            _readPos = _readLen = 0;
-            _read = false;
-            if (_canSeek && !_file.Seek(position))
-                throw new IOException(string.Concat("FileStream: couldn't seek in '", Name, "'"));
-        }
+            LeaveReading();
         if (_buffer == null)
         {
             WriteToFile(buffer);
@@ -891,7 +901,7 @@ public class FileStream : Stream
     /// <inheritdoc/>
     public override void WriteByte(byte value)
     {
-        if (_buffer != null && !_read && _writeLen < _buffer.Length && _canWrite && _file.IsOpen)
+        if (_buffer != null && !_read && _writeLen < _buffer.Length && _canWrite && _file.IsOpen && !_busy)
         {
             _buffer[_writeLen++] = value;
             return;
@@ -937,6 +947,7 @@ public class FileStream : Stream
     {
         if (!_file.IsOpen)
             return;
+        EnsureOpen(); // not while an async operation runs on the file
         FlushWrites();
         unsafe { _file.Close(); } // SAFETY: _file is this stream's only handle, and is forgotten here
         _file = default;
@@ -961,6 +972,8 @@ public class FileStream : Stream
     {
         if (!_file.IsOpen)
             throw new ObjectDisposedException("FileStream");
+        if (_busy)
+            throw new InvalidOperationException("FileStream: an async operation on it is still running (await it first)");
     }
 
     static string ErrorName(FileError error) => error switch

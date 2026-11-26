@@ -139,6 +139,10 @@ when the program fits, to test banking or to measure what a call costs (about 33
 For `dotnet build -p:ZeroTarget=cx16` the SDK carries `cx16/runtime.c` and `math.c`; `sdk/pack-local.sh`
 packs the checkout for projects on this machine, and `sdk/test/run.sh cx16_target` tests it.
 
+The integer division and multiplication in `cx16/runtime.c` are the C64's (`c64/runtime.c`) with two
+loops changed, so change both. `tests/cx16-math.sh` checks them in x16emu with `tests/c64-math`'s cases;
+`./test.sh --cx16` runs it first.
+
 `cx16/math.c` (sin, cos, exp, log, pow, ...) is tested on a computer first, against its math library:
 `cc -O1 -o /tmp/test-math cx16/test-math.c -lm && /tmp/test-math`; `SmallMath` then checks it in the emulator, and on the
 other targets that have the functions.

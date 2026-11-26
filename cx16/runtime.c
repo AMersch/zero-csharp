@@ -632,6 +632,1104 @@ char *cs_getenv(const char *name) { (void)name; return 0; } // no environment
 i32 cs_sched_yield(void) { return 0; }                      // no other thread to yield to
 i32 cs_get_nprocs(void) { return 1; }
 
+// ---- integer division and multiplication ---------------------------------------------
+//
+// As in c64/runtime.c, from which this section is copied: change both. The
+// differences are the two loops marked "two pairs": the X16's imaginary
+// registers have a gap between __rc9 ($09) and __rc10 ($18), so an index
+// mustn't run across it. tests/cx16-math.sh checks the section. The cycle counts
+// below are the C64's.
+//
+// The 6502 can't multiply or divide. For `/`, `%` and `*` it can't do with
+// shifts, llvm-mos calls __udivsi3, __mulsi3 and the like from its library,
+// written in C: dividing C#'s 32-bit numbers there costs 1,100-5,300 cycles
+// of a frame's 19,700, multiplying 1,250-2,500, and printing a number
+// (lib/Str.cs, Fmt.UInt: ulong % 10 and / 10) up to 16,000 a digit. The
+// library keeps them in three pieces (twenty divisions from 8 to 64 bits;
+// the four that give quotient and remainder together; four
+// multiplications), and replacing part of a piece means defining all of
+// it, here.
+//
+// The 16-, 32- and 64-bit divisions and the 32-bit multiplication are in
+// assembly: 2-5 times faster than the library's for the numbers programs
+// use, 1.3-7 for multiplying. The rest are C around them, or the library's
+// own method in C, as fast as before (on 8 bits it is hard to beat). The
+// library is faster only where its divisor and dividend are within a bit
+// or two of each other, by a few hundred cycles.
+//
+// Arguments and results follow llvm-mos's calling convention: the first
+// number's bytes in A, X, __rc2, __rc3, the second's after them, low byte
+// first; the result in the first's place. __rc2-__rc19, A, X and Y are the
+// caller's to save.
+
+typedef signed char i8;
+typedef unsigned char u8;
+typedef short i16;
+typedef unsigned short u16;
+
+// Unsigned division in assembly. Long division, a bit at a time: the
+// dividend shifts left into the remainder, and wherever the divisor fits it
+// is subtracted and a 1 shifts into the quotient (where the dividend's bit
+// was). Two shortcuts first: a dividend below the divisor is the remainder,
+// and the dividend's top bytes go into the remainder whole while it stays
+// below the divisor (a zero byte always does). The remainder is then kept
+// as wide as the divisor, in A when that is a byte (about 35 cycles a bit),
+// with the carry as its extra top bit.
+//
+// zero_udivmod32: n in A, X, __rc2, __rc3 and d (not 0) in __rc4-__rc7;
+// the quotient comes out in __rc8-__rc11, the remainder in __rc12-__rc15.
+__asm__(
+    "  .section .text.zero_udivmod32,\"ax\",@progbits\n"
+    "zero_udivmod32:\n"
+    "  sta __rc8\n"
+    "  stx __rc9\n"
+    "  lda __rc2\n"
+    "  sta __rc10\n"
+    "  lda __rc3\n"
+    "  sta __rc11\n"
+    "  lda __rc8\n"                   // n < d: the quotient is 0
+    "  cmp __rc4\n"
+    "  lda __rc9\n"
+    "  sbc __rc5\n"
+    "  lda __rc10\n"
+    "  sbc __rc6\n"
+    "  lda __rc11\n"
+    "  sbc __rc7\n"
+    "  bcs .Ldiv32\n"
+    "  lda __rc8\n"
+    "  sta __rc12\n"
+    "  lda __rc9\n"
+    "  sta __rc13\n"
+    "  lda __rc10\n"
+    "  sta __rc14\n"
+    "  lda __rc11\n"
+    "  sta __rc15\n"
+    "  lda #0\n"
+    "  sta __rc8\n"
+    "  sta __rc9\n"
+    "  sta __rc10\n"
+    "  sta __rc11\n"
+    "  rts\n"
+    ".Ldiv32:\n"
+    "  lda __rc10\n"                  // n under 65,536 (and so d): 16 bits
+    "  ora __rc11\n"
+    "  bne .Ldiv32_wide\n"
+    "  sta __rc14\n"
+    "  sta __rc15\n"
+    "  jmp zero_udivmod16_from32\n"
+    ".Ldiv32_wide:\n"
+    "  lda #0\n"
+    "  sta __rc12\n"
+    "  sta __rc13\n"
+    "  sta __rc14\n"
+    "  sta __rc15\n"
+    "  ldy #32\n"                     // bits left
+    ".Ldiv32_zero:\n"                 // a zero top byte (n >= d: not all)
+    "  lda __rc11\n"
+    "  bne .Ldiv32_byte_in\n"
+    "  lda __rc10\n"
+    "  sta __rc11\n"
+    "  lda __rc9\n"
+    "  sta __rc10\n"
+    "  lda __rc8\n"
+    "  sta __rc9\n"
+    "  lda #0\n"
+    "  sta __rc8\n"
+    "  tya\n"
+    "  sec\n"
+    "  sbc #8\n"
+    "  tay\n"
+    "  jmp .Ldiv32_zero\n"
+    ".Ldiv32_byte_in:\n"              // remainder * 256 + top byte < d?
+    "  lda __rc15\n"
+    "  bne .Ldiv32_bits\n"
+    "  lda __rc11\n"
+    "  cmp __rc4\n"
+    "  lda __rc12\n"
+    "  sbc __rc5\n"
+    "  lda __rc13\n"
+    "  sbc __rc6\n"
+    "  lda __rc14\n"
+    "  sbc __rc7\n"
+    "  bcs .Ldiv32_bits\n"
+    "  lda __rc14\n"                  // yes: it's the remainder, 8 zero bits
+    "  sta __rc15\n"                  // of the quotient (n >= d: not all 32)
+    "  lda __rc13\n"
+    "  sta __rc14\n"
+    "  lda __rc12\n"
+    "  sta __rc13\n"
+    "  lda __rc11\n"
+    "  sta __rc12\n"
+    "  lda __rc10\n"
+    "  sta __rc11\n"
+    "  lda __rc9\n"
+    "  sta __rc10\n"
+    "  lda __rc8\n"
+    "  sta __rc9\n"
+    "  lda #0\n"
+    "  sta __rc8\n"
+    "  tya\n"
+    "  sec\n"
+    "  sbc #8\n"
+    "  tay\n"
+    "  jmp .Ldiv32_byte_in\n"
+    ".Ldiv32_bits:\n"
+    "  lda __rc6\n"
+    "  ora __rc7\n"
+    "  bne .Ldiv32_long\n"
+    "  lda __rc5\n"
+    "  bne .Ldiv32_short\n"
+    "  lda __rc12\n"                  // a byte: the remainder in A
+    ".Ldiv32_byte:\n"
+    "  asl __rc8\n"
+    "  rol __rc9\n"
+    "  rol __rc10\n"
+    "  rol __rc11\n"
+    "  rol a\n"
+    "  bcs .Ldiv32_byte_fits\n"       // a ninth bit: more than d for sure
+    "  cmp __rc4\n"
+    "  bcc .Ldiv32_byte_next\n"
+    ".Ldiv32_byte_fits:\n"
+    "  sbc __rc4\n"                   // the carry is set both ways here
+    "  inc __rc8\n"
+    ".Ldiv32_byte_next:\n"
+    "  dey\n"
+    "  bne .Ldiv32_byte\n"
+    "  sta __rc12\n"
+    "  rts\n"
+    ".Ldiv32_short:\n"                // 16 bits
+    "  asl __rc8\n"
+    "  rol __rc9\n"
+    "  rol __rc10\n"
+    "  rol __rc11\n"
+    "  rol __rc12\n"
+    "  rol __rc13\n"
+    "  bcs .Ldiv32_short_fits\n"
+    "  lda __rc12\n"
+    "  cmp __rc4\n"
+    "  lda __rc13\n"
+    "  sbc __rc5\n"
+    "  bcc .Ldiv32_short_next\n"
+    ".Ldiv32_short_fits:\n"
+    "  lda __rc12\n"
+    "  sbc __rc4\n"
+    "  sta __rc12\n"
+    "  lda __rc13\n"
+    "  sbc __rc5\n"
+    "  sta __rc13\n"
+    "  inc __rc8\n"
+    ".Ldiv32_short_next:\n"
+    "  dey\n"
+    "  bne .Ldiv32_short\n"
+    "  rts\n"
+    ".Ldiv32_long:\n"                 // 32 bits
+    "  asl __rc8\n"
+    "  rol __rc9\n"
+    "  rol __rc10\n"
+    "  rol __rc11\n"
+    "  rol __rc12\n"
+    "  rol __rc13\n"
+    "  rol __rc14\n"
+    "  rol __rc15\n"
+    "  bcs .Ldiv32_long_fits\n"
+    "  lda __rc12\n"
+    "  cmp __rc4\n"
+    "  lda __rc13\n"
+    "  sbc __rc5\n"
+    "  lda __rc14\n"
+    "  sbc __rc6\n"
+    "  lda __rc15\n"
+    "  sbc __rc7\n"
+    "  bcc .Ldiv32_long_next\n"
+    ".Ldiv32_long_fits:\n"
+    "  lda __rc12\n"
+    "  sbc __rc4\n"
+    "  sta __rc12\n"
+    "  lda __rc13\n"
+    "  sbc __rc5\n"
+    "  sta __rc13\n"
+    "  lda __rc14\n"
+    "  sbc __rc6\n"
+    "  sta __rc14\n"
+    "  lda __rc15\n"
+    "  sbc __rc7\n"
+    "  sta __rc15\n"
+    "  inc __rc8\n"
+    ".Ldiv32_long_next:\n"
+    "  dey\n"
+    "  bne .Ldiv32_long\n"
+    "  rts\n"
+    "  .section .text.__udivsi3,\"ax\",@progbits\n"
+    "  .globl __udivsi3\n"
+    "__udivsi3:\n"
+    "  jsr zero_udivmod32\n"
+    ".Ludivsi3_quotient:\n"
+    "  lda __rc10\n"
+    "  sta __rc2\n"
+    "  lda __rc11\n"
+    "  sta __rc3\n"
+    "  lda __rc8\n"
+    "  ldx __rc9\n"
+    "  rts\n"
+    "  .section .text.__umodsi3,\"ax\",@progbits\n"
+    "  .globl __umodsi3\n"
+    "__umodsi3:\n"
+    "  jsr zero_udivmod32\n"
+    "  lda __rc14\n"
+    "  sta __rc2\n"
+    "  lda __rc15\n"
+    "  sta __rc3\n"
+    "  lda __rc12\n"
+    "  ldx __rc13\n"
+    "  rts\n"
+    "  .section .text.__udivmodsi4,\"ax\",@progbits\n"
+    "  .globl __udivmodsi4\n"
+    "__udivmodsi4:\n"                 // both: the remainder through a pointer,
+    "  ldy __rc8\n"                   // in __rc8, __rc9
+    "  sty __rc16\n"
+    "  ldy __rc9\n"
+    "  sty __rc17\n"
+    "  jsr zero_udivmod32\n"
+    "  ldy #0\n"
+    "  lda __rc12\n"
+    "  sta (__rc16),y\n"
+    "  iny\n"
+    "  lda __rc13\n"
+    "  sta (__rc16),y\n"
+    "  iny\n"
+    "  lda __rc14\n"
+    "  sta (__rc16),y\n"
+    "  iny\n"
+    "  lda __rc15\n"
+    "  sta (__rc16),y\n"
+    "  jmp .Ludivsi3_quotient\n"
+
+    // zero_udivmod16, the same on 16 bits: n in A, X and d (not 0) in
+    // __rc2, __rc3; the quotient comes out in __rc8, __rc9 and the
+    // remainder in __rc12, __rc13. The 32-bit division comes here for a
+    // dividend under 65,536. A dividend under 256, or whose top byte is
+    // below d, takes 8 steps on a byte.
+    "  .section .text.zero_udivmod16,\"ax\",@progbits\n"
+    "zero_udivmod16:\n"
+    "  ldy __rc2\n"
+    "  sty __rc4\n"
+    "  ldy __rc3\n"
+    "  sty __rc5\n"
+    "  sta __rc8\n"
+    "  stx __rc9\n"
+    "  cmp __rc4\n"                   // n < d: the quotient is 0
+    "  txa\n"
+    "  sbc __rc5\n"
+    "  bcs zero_udivmod16_from32\n"
+    "  lda __rc8\n"
+    "  sta __rc12\n"
+    "  stx __rc13\n"
+    "  lda #0\n"
+    "  sta __rc8\n"
+    "  sta __rc9\n"
+    "  rts\n"
+    "zero_udivmod16_from32:\n"        // n >= d in __rc8, __rc9 and d in __rc4, __rc5
+    "  lda #0\n"
+    "  sta __rc13\n"
+    "  ldy #8\n"
+    "  ldx __rc9\n"
+    "  bne .Ldiv16_two\n"
+    ".Ldiv8:\n"                       // a byte left in __rc8, the remainder in A
+    "  asl __rc8\n"
+    "  rol a\n"
+    "  bcs .Ldiv8_fits\n"
+    "  cmp __rc4\n"
+    "  bcc .Ldiv8_next\n"
+    ".Ldiv8_fits:\n"
+    "  sbc __rc4\n"
+    "  inc __rc8\n"
+    ".Ldiv8_next:\n"
+    "  dey\n"
+    "  bne .Ldiv8\n"
+    "  sta __rc12\n"
+    "  rts\n"
+    ".Ldiv16_two:\n"
+    "  lda __rc5\n"
+    "  bne .Ldiv16_wide\n"
+    "  cpx __rc4\n"                   // the top byte below d: it's the
+    "  bcs .Ldiv16_bytes\n"           // remainder, and a byte is left
+    "  txa\n"
+    "  ldx #0\n"
+    "  stx __rc9\n"
+    "  beq .Ldiv8\n"
+    ".Ldiv16_bytes:\n"                // 16 bits, the remainder in A
+    "  lda #0\n"
+    "  ldy #16\n"
+    ".Ldiv16_byte:\n"
+    "  asl __rc8\n"
+    "  rol __rc9\n"
+    "  rol a\n"
+    "  bcs .Ldiv16_byte_fits\n"
+    "  cmp __rc4\n"
+    "  bcc .Ldiv16_byte_next\n"
+    ".Ldiv16_byte_fits:\n"
+    "  sbc __rc4\n"
+    "  inc __rc8\n"
+    ".Ldiv16_byte_next:\n"
+    "  dey\n"
+    "  bne .Ldiv16_byte\n"
+    "  sta __rc12\n"
+    "  rts\n"
+    ".Ldiv16_wide:\n"                 // d above a byte: the top byte is the
+    "  stx __rc12\n"                  // remainder, a byte is left
+    "  lda #0\n"
+    "  sta __rc9\n"
+    ".Ldiv16_short:\n"
+    "  asl __rc8\n"
+    "  rol __rc12\n"
+    "  rol __rc13\n"
+    "  bcs .Ldiv16_short_fits\n"
+    "  lda __rc12\n"
+    "  cmp __rc4\n"
+    "  lda __rc13\n"
+    "  sbc __rc5\n"
+    "  bcc .Ldiv16_short_next\n"
+    ".Ldiv16_short_fits:\n"
+    "  lda __rc12\n"
+    "  sbc __rc4\n"
+    "  sta __rc12\n"
+    "  lda __rc13\n"
+    "  sbc __rc5\n"
+    "  sta __rc13\n"
+    "  inc __rc8\n"
+    ".Ldiv16_short_next:\n"
+    "  dey\n"
+    "  bne .Ldiv16_short\n"
+    "  rts\n"
+    "  .section .text.__udivhi3,\"ax\",@progbits\n"
+    "  .globl __udivhi3\n"
+    "__udivhi3:\n"
+    "  jsr zero_udivmod16\n"
+    "  lda __rc8\n"
+    "  ldx __rc9\n"
+    "  rts\n"
+    "  .section .text.__umodhi3,\"ax\",@progbits\n"
+    "  .globl __umodhi3\n"
+    "__umodhi3:\n"
+    "  jsr zero_udivmod16\n"
+    "  lda __rc12\n"
+    "  ldx __rc13\n"
+    "  rts\n"
+    "  .text\n");
+
+u32 __udivsi3(u32 n, u32 d);
+u32 __umodsi3(u32 n, u32 d);
+u32 __udivmodsi4(u32 n, u32 d, u32 *rem);
+u16 __udivhi3(u16 n, u16 d);
+u16 __umodhi3(u16 n, u16 d);
+
+// Unsigned division in C, the library's way: the divisor shifts left up to
+// the dividend's top bit, and back down a bit at a time, subtracted
+// wherever it fits.
+#define ZERO_UDIV(T, udiv, umod)                                                \
+    T udiv(T n, T d)                                                            \
+    {                                                                           \
+        if (d == 0 || d > n)                                                    \
+            return 0;                                                           \
+        u8 shift = zero_align_##T(n, &d);                                       \
+        T q = 1;                                                                \
+        n -= d;                                                                 \
+        for (; shift != 0; shift--) {                                           \
+            d >>= 1;                                                            \
+            q <<= 1;                                                            \
+            if (d <= n) {                                                       \
+                n -= d;                                                         \
+                q |= 1;                                                         \
+            }                                                                   \
+        }                                                                       \
+        return q;                                                               \
+    }                                                                           \
+    T umod(T n, T d)                                                            \
+    {                                                                           \
+        if (d == 0 || d > n)                                                    \
+            return n;                                                           \
+        u8 shift = zero_align_##T(n, &d);                                       \
+        n -= d;                                                                 \
+        for (; shift != 0; shift--) {                                           \
+            d >>= 1;                                                            \
+            if (d <= n)                                                         \
+                n -= d;                                                         \
+        }                                                                       \
+        return n;                                                               \
+    }
+// d, at most n, shifted left as far as it stays so; returns how far.
+#define ZERO_ALIGN(T)                                                           \
+    static inline u8 zero_align_##T(T n, T *dp)                                 \
+    {                                                                           \
+        T d = *dp;                                                              \
+        u8 shift = 0;                                                           \
+        while (!(d >> (sizeof(T) * 8 - 1)) && (T)(d << 1) <= n) {              \
+            d <<= 1;                                                            \
+            shift++;                                                            \
+        }                                                                       \
+        *dp = d;                                                                \
+        return shift;                                                           \
+    }
+ZERO_ALIGN(u8)
+ZERO_UDIV(u8, __udivqi3, __umodqi3)
+
+// zero_udivmod64_short: n in A, X, __rc2-__rc7, d under 65,536 (not 0) in
+// __rc8, __rc9 and a pointer for the remainder in __rc10, __rc11; the
+// quotient comes back in n's place. The dividend shifts in __rc12-__rc19,
+// the remainder in __rc2, __rc3.
+u64 zero_udivmod64_short(u64 n, u16 d, u64 *rem);
+__asm__(
+    "  .section .text.zero_udivmod64_short,\"ax\",@progbits\n"
+    "zero_udivmod64_short:\n"
+    "  sta __rc12\n"
+    "  stx __rc13\n"
+    "  ldx #5\n"
+    ".Ldiv64_copy:\n"
+    "  lda __rc2,x\n"
+    "  sta __rc14,x\n"
+    "  dex\n"
+    "  bpl .Ldiv64_copy\n"
+    "  lda #0\n"
+    "  sta __rc2\n"
+    "  sta __rc3\n"
+    "  ldy #64\n"
+    ".Ldiv64_skip:\n"                 // the dividend's zero top bytes
+    "  lda __rc19\n"
+    "  bne .Ldiv64_bits\n"
+    "  ldx #6\n"
+    ".Ldiv64_move:\n"
+    "  lda __rc12,x\n"
+    "  sta __rc13,x\n"
+    "  dex\n"
+    "  bpl .Ldiv64_move\n"
+    "  lda #0\n"
+    "  sta __rc12\n"
+    "  tya\n"
+    "  sec\n"
+    "  sbc #8\n"
+    "  tay\n"
+    "  bne .Ldiv64_skip\n"
+    "  beq .Ldiv64_out\n"             // n was 0
+    ".Ldiv64_bits:\n"
+    "  lda __rc9\n"
+    "  bne .Ldiv64_short\n"
+    "  lda #0\n"                      // a byte: the remainder in A
+    ".Ldiv64_byte:\n"
+    "  asl __rc12\n"
+    "  rol __rc13\n"
+    "  rol __rc14\n"
+    "  rol __rc15\n"
+    "  rol __rc16\n"
+    "  rol __rc17\n"
+    "  rol __rc18\n"
+    "  rol __rc19\n"
+    "  rol a\n"
+    "  bcs .Ldiv64_byte_fits\n"
+    "  cmp __rc8\n"
+    "  bcc .Ldiv64_byte_next\n"
+    ".Ldiv64_byte_fits:\n"
+    "  sbc __rc8\n"
+    "  inc __rc12\n"
+    ".Ldiv64_byte_next:\n"
+    "  dey\n"
+    "  bne .Ldiv64_byte\n"
+    "  sta __rc2\n"
+    "  beq .Ldiv64_out\n"             // Y is 0
+    ".Ldiv64_short:\n"
+    "  asl __rc12\n"
+    "  rol __rc13\n"
+    "  rol __rc14\n"
+    "  rol __rc15\n"
+    "  rol __rc16\n"
+    "  rol __rc17\n"
+    "  rol __rc18\n"
+    "  rol __rc19\n"
+    "  rol __rc2\n"
+    "  rol __rc3\n"
+    "  bcs .Ldiv64_short_fits\n"
+    "  lda __rc2\n"
+    "  cmp __rc8\n"
+    "  lda __rc3\n"
+    "  sbc __rc9\n"
+    "  bcc .Ldiv64_short_next\n"
+    ".Ldiv64_short_fits:\n"
+    "  lda __rc2\n"
+    "  sbc __rc8\n"
+    "  sta __rc2\n"
+    "  lda __rc3\n"
+    "  sbc __rc9\n"
+    "  sta __rc3\n"
+    "  inc __rc12\n"
+    ".Ldiv64_short_next:\n"
+    "  dey\n"
+    "  bne .Ldiv64_short\n"
+    ".Ldiv64_out:\n"
+    "  lda __rc10\n"                  // the remainder, if wanted
+    "  ora __rc11\n"
+    "  beq .Ldiv64_quotient\n"
+    "  ldy #0\n"
+    "  lda __rc2\n"
+    "  sta (__rc10),y\n"
+    "  iny\n"
+    "  lda __rc3\n"
+    "  sta (__rc10),y\n"
+    "  lda #0\n"
+    ".Ldiv64_rest:\n"
+    "  iny\n"
+    "  sta (__rc10),y\n"
+    "  cpy #7\n"
+    "  bne .Ldiv64_rest\n"
+    ".Ldiv64_quotient:\n"
+    "  ldx #5\n"
+    ".Ldiv64_back:\n"
+    "  lda __rc14,x\n"
+    "  sta __rc2,x\n"
+    "  dex\n"
+    "  bpl .Ldiv64_back\n"
+    "  lda __rc12\n"
+    "  ldx __rc13\n"
+    "  rts\n"
+    "  .text\n");
+
+// 64 bits (C#'s long and ulong, and the decimal and double formatting
+// that works in them). zero_udivmod64: n in A, X, __rc2-__rc7 and d (not
+// 0) in __rc8-__rc15; the quotient comes back in n's place and the
+// remainder in zero_rem64. A dividend below the divisor is the remainder,
+// one that fits in 32 bits goes to the 32-bit division, and a divisor
+// under 65,536 to zero_udivmod64_short. Others (rare) go the library's
+// way: the divisor shifts left up to the dividend's top bit, and back down
+// a bit at a time, subtracted wherever it fits.
+__asm__(
+    "  .section .noinit.zero_rem64,\"aw\",@nobits\n"
+    "  .globl zero_rem64\n"
+    "zero_rem64:\n"
+    "  .zero 8\n"
+    "  .section .text.zero_udivmod64,\"ax\",@progbits\n"
+    "zero_udivmod64:\n"
+    "  sta __rc18\n"
+    "  stx __rc19\n"
+    "  cmp __rc8\n"                   // n < d: the quotient is 0
+    "  txa\n"
+    "  sbc __rc9\n"
+    "  lda __rc2\n"
+    "  sbc __rc10\n"
+    "  lda __rc3\n"
+    "  sbc __rc11\n"
+    "  lda __rc4\n"
+    "  sbc __rc12\n"
+    "  lda __rc5\n"
+    "  sbc __rc13\n"
+    "  lda __rc6\n"
+    "  sbc __rc14\n"
+    "  lda __rc7\n"
+    "  sbc __rc15\n"
+    "  bcs .Ldiv64_ge\n"
+    "  lda __rc18\n"                  // the remainder is n
+    "  sta zero_rem64\n"
+    "  lda __rc19\n"
+    "  sta zero_rem64+1\n"
+    "  ldx #5\n"
+    ".Ldiv64_n:\n"
+    "  lda __rc2,x\n"
+    "  sta zero_rem64+2,x\n"
+    "  lda #0\n"
+    "  sta __rc2,x\n"
+    "  dex\n"
+    "  bpl .Ldiv64_n\n"
+    "  tax\n"
+    "  rts\n"
+    ".Ldiv64_ge:\n"
+    "  lda __rc4\n"                   // n in 32 bits (and so d)?
+    "  ora __rc5\n"
+    "  ora __rc6\n"
+    "  ora __rc7\n"
+    "  bne .Ldiv64_wide\n"
+    "  ldx #1\n"                      // two pairs: __rc8-__rc11 aren't
+    ".Ldiv64_d32:\n"                  // one block here
+    "  lda __rc8,x\n"
+    "  sta __rc4,x\n"
+    "  lda __rc10,x\n"
+    "  sta __rc6,x\n"
+    "  dex\n"
+    "  bpl .Ldiv64_d32\n"
+    "  lda __rc18\n"
+    "  ldx __rc19\n"
+    "  jsr zero_udivmod32\n"
+    "  ldx #3\n"
+    ".Ldiv64_r32:\n"
+    "  lda __rc12,x\n"
+    "  sta zero_rem64,x\n"
+    "  lda #0\n"
+    "  sta zero_rem64+4,x\n"
+    "  sta __rc4,x\n"
+    "  dex\n"
+    "  bpl .Ldiv64_r32\n"
+    "  lda __rc10\n"
+    "  sta __rc2\n"
+    "  lda __rc11\n"
+    "  sta __rc3\n"
+    "  lda __rc8\n"
+    "  ldx __rc9\n"
+    "  rts\n"
+    ".Ldiv64_wide:\n"
+    "  lda __rc10\n"                  // d under 65,536?
+    "  ora __rc11\n"
+    "  ora __rc12\n"
+    "  ora __rc13\n"
+    "  ora __rc14\n"
+    "  ora __rc15\n"
+    "  bne .Ldiv64_long\n"
+    "  lda #mos16lo(zero_rem64)\n"
+    "  sta __rc10\n"
+    "  lda #mos16hi(zero_rem64)\n"
+    "  sta __rc11\n"
+    "  lda __rc18\n"
+    "  ldx __rc19\n"
+    "  jmp zero_udivmod64_short\n"
+    ".Ldiv64_long:\n"   // n in __rc18, __rc19, __rc2-__rc7; d shifts
+    "  ldy #0\n"   // up to n's top bit, a byte then a bit at a time
+    ".Ldiv64_long_bytes:\n"
+    "  lda __rc15\n"
+    "  bne .Ldiv64_long_bits\n"
+    "  lda __rc19\n"
+    "  cmp __rc8\n"
+    "  lda __rc2\n"
+    "  sbc __rc9\n"
+    "  lda __rc3\n"
+    "  sbc __rc10\n"
+    "  lda __rc4\n"
+    "  sbc __rc11\n"
+    "  lda __rc5\n"
+    "  sbc __rc12\n"
+    "  lda __rc6\n"
+    "  sbc __rc13\n"
+    "  lda __rc7\n"
+    "  sbc __rc14\n"
+    "  bcc .Ldiv64_long_bits\n"
+    "  lda __rc14\n"
+    "  sta __rc15\n"
+    "  lda __rc13\n"
+    "  sta __rc14\n"
+    "  lda __rc12\n"
+    "  sta __rc13\n"
+    "  lda __rc11\n"
+    "  sta __rc12\n"
+    "  lda __rc10\n"
+    "  sta __rc11\n"
+    "  lda __rc9\n"
+    "  sta __rc10\n"
+    "  lda __rc8\n"
+    "  sta __rc9\n"
+    "  lda #0\n"
+    "  sta __rc8\n"
+    "  tya\n"
+    "  clc\n"
+    "  adc #8\n"
+    "  tay\n"
+    "  jmp .Ldiv64_long_bytes\n"
+    ".Ldiv64_long_bits:\n"
+    "  lda __rc15\n"
+    "  bmi .Ldiv64_long_aligned\n"
+    "  asl __rc8\n"
+    "  rol __rc9\n"
+    "  rol __rc10\n"
+    "  rol __rc11\n"
+    "  rol __rc12\n"
+    "  rol __rc13\n"
+    "  rol __rc14\n"
+    "  rol __rc15\n"
+    "  lda __rc18\n"
+    "  cmp __rc8\n"
+    "  lda __rc19\n"
+    "  sbc __rc9\n"
+    "  lda __rc2\n"
+    "  sbc __rc10\n"
+    "  lda __rc3\n"
+    "  sbc __rc11\n"
+    "  lda __rc4\n"
+    "  sbc __rc12\n"
+    "  lda __rc5\n"
+    "  sbc __rc13\n"
+    "  lda __rc6\n"
+    "  sbc __rc14\n"
+    "  lda __rc7\n"
+    "  sbc __rc15\n"
+    "  bcc .Ldiv64_long_back\n"
+    "  iny\n"
+    "  jmp .Ldiv64_long_bits\n"
+    ".Ldiv64_long_back:\n"
+    "  lsr __rc15\n"
+    "  ror __rc14\n"
+    "  ror __rc13\n"
+    "  ror __rc12\n"
+    "  ror __rc11\n"
+    "  ror __rc10\n"
+    "  ror __rc9\n"
+    "  ror __rc8\n"
+    ".Ldiv64_long_aligned:\n"   // the quotient, in zero_rem64 for now: 1
+    "  lda #1\n"
+    "  sta zero_rem64\n"
+    "  lda #0\n"
+    "  ldx #6\n"
+    ".Ldiv64_long_q:\n"
+    "  sta zero_rem64+1,x\n"
+    "  dex\n"
+    "  bpl .Ldiv64_long_q\n"
+    "  sec\n"
+    "  lda __rc18\n"
+    "  sbc __rc8\n"
+    "  sta __rc18\n"
+    "  lda __rc19\n"
+    "  sbc __rc9\n"
+    "  sta __rc19\n"
+    "  lda __rc2\n"
+    "  sbc __rc10\n"
+    "  sta __rc2\n"
+    "  lda __rc3\n"
+    "  sbc __rc11\n"
+    "  sta __rc3\n"
+    "  lda __rc4\n"
+    "  sbc __rc12\n"
+    "  sta __rc4\n"
+    "  lda __rc5\n"
+    "  sbc __rc13\n"
+    "  sta __rc5\n"
+    "  lda __rc6\n"
+    "  sbc __rc14\n"
+    "  sta __rc6\n"
+    "  lda __rc7\n"
+    "  sbc __rc15\n"
+    "  sta __rc7\n"
+    ".Ldiv64_long_step:\n"   // back down a bit at a time
+    "  tya\n"
+    "  bne .Ldiv64_long_more\n"
+    "  jmp .Ldiv64_long_done\n"
+    ".Ldiv64_long_more:\n"
+    "  dey\n"
+    "  lsr __rc15\n"
+    "  ror __rc14\n"
+    "  ror __rc13\n"
+    "  ror __rc12\n"
+    "  ror __rc11\n"
+    "  ror __rc10\n"
+    "  ror __rc9\n"
+    "  ror __rc8\n"
+    "  asl zero_rem64\n"
+    "  rol zero_rem64+1\n"
+    "  rol zero_rem64+2\n"
+    "  rol zero_rem64+3\n"
+    "  rol zero_rem64+4\n"
+    "  rol zero_rem64+5\n"
+    "  rol zero_rem64+6\n"
+    "  rol zero_rem64+7\n"
+    "  lda __rc18\n"
+    "  cmp __rc8\n"
+    "  lda __rc19\n"
+    "  sbc __rc9\n"
+    "  lda __rc2\n"
+    "  sbc __rc10\n"
+    "  lda __rc3\n"
+    "  sbc __rc11\n"
+    "  lda __rc4\n"
+    "  sbc __rc12\n"
+    "  lda __rc5\n"
+    "  sbc __rc13\n"
+    "  lda __rc6\n"
+    "  sbc __rc14\n"
+    "  lda __rc7\n"
+    "  sbc __rc15\n"
+    "  bcs .Ldiv64_long_fits\n"
+    "  jmp .Ldiv64_long_step\n"
+    ".Ldiv64_long_fits:\n"
+    "  lda __rc18\n"
+    "  sbc __rc8\n"
+    "  sta __rc18\n"
+    "  lda __rc19\n"
+    "  sbc __rc9\n"
+    "  sta __rc19\n"
+    "  lda __rc2\n"
+    "  sbc __rc10\n"
+    "  sta __rc2\n"
+    "  lda __rc3\n"
+    "  sbc __rc11\n"
+    "  sta __rc3\n"
+    "  lda __rc4\n"
+    "  sbc __rc12\n"
+    "  sta __rc4\n"
+    "  lda __rc5\n"
+    "  sbc __rc13\n"
+    "  sta __rc5\n"
+    "  lda __rc6\n"
+    "  sbc __rc14\n"
+    "  sta __rc6\n"
+    "  lda __rc7\n"
+    "  sbc __rc15\n"
+    "  sta __rc7\n"
+    "  inc zero_rem64\n"
+    "  jmp .Ldiv64_long_step\n"
+    ".Ldiv64_long_done:\n"   // what's left of n is the remainder: swap
+    "  lda zero_rem64+2\n"
+    "  ldx __rc2\n"
+    "  stx zero_rem64+2\n"
+    "  sta __rc2\n"
+    "  lda zero_rem64+3\n"
+    "  ldx __rc3\n"
+    "  stx zero_rem64+3\n"
+    "  sta __rc3\n"
+    "  lda zero_rem64+4\n"
+    "  ldx __rc4\n"
+    "  stx zero_rem64+4\n"
+    "  sta __rc4\n"
+    "  lda zero_rem64+5\n"
+    "  ldx __rc5\n"
+    "  stx zero_rem64+5\n"
+    "  sta __rc5\n"
+    "  lda zero_rem64+6\n"
+    "  ldx __rc6\n"
+    "  stx zero_rem64+6\n"
+    "  sta __rc6\n"
+    "  lda zero_rem64+7\n"
+    "  ldx __rc7\n"
+    "  stx zero_rem64+7\n"
+    "  sta __rc7\n"
+    "  lda zero_rem64\n"
+    "  ldx __rc18\n"
+    "  stx zero_rem64\n"
+    "  sta __rc18\n"
+    "  lda zero_rem64+1\n"
+    "  ldx __rc19\n"
+    "  stx zero_rem64+1\n"
+    "  sta __rc19\n"
+    "  lda __rc18\n"
+    "  ldx __rc19\n"
+    "  rts\n"
+
+    // The library's three, on top of it. __udivmoddi4's pointer comes on
+    // the stack: the numbers fill the registers.
+    "  .section .text.__udivdi3,\"ax\",@progbits\n"
+    "  .globl __udivdi3\n"
+    "__udivdi3:\n"
+    "  jmp zero_udivmod64\n"
+    "  .section .text.__umoddi3,\"ax\",@progbits\n"
+    "  .globl __umoddi3\n"
+    "__umoddi3:\n"
+    "  jsr zero_udivmod64\n"
+    "  ldx #5\n"
+    ".Lumoddi3_copy:\n"
+    "  lda zero_rem64+2,x\n"
+    "  sta __rc2,x\n"
+    "  dex\n"
+    "  bpl .Lumoddi3_copy\n"
+    "  lda zero_rem64\n"
+    "  ldx zero_rem64+1\n"
+    "  rts\n"
+    "  .section .text.__udivmoddi4,\"ax\",@progbits\n"
+    "  .globl __udivmoddi4\n"
+    "__udivmoddi4:\n"
+    "  jsr zero_udivmod64\n"
+    "  sta __rc18\n"
+    "  ldy #0\n"
+    "  lda (__rc0),y\n"
+    "  sta __rc16\n"
+    "  iny\n"
+    "  lda (__rc0),y\n"
+    "  sta __rc17\n"
+    "  ora __rc16\n"
+    "  beq .Ludivmoddi4_done\n"
+    "  ldy #7\n"
+    ".Ludivmoddi4_copy:\n"
+    "  lda zero_rem64,y\n"
+    "  sta (__rc16),y\n"
+    "  dey\n"
+    "  bpl .Ludivmoddi4_copy\n"
+    ".Ludivmoddi4_done:\n"
+    "  lda __rc18\n"
+    "  rts\n"
+    "  .text\n");
+
+u64 __udivdi3(u64 n, u64 d);
+u64 __umoddi3(u64 n, u64 d);
+u64 __udivmoddi4(u64 n, u64 d, u64 *rem);
+
+// Signed: rounded towards zero, and the remainder has the dividend's sign,
+// as in C and C#. The minimum value divided by -1 overflows to itself (C#
+// throws before it gets here).
+#define ZERO_DIVMOD(S, U, div, mod, udiv, umod)                                 \
+    S div(S n, S d)                                                             \
+    {                                                                           \
+        U q = udiv(n < 0 ? (U)(0 - (U)n) : (U)n, d < 0 ? (U)(0 - (U)d) : (U)d);  \
+        return (S)((n < 0) != (d < 0) ? (U)(0 - q) : q);                        \
+    }                                                                           \
+    S mod(S n, S d)                                                             \
+    {                                                                           \
+        U r = umod(n < 0 ? (U)(0 - (U)n) : (U)n, d < 0 ? (U)(0 - (U)d) : (U)d);  \
+        return (S)(n < 0 ? (U)(0 - r) : r);                                     \
+    }
+ZERO_DIVMOD(i8, u8, __divqi3, __modqi3, __udivqi3, __umodqi3)
+ZERO_DIVMOD(i16, u16, __divhi3, __modhi3, __udivhi3, __umodhi3)
+ZERO_DIVMOD(i32, u32, __divsi3, __modsi3, __udivsi3, __umodsi3)
+ZERO_DIVMOD(i64, u64, __divdi3, __moddi3, __udivdi3, __umoddi3)
+
+// Both at once, the remainder through a pointer.
+#define ZERO_SDIVMOD(S, U, divmod, udivmod)                                     \
+    S divmod(S n, S d, S *rem)                                                  \
+    {                                                                           \
+        U r;                                                                    \
+        U q = udivmod(n < 0 ? 0 - (U)n : (U)n, d < 0 ? 0 - (U)d : (U)d, &r);    \
+        *rem = (S)(n < 0 ? 0 - r : r);                                          \
+        return (S)((n < 0) != (d < 0) ? 0 - q : q);                             \
+    }
+ZERO_SDIVMOD(i32, u32, __divmodsi4, __udivmodsi4)
+ZERO_SDIVMOD(i64, u64, __divmoddi4, __udivmoddi4)
+u8 __udivmodqi4(u8 n, u8 d, u8 *rem) { *rem = __umodqi3(n, d); return __udivqi3(n, d); }
+u16 __udivmodhi4(u16 n, u16 d, u16 *rem) { *rem = __umodhi3(n, d); return __udivhi3(n, d); }
+i8 __divmodqi4(i8 n, i8 d, i8 *rem) { *rem = __modqi3(n, d); return __divqi3(n, d); }
+i16 __divmodhi4(i16 n, i16 d, i16 *rem) { *rem = __modhi3(n, d); return __divhi3(n, d); }
+
+// The low 32 bits of a * b (the same for signed and unsigned numbers), in
+// assembly: a in A, X, __rc2, __rc3 and b in __rc4-__rc7. The factor with
+// fewer bytes is the multiplier, taken from the bottom a byte at a time:
+// for each 1 bit the multiplicand is added, and it shifts left a bit for
+// the next. A byte ends with its last 1 bit, a zero byte costs a byte
+// move, and the work ends with the multiplier's last nonzero byte.
+__asm__(
+    "  .section .text.__mulsi3,\"ax\",@progbits\n"
+    "  .globl __mulsi3\n"
+    "__mulsi3:\n"
+    "  sta __rc8\n"                   // the multiplicand: __rc8-__rc11
+    "  stx __rc9\n"
+    "  lda __rc2\n"
+    "  sta __rc10\n"
+    "  lda __rc3\n"
+    "  sta __rc11\n"
+    "  lda __rc6\n"                   // b above 16 bits: a is shorter?
+    "  ora __rc7\n"
+    "  beq .Lmul_b_short\n"
+    "  lda __rc10\n"
+    "  ora __rc11\n"
+    "  beq .Lmul_swap\n"
+    "  bne .Lmul_start\n"
+    ".Lmul_b_short:\n"                // b above 8 bits: is a a byte?
+    "  lda __rc5\n"
+    "  beq .Lmul_start\n"
+    "  lda __rc9\n"
+    "  ora __rc10\n"
+    "  ora __rc11\n"
+    "  bne .Lmul_start\n"
+    ".Lmul_swap:\n"
+    "  ldx #1\n"                      // two pairs: __rc8-__rc11 aren't
+    ".Lmul_swap_byte:\n"              // one block here
+    "  lda __rc4,x\n"
+    "  ldy __rc8,x\n"
+    "  sta __rc8,x\n"
+    "  sty __rc4,x\n"
+    "  lda __rc6,x\n"
+    "  ldy __rc10,x\n"
+    "  sta __rc10,x\n"
+    "  sty __rc6,x\n"
+    "  dex\n"
+    "  bpl .Lmul_swap_byte\n"
+    ".Lmul_start:\n"
+    "  lda #0\n"                      // the product: __rc12-__rc15
+    "  sta __rc12\n"
+    "  sta __rc13\n"
+    "  sta __rc14\n"
+    "  sta __rc15\n"
+    ".Lmul_byte:\n"
+    "  lda __rc4\n"
+    "  beq .Lmul_zero_byte\n"
+    "  ldy #8\n"                      // shifts of the multiplicand left
+    ".Lmul_bit:\n"
+    "  lsr __rc4\n"
+    "  bcc .Lmul_shift\n"
+    "  clc\n"
+    "  lda __rc12\n"
+    "  adc __rc8\n"
+    "  sta __rc12\n"
+    "  lda __rc13\n"
+    "  adc __rc9\n"
+    "  sta __rc13\n"
+    "  lda __rc14\n"
+    "  adc __rc10\n"
+    "  sta __rc14\n"
+    "  lda __rc15\n"
+    "  adc __rc11\n"
+    "  sta __rc15\n"
+    ".Lmul_shift:\n"
+    "  asl __rc8\n"
+    "  rol __rc9\n"
+    "  rol __rc10\n"
+    "  rol __rc11\n"
+    "  dey\n"
+    "  lda __rc4\n"
+    "  bne .Lmul_bit\n"
+    "  lda __rc5\n"                   // the byte's last 1 bit: more bytes?
+    "  ora __rc6\n"
+    "  ora __rc7\n"
+    "  beq .Lmul_done\n"
+    "  tya\n"
+    "  beq .Lmul_next\n"
+    ".Lmul_rest:\n"                   // the byte's remaining shifts
+    "  asl __rc8\n"
+    "  rol __rc9\n"
+    "  rol __rc10\n"
+    "  rol __rc11\n"
+    "  dey\n"
+    "  bne .Lmul_rest\n"
+    "  beq .Lmul_next\n"
+    ".Lmul_zero_byte:\n"
+    "  lda __rc5\n"
+    "  ora __rc6\n"
+    "  ora __rc7\n"
+    "  beq .Lmul_done\n"
+    "  lda __rc10\n"                  // shift the multiplicand a byte
+    "  sta __rc11\n"
+    "  lda __rc9\n"
+    "  sta __rc10\n"
+    "  lda __rc8\n"
+    "  sta __rc9\n"
+    "  lda #0\n"
+    "  sta __rc8\n"
+    ".Lmul_next:\n"                   // and the multiplier the other way
+    "  lda __rc5\n"
+    "  sta __rc4\n"
+    "  lda __rc6\n"
+    "  sta __rc5\n"
+    "  lda __rc7\n"
+    "  sta __rc6\n"
+    "  lda #0\n"
+    "  sta __rc7\n"
+    "  beq .Lmul_byte\n"
+    ".Lmul_done:\n"
+    "  lda __rc14\n"
+    "  sta __rc2\n"
+    "  lda __rc15\n"
+    "  sta __rc3\n"
+    "  lda __rc12\n"
+    "  ldx __rc13\n"
+    "  rts\n"
+    "  .text\n");
+
+// The other widths in C, the library's way: add a, shifting left, for each
+// 1 bit of b, until b has none left.
+#define ZERO_MUL(T, name)                                                       \
+    T name(T a, T b)                                                            \
+    {                                                                           \
+        T p = 0;                                                                \
+        while (b != 0) {                                                        \
+            if (b & 1)                                                          \
+                p += a;                                                         \
+            a <<= 1;                                                            \
+            b >>= 1;                                                            \
+        }                                                                       \
+        return p;                                                               \
+    }
+ZERO_MUL(u8, __mulqi3)
+ZERO_MUL(u16, __mulhi3)
+ZERO_MUL(u64, __muldi3)
+
+// ---- end of integer division ----------------------------------------------------------
+
 // ---- floating point ------------------------------------------------------------------
 //
 // The 6502 has none; llvm-mos computes float and double in software, slowly

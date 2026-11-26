@@ -557,6 +557,7 @@ test_dos() {
 }
 
 test_cx16() {
+    tests/cx16-math.sh
     ./build.sh --cx16 > /dev/null
     local card name out status
     card=$(find_x16_sdcard) || card=

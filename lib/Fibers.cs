@@ -715,7 +715,7 @@ public static class Fiber
 /// A queue that fibers pass values through: Send waits while it's full,
 /// Receive while it's empty. Capacity 0 makes every Send wait for a Receive.
 /// </summary>
-public sealed class Channel<T>
+public sealed partial class Channel<T>
 {
     readonly T[] _items;
     int _head, _count;
@@ -725,6 +725,21 @@ public sealed class Channel<T>
     // A value moves straight into or out of a slot, so a woken fiber finds its
     // work done and nothing can take its place in the meantime.
     unsafe Fiber.Record* _senders, _receivers;
+    // Async methods waiting (lib/ChannelAsync.cs), once ReceiveAsync,
+    // SendAsync or WaitToReceiveAsync has had to wait. Fibers waiting go
+    // first. Behind an abstract class, so a program that never uses them
+    // links none of their code (on a C64, every KB counts).
+    AsyncWaiters? _async;
+
+    internal abstract class AsyncWaiters
+    {
+        internal abstract bool HasSender { get; }
+        internal abstract bool HasReceiver { get; }
+        internal abstract bool Give(T value);       // to a waiting ReceiveAsync: true if one took it
+        internal abstract bool Take(out T value);   // from a waiting SendAsync: true if there was one
+        internal abstract void Available();        // a value is ready: WaitToReceiveAsync's wake
+        internal abstract void Closed();
+    }
 
     /// <summary>A channel that holds up to <paramref name="capacity"/> values before Send waits.</summary>
     public Channel(int capacity = 0)
@@ -762,15 +777,19 @@ public sealed class Channel<T>
                 Fiber.Wake(receiver, true);
                 return;
             }
+            if (_async != null && _async.Give(value))
+                return;
             if (_count < Capacity)
             {
                 Push(value);
+                _async?.Available();
                 return;
             }
             Fiber.Record* current = Fiber.CurrentRecord;
             if (current != null)
                 current->Slot = System.Runtime.CompilerServices.Unsafe.AsPointer(ref value);
             Append(ref _senders, current);
+            _async?.Available(); // capacity 0: a value waits to be taken
             if (!Fiber.Park("Channel.Send: the channel is full, and only a fiber can wait"))
                 Environment.FailFast("Channel.Send: the channel was closed while sending");
         }
@@ -795,6 +814,10 @@ public sealed class Channel<T>
                     Push(*(T*)sender->Slot);
                     Fiber.Wake(sender, true);
                 }
+                else if (_async != null && _async.Take(out T next))
+                {
+                    Push(next);
+                }
                 return true;
             }
             if (_senders != null)
@@ -805,6 +828,8 @@ public sealed class Channel<T>
                 Fiber.Wake(sender, true);
                 return true;
             }
+            if (_async != null && _async.Take(out value))
+                return true;
             value = default!;
             if (_closed)
                 return false;
@@ -835,7 +860,7 @@ public sealed class Channel<T>
         {
             // SAFETY: as in Receive; the registration is removed before the
             // waiter's record and slot can go.
-            if (_senders != null)
+            if (_senders != null || (_async != null && _async.HasSender))
                 return Receive(out value);
             Fiber.Record* current = Fiber.CurrentRecord;
             if (current == null)
@@ -883,7 +908,7 @@ public sealed class Channel<T>
     {
         unsafe
         {
-            if (_count > 0 || _senders != null)
+            if (_count > 0 || _senders != null || (_async != null && _async.HasSender))
                 return Receive(out value);
         }
         value = default!;
@@ -907,6 +932,7 @@ public sealed class Channel<T>
             while (_senders != null)
                 Fiber.Wake(Take(ref _senders), false);
         }
+        _async?.Closed();
     }
 
     void Push(T value)

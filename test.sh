@@ -393,10 +393,11 @@ run_all() {
         fi
     fi
 
-    # Awaiting a canceled task plainly, and ThrowIfCancellationRequested on a
-    # canceled token, must end the program with .NET's exception message.
+    # Awaiting a canceled task plainly, ThrowIfCancellationRequested on a
+    # canceled token, and ReceiveAsync on a closed channel must end the
+    # program with .NET's exception message.
     if [[ " ${samples[*]} " == *" Tasks "* ]] && [ "$target" != c64 ]; then
-        for case in "canceled|A task was canceled." "throw|The operation was canceled."; do
+        for case in "canceled|A task was canceled." "throw|The operation was canceled." "closed|The channel has been closed."; do
             arg=${case%%|*}
             message=${case#*|}
             status=0

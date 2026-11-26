@@ -197,9 +197,22 @@ Fiber.Run();
 (`Timeout.Infinite` for a timer that fires once, or `Change(Timeout.Infinite, Timeout.Infinite)` to
 stop it).
 
-`PeriodicTimer` has `WaitForNextTick()`, which blocks, in place of .NET's `WaitForNextTickAsync()`
-(there's no `WaitForNextTickAsync` yet). In a fiber it lets the other fibers run; outside one it sleeps the thread,
-so it needs no `Fiber.Run`.
+`PeriodicTimer` has .NET's `WaitForNextTickAsync`, and also `WaitForNextTick()`, which blocks. In a
+fiber it lets the other fibers run; outside one it sleeps the thread, so it needs no `Fiber.Run`.
+The async one waits on `Task.Delay`'s timer, with no fiber of its own:
+
+<!-- sample: samples/Tasks.cs periodic-async -->
+```csharp
+// Ticks every 10 ms without a fiber of its own; Dispose ends the loop.
+using (var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(10)))
+{
+    int ticks = 0;
+    while (await timer.WaitForNextTickAsync())
+        if (++ticks == 3)
+            timer.Dispose();
+    Console.WriteLine($"ticks: {ticks}");
+}
+```
 
 A handler runs on the same thread as everything else, so it needs no locks, and two calls of one
 timer's handlers never overlap. It can use `Console`, `Fiber.Sleep` and channels. `AutoReset = false`
@@ -290,11 +303,45 @@ static async Task<int> Sleeper(int times)
 }
 ```
 
-- `throw` ends the program, so a task is never faulted. There's no `ContinueWith`, `ValueTask` or
+- `ValueTask` and `ValueTask<T>` work as in .NET, and so do `async ValueTask` methods: one that
+  finishes without waiting allocates nothing at all. Unlike .NET's, a `ValueTask` may be awaited
+  twice. `IAsyncEnumerable<T>` works with `await foreach`, but there are no async iterators
+  (`yield return` in an async method).
+- `throw` ends the program, so a task is never faulted. There's no `ContinueWith` or
   `SynchronizationContext`. `ConfigureAwait(bool)` changes nothing, since there's no context to
   return to.
 - Tasks are ordinary objects. If an arena makes a task, the arena must stay alive until whoever
   awaits the task has finished with it.
+
+## Await a channel
+
+A channel also has .NET's `ChannelReader`/`ChannelWriter` methods: `ReceiveAsync`, `SendAsync`,
+`WaitToReceiveAsync` (with `TryReceive`) and `ReceiveAllAsync` for `await foreach`. An async method
+waiting on a channel costs no fiber, and fibers and async methods can share a channel. When both
+wait, the fibers are served first:
+
+<!-- sample: samples/Tasks.cs channel-async -->
+```csharp
+// Sends 1..10 and closes; the reader's await foreach ends there.
+static async Task Produce(Channel<int> channel)
+{
+    for (int i = 1; i <= 10; i++)
+        await channel.SendAsync(i);
+    channel.Close();
+}
+
+static async Task<int> Consume(Channel<int> channel)
+{
+    int sum = 0;
+    await foreach (int value in channel.ReceiveAllAsync())
+        sum += value;
+    return sum;
+}
+```
+
+`ReceiveAllAsync` and `WaitToReceiveAsync` stop when the channel is closed and empty. Awaiting
+`ReceiveAsync` then ends the program, as .NET's `ReadAsync` throws. A program that never calls
+these methods doesn't link their code.
 
 ## Cancel
 

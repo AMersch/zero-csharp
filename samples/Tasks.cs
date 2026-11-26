@@ -4,9 +4,10 @@
 // the fibers until the task is done. Not on WebAssembly, which has no fibers.
 // Exit code = number of failed checks.
 //
-// `Tasks canceled` awaits a canceled task plainly, and `Tasks throw` calls
-// ThrowIfCancellationRequested on a canceled token: each must end the
-// program with .NET's message. test.sh checks both.
+// `Tasks canceled` awaits a canceled task plainly, `Tasks throw` calls
+// ThrowIfCancellationRequested on a canceled token, and `Tasks closed`
+// awaits ReceiveAsync on a closed channel: each must end the program with
+// .NET's message. test.sh checks them.
 // Build: ./build.sh Tasks
 
 using System;
@@ -147,11 +148,46 @@ public static class Program
     }
     // docs:end
 
+    static async ValueTask<int> Quick(int i) => i + 1;
+
+    static async ValueTask<int> Slow(int i)
+    {
+        await Task.Delay(1);
+        return i + 1;
+    }
+
+    static async ValueTask Pause() => await Task.Delay(1);
+
+    // docs:channel-async
+    // Sends 1..10 and closes; the reader's await foreach ends there.
+    static async Task Produce(Channel<int> channel)
+    {
+        for (int i = 1; i <= 10; i++)
+            await channel.SendAsync(i);
+        channel.Close();
+    }
+
+    static async Task<int> Consume(Channel<int> channel)
+    {
+        int sum = 0;
+        await foreach (int value in channel.ReceiveAllAsync())
+            sum += value;
+        return sum;
+    }
+    // docs:end
+
     static async Task<int> Main(string[] args)
     {
         if (args.Length > 0 && args[0] == "canceled")
         {
             await Task.FromCanceled(new CancellationToken(true));
+            return 0;
+        }
+        if (args.Length > 0 && args[0] == "closed")
+        {
+            var closed = new Channel<int>();
+            closed.Close();
+            await closed.ReceiveAsync();
             return 0;
         }
         if (args.Length > 0 && args[0] == "throw")
@@ -395,6 +431,93 @@ public static class Program
         Fiber.Spawn(ints, static ch => ch.Send(7));
         Check("the channel still works", await receiver == 7);
         End("Fibers and tokens");
+
+        // ValueTask: a method that doesn't wait allocates nothing.
+        long allocated = GC.GetTotalAllocatedBytes();
+        int quick = 0;
+        for (int i = 0; i < 100; i++)
+            quick += await Quick(i);
+        long valueTaskBytes = GC.GetTotalAllocatedBytes() - allocated;
+        Check($"ValueTask without waiting: {valueTaskBytes} bytes", valueTaskBytes == 0 && quick == 5050);
+        Check("ValueTask<T> waiting", await Slow(41) == 42);
+        ValueTask paused = Pause();
+        await paused;
+        Check("ValueTask waiting", paused.IsCompletedSuccessfully);
+        Check("AsTask", await Slow(1).AsTask() == 2 && Quick(1).AsTask().Result == 2);
+        Check("FromResult", await ValueTask.FromResult(3) == 3 && ValueTask.CompletedTask.IsCompleted);
+        End("ValueTask");
+
+        // docs:periodic-async
+        // Ticks every 10 ms without a fiber of its own; Dispose ends the loop.
+        using (var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(10)))
+        {
+            int ticks = 0;
+            while (await timer.WaitForNextTickAsync())
+                if (++ticks == 3)
+                    timer.Dispose();
+            Console.WriteLine($"ticks: {ticks}");
+        }
+        // docs:end
+        start = Clock.Monotonic;
+        int ticked = 0;
+        using (var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(10)))
+        {
+            while (await timer.WaitForNextTickAsync())
+                if (++ticked == 3)
+                    timer.Dispose();
+        }
+        long tickMs = Milliseconds(start);
+        Check($"3 ticks in {tickMs} ms", ticked == 3 && tickMs >= 29 && tickMs < 500);
+        var slowTimer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(10);
+            slowTimer.Dispose();
+        });
+        start = Clock.Monotonic;
+        Check("Dispose ends a wait with false", !await slowTimer.WaitForNextTickAsync() && Milliseconds(start) < 1000);
+        var canceledTimer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        Task<bool> tick = canceledTimer.WaitForNextTickAsync(new CancellationTokenSource(10).Token).AsTask();
+        await ((Task)tick).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        Check("a canceled wait", tick.IsCanceled);
+        canceledTimer.Period = TimeSpan.FromMilliseconds(5);
+        Check("waits again after a cancel", await canceledTimer.WaitForNextTickAsync());
+        canceledTimer.Dispose();
+        End("PeriodicTimer");
+
+        // Channels, async on both sides, and mixed with fibers.
+        var numbers = new Channel<int>(2);
+        Task<int> consumed = Consume(numbers);
+        await Produce(numbers);
+        Check("SendAsync and await foreach", await consumed == 55);
+        var rendezvous = new Channel<int>();
+        Task<int> pendingReceive = rendezvous.ReceiveAsync().AsTask();
+        Check("ReceiveAsync waits", !pendingReceive.IsCompleted);
+        await rendezvous.SendAsync(7);
+        Check("ReceiveAsync gets it", await pendingReceive == 7);
+        ValueTask sending = rendezvous.SendAsync(8);
+        Check("SendAsync waits for a receiver", !sending.IsCompleted);
+        Check("a fiber's Receive takes it", rendezvous.TryReceive(out int eight) && eight == 8);
+        await sending;
+        var fromFiber = new Channel<int>();
+        Fiber.Spawn(fromFiber, static ch =>
+        {
+            for (int i = 1; i <= 5; i++)
+                ch.Send(i);
+            ch.Close();
+        });
+        int total2 = 0;
+        while (await fromFiber.WaitToReceiveAsync())
+            while (fromFiber.TryReceive(out int value))
+                total2 += value;
+        Check("a fiber sends, WaitToReceiveAsync reads", total2 == 15);
+        var quiet = new Channel<int>();
+        Task<int> gaveUp2 = quiet.ReceiveAsync(new CancellationTokenSource(10).Token).AsTask();
+        await ((Task)gaveUp2).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        Check("ReceiveAsync canceled", gaveUp2.IsCanceled);
+        Fiber.Spawn(quiet, static ch => ch.Send(9));
+        Check("the channel still works", await quiet.ReceiveAsync() == 9);
+        End("Channels, async");
 
         // Cost: awaits that wait, and ones that don't.
         start = Clock.Monotonic;

@@ -35,8 +35,9 @@
 // is never faulted: it completes, with its result, or is canceled
 // (lib/Cancellation.cs). Awaiting a canceled task ends the program, as an
 // unhandled OperationCanceledException would in .NET, unless the await is
-// ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing). No ContinueWith,
-// ValueTask or SynchronizationContext; ConfigureAwait(bool) changes nothing.
+// ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing). ValueTask is in
+// lib/ValueTasks.cs. No ContinueWith or SynchronizationContext;
+// ConfigureAwait(bool) changes nothing.
 //
 // Tasks are objects like any other: from the fiber's ObjectAllocator,
 // calloc by default (never freed), or an arena's while one is set. A task
@@ -863,6 +864,13 @@ namespace System.Runtime.CompilerServices
     // continuation.
     internal interface IFiberAwaiter { }
 
+    // An awaiter with more fields than its task (ValueTaskAwaiter<T>): the
+    // builders ask it, through a box, for the task to wait for.
+    internal interface IWaitTarget
+    {
+        Task WaitTarget { get; }
+    }
+
     public readonly struct TaskAwaiter : ICriticalNotifyCompletion, IFiberAwaiter
     {
         internal readonly Task m_task;
@@ -1287,6 +1295,8 @@ namespace System.Runtime.CompilerServices
         {
             if (awaiter is IFiberAwaiter)
                 return Unsafe.As<TAwaiter, TaskAwaiter>(ref awaiter).m_task;
+            if (awaiter is IWaitTarget target) // boxes: ValueTask<T>'s awaiters, which hold a result too
+                return target.WaitTarget;
             Task signal = new Task();
             awaiter.OnCompleted(() => signal.Complete());
             return signal;

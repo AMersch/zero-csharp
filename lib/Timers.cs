@@ -41,14 +41,15 @@
 // - System.Threading.Timer: no Dispose(WaitHandle), DisposeAsync or
 //   ActiveCount.
 // - PeriodicTimer: WaitForNextTick, which blocks, in place of
-//   WaitForNextTickAsync (not yet: lib/Tasks.cs came later), and no
-//   CancellationToken or TimeProvider. It needs no Fiber.Run: in a fiber the
+//   WaitForNextTickAsync(token) (lib/Tasks.cs), which waits on Task.Delay's
+//   timer fiber, so a waiting async method costs no fiber; no TimeProvider. It needs no Fiber.Run: in a fiber the
 //   wait lets the others run, outside one it sleeps the thread.
 // - StackSize, the size of the timer's fiber's stack, is new on both.
 // - Not on WebAssembly, which has no fibers.
 
 using System;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 
 // What both timers are built on: a fiber that calls Tick at a due time and
 // then every period. Each timer has one, made with it.
@@ -490,6 +491,11 @@ namespace System.Threading
         bool _disposed;
         bool _waiting;
         Fiber.Record* _waiter;      // the fiber waiting, if one is
+        // WaitForNextTickAsync's wait, if one is on: its task, the delay it
+        // waits on (Task.Delay's timer), and its token's callback.
+        System.Threading.Tasks.TaskCompletionSource<bool>? _pending;
+        System.Threading.Tasks.DelayTimer? _delay;
+        CancellationTokenRegistration _registration;
 
         /// <summary>
         /// A timer that ticks every <paramref name="period"/>: at least a
@@ -513,6 +519,8 @@ namespace System.Threading
                 _periodNs = value == Timeout.InfiniteTimeSpan ? 0 : milliseconds * 1_000_000;
                 _due = Clock.Monotonic + _periodNs;
                 WakeWaiter(); // to wait for the new time
+                if (_pending != null)
+                    Arm();
             }
         }
 
@@ -550,6 +558,91 @@ namespace System.Threading
             return ticked;
         }
 
+        /// <summary>
+        /// Waits for the next tick, as WaitForNextTick does, without blocking:
+        /// true at the tick, false once the timer is disposed. Canceled with
+        /// <paramref name="cancellationToken"/> (then awaiting it ends the
+        /// program, as .NET's OperationCanceledException would: check the
+        /// token, or Dispose the timer, to stop a loop instead). It waits on
+        /// Task.Delay's timer fiber, with no fiber of its own.
+        /// </summary>
+        public ValueTask<bool> WaitForNextTickAsync(CancellationToken cancellationToken = default)
+        {
+            if (_disposed)
+                return new ValueTask<bool>(false);
+            if (_waiting)
+                throw new InvalidOperationException("Operation is not valid due to the current state of the object.");
+            if (cancellationToken.IsCancellationRequested)
+                return ValueTask.FromCanceled<bool>(cancellationToken);
+            if (TryTick())
+                return new ValueTask<bool>(true);
+            _waiting = true;
+            _pending = new System.Threading.Tasks.TaskCompletionSource<bool>();
+            _registration = cancellationToken.Register(static t => ((PeriodicTimer)t!).CancelWait(), this);
+            Arm();
+            return new ValueTask<bool>(_pending.Task);
+        }
+
+        // A tick has come since the last wait: counts it (all those since
+        // as one) and keeps the rhythm.
+        bool TryTick()
+        {
+            long now = Clock.Monotonic;
+            if (_periodNs == 0 || now < _due)
+                return false;
+            _due += ((now - _due) / _periodNs + 1) * _periodNs;
+            return true;
+        }
+
+        // Waits on a Task.Delay for the next tick (or 1000 s at a time when
+        // the period is infinite), in place of any earlier one.
+        void Arm()
+        {
+            if (_delay != null)
+                System.Threading.Tasks.DelayTimer.Remove(_delay);
+            long wait = _periodNs == 0 ? 1_000_000 : (_due - Clock.Monotonic + 999_999) / 1_000_000;
+            _delay = System.Threading.Tasks.DelayTimer.Add(wait < 1 ? 1 : wait < 1_000_000 ? (int)wait : 1_000_000);
+            _delay.AddObserver(new DelayDone(this));
+        }
+
+        sealed class DelayDone(PeriodicTimer timer) : System.Threading.Tasks.Observer
+        {
+            internal override void Completed(System.Threading.Tasks.Task task)
+            {
+                if (task != timer._delay)
+                    return; // replaced by Arm, or the wait ended
+                timer._delay = null;
+                if (timer.TryTick())
+                    timer.Finish(ticked: true, canceled: false);
+                else
+                    timer.Arm();
+            }
+        }
+
+        // Ends WaitForNextTickAsync's wait: with a result, or canceled.
+        void Finish(bool ticked, bool canceled)
+        {
+            if (_delay != null)
+            {
+                System.Threading.Tasks.DelayTimer.Remove(_delay);
+                _delay = null;
+            }
+            _registration.Dispose();
+            _waiting = false;
+            var pending = _pending!;
+            _pending = null;
+            if (canceled)
+                pending.TrySetCanceled();
+            else
+                pending.TrySetResult(ticked);
+        }
+
+        void CancelWait()
+        {
+            if (_pending != null)
+                Finish(ticked: false, canceled: true);
+        }
+
         /// <summary>Stops the timer: a wait in progress, and every later one, returns false.</summary>
         public void Dispose()
         {
@@ -557,6 +650,8 @@ namespace System.Threading
                 return;
             _disposed = true;
             WakeWaiter();
+            if (_pending != null)
+                Finish(ticked: false, canceled: false);
         }
 
         void WakeWaiter()

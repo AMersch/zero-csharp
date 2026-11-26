@@ -77,7 +77,7 @@ runners start programs there; an app with a window and real devices are still to
 
 The program's object is the one `--mac` builds: iOS runs the same arm64 code. But bflat compiles for
 Apple only as macOS, the object's build-version load command says so, and Apple's linker won't put an
-object built for macOS into an iOS program. `ios/retag.py` marks a copy as built for the simulator
+object built for macOS into an iOS program. `zero-bitcode macho-platform` marks a copy as built for the simulator
 (iOS 17 and later; `IOS_MIN` changes it), and clang links it against the simulator's SDK with
 `mac/`'s C files, compiled again for the simulator.
 
@@ -97,6 +97,38 @@ It doesn't show that a program will run on an iPhone. A simulator program is a M
 Mac's kernel, with no sandbox and the Mac's stack size. On an iPhone only a signed app runs; it can
 write only inside its own container, it gets a 1 MB main-thread stack, and iOS stops it if it uses
 too much memory.
+
+## Android
+
+`./build.sh --android` builds command-line programs for Android on arm64, the kind `adb shell` runs;
+an app with a window is still to come. An Android program is a Linux program linked against Android's
+C library, Bionic, and started by Android's loader, so bflat builds it as for Linux, with
+`--libc bionic`. Its layout carries what that link needs, so the Android NDK isn't needed. The
+programs are position-independent, as Android requires, and aligned for 16 KB pages, which phones
+with Android 15 and later may have.
+
+lib/ calls the C library by glibc's names. Bionic has them all but three, which `android/runtime.c`
+supplies: `__errno_location`, and `__xstat64` and `__lxstat64`, glibc's old names for `stat` and
+`lstat` (Bionic's `struct stat` has glibc's arm64 layout). Its `ZeroSystem` says Android, because Bionic
+answers `getaddrinfo` the BSD way, as macOS does: `ai_canonname` before `ai_addr`, and other error
+numbers.
+
+```bash
+./build.sh --android Core     # bin/android/Core
+./run.sh --android Core       # on the connected phone or emulator
+```
+
+`./run.sh --android` copies the program to `/data/local/tmp/zero` on the device, through adb, and runs
+it there; standard input and output and the exit code pass through. With no device connected, it
+starts the first virtual device Android Studio made (`ANDROID_AVD` picks another), without a window.
+`ANDROID_SERIAL` picks one of several devices, as it does for adb. `./test.sh --android` runs every
+sample there.
+
+With `ANDROID_RUN=container`, the programs run in an arm64 Linux container instead, with only Android's
+loader and C library, from `android/sysroot/` (copies from Android 15; its README says where they came
+from). That is how CI runs the samples, on its arm64 Linux runner, without an emulator. It shows that
+the programs and Bionic work together on a Linux kernel; the emulator also runs them on Android
+itself, with its security rules.
 
 ## Windows x64
 

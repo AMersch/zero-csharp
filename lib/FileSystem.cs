@@ -6,11 +6,11 @@
 // lstat), opendir, readdir64 and closedir, mkdir, rmdir, rename, getcwd,
 // chdir and __errno_location. Linux has them all. The others supply what
 // their C library lacks or lays out differently, in their runtime files
-// (mac/runtime.c, win/runtime.c, wasm/runtime.c). On Windows the ones the
+// (mac/runtime.c, win/runtime.c, wasm/runtime.c, android/runtime.c). On Windows the ones the
 // Universal CRT also has are linked with /wrap:, as fopen is, and take UTF-8.
 //
 // Directories, file information, moving and copying work on Linux, macOS,
-// Windows and WebAssembly (under wasmtime, inside the directories given with
+// Windows, Android and WebAssembly (under wasmtime, inside the directories given with
 // --dir). Path's functions work everywhere: they only look at text.
 // ZeroSystem(), in each target's assembly or runtime file, says which system
 // this is.
@@ -55,6 +55,7 @@ enum SystemKind
     Dos = 7,
     Microcontroller = 8,
     C64 = 9,
+    Android = 10,
 }
 
 static class FileSystem
@@ -100,13 +101,13 @@ static class FileSystem
     }
 
     // Whether the system has stat, directories and rename: Linux, macOS,
-    // Windows, WebAssembly. Elsewhere those imports are placeholders that fail.
+    // Windows, WebAssembly, Android. Elsewhere those imports are placeholders that fail.
     internal static bool HasCalls
     {
         get
         {
             SystemKind system = System;
-            return system <= SystemKind.Windows || system == SystemKind.Wasi;
+            return system <= SystemKind.Windows || system == SystemKind.Wasi || system == SystemKind.Android;
         }
     }
 

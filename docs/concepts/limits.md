@@ -670,6 +670,7 @@ These are the issues you may hit with zerocore, as `build.sh` builds:
 | Windows: x64 only, built from Linux or macOS | `./build.sh --win`; building on Windows (`build.ps1`) is untested |
 | macOS: Apple Silicon only, built on a Mac | `./build.sh --mac` |
 | iOS: the simulator only, as console programs (no app bundle, no device) | `./build.sh --ios`, `./run.sh --ios` |
+| Android: arm64 command-line programs, run through adb (no app yet) | `./build.sh --android`, `./run.sh --android` |
 
 Two of these come from the core library having to be named `System.Private.CoreLib`. bflat assumes a
 library with that name is .NET's and looks for its reflection support, hence `--no-reflection`. And

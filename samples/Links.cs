@@ -139,6 +139,33 @@ public struct Map
         Towns.Remove(town);
     }
     // docs:end
+
+    // docs:map-prune
+    // Takes out the roads to removed towns, and returns how many. Each is
+    // unlinked from its town's chain first, so no chain leads to a road
+    // that is gone.
+    public int Prune()
+    {
+        int pruned = 0;
+        foreach (Handle<Town> town in Towns)
+        {
+            ref Handle<Road> link = ref Towns[town].FirstRoad;
+            while (!link.IsNull)
+            {
+                Handle<Road> road = link;
+                if (Towns.Contains(Roads[road].To))
+                {
+                    link = ref Roads[road].Next;
+                    continue;
+                }
+                link = Roads[road].Next;    // the chain skips it now
+                Roads.Remove(road);
+                pruned++;
+            }
+        }
+        return pruned;
+    }
+    // docs:end
 }
 
 public struct Trip
@@ -340,6 +367,18 @@ public static class Program
         foreach (Handle<Job> job in jobs)
             ids += jobs[job].Id;
         Check("change in place, walk the handles", ids == 11 + 3 + 4);
+        var numbers = Pool<int>.Create(arena, 4);
+        for (int i = 1; i <= 20; i++)
+            numbers.Add(i);
+        // docs:remove-while-walking
+        foreach (Handle<int> number in numbers)
+            if (numbers[number] % 2 == 1)
+                numbers.Remove(number);      // allowed while walking
+        // docs:end
+        int evens = 0;
+        foreach (Handle<int> number in numbers)
+            evens += numbers[number];
+        Check("Remove while walking", numbers.Count == 10 && evens == 110);
         var growing = Pool<int>.Create(arena, 8);
         Handle<int> firstNumber = growing.Add(1);
         ref int kept = ref growing[firstNumber];
@@ -432,12 +471,15 @@ public static class Program
         // Ten one-way roads; ford's own two went with it, the two to it stay.
         Check("a removed town's roads went with it", map.Towns.Count == 4 && map.Roads.Count == 8);
         Check("a road to a removed town is skipped", Distance(map, mill, ford) == -1);
+        Check("Prune takes out the two left", map.Prune() == 2 && map.Roads.Count == 6 && map.Prune() == 0);
+        Check("the way is the same after Prune", Distance(map, harbor, lake) == 560);
         Handle<Town> island = map.AddTown(6);
         Check("its slot went to a new town", map.Towns[island].Id == 6 && !map.Towns.Contains(ford));
         Check("no way there", Distance(map, harbor, island) == -1);
         Check("from a town to itself", Distance(map, hill, hill) == 0);
         map.RemoveTown(mill);
         Check("cut off", Distance(map, harbor, lake) == -1 && Distance(map, harbor, hill) == 260);
+        Check("Prune after another removal", map.Prune() == 2 && map.Roads.Count == 2);
         Section("a map");
 
         Console.WriteLine();

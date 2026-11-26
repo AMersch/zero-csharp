@@ -36,9 +36,12 @@ i32 __managed__Main(i32 argc, char **argv);
 // nothing with: $D7FF, among the repeats of the sound chip's registers, where
 // it falls on a register the chip doesn't have. VICE's "debug cartridge"
 // (-debugcart) watches that address and ends the emulator with the code;
-// c64/run.sh relies on it.
+// c64/run.sh relies on it. The KERNAL's interrupt goes back on first, in
+// case the program switched it off (C64.KernalInterrupt): without it BASIC
+// would have no cursor and read no keys.
 static void leave(int code)
 {
+    *(volatile unsigned char *)0xDC0D = 0x81;
     *(volatile unsigned char *)0xD7FF = (unsigned char)code;
     exit(code);
 }
@@ -680,6 +683,33 @@ i32 cs_c64_key(void)
 {
     return cbm_k_getin();
 }
+
+// The keys held down in some of the keyboard's 8 columns: a column is
+// selected by a 0 in its bit of $DC00, and $DC01 then has a 0 for each key
+// of it that is down. The KERNAL's interrupt scans the keyboard through the
+// same register, so interrupts wait for the few instructions this takes,
+// and $DC00 is put back as it was. Returns 1 bits for keys down. llvm-mos
+// passes the 32-bit argument in A, X, __rc2 and __rc3, and takes the result
+// back in the same four.
+i32 cs_c64_matrix(i32 columns);
+__asm__(
+    "  .section .text.cs_c64_matrix,\"ax\",@progbits\n"
+    "  .globl cs_c64_matrix\n"
+    "cs_c64_matrix:\n"
+    "  eor #$ff\n"
+    "  php\n"
+    "  sei\n"
+    "  ldx $dc00\n"
+    "  sta $dc00\n"
+    "  lda $dc01\n"
+    "  stx $dc00\n"
+    "  plp\n"
+    "  eor #$ff\n"
+    "  ldx #0\n"
+    "  stx __rc2\n"
+    "  stx __rc3\n"
+    "  rts\n"
+    "  .text\n");
 
 u32 cs_c64_ticks(void) { return jiffies(); }
 

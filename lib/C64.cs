@@ -51,6 +51,7 @@ public static class C64
     [DllImport("libc")] static unsafe extern void c64_copy(int address, byte* source, int count);
     [DllImport("libc")] static safe extern void c64_wait_line(int line);
     [DllImport("libc")] static safe extern int c64_key();
+    [DllImport("libc")] static safe extern int c64_matrix(int columns);
     [DllImport("libc")] static safe extern uint c64_ticks();
 
     // ---- memory ------------------------------------------------------------------
@@ -193,23 +194,35 @@ public static class C64
         return key == 13 ? '\n' : key;
     }
 
-    // The key held down, as the KERNAL's keyboard scan leaves it at $CB: a
-    // position on the keyboard's 8x8 matrix, or 64 for none. This is each
-    // position's character; '\0' for keys without one, '_' for the left arrow.
+    // The keyboard's 8x8 matrix, column after column: the character of each
+    // position; '\0' for keys without one, '_' for the left arrow.
     const string KeyMatrix =
         "\0\n\0\0\0\0\0\0" + "3wa4zse\0" + "5rd6cftx" + "7yg8bhuv" +
         "9ij0mkon" + "+pl-.:@," + "\0*;\0\0=\0/" + "1_\02 \0q\0";
 
-    /// <summary>Whether a key is held down right now: a letter (either case), a digit, ' ' or a sign on the keyboard. Unlike ReadKey this doesn't wait for a press, so a game can move something for as long as a key is held. One key at a time: of two held together it sees one. Shift, Ctrl and C= don't count.</summary>
+    /// <summary>Whether a key is held down right now: a letter (either case), a digit, ' ' or a sign on the keyboard. Unlike ReadKey this doesn't wait for a press, so a game can move something for as long as a key is held, and it sees several held together (move and fire). It reads the keyboard itself, so it works with the KERNAL's interrupt off. A joystick in port 2 held over looks like keys to it, as it does to the KERNAL; read the joystick on its own first.</summary>
     public static bool KeyHeld(char key)
     {
-        int position = c64_peek(0xCB);
-        if (position >= 64)
-            return false;
         if (key >= 'A' && key <= 'Z')
             key = (char)(key + 32);
-        return KeyMatrix[position] == key;
+        int position = key == '\0' ? -1 : KeyMatrix.IndexOf(key);
+        if (position < 0)
+            return false;
+        return (c64_matrix(1 << (position >> 3)) & (1 << (position & 7))) != 0;
     }
+
+    /// <summary>Whether the KERNAL's interrupt runs, 60 times a second. It scans the keyboard for ReadKey and In.ReadLine, counts Ticks and blinks the cursor, and takes about a tenth of the processor's time. A game that reads keys with KeyHeld can switch it off while it plays: ReadKey then gets nothing and Ticks stands still. The program's end switches it back on.</summary>
+    public static bool KernalInterrupt
+    {
+        get => !s_kernalOff;
+        set
+        {
+            s_kernalOff = !value;
+            c64_poke(0xDC0D, value ? 0x81 : 0x7F);     // the timer's interrupt, enabled or not
+        }
+    }
+
+    static bool s_kernalOff;
 
     /// <summary>The joystick in port 2: Up, Down, Left, Right and Fire, added up; 0 when it is at rest.</summary>
     public static int Joystick => ~c64_peek(JoystickPort2) & 31;

@@ -275,10 +275,16 @@ static void Frame(int frame, ref int x, ref int y, ref int dx, ref int dy)
 }
 ```
 
-`C64.ReadKey` gives the next key pressed without waiting, `C64.Joystick` the joystick in port 2, and
+`C64.ReadKey` gives the next key pressed without waiting, `C64.KeyHeld('w')` whether a key is held down
+(several at once: move and fire), `C64.Joystick` the joystick in port 2, and
 `C64.Peek` and `C64.Poke` reach every address there is, and cost what a load or a store costs:
 `C64.Poke(0xD020, 0)` compiles to one `STA $D020`. `C64.Print` takes about 170 processor cycles a
 character, of the 20,000 in a frame, so a full line is a third of a frame.
+
+The KERNAL's interrupt scans the keyboard, counts `C64.Ticks` and blinks the cursor 60 times a second,
+at about a tenth of the processor's time. A game that reads keys with `KeyHeld` can switch it off while
+it plays, `C64.KernalInterrupt = false`; `ReadKey` then gets nothing and `Ticks` stands still. The
+program's end switches it back on.
 
 ## A game
 

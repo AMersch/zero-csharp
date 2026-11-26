@@ -1,0 +1,11 @@
+<!-- A native library whose exports use every kind of type the .NET bindings
+     copy (bin/interoplib.Interop.cs): enums, nested structs, fixed buffers,
+     explicit layout, a struct that points at itself, function pointers. Its
+     class is named by ZeroInteropClass. Called by fixtures/interoplib-app. -->
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <NativeLib>Shared</NativeLib>
+    <ZeroInteropClass>Shapes.Native</ZeroInteropClass>
+  </PropertyGroup>
+</Project>

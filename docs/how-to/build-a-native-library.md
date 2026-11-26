@@ -124,7 +124,115 @@ programs. `dotnet run` refuses a library.
 
 ## Call it from .NET
 
-Declare the exports with `[DllImport]`, with the same signatures:
+The library's build also writes its .NET bindings, `bin/MathLib.Interop.cs` (and the same in F#,
+below). That's C# with a `[LibraryImport]` for each export, under its method's name, and a copy of
+each struct and enum the exports use, with the same fields and layout. A .NET program compiles that file in and calls the library like
+any class:
+
+<!-- sample: sdk/test/fixtures/nativelib-app/App/Program.cs call -->
+```csharp
+public static void Main()
+{
+    Console.WriteLine($"add {MathLib.Add(2, 3)}");
+    Point moved = MathLib.Offset(new Point { X = 1, Y = 12 }, 10);
+    Console.WriteLine($"offset {moved.X},{moved.Y}");
+}
+```
+
+The program's project file references the library and compiles the bindings:
+
+```xml
+<PropertyGroup>
+  <!-- [LibraryImport] needs it. -->
+  <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+</PropertyGroup>
+<ItemGroup>
+  <ProjectReference Include="../MathLib/MathLib.csproj"
+                    ReferenceOutputAssembly="false"
+                    SkipGetTargetFrameworkProperties="true"
+                    Targets="ZeroNativeLibraryFiles"
+                    OutputItemType="Content" />
+  <Compile Include="../MathLib/bin/MathLib.Interop.cs" />
+</ItemGroup>
+```
+
+The reference builds the library first and copies it next to the program, and `dotnet publish`
+copies it into the publish folder too. .NET then finds it by name. The metadata does this:
+
+- `ReferenceOutputAssembly="false"` keeps the library's IL out of the program.
+- `SkipGetTargetFrameworkProperties="true"` lets a `net10.0` project reference a `zero03` one.
+- `Targets="ZeroNativeLibraryFiles"` and `OutputItemType="Content"` bring back the native library as
+  a file to copy.
+
+Visual Studio builds the library itself and asks the reference only for its output file; the library
+answers with its native file there, so the copy works the same.
+
+`[LibraryImport]` has .NET's source generator write each call when the program compiles, which
+NativeAOT and trimming prefer. The bindings use it on .NET 7 and later, and `[DllImport]` before
+that. To have `[DllImport]` anyway, define `ZERO_INTEROP_DLLIMPORT` in the program
+(`<DefineConstants>$(DefineConstants);ZERO_INTEROP_DLLIMPORT</DefineConstants>`); the program can then
+leave out `AllowUnsafeBlocks` when none of the library's exports take pointers.
+
+A zero project can't reference a native library this way: a reference that would compile its IL in is
+an error.
+
+The class takes the library's name: `MathLib` here, or `My.Native` as class `Native` in namespace
+`My`. Set `ZeroInteropClass` in the library's project to name it yourself (`Shapes.Native`). Two
+exports with the same name and parameters, from two classes, take their entry points' names instead.
+The bindings are written only when they change, so an unchanged library doesn't rebuild the program,
+and `ZeroInterop=false` turns them off.
+
+The bindings copy structs with sequential or explicit layout, enums, fixed-size buffers and structs
+that point at themselves. They declare exports that take function pointers (`delegate* unmanaged`)
+too. An export that uses a struct from another assembly, such as one from `lib/`, is left out with
+warning `ZERO008`: the library still builds and exports it, and you declare that one yourself.
+
+### Call it from F#
+
+The build writes the same bindings in F#, `bin/MathLib.Interop.fs`: a module of `extern` functions,
+and the structs and enums as `[<Struct>]` types with `val mutable` fields. An F# program references
+the library the same way and compiles the file before its own:
+
+```xml
+<ItemGroup>
+  <ProjectReference Include="../MathLib/MathLib.csproj"
+                    ReferenceOutputAssembly="false"
+                    SkipGetTargetFrameworkProperties="true"
+                    Targets="ZeroNativeLibraryFiles"
+                    OutputItemType="Content" />
+</ItemGroup>
+<ItemGroup>
+  <!-- Before the files that use it. -->
+  <Compile Include="../MathLib/bin/MathLib.Interop.fs" />
+  <Compile Include="Program.fs" />
+</ItemGroup>
+```
+
+<!-- sample: sdk/test/fixtures/nativelib-fsapp/App/Program.fs fsharp-call -->
+```fsharp no-check reason="uses the generated bindings: the SDK tests build and run it"
+let mutable point = Point()
+point.X <- 1
+point.Y <- 12
+let moved = MathLib.Offset(point, 10)
+printfn "add %d" (MathLib.Add(2, 3))
+printfn "offset %d,%d" moved.X moved.Y
+```
+
+F# has no fixed-size buffers or function-pointer types, so the F# bindings differ in two places:
+
+- A fixed-size buffer is a struct of the buffer's size, `Name_BytesBuffer`, whose first element is
+  `Element0`. Take its address for a pointer to the elements.
+- A `delegate* unmanaged` parameter is a `nativeint`. Pass `Marshal.GetFunctionPointerForDelegate`'s
+  result, and keep the delegate alive while the library may call it.
+
+Pointers are `nativeptr<_>` in fields and `T*` in the `extern` declarations, as F# writes them.
+
+An F# library gets both files the same way, made from its IL.
+
+### Declare the exports yourself
+
+Without the reference (a library built elsewhere, or loaded from a path), declare the exports with
+`[DllImport]`, with the same signatures:
 
 <!-- sample: sdk/test/fixtures/nativelib-caller/Program.cs imports -->
 ```csharp
@@ -153,33 +261,8 @@ public static unsafe class Native
 ```
 
 .NET looks for the library by name next to the application: `nativelib.so` or `libnativelib.so`
-(`.dylib` on macOS, `.dll` on Windows). To build the library before the application and copy it
-there, give the application's project file a reference that only orders the builds, and a step that
-copies the library after building:
-
-```xml
-<ItemGroup>
-  <ProjectReference Include="../MathLib/MathLib.csproj"
-                    ReferenceOutputAssembly="false"
-                    SkipGetTargetFrameworkProperties="true" />
-</ItemGroup>
-
-<Target Name="CopyMathLib" AfterTargets="Build">
-  <ItemGroup>
-    <MathLibNative
-      Include="../MathLib/bin/$(Configuration)/zero03/native/MathLib.*" />
-  </ItemGroup>
-  <Copy SourceFiles="@(MathLibNative)" DestinationFolder="$(OutDir)" />
-</Target>
-```
-
-`ReferenceOutputAssembly="false"` keeps the library's IL out of the application, and
-`SkipGetTargetFrameworkProperties="true"` lets a `net10.0` project reference a `zero03` one. The
-library's files are listed inside the target, when it runs, so a clean build finds them. A zero
-project can't reference a native library any other way: a reference that would compile its IL in
-is an error.
-
-To load the library from elsewhere, give .NET its path with `NativeLibrary.SetDllImportResolver`.
+(`.dylib` on macOS, `.dll` on Windows). To load it from elsewhere, give .NET its path with
+`NativeLibrary.SetDllImportResolver`.
 
 ## Call it from C
 

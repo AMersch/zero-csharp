@@ -568,10 +568,14 @@ static void read_wall_clock(void)
 
 i32 cs_clock_gettime(i32 clock, i64 *timespec)
 {
+    // The wall clock is read before the jiffies are looked at: reading it takes a while, and
+    // a jiffy that passes meanwhile would make the time since then -1, which without a sign
+    // is 828 days. Jiffies below those of the reading (a count that has started again) mean
+    // another reading.
+    if (clock == 0 && (!wall_known || jiffies() < wall_jiffies))
+        read_wall_clock();
     u32 ticks = jiffies();
     if (clock == 0) {
-        if (!wall_known)
-            read_wall_clock();
         u32 since = ticks - wall_jiffies;
         timespec[0] = wall_seconds + since / 60;
         timespec[1] = (i64)(since % 60) * 16666667;

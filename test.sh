@@ -206,6 +206,7 @@ CX16_SAMPLES=(
     VeraFxDemo
     Jameson
     PcmDemo
+    DiskList
 )
 # Microcontrollers: no SIMD to benchmark, no PC screen for Vga. Blink is
 # theirs only, and checks itself. The Uno R4
@@ -482,7 +483,29 @@ test_dos() {
 
 test_cx16() {
     ./build.sh --cx16 > /dev/null
+    local card name out status
+    card=$(find_x16_sdcard) || card=
+    unset X16_SDCARD        # the samples run on the host folder; those with files on the card too, below
     run_all "Commander X16 (x16emu)" cx16 check
+    # The emulator's host folder is forgiving where the SD card's own DOS isn't: the
+    # samples that use the disk run on a card image too.
+    if [ -n "$card" ]; then
+        for name in DiskFiles DiskList; do
+            status=0
+            out=$(X16_SDCARD=$card ./run.sh --cx16 "$name" < /dev/null 2>&1) || status=$?
+            # (the emulator says that it has a card)
+            out=${out#SD card attached.$'\n'}
+            if [ "$status" = 0 ] && [ "$out" = "$(cat "$EXPECTED/$name.txt")" ]; then
+                echo "ok   $name (on an SD card)"
+            else
+                echo "FAIL $name on an SD card: exit code $status"
+                echo "$out" | tail -5 | sed 's/^/       /'
+                failures=$((failures + 1))
+            fi
+        done
+    else
+        echo "(skipping the SD card: no sdcard.img.zip next to x16emu; set X16_SDCARD)"
+    fi
 }
 
 test_c64() {

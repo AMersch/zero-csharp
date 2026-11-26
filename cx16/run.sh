@@ -22,6 +22,8 @@
 #
 # Usage: cx16/run.sh [--window [--capture]] <Sample>
 # Env:   X16_EMULATOR  x16emu; default: x16emu on the PATH, or see env.sh
+#        X16_SDCARD    an SD card image (or .zip of one): run with a copy of it as the disk,
+#                      in place of the program's folder
 #        X16_ROM       its ROM, if it isn't next to the emulator
 #        X16_TIMEOUT   seconds the program may take without a window (default 600)
 #
@@ -61,7 +63,21 @@ if ! emulator=$(find_x16_emulator); then
     exit 1
 fi
 
-options=(-prg "$program" -run -rtc -fsroot "$(dirname "$program")")
+work=$PWD/bin/cx16/run
+mkdir -p "$work"
+
+options=(-prg "$program" -run -rtc)
+if [ -n "${X16_SDCARD:-}" ]; then
+    # A copy of the card, with the program's code banks on it if it has any: they are
+    # loaded from the disk. The name is the build's (see sdk/ZeroCSharp.Bitcode/X16.cs).
+    banks=bin/cx16/$(printf %s "$name" | tr -cd '[:alnum:]' | tr '[:lower:]' '[:upper:]' | cut -c1-12).BNK
+    files=()
+    [ -f "$banks" ] && files=("$banks")
+    python3 -I cx16/sdcard.py "$X16_SDCARD" "$work/sdcard.img" ${files[@]+"${files[@]}"}
+    options+=(-sdcard "$work/sdcard.img")
+else
+    options+=(-fsroot "$(dirname "$program")")
+fi
 [ -n "${X16_ROM:-}" ] && options+=(-rom "$X16_ROM")
 
 if [ "$window" = 1 ]; then
@@ -70,8 +86,6 @@ fi
 
 # Text for the program to read: the emulator can't type it, so it goes in a
 # cartridge image that cx16/runtime.c reads (see there).
-work=$PWD/bin/cx16/run
-mkdir -p "$work"
 if [ -f /dev/stdin ] || [ -p /dev/stdin ]; then
     python3 -I cx16/input.py > "$work/input.bin"
     options+=(-cartbin "$work/input.bin")

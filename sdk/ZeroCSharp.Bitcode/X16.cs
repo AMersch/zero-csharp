@@ -243,13 +243,15 @@ static partial class C64
 
     /// <summary>
     /// What the runtime has to be compiled with for this program: the file functions
-    /// (the C library's stdio, 3 KB) and the math functions (cx16/math.c, 5 KB) only
+    /// (and the directory's, for lib/Disk.cs) and the math functions (cx16/math.c, 5 KB) only
     /// if the program calls them.
     /// </summary>
     static IEnumerable<string> X16Defines(IEnumerable<string> irFiles)
     {
-        if (irFiles.Any(f => Regex.IsMatch(Files.ReadText(f), @"@cell\.(fopen|fread|fwrite|fclose|fseeko|ftello|remove)\b", RegexOptions.CultureInvariant)))
+        if (irFiles.Any(f => Regex.IsMatch(Files.ReadText(f), @"@cell\.(fopen|fread|fwrite|fclose|fseeko|ftello|remove|cx16_dir_open|cx16_dos)\b", RegexOptions.CultureInvariant)))
             yield return "-DCX16_FILES";
+        if (irFiles.Any(f => Regex.IsMatch(Files.ReadText(f), @"@cell\.cx16_dir_open\b", RegexOptions.CultureInvariant)))
+            yield return "-DCX16_DIR";
         if (irFiles.Any(f => Regex.IsMatch(Files.ReadText(f), @"@cell\.(exp|log|log2|log10|sin|cos|tan|pow|atan2|expf|logf|sinf|cosf|tanhf|powf|sqrt|fabs|floor|ceil|trunc|rint|sqrtf|fabsf|floorf|ceilf|truncf|rintf)\b", RegexOptions.CultureInvariant)))
             yield return "-DCX16_MATH";
     }

@@ -232,6 +232,9 @@ find_uefi_firmware() {
 # X16_EMULATOR  x16emu. Default: the one on the PATH, or in a folder named in
 #               X16_HOME (/Applications/X16 and ~/X16 are tried too)
 # X16_ROM       its ROM, if it isn't next to the emulator
+# X16_SDCARD    an SD card image (or its .zip) for ./test.sh --cx16 to test files on;
+#               default: the sdcard.img.zip next to the emulator. When set for
+#               ./run.sh --cx16, the program runs with a copy of that card.
 find_x16_emulator() {
     local candidate
     for candidate in "${X16_EMULATOR:-}" x16emu "${X16_HOME:-/nonexistent}/x16emu" /Applications/X16/x16emu "$HOME/X16/x16emu"; do
@@ -241,6 +244,23 @@ find_x16_emulator() {
             return 0
         elif command -v "$candidate" >/dev/null 2>&1; then
             command -v "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# The SD card image the emulator's release comes with, next to the emulator.
+find_x16_sdcard() {
+    local emulator candidate
+    if [ -n "${X16_SDCARD:-}" ]; then
+        [ -f "$X16_SDCARD" ] && echo "$X16_SDCARD"
+        return
+    fi
+    emulator=$(find_x16_emulator) || return 1
+    for candidate in "$(dirname "$emulator")/sdcard.img.zip" "$(dirname "$emulator")/sdcard.img"; do
+        if [ -f "$candidate" ]; then
+            echo "$candidate"
             return 0
         fi
     done

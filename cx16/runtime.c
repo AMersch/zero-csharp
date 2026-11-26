@@ -37,6 +37,10 @@ i32 __managed__Main(i32 argc, char **argv);
 #define EMU_DEBUG1 (*(volatile unsigned char *)0x9FB9)
 
 static char in_emulator;
+#ifdef CX16_FILES
+static void files_shutdown(void);
+static unsigned char program_device;    // the device the program was loaded from (set in main)
+#endif
 
 // Leaves the program: back to BASIC's READY (the build links llvm-mos's
 // save-basic.o, which puts back the memory BASIC needs). The exit code has
@@ -52,6 +56,9 @@ static void leave(int code)
 {
     if (pcm_shutdown)
         pcm_shutdown();
+#ifdef CX16_FILES
+    files_shutdown();
+#endif
     if (iso_mode)
         cbm_k_chrout(0x8F); // back to PETSCII, for BASIC
     if (in_emulator)
@@ -86,6 +93,9 @@ static void load_code_banks(void)
 int main(void)
 {
     in_emulator = EMU_ID_1 == 0x31 && EMU_ID_2 == 0x36;
+#ifdef CX16_FILES
+    program_device = *(volatile unsigned char *)0x00BA ? *(volatile unsigned char *)0x00BA : 8;   // before anything else opens
+#endif
 #ifdef CX16_CODE_BANKS
     load_code_banks();
 #endif
@@ -743,54 +753,51 @@ float cs_rintf(float x) { return roundevenf(x); }
 #endif
 
 #ifdef CX16_FILES
-// ---- files, for lib/File.cs ----------------------------------------------------------
+// ---- files, for lib/File.cs and lib/Disk.cs ------------------------------------------
 //
-// Only in a program that uses File (the build defines CX16_FILES then): the C
-// library's stdio is some 3 KB, which no other program should carry.
+// Only in a program that uses them (the build defines CX16_FILES then).
 //
-// The C library's own stdio, which llvm-mos built on the KERNAL's file calls:
-// a file is on the disk device the program came from (the SD card, or an IEC
-// drive), by the name CBM DOS gives it.
+// The KERNAL's file calls, used directly: llvm-mos's stdio is made for the old Commodore
+// drives. It sends "name,R" without a file type, which CMDR-DOS (the SD card's) doesn't
+// take for reading (a missing file then opens, and an existing one is refused as "FILE
+// EXISTS"), and it allows 16 characters of a name.
 //
-// What the KERNAL can't do is move around in a file: llvm-mos's fseek wants an
-// lseek that isn't there, and a sequential file has no positions. So a file
-// is a handle (1 to MAX_FILES, in the table below) and this keeps the
-// position itself. A file opened for reading can be moved anywhere: forward
-// by reading and throwing the bytes away, backward by opening it again, and
-// the end by reading to it. That is slow (File.Length reads a file through
-// twice) but it works, and it is all File and TryReadAllText need. A file
-// opened for writing or appending can only "move" to where it is. (A device
-// that isn't there, named in a path, closes all open files: see below.)
+// A file is on the disk device the program came from (8: the SD card, or an IEC drive).
+// A path may start with "#" and a device number and a colon ("#9:notes.txt") to name
+// another. The rest is CBM DOS's: "name", or "//folder/:name".
 //
-// Files are always opened in binary mode ("rb"): the text mode swaps newline
-// and carriage return, which would change bytes. CBM DOS appends to a file
-// when its name ends in ",a" ("name,a" with mode "ab"); for the rest, a file
-// that is written is removed first, since CBM DOS won't write over one.
+// What the KERNAL can't do is move around in a file. So a file is a handle (1 to
+// MAX_FILES) and this keeps the position itself. A file opened for reading can be moved
+// anywhere: forward by reading and throwing the bytes away, backward by opening it again,
+// and the end by reading to it. That is slow (File.Length reads a file through twice) but
+// it works. A file opened for writing or appending can only "move" to where it is.
 //
-// A path may start with "#" and a device number and a colon ("#9:notes.txt"):
-// the file is then on that device, the way a Commodore disk drive is
-// addressed (8 and up: the SD card is 8, drives on the serial bus 8 to 11).
-// Without it the device is the one the program came from, which llvm-mos
-// keeps in curunit.
+// Every file is read and written byte for byte. CBM DOS won't write over a file, so one
+// that is written is removed first. Logical file numbers and secondary addresses: 2 to 5
+// for the files, 7 for a directory, 15 for the command channel, whose answer says
+// whether an open worked.
 
 #define MAX_FILES 4
-#define MAX_NAME 40
+#define MAX_NAME 80
+#define DIR_FILE 7
 
-extern unsigned char curunit;       // the device a file is on when its name doesn't say
+i32 cs_cx16_bank_count(void);
 
 static struct {
-    FILE *file;
     unsigned long position;
     char path[MAX_NAME];
     unsigned char device;
-    char mode;          // 'r', 'w' or 'a'
+    char mode;          // 'r', 'w' or 'a'; 0: the slot is free
+    char ended;         // the last byte has been read
 } files[MAX_FILES];
 
+static u32 command_channels;            // a bit for each drive whose command channel is open
+
 // The path without a "#9:" in front of it, and the device that said: the
-// default one if nothing did. 0 if the device is not a number from 8 to 30.
+// program's if nothing did. 0 if the device is not a number from 8 to 30.
 static const char *take_device(const char *path, unsigned char *device)
 {
-    *device = curunit;
+    *device = program_device;
     if (path[0] != '#')
         return path;
     unsigned number = 0;
@@ -803,75 +810,198 @@ static const char *take_device(const char *path, unsigned char *device)
     return p + 1;
 }
 
-static int file_slot(i32 handle)
-{
-    return handle >= 1 && handle <= MAX_FILES && files[handle - 1].file ? (int)handle - 1 : -1;
-}
-
-// Opening a file on a device that isn't there leaves the KERNAL unable to open
+// Opening anything on a device that isn't there leaves the KERNAL unable to open
 // anything, on any device, until it has closed everything. So that is what
 // happens: every open file of the program is closed too.
-static void forget_files_if_device_missing(void)
+static void forget_everything(void)
 {
-    if (!(cbm_k_readst() & 0x80))
-        return;
+    cbm_k_clrch();
     cbm_k_clall();
     for (int i = 0; i < MAX_FILES; i++)
-        files[i].file = 0;
+        files[i].mode = 0;
+    command_channels = 0;
+}
+
+// The command channel of a drive (logical file 90 + its number) is opened when first
+// needed and stays open: on CBM drives, closing it closes every file on the drive.
+
+// Sends a command to the drive (an empty one just asks) and reads its answer: the code,
+// 0 for "OK", 62 for "FILE NOT FOUND", ... -1: no such device.
+static int dos_command(unsigned char device, const char *command)
+{
+    unsigned char lfn = (unsigned char)(90 + device);
+    if (!(command_channels & (1ul << device))) {
+        cbm_k_setnam("");
+        cbm_k_setlfs(lfn, device, 15);
+        if (cbm_k_open() || (cbm_k_readst() & 0x80)) {
+            forget_everything();
+            return -1;
+        }
+        command_channels |= 1ul << device;
+    }
+    if (*command) {
+        if (cbm_k_ckout(lfn) || (cbm_k_readst() & 0x80)) {
+            forget_everything();
+            return -1;
+        }
+        while (*command)
+            cbm_k_chrout((unsigned char)*command++);
+        cbm_k_clrch();                      // the end of it: the drive does it now
+    }
+    if (cbm_k_chkin(lfn) || (cbm_k_readst() & 0x80)) {
+        forget_everything();
+        return -1;
+    }
+    int code = 0;
+    unsigned char digits = 0;
+    for (unsigned char i = 0; i < 64; i++) {            // "62, FILE NOT FOUND,00,00" and a CR
+        unsigned char c = cbm_k_chrin();
+        unsigned char status = cbm_k_readst();
+        if (status & 0x82) {
+            forget_everything();
+            return -1;
+        }
+        if (digits < 2 && c >= '0' && c <= '9') {
+            code = code * 10 + (c - '0');
+            digits++;
+        } else {
+            digits = 2;
+        }
+        if (c == 13 || status)
+            break;
+    }
+    cbm_k_clrch();
+    return code;
+}
+
+// "0:name,S,R" for the drive (the letters of commands, types and modes are capitals for it); 0 if it doesn't fit. A name that has a colon of its own
+// (a folder: "//folder/:name") gets no "0:".
+static char dos_name(char *into, const char *prefix, const char *path, const char *suffix)
+{
+    if (strlen(path) == 0 || strlen(path) >= MAX_NAME - 8 || strchr(path, ',') != 0)
+        return 0;
+    strcpy(into, prefix);
+    if (strchr(path, ':') == 0)
+        strcat(into, "0:");
+    strcat(into, path);
+    strcat(into, suffix);
+    return 1;
+}
+
+// Opens slot's data channel; 1 if the drive says OK.
+static char open_channel(int slot, unsigned char device, const char *path, char mode)
+{
+    char name[MAX_NAME + 8];
+    if (!dos_name(name, "", path, mode == 'r' ? ",S,R" : mode == 'w' ? ",S,W" : ",S,A"))
+        return 0;
+    unsigned char lfn = (unsigned char)(2 + slot);
+    cbm_k_setnam(name);
+    cbm_k_setlfs(lfn, device, lfn);
+    if (cbm_k_open() || (cbm_k_readst() & 0x80)) {
+        forget_everything();
+        return 0;
+    }
+    int code = dos_command(device, "");
+    if (code < 0)
+        return 0;
+    if (code >= 20) {
+        cbm_k_close(lfn);
+        return 0;
+    }
+    return 1;
+}
+
+static int file_slot(i32 handle)
+{
+    return handle >= 1 && handle <= MAX_FILES && files[handle - 1].mode ? (int)handle - 1 : -1;
+}
+
+static void scratch(unsigned char device, const char *path)
+{
+    char command[MAX_NAME + 8];
+    if (dos_name(command, "S", path, ""))       // "S0:name", or "S//folder/:name"
+        dos_command(device, command);
 }
 
 i32 cs_fopen(const char *given, const char *mode)
 {
     unsigned char device;
     const char *path = take_device(given, &device);
-    if (path == 0)
+    if (path == 0 || strlen(path) >= MAX_NAME - 8)
         return 0;
+    char how = mode[0];
     int slot = 0;
-    while (slot < MAX_FILES && files[slot].file)
+    while (slot < MAX_FILES && files[slot].mode)
         slot++;
-    if (slot == MAX_FILES || strlen(path) >= MAX_NAME - 2 || (mode[0] != 'r' && mode[0] != 'w' && mode[0] != 'a'))
+    if (slot == MAX_FILES || (how != 'r' && how != 'w' && how != 'a'))
         return 0;
-    char name[MAX_NAME];
-    char binary[3] = { mode[0], 'b', 0 };
-    strcpy(name, path);
-    unsigned char standard = curunit;
-    curunit = device;
-    if (mode[0] == 'w')
-        remove(path);
-    else if (mode[0] == 'a')
-        strcat(name, ",a");
-    FILE *file = fopen(name, binary);
-    curunit = standard;
-    if (file == 0) {
-        forget_files_if_device_missing();
-        return 0;
+    if (how == 'w')
+        scratch(device, path);
+    if (!open_channel(slot, device, path, how)) {
+        // Appending to a file that isn't there makes it.
+        if (how != 'a' || !open_channel(slot, device, path, 'w'))
+            return 0;
     }
     files[slot].device = device;
-    files[slot].file = file;
+    files[slot].mode = how;
     files[slot].position = 0;
+    files[slot].ended = 0;
     strcpy(files[slot].path, path);
-    files[slot].mode = mode[0];
     return slot + 1;
+}
+
+// Up to count bytes from slot's file; what was read.
+static unsigned read_bytes(int slot, unsigned char *buffer, unsigned count)
+{
+    if (files[slot].mode != 'r' || files[slot].ended || count == 0 || cbm_k_chkin((unsigned char)(2 + slot)))
+        return 0;
+    unsigned n = 0;
+    while (n < count) {
+        unsigned char c = cbm_k_chrin();
+        unsigned char status = cbm_k_readst();
+        if (status & 0x82) {                // no byte: the end of an empty file, or an error
+            files[slot].ended = 1;
+            break;
+        }
+        if (buffer)
+            buffer[n] = c;
+        n++;
+        if (status & 0x40) {                // that was the last byte
+            files[slot].ended = 1;
+            break;
+        }
+    }
+    cbm_k_clrch();
+    files[slot].position += n;
+    return n;
 }
 
 u32 cs_fread(void *buffer, u32 size, u32 count, i32 handle)
 {
     int slot = file_slot(handle);
-    if (slot < 0 || size == 0 || count == 0 || size > 0xFFFF || count > 0xFFFF)
+    if (slot < 0 || size == 0 || size > 0xFFFF || count > 0xFFFF || size * count > 0xFFFF)
         return 0;
-    u32 items = (u32)fread(buffer, (size_t)size, (size_t)count, files[slot].file);
-    files[slot].position += items * size;
-    return items;
+    return read_bytes(slot, (unsigned char *)buffer, (unsigned)(size * count)) / (unsigned)size;
 }
 
 u32 cs_fwrite(const void *buffer, u32 size, u32 count, i32 handle)
 {
     int slot = file_slot(handle);
-    if (slot < 0 || size == 0 || count == 0 || size > 0xFFFF || count > 0xFFFF)
+    if (slot < 0 || files[slot].mode == 'r' || size == 0 || count == 0 || size > 0xFFFF || count > 0xFFFF || size * count > 0xFFFF)
         return 0;
-    u32 items = (u32)fwrite(buffer, (size_t)size, (size_t)count, files[slot].file);
-    files[slot].position += items * size;
-    return items;
+    if (cbm_k_ckout((unsigned char)(2 + slot)))
+        return 0;
+    const unsigned char *bytes = (const unsigned char *)buffer;
+    unsigned total = (unsigned)(size * count), n = 0;
+    while (n < total) {
+        cbm_k_chrout(bytes[n]);
+        if (cbm_k_readst() & 0x82)
+            break;
+        n++;
+    }
+    cbm_k_clrch();
+    files[slot].position += n;
+    return n / (unsigned)size;
 }
 
 i32 cs_fclose(i32 handle)
@@ -879,21 +1009,18 @@ i32 cs_fclose(i32 handle)
     int slot = file_slot(handle);
     if (slot < 0)
         return -1;
-    int result = fclose(files[slot].file);
-    files[slot].file = 0;
-    return (i32)result;
+    cbm_k_close((unsigned char)(2 + slot));
+    files[slot].mode = 0;
+    return 0;
 }
 
 // Reads and drops bytes until the position is `target`, or the file ends.
 static void skip_to(int slot, unsigned long target)
 {
-    unsigned char scratch[64];
     while (files[slot].position < target) {
         unsigned long left = target - files[slot].position;
-        size_t n = fread(scratch, 1, left < sizeof scratch ? (size_t)left : sizeof scratch, files[slot].file);
-        if (n == 0)
+        if (read_bytes(slot, 0, left < 256 ? (unsigned)left : 256) == 0)
             return;
-        files[slot].position += n;
     }
 }
 
@@ -915,14 +1042,13 @@ i32 cs_fseeko(i32 handle, long long offset, i32 origin)
     if (target < 0 || target > 0x7FFFFFFFLL)
         return -1;
     if ((unsigned long)target < files[slot].position) {     // back: from the start again
-        fclose(files[slot].file);
-        unsigned char standard = curunit;
-        curunit = files[slot].device;
-        files[slot].file = fopen(files[slot].path, "rb");
-        curunit = standard;
+        cbm_k_close((unsigned char)(2 + slot));
         files[slot].position = 0;
-        if (files[slot].file == 0)
+        files[slot].ended = 0;
+        if (!open_channel(slot, files[slot].device, files[slot].path, 'r')) {
+            files[slot].mode = 0;
             return -1;
+        }
     }
     skip_to(slot, (unsigned long)target);
     return files[slot].position == (unsigned long)target ? 0 : -1;
@@ -938,22 +1064,235 @@ i32 cs_remove(const char *given)
 {
     unsigned char device;
     const char *path = take_device(given, &device);
-    if (path == 0)
+    char command[MAX_NAME + 8];
+    if (path == 0 || !dos_name(command, "S", path, ""))
         return -1;
-    unsigned char standard = curunit;
-    curunit = device;
-    // The drive's scratch command says nothing about a file that isn't there,
-    // so look first.
-    FILE *file = fopen(path, "rb");
-    i32 result = -1;
-    if (file != 0) {
-        fclose(file);
-        result = (i32)remove(path);
-    } else {
-        forget_files_if_device_missing();
+    // The answer to a scratch is "01, FILES SCRATCHED,nn,00", with a count that is 0 for
+    // a file that isn't there; so look first.
+    int slot = 0;
+    while (slot < MAX_FILES && files[slot].mode)
+        slot++;
+    if (slot == MAX_FILES || !open_channel(slot, device, path, 'r'))
+        return -1;
+    cbm_k_close((unsigned char)(2 + slot));
+    int code = dos_command(device, command);
+    return code == 0 || code == 1 ? 0 : -1;
+}
+
+// A command to the drive, such as "md:folder" or "cd:..": its answer's code (0 and 1 are
+// fine), or -1 if there is no such drive. The word before the colon is made capitals.
+i32 cs_cx16_dos(const char *given)
+{
+    unsigned char device;
+    const char *command = take_device(given, &device);
+    if (command == 0 || *command == 0 || strlen(command) >= MAX_NAME)
+        return -1;
+    char text[MAX_NAME];
+    strcpy(text, command);
+    for (char *p = text; *p && *p != ':'; p++)
+        if (*p >= 'a' && *p <= 'z')
+            *p -= 'a' - 'A';
+    return dos_command(device, text);
+}
+
+// ---- a directory: the listing the drive makes, as a BASIC program ------------------------
+//
+// After two bytes of load address come lines: a link (0 ends them), a number (a file's
+// size in blocks) and text ending in 0. The first line is the volume's name, a file's has
+// its name in quotes and then its type, and the last one says how much is free. The SD
+// card, asked with "$=L", adds the date, an attribute and the exact size in hex.
+
+// CMDR-DOS can't have a listing open while a file is opened or read: it then ends early,
+// gives nonsense or hangs. So the whole listing is read at once, into the topmost RAM bank
+// (which Banks doesn't count in a program that lists folders), and then handed out from
+// there. An entry: the name's length, whether it is a folder, the size, the name.
+
+static char dir_name[MAX_NAME];
+static unsigned char dir_name_length, dir_is_folder, dir_bank, dir_complete = 1;
+static u32 dir_size;
+static unsigned dir_used, dir_at;       // bytes of entries in the bank; the next one
+
+static int dir_byte(void)
+{
+    unsigned char c = cbm_k_chrin();
+    return cbm_k_readst() & 0x82 ? -1 : c;
+}
+
+// One line's number and text; 0 at the end.
+static char dir_line(unsigned *number, char *text, unsigned char room)
+{
+    int low = dir_byte(), high = dir_byte();
+    if (low < 0 || high < 0 || (low | high) == 0)
+        return 0;
+    low = dir_byte();
+    high = dir_byte();
+    if (low < 0 || high < 0)
+        return 0;
+    *number = (unsigned)low | (unsigned)high << 8;
+    unsigned char n = 0;
+    for (;;) {
+        int c = dir_byte();
+        if (c <= 0)
+            break;
+        if (n < room - 1)
+            text[n++] = (char)c;
     }
-    curunit = standard;
-    return result;
+    text[n] = 0;
+    return 1;
+}
+
+// Copies to or from the bank of entries, with interrupts off: a handler must find the
+// bank it left.
+static void dir_copy(unsigned at, unsigned char *bytes, unsigned char count, char store)
+{
+    unsigned char saved = RAM_BANK;
+    volatile unsigned char *window = (volatile unsigned char *)(0xA000u + at);
+    __asm__ volatile("sei" ::: "memory");
+    RAM_BANK = dir_bank;
+    for (unsigned char i = 0; i < count; i++) {
+        if (store)
+            window[i] = bytes[i];
+        else
+            bytes[i] = window[i];
+    }
+    RAM_BANK = saved;
+    __asm__ volatile("cli" ::: "memory");
+}
+
+// A line of the listing as an entry in the bank; 0 for the line about free space.
+static char dir_keep(unsigned blocks, char *text)
+{
+    char *first = strchr(text, '"');
+    char *last = first ? strchr(first + 1, '"') : 0;
+    if (last == 0)
+        return 0;                                   // the line about free space
+    *last = 0;
+    const char *name = first + 1;
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+        return 1;
+    unsigned char length = 0;
+    while (name[length] && length < MAX_NAME - 1)
+        length++;
+    const char *p = last + 1;
+    while (*p == ' ')
+        p++;
+    unsigned char folder = (p[0] & 0xDF) == 'D' && (p[1] & 0xDF) == 'I' && (p[2] & 0xDF) == 'R';
+    // The exact size: eight hex digits at the end of an "$=L" line. Else the blocks.
+    const char *end = p + strlen(p);
+    while (end > p && end[-1] == ' ')
+        end--;
+    u32 size = 0;
+    unsigned char digits = 0;
+    const char *h = end;
+    while (h > p && h[-1] != ' ')
+        h--;
+    if (end - h == 8) {
+        for (; h < end; h++, digits++) {
+            unsigned char c = (unsigned char)*h;
+            unsigned char value = c >= '0' && c <= '9' ? c - '0' : (c & 0xDF) >= 'A' && (c & 0xDF) <= 'F' ? (c & 0xDF) - 'A' + 10 : 255;
+            if (value == 255)
+                break;
+            size = size << 4 | value;
+        }
+    }
+    size = folder ? 0 : digits == 8 ? size : (u32)blocks * 254;
+    if (dir_used + 6u + length > 0x2000u) {
+        dir_complete = 0;                           // the bank is full
+        return 1;
+    }
+    unsigned char head[6] = { length, folder, (unsigned char)size, (unsigned char)(size >> 8), (unsigned char)(size >> 16), (unsigned char)(size >> 24) };
+    dir_copy(dir_used, head, 6, 1);
+    dir_copy(dir_used + 6, (unsigned char *)name, length, 1);
+    dir_used += 6u + length;
+    return 1;
+}
+
+void cs_cx16_dir_close(void)
+{
+    dir_used = dir_at = 0;
+}
+
+// given: "" for the current folder, "folder", "#9:". 1 if the folder was read.
+i32 cs_cx16_dir_open(const char *given)
+{
+    unsigned char device;
+    const char *path = take_device(given, &device);
+    cs_cx16_dir_close();
+    dir_complete = 1;
+    if (path == 0 || strlen(path) >= MAX_NAME - 12)
+        return 0;
+    char name[MAX_NAME];
+    strcpy(name, device == 8 ? "$=L" : "$");            // the exact sizes, from CMDR-DOS
+    if (path[0]) {
+        strcat(name, "//");
+        strcat(name, path);
+        strcat(name, "/:*");
+    }
+    dir_bank = (unsigned char)(cs_cx16_bank_count() + CODE_BANKS);     // the topmost bank
+    cbm_k_setnam(name);
+    cbm_k_setlfs(DIR_FILE, device, 0);
+    if (cbm_k_open() || (cbm_k_readst() & 0x80)) {
+        forget_everything();
+        return 0;
+    }
+    int code = dos_command(device, "");                 // a folder that isn't there: don't read, it never ends
+    if (code < 0)
+        return 0;
+    if (code >= 20) {
+        cbm_k_close(DIR_FILE);
+        return 0;
+    }
+    if (cbm_k_chkin(DIR_FILE) || (cbm_k_readst() & 0x80)) {
+        forget_everything();
+        return 0;
+    }
+    char text[MAX_NAME + 48];
+    unsigned number;
+    int low = dir_byte(), high = dir_byte();            // the load address
+    char ok = low >= 0 && high >= 0 && dir_line(&number, text, sizeof text);       // the volume
+    if (ok) {
+        while (dir_line(&number, text, sizeof text) && dir_keep(number, text)) {
+        }
+    }
+    cbm_k_clrch();
+    cbm_k_close(DIR_FILE);
+    return ok;
+}
+
+// Hands out the next file or folder; 0 when there are no more.
+i32 cs_cx16_dir_next(void)
+{
+    if (dir_at >= dir_used) {
+        dir_name_length = 0;
+        return 0;
+    }
+    unsigned char head[6];
+    dir_copy(dir_at, head, 6, 0);
+    dir_name_length = head[0];
+    dir_is_folder = head[1];
+    dir_size = head[2] | (u32)head[3] << 8 | (u32)head[4] << 16 | (u32)head[5] << 24;
+    dir_copy(dir_at + 6, (unsigned char *)dir_name, dir_name_length, 0);
+    dir_at += 6u + dir_name_length;
+    return 1;
+}
+
+i32 cs_cx16_dir_is_complete(void) { return dir_complete; }
+
+i32 cs_cx16_dir_name_length(void) { return dir_name_length; }
+i32 cs_cx16_dir_name_char(i32 i) { return i >= 0 && i < dir_name_length ? (unsigned char)dir_name[i] : 0; }
+i32 cs_cx16_dir_size(void) { return (i32)dir_size; }
+i32 cs_cx16_dir_is_folder(void) { return dir_is_folder; }
+
+// At the program's end: files that are written aren't whole until they are closed.
+static void files_shutdown(void)
+{
+    cbm_k_clrch();
+    for (int i = 0; i < MAX_FILES; i++)
+        if (files[i].mode)
+            cbm_k_close((unsigned char)(2 + i));
+    for (unsigned char device = 8; device <= 30; device++)
+        if (command_channels & (1ul << device))
+            cbm_k_close((unsigned char)(90 + device));
 }
 #endif // CX16_FILES
 
@@ -2350,7 +2689,11 @@ i32 cs_cx16_bank_count(void)
         __asm__ volatile("sec\n\tjsr $FF99" : "=a"(banks) : : "x", "y", "c", "memory");
         count = banks == 0 ? 256 : banks;
     }
+#ifdef CX16_DIR
+    return (i32)count - CODE_BANKS - 1;     // nor is the topmost one, for a folder's list (below)
+#else
     return (i32)count - CODE_BANKS;     // the code's banks are not the program's
+#endif
 }
 
 #define WITH_BANK(bank, body) do { \

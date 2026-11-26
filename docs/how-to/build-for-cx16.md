@@ -74,31 +74,65 @@ back, and leave those two to a run in a window.
 
 ## Files on the disk
 
-`File` (`lib/File.cs`) reads and writes the SD card, or a drive on the serial bus, through the
-KERNAL (llvm-mos's C library does the talking; `cx16/runtime.c` adapts it):
+`File` (`lib/File.cs`) reads and writes the SD card, or a drive on the serial bus. `cx16/runtime.c` uses the
+KERNAL's file calls for it, not llvm-mos's stdio, which is made for the old Commodore drives: it can't open a
+file on the SD card for reading, and allows only 16 characters of a name.
 
 ```csharp
 File.WriteAllText("notes.txt", "hello\n");
 File.AppendAllText("notes.txt", "more\n");
 File.WriteAllBytes("#9:data.bin", bytes);       // on device 9
+File.TryReadAllText(arena, "//levels/:one.txt", out string text);    // in a folder
 ```
 
-- **Names:** the SD card follows CBM DOS: short names, no folders to speak of. In the emulator, the
-  files are in the folder `run.sh` gives it with `-fsroot` (`bin/cx16/`).
+- **Names:** long names and spaces are fine, up to about 70 characters with the folder; a comma isn't (the drive
+  takes what follows for the file's type). Upper and lower case find the same file.
+- **Folders:** `"folder/name"` or `"//folder/:name"`, from the current folder, which `Disk.Command("cd:folder")`
+  changes.
 - **Device:** a path starting with `#` and a number and a colon is on that device (8 to 30):
   `"#9:data.bin"`. Without it, a file is on the device the program was loaded from, 8 for the SD
   card. A device that isn't there closes all the program's open files, because the KERNAL can't open
   anything else until it has.
-- **Binary:** every file is opened as binary: no byte is changed on the way.
+- **Binary:** every file is read and written byte for byte.
 - **Moving about:** a file opened for reading can be moved anywhere with `Seek`, and `Length` and
   `Position` work, but only by reading (forward) or opening it again (backward): `Length` reads a file
   through twice. A file opened for writing, or for appending, can only go on from where it is.
   `File.OpenAppend` adds to a file; `File.Create` replaces one.
-- **Limits:** four files open at once, and names of up to 37 characters. `File.Delete` says false
-  for a file that isn't there.
+- **Limits:** four files open at once. `File.Delete` says false for a file that isn't there.
 
-`samples/DiskFiles.cs` tests all of it (the emulator's host folder stands in for the SD card);
-`samples/Files.cs` is for the other targets: it wants 64 KB arenas and writes into the middle of files.
+### Folders
+
+`Disk` (`lib/Disk.cs`) lists a folder and sends commands to the drive:
+
+```csharp
+char[] name = new char[80];
+if (Disk.OpenDirectory())                       // the current folder; or Disk.OpenDirectory("levels")
+{
+    while (Disk.Next())
+    {
+        int length = Disk.CopyName(name);       // and Disk.Size in bytes, Disk.IsFolder
+        Out.Line(new ReadOnlySpan<char>(name, 0, length));
+    }
+}
+Disk.Command("md:levels");                      // make a folder; "cd:..", "rd:levels", "r:new=old"
+```
+
+- `OpenDirectory` reads the whole folder at once into the topmost bank of the banked RAM (a program that uses it
+  has one bank less for `Banks`), because CMDR-DOS can't have a listing open while files are used: it then ends
+  early, gives nonsense or hangs. So the loop may open, write and delete files, and goes through the folder as
+  it was. The bank holds some 250 entries; `Disk.IsComplete` says false if there were more.
+- It says false for a folder or a device that isn't there.
+- A drive on the serial bus gives sizes in blocks of 254 bytes, not bytes. Nothing here was tried with one.
+- `samples/DiskFiles.cs` and `DiskList.cs` test all of it; `samples/Files.cs` is for the other targets (it wants
+  64 KB arenas and writes into the middle of files).
+
+### On the emulator and on a card
+
+Without a card image the emulator serves a folder of the computer as the disk (`-fsroot`, which `run.sh` points
+at `bin/cx16/`). That is more forgiving than the SD card's own DOS, and different with folders: a listing of a
+named folder shows the root. `X16_SDCARD=sdcard.img.zip ./run.sh --cx16 Name` runs a program with a copy of a card
+image instead (the emulator's release has an empty one), and `./test.sh --cx16` runs `samples/DiskFiles.cs` and
+`DiskList.cs` both ways.
 
 ## Screen modes
 

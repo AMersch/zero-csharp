@@ -468,15 +468,22 @@ compile_bitcode() {
 }
 
 # Bitcode (against zerocore's WebAssembly build) -> WASM objects (clang) -> one
-# module, linked with wasm/runtime.c (zerocore's native half there) and WASI's
-# C library.
+# module, linked with wasm/runtime.c (zerocore's native half there),
+# wasm/simd.c (SIMD kernels for TensorPrimitives and lib/Kernels.cs) and
+# WASI's C library.
 build_wasm() {
     local name obj bc
     check_bflat
     check_wasm
     build_core "$CORE"
-    build_core "$WASM_CORE" -d WASM
+    # WASM_SIMD: only this build has wasm/simd.c linked in, so only here does
+    # zerocore's PackedSimd.IsSupported say true (DOS, C64 and ARM build
+    # zerocore with -d WASM too).
+    build_core "$WASM_CORE" -d WASM -d WASM_SIMD
     build_lib
+    # simd128 is in every WebAssembly engine since 2021 (Chrome 91, Firefox 89,
+    # Safari 16.4, wasmtime, Node 16.4).
+    "$WASI_SDK/bin/clang" -target wasm32-wasip1 -O2 -msimd128 -Wall -Wextra -c wasm/simd.c -o bin/wasm/simd.o
     for name in "$@"; do
         echo "[wasm]  $name -> bin/wasm/$name.wasm"
         obj=bin/wasm/obj/$name
@@ -494,7 +501,7 @@ build_wasm() {
         # --fatal-warnings: if wasm/runtime.c's signature for a function no longer
         # matches what NativeAOT-LLVM's code calls, wasm-ld only warns and links a
         # trap; this makes it a build error instead.
-        "$WASI_SDK/bin/clang" -target wasm32-wasip1 -Os "$obj"/*.o wasm/runtime.c -lm -o "bin/wasm/$name.wasm" \
+        "$WASI_SDK/bin/clang" -target wasm32-wasip1 -Os "$obj"/*.o bin/wasm/simd.o wasm/runtime.c -lm -o "bin/wasm/$name.wasm" \
             -Wl,--no-stack-first -Wl,--global-base=1024 -Wl,-z,stack-size=1048576 \
             -Wl,--strip-all -Wl,--gc-sections -Wl,--fatal-warnings
     done

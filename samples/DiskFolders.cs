@@ -6,7 +6,6 @@
 // Build: ./build.sh --cx16 DiskFolders
 
 using System;
-using System.IO;
 
 public static class Program
 {
@@ -56,14 +55,17 @@ public static class Program
     static void Inside()
     {
         int folders;
+        // Wherever the program was started from, the card's root or a folder of it.
+        string start = Directory.GetCurrentDirectory();
+        string dir = (start == "/" ? "" : start) + "/d.dir";
         Check("go in", Directory.SetCurrentDirectory("d.dir/in") == FileError.None);
-        Check("where", Directory.GetCurrentDirectory() == "/d.dir/in");
-        Check("from here", File.Exists("two.tmp") && File.Exists("/d.dir/in/two.tmp") && Entries(".", out folders) == 2 && folders == 1);
+        Check("where", Directory.GetCurrentDirectory() == dir + "/in");
+        Check("from here", File.Exists("two.tmp") && File.Exists(dir + "/in/two.tmp") && Entries(".", out folders) == 2 && folders == 1);
         Disk.OpenDirectory("deeper");
         Check("a folder from here, for Disk", !Disk.Next());
-        Disk.OpenDirectory("/d.dir");
+        Disk.OpenDirectory(dir);
         Check("one from the root", Disk.Next());
-        Check("back to the root", Directory.SetCurrentDirectory("/") == FileError.None && Directory.GetCurrentDirectory() == "/");
+        Check("back", Directory.SetCurrentDirectory(start) == FileError.None && Directory.GetCurrentDirectory() == start);
         Check("move a folder", Directory.Move("d.dir/in", "d.dir/out") == FileError.None && Size("d.dir/out/two.tmp") == 2);
     }
 

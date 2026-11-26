@@ -56,6 +56,8 @@ public static class Board
     /// Calls <paramref name="handler"/> <paramref name="hz"/> times a second,
     /// from the SysTick timer's interrupt, until StopTicks. The handler is a
     /// static method marked [UnmanagedCallersOnly], with no parameters.
+    /// A throw in it ends the program, also when the code it interrupted
+    /// is inside a Catch.Run; a Catch.Run in the handler itself works.
     /// Returns false if the timer can't count that rate.
     /// </summary>
     public static unsafe bool StartTicks(int hz, delegate* unmanaged<void> handler)

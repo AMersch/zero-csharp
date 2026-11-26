@@ -90,8 +90,9 @@ as here: that writes out what's still in the buffer and closes the file. A strea
 disposed loses whatever is still in its buffer.
 
 Every `FileMode` works: `Open`, `Create`, `CreateNew`, `OpenOrCreate`, `Truncate` and `Append`.
-Opening a file that isn't there, or a `CreateNew` file that is, throws in .NET, and here a throw ends
-the program. `TryOpen` returns the reason as a `FileError` instead:
+Opening a file that isn't there, or a `CreateNew` file that is, throws an `IOException`, as in .NET.
+A throw ends the program unless a [`Catch.Run`](recover-from-errors.html) is waiting for it. Where
+failing is expected, `TryOpen` returns the reason as a `FileError` instead:
 
 <!-- sample: samples/Streams.cs modes -->
 ```csharp
@@ -148,8 +149,10 @@ There, `Read` waits for bytes and lets the other fibers run in the meantime.
 
 - **`ReadAsync`, `WriteAsync` and `Task`:** streams are synchronous. For work that waits, use fibers
   and a pipe.
-- **Exceptions you can catch:** a throw ends the program, so check `CanRead`, `CanWrite` and
-  `CanSeek`, and open files with `TryOpen`, where failing is expected.
+- **`catch` blocks:** a throw ends the program, or comes back to a
+  [`Catch.Run`](recover-from-errors.html), which closes the files opened inside it without writing
+  out what their streams still held. Check `CanRead`, `CanWrite` and `CanSeek`, and open files with
+  `TryOpen`, where failing is expected.
 - **`BufferedStream`, `StreamReader` and `StreamWriter`:** for text, `File.TryReadAllText`,
   `File.Write(text)` and `Pipe.Write(text)` handle UTF-8.
 

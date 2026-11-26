@@ -301,6 +301,33 @@ namespace Microsoft.FSharp.Core
         [<CompiledName("PrintFormatLineToError")>]
         let inline eprintfn (format: PrintfFormat< ^T, unit, unit, unit, ^U>) : ^T = Printf.eprintfn format
 
+namespace Microsoft.FSharp.Core
+
+    open System
+
+    /// lib/'s Catch.Run (lib/Catch.cs) as F# would have it. A raise, failwith
+    /// or any other throw inside comes back as Error; nothing between it and
+    /// here runs on the way, not even try/with or try/finally, but files and
+    /// sockets opened inside and left open are closed.
+    ///
+    ///   match Catch.result (fun () -> download url path) with
+    ///   | Ok size -> printfn "%d bytes" size
+    ///   | Error (:? IOException as e) -> printfn "couldn't: %s" e.Message
+    ///   | Error e -> raise e
+    ///
+    /// Catch.Run itself works from F# as well: it returns the exception, or
+    /// null.
+    [<RequireQualifiedAccess>]
+    [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+    module Catch =
+        /// Runs f: Ok with what it returns, or Error with what it throws.
+        [<CompiledName("Result")>]
+        let result (f: unit -> 'T) : Result<'T, exn> =
+            let mutable value = Unchecked.defaultof<'T>
+            match global.Catch.Run(Func<'T>(f), &value) with
+            | null -> Ok value
+            | e -> Error e
+
 namespace Microsoft.FSharp
     // After FSharp.Core's: these printf functions are the ones programs see.
     // The namespace too, for Printf.ksprintf: FSharp.Core's opens only its own

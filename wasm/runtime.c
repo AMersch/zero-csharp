@@ -77,6 +77,18 @@ void *ZeroGetModuleHeader(void *shadowStack)
     return __ReadyToRunHeader;
 }
 
+// Catch.Run (zerocore/Runtime/Catch.cs). WebAssembly can't jump back up
+// the stack without exception handling or JavaScript's help, so here the
+// callback just runs, and ZeroCatchJump returns: RhpThrowEx goes on to print
+// the exception and end the program, as with no Catch.Run at all.
+void ZeroCatchCall(void *shadowStack, void **saved, void (*body)(void *, void *), void *argument)
+{
+    (void)saved;
+    body(shadowStack, argument);
+}
+
+void ZeroCatchJump(void *shadowStack, void *saved) { (void)shadowStack; (void)saved; }
+
 // ---- transitions between native and managed code --------------------------
 
 static char shadow_stack[1 << 20] __attribute__((aligned(16)));

@@ -50,7 +50,8 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `System/Range.cs` | `Index` and `Range`, for `^1` and `a..b`, and `RuntimeHelpers.GetSubArray` for `array[a..b]` (`string.Substring` is in `String.cs`) |
 | `System/Debug.cs` | `Debug.Assert` and `Debug.Fail`, for builds with `DEBUG` defined: print the condition, member, file and line, then `FailFast`. They use the caller-info attributes in `System/Attributes.cs` (`CallerMemberName`, `CallerLineNumber`, `CallerFilePath`, `CallerArgumentExpression`) |
 | `System/Environment.cs` | `Environment.FailFast`, which is what every failure ends in; `Exit`, `GetEnvironmentVariable`, `ProcessorCount`, `TickCount64` and `NewLine` (`"\n"`) |
-| `Runtime/RuntimeExports.cs` | Allocation (`calloc`, never freed), boxing and unboxing; `throw` (print the message, abort) |
+| `Runtime/RuntimeExports.cs` | Allocation (`calloc`, never freed), boxing and unboxing; `throw` (back to `Catch.Run`, or print the message and abort) |
+| `Runtime/Catch.cs` | The marks `throw` jumps back to, for lib/'s `Catch.Run`: `ZeroCatchCall` and `ZeroCatchJump`, in assembly next to the fiber switch (`native/`), or with `setjmp` in the C runtimes |
 | `Runtime/TypeCast.cs` | `is`, `as` and casts to classes, interfaces and arrays (an array of a different element type matches only by covariance, which ends the program as unsupported); type-checked stores into arrays |
 | `Runtime/InterfaceDispatch.cs` | Calling an interface method on an object whose class isn't known at build time, with a small cache per call site |
 | `System/Math.cs` | `Math` and `MathF`: the processor's instruction where there is one, the C math library otherwise. The inverse and hyperbolic functions, `Cbrt`, `IEEERemainder` and `Log(a, newBase)` are built on `atan2`, `exp`, `log`, `sqrt` and `pow`, so every target's C library is enough |
@@ -91,14 +92,14 @@ Most of the library is a contract with the compiler: it looks types, methods and
 - `try`/`finally` and `using` (but see exceptions below)
 - Extension methods and C# 14 extension members (properties, static members, `ref` receivers)
 - C# 15 unions (`union Result(Ok, Err);`) and `switch` on them; a struct case is boxed, and never freed
-- `throw`, as a panic: it prints the exception's message to stderr and aborts
+- `throw`, as a panic: it prints the exception's message to stderr and aborts, unless lib/'s `Catch.Run` is waiting for it
 
 A failure that would throw in .NET (a failed cast, an index out of range, an arithmetic overflow in `checked` code) prints its name to stderr and aborts. A null dereference is a plain segmentation fault. Integer division by zero aborts with a message on arm64 and is a hardware trap on x64.
 
 ## What doesn't
 
 - **Freeing memory.** Every `new`, boxing and string concatenation calls `calloc`, and nothing is ever freed. Use it for objects that live as long as the program, and an arena (`../lib/Arena.cs`) for the rest.
-- **Catching exceptions.** `throw` compiles, and `catch` compiles, but nothing unwinds: `RhpThrowEx` prints `Unhandled exception: ` and the message, then aborts. No `catch` block ever runs, and neither do the `finally` blocks and `using` disposals between the `throw` and `Main`. `try`/`finally` and `using` work on the normal path: the `finally` block runs when the `try` block ends. Without reflection there's no type name to print, so the standard exception types use their name as the default message.
+- **Catching exceptions.** `throw` compiles, and `catch` compiles, but nothing unwinds: `RhpThrowEx` jumps back to the innermost `Catch.Run` (lib/Catch.cs, `Runtime/Catch.cs`) if there is one, or prints `Unhandled exception: ` and the message, then aborts. No `catch` block ever runs, and neither do the `finally` blocks and `using` disposals between the `throw` and `Main` (or `Catch.Run`). `try`/`finally` and `using` work on the normal path: the `finally` block runs when the `try` block ends. Without reflection there's no type name to print, so the standard exception types use their name as the default message.
 - **Variance.** Casting or dispatching through it (`IEnumerable<string>` as `IEnumerable<object>`, `string[]` as `object[]`) aborts with a message saying so instead of answering wrongly. Arrays don't implement `IList<T>` or `IEnumerable<T>`.
 - **Interface calls cost a little more than virtual calls.** When the compiler can't tell which class is behind an interface, the call goes through a cache of the last four classes seen at that call site: about 1.6 ns on an Apple M-series core against 0.9 ns for a virtual call, and 3 to 4 ns when the site alternates between two to four classes. A site that sees more than four pays for a full search (about 5 ns) on each of the extras. In a hot loop, generics with a `struct` constraint or static abstract members are still faster: they're resolved at build time.
 - **Most of the base class library.** No `Console` (use `../lib/Out.cs`), reflection (a `Type` only compares; a class without its own `ToString` prints `object`), collections, LINQ (see `../lib/Seq.cs`), async (see `../lib/Fibers.cs` for green threads), `Thread`, or `Nullable<T>` boxing.

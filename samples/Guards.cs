@@ -34,8 +34,11 @@ public static class Program
             Console.WriteLine("  arena-limit          an allocation past an arena's maxCapacity (stopOnOutOfMemory)");
             Console.WriteLine("  buffer-full          an allocation that doesn't fit in a FromBuffer arena (stopOnOutOfMemory)");
             Console.WriteLine("  lambda-in-scope      a lambda first run inside AllocateObjectsHere, cached in the arena (DebugChecks)");
+            Console.WriteLine("  lambda-scope-not-closed  the same, with the scope never disposed: found when the arena is reset (DebugChecks)");
             Console.WriteLine("  throw                a throw, inside a try with a matching catch");
             Console.WriteLine("  throw-null           throw null");
+            Console.WriteLine("  throw-in-static-constructor  a throw out of a static constructor, inside Catch.Run");
+            Console.WriteLine("  throw-in-parallel-for  a throw in a Parallel.For iteration, inside Catch.Run");
             Console.WriteLine("  union-no-case        a switch on a union that holds none of its cases");
             Console.WriteLine("  debug-assert         a Debug.Assert whose condition is false");
             Console.WriteLine("  debug-fail           a Debug.Fail");
@@ -79,8 +82,11 @@ public static class Program
             case "arena-limit": ArenaLimit(); break;
             case "buffer-full": BufferFull(); break;
             case "lambda-in-scope": LambdaInScope(); break;
+            case "lambda-scope-not-closed": LambdaScopeNotClosed(); break;
             case "throw": Throw(); break;
             case "throw-null": ThrowNull(); break;
+            case "throw-in-static-constructor": ThrowInStaticConstructor(); break;
+            case "throw-in-parallel-for": ThrowInParallelFor(); break;
             case "union-no-case": UnionNoCase(); break;
             case "debug-assert": DebugAssert(Opaque(0)); break;
             case "debug-fail": DebugFail(); break;
@@ -275,6 +281,24 @@ public static class Program
         }
     }
 
+    // The same with a scope that is never disposed, as when a throw that a
+    // Catch.Run catches jumps over its using block: the check then runs when
+    // the arena is about to free the memory.
+    static void LambdaScopeNotClosed()
+    {
+        Arena.DebugChecks = true;
+        Arena frame = Arena.Create(1024, "frame");
+        unsafe { frame.AllocateObjectsHere(); } // SAFETY: the mistake is the point
+        System.Func<int, int> thrice = static x => x * 3;
+        thrice(14);
+        unsafe
+        {
+            // SAFETY: as above. Catch.Run does this much after a throw.
+            System.Runtime.ObjectAllocator.Set(null, null);
+            frame.Reset();
+        }
+    }
+
     static void Throw()
     {
         // docs:throw-panic
@@ -293,6 +317,32 @@ public static class Program
     static void ThrowNull()
     {
         throw null;
+    }
+
+    // A type whose static constructor throws.
+    static class Settings
+    {
+        public static readonly int Port = Load();
+
+        static int Load() => throw new System.InvalidOperationException("the settings are missing");
+    }
+
+    // Catch.Run gets a throw back, but not one out of a static constructor:
+    // jumping out of it would leave the type half made for good.
+    static void ThrowInStaticConstructor()
+    {
+        Exception error = Catch.Run(static () => Console.WriteLine(Settings.Port));
+        Console.WriteLine(error == null ? "returned" : "caught");
+    }
+
+    // Nor one out of a Parallel.For iteration: the loop's other threads
+    // would go on working for a loop that is gone. (One iteration, so that
+    // it's the calling thread's, the one with the Catch.Run.)
+    static void ThrowInParallelFor()
+    {
+        Exception error = Catch.Run(static () => Parallel.For(0, 1, 0,
+            static (_, i) => throw new System.InvalidOperationException("thrown in a Parallel.For")));
+        Console.WriteLine(error == null ? "returned" : "caught");
     }
 
     static int UnionNoCase()

@@ -6,6 +6,7 @@
 // Build: ./build.sh Network
 
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 
@@ -36,6 +37,16 @@ public sealed class Failures
     public TcpClient Victim;    // the server's end of the connection closed from another fiber
     public bool Waiting;        // its reader is about to wait
     public bool EchoedAfter;
+}
+
+public sealed class Guarded
+{
+    public TcpListener Listener;
+    public int Port;
+    public int Served;
+    public int Failed;      // connections whose serving threw
+    public int Echoed;      // clients that got their echo
+    public bool Dropped;    // the client whose connection failed saw it close
 }
 
 public sealed class Datagrams
@@ -114,6 +125,29 @@ public static class Program
         int n;
         while ((n = stream.Read(buffer)) > 0)
             stream.Write(buffer.Slice(0, n));
+    }
+    // docs:end
+
+    // docs:serve-catch
+    // The same with a Catch.Run of its own, which every fiber that should
+    // survive a throw needs: a throw while serving (here, for a message
+    // that starts with '!') ends this connection, not the program.
+    static bool ServeGuarded(TcpClient client)
+    {
+        Exception error = Catch.Run(ref client, static (ref TcpClient c) =>
+        {
+            using NetworkStream stream = c.GetStream();
+            Span<byte> buffer = stackalloc byte[512];
+            int n;
+            while ((n = stream.Read(buffer)) > 0)
+            {
+                if (buffer[0] == (byte)'!')
+                    throw new IOException("a bad request");
+                stream.Write(buffer.Slice(0, n));
+            }
+        });
+        client.Dispose(); // runs either way: Catch.Run always returns
+        return error == null;
     }
     // docs:end
 
@@ -327,6 +361,78 @@ public static class Program
         Check("refused", !connected && error == SocketError.ConnectionRefused);
         Check("not connected", !socket.Connected);
         Section("Errors");
+
+        // docs:catch
+        // Connect throws a SocketException where TryConnect returns false.
+        // Catch.Run gets it back, and closes the socket the callback opened
+        // and left open.
+        Socket attempt = null;
+        Exception thrown = Catch.Run(() =>
+        {
+            attempt = new Socket(AddressFamily.InterNetwork,
+                SocketType.Stream, ProtocolType.Tcp);
+            attempt.Connect(new IPEndPoint(IPAddress.Loopback, closedPort));
+        });
+        // thrown is a SocketException, and attempt.Handle is -1
+        // docs:end
+        Check("Connect's throw comes back", thrown is SocketException refusal
+            && refusal.SocketErrorCode == SocketError.ConnectionRefused);
+        Check("and the socket it left open is closed", attempt.Handle == -1);
+
+        // Kept, a socket opened inside stays open: for a pool, say.
+        Socket pooled = null;
+        thrown = Catch.Run(() =>
+        {
+            pooled = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            Catch.Keep(pooled);
+            throw new IOException("something else failed");
+        });
+        Check("a kept socket stays open after a throw", thrown is IOException && pooled.Handle != -1);
+        pooled.Dispose();
+
+        // A server whose connections each have a Catch.Run: one client sends
+        // a request that makes its handler throw, and the others are served.
+        var guarded = new Guarded { Listener = new TcpListener(IPAddress.Loopback, 0) };
+        guarded.Listener.Start();
+        guarded.Port = ((IPEndPoint)guarded.Listener.LocalEndpoint).Port;
+        Fiber.Spawn(guarded, static g =>
+        {
+            while (g.Served < 3)
+            {
+                TcpClient client = g.Listener.AcceptTcpClient();
+                g.Served++;
+                Fiber.Spawn((g, client), static s =>
+                {
+                    if (!ServeGuarded(s.client))
+                        s.g.Failed++;
+                });
+            }
+        });
+        for (int id = 0; id < 3; id++)
+            Fiber.Spawn((guarded, id), static s =>
+            {
+                using var client = new TcpClient();
+                client.Connect(IPAddress.Loopback, s.guarded.Port);
+                NetworkStream stream = client.GetStream();
+                Span<byte> message = stackalloc byte[10];
+                message.Fill(s.id == 1 ? (byte)'!' : (byte)('a' + s.id));
+                stream.Write(message);
+                Span<byte> back = stackalloc byte[10];
+                if (s.id == 1)
+                {
+                    s.guarded.Dropped = stream.Read(back) == 0; // closed, nothing echoed
+                    return;
+                }
+                stream.ReadExactly(back);
+                client.Client.Shutdown(SocketShutdown.Send);
+                if (Same(back, message) && stream.Read(back) == 0)
+                    s.guarded.Echoed++;
+            });
+        Fiber.Run();
+        guarded.Listener.Stop();
+        Check("the connection whose serving threw is closed", guarded.Failed == 1 && guarded.Dropped);
+        Check("and the others are served", guarded.Echoed == 2);
+        Section("Catching");
 
         // docs:udp
         // UDP: a datagram there and back, between two fibers.

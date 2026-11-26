@@ -86,6 +86,7 @@ public partial struct Arena
         public bool Poison;        // DebugChecks was on when the arena was created
         public bool StopOnOutOfMemory;
         public bool InBuffer;      // from FromBuffer: the caller owns the memory
+        public bool Unchecked;     // objects were made here since statics were last checked (CheckFreed)
         public nuint Used;         // bytes handed out, padding excluded
         public nuint Capacity;     // sum of all block sizes
         public nuint PeakUsed;     // the highest Used and Capacity so far;
@@ -611,6 +612,9 @@ public partial struct Arena
             if (keep == null || mark.Used > state->Used || (keep == state->Current && mark.Ptr > state->Ptr))
                 Fail(state, "Arena.Restore: the mark was already freed by restoring an older one (restore marks newest first)");
 
+            if (state->Unchecked)
+                s_checkFreed(state, keep, mark.Ptr);
+
             // SAFETY: keep is in the chain; the blocks after it were added
             // since the mark and are freed once.
             Block* block = keep->Next;
@@ -699,6 +703,7 @@ public partial struct Arena
             // is given this arena's live state, which the caller keeps alive.
             System.Runtime.ObjectAllocator.Get(out scope.PreviousAllocate, out scope.PreviousContext);
             System.Runtime.ObjectAllocator.Set(&AllocateObject, _state);
+            s_checkFreed = &CheckFreed;
         }
         return scope;
     }
@@ -747,7 +752,15 @@ public partial struct Arena
     // ObjectAllocator's function: objects are zeroed and 8-byte aligned (a
     // long or double in an object needs it on 32-bit targets).
     static unsafe void* AllocateObject(void* context, nuint size)
-        => new Arena { _state = (State*)context }.Alloc(size, 8, zero: true);
+    {
+        // SAFETY: context is the State AllocateObjectsHere set this with.
+        unsafe
+        {
+            State* state = (State*)context;
+            state->Unchecked = state->Poison; // see CheckFreed
+            return new Arena { _state = state }.Alloc(size, 8, zero: true);
+        }
+    }
 
     /// <summary>
     /// From AllocateObjectsHere or OpenObjectScope, for a using block: disposing
@@ -773,7 +786,13 @@ public partial struct Arena
             unsafe { System.Runtime.ObjectAllocator.Set(PreviousAllocate, PreviousContext); }
             // Checked before freeing, while the scope's objects are still in
             // the arena's blocks.
-            unsafe { CheckStatics((State*)State); } // SAFETY: State is the scope's live arena.
+            unsafe
+            {
+                // SAFETY: State is the scope's live arena.
+                CheckStatics((State*)State);
+                if (State != null)
+                    ((State*)State)->Unchecked = false;
+            }
             if (FreeOnDispose)
             {
                 FreeOnDispose = false; // a second Dispose frees nothing
@@ -800,6 +819,35 @@ public partial struct Arena
                 if (System.Runtime.ObjectAllocator.StaticsReferInto(block->Start, block->End))
                     Fail(state, "Arena.AllocateObjectsHere: a static field points at an object created inside the scope. "
                         + "A C# lambda that captures nothing probably ran for the first time inside it; run it once before.");
+            }
+        }
+    }
+
+    // The same check where the memory is freed, for a scope that was never
+    // disposed: forgotten, or jumped over by a throw that a Catch.Run caught
+    // (Catch.cs), which puts the allocator back but knows nothing of arenas.
+    // With debug checks on, Restore, Reset and Destroy call this, through
+    // s_checkFreed, when objects were made in the arena since the last check,
+    // for the memory they are about to free: from `from` in block to where
+    // the arena has got to. (The message is CheckStatics's, word for word:
+    // one string in the program.) (A pointer, set by AllocateObjectsHere, so that
+    // a program without object scopes doesn't have the check in it.)
+    static unsafe delegate*<State*, Block*, byte*, void> s_checkFreed;
+
+    static unsafe void CheckFreed(State* state, Block* block, byte* from)
+    {
+        unsafe
+        {
+            // SAFETY: block is in state's chain, and from inside it.
+            if (!state->Poison)
+                return;
+            for (; block != null; block = block->Next)
+            {
+                byte* end = block == state->Current ? state->Ptr : block->End;
+                if (from < end && System.Runtime.ObjectAllocator.StaticsReferInto(from, end))
+                    Fail(state, "Arena.AllocateObjectsHere: a static field points at an object created inside the scope. "
+                        + "A C# lambda that captures nothing probably ran for the first time inside it; run it once before.");
+                from = block->Next != null ? block->Next->Start : null;
             }
         }
     }
@@ -888,6 +936,11 @@ public partial struct Arena
 
         unsafe
         {
+            if (state->Unchecked)
+            {
+                s_checkFreed(state, state->First, state->First->Start);
+                state->Unchecked = false; // nothing is left to check
+            }
             state->Used = 0;
             state->Generation++;
 
@@ -934,6 +987,8 @@ public partial struct Arena
 
         unsafe
         {
+            if (state->Unchecked)
+                s_checkFreed(state, state->First, state->First->Start);
             if (state->InBuffer)
             {
                 // The memory is the caller's: nothing to free, but a stale

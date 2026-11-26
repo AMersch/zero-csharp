@@ -419,7 +419,9 @@ nothing may keep a reference to one. The compiler can break that rule for you in
   hidden static field. If that first time is inside the scope, the static field ends up pointing into
   the arena. Run such code once before opening a scope. With `Arena.DebugChecks` on when the arena
   was created, closing the scope checks every static field and stops the program if one points into
-  the arena. Static constructors are safe: whatever one creates is allocated outside every scope, since
+  the arena. A scope that is never closed (forgotten, or jumped over by a throw that
+  [`Catch.Run`](../how-to/recover-from-errors.html) caught) is checked when the arena next frees
+  that memory. Static constructors are safe: whatever one creates is allocated outside every scope, since
   it's kept for the rest of the program.
 - **Captured variables from outside.** A lambda that captures a variable declared outside the scope is
   cached in the object that holds that variable, which the check can't see. Declare what a lambda

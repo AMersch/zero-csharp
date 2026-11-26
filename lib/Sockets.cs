@@ -20,9 +20,11 @@
 // each, without callbacks or async.
 //
 // What differs from .NET:
-// - A throw ends the program, so a failure .NET reports with a
-//   SocketException stops the program with its message. The forms that
-//   return a SocketError don't: Receive and Send with `out SocketError`, and
+// - A throw ends the program unless a Catch.Run is waiting for it
+//   (Catch.cs), so a failure .NET reports with a SocketException stops
+//   the program with its message, or comes back to that Catch.Run, which
+//   closes the sockets opened inside it. The forms that return a
+//   SocketError don't throw: Receive and Send with `out SocketError`, and
 //   TryConnect and TryAccept, which .NET doesn't have.
 // - No async methods, timeouts or Select: fibers do the waiting.
 // - Linux, macOS and Windows. WebAssembly (WASI preview 1), DOS, UEFI and
@@ -175,7 +177,7 @@ public enum SocketError
     NoData = 11004,
 }
 
-/// <summary>A socket failure. Thrown, it ends the program with its message.</summary>
+/// <summary>A socket failure. Thrown, it ends the program with its message, unless a Catch.Run is waiting for it.</summary>
 public class SocketException : Exception
 {
     /// <summary>The failure for this SocketError number.</summary>
@@ -236,13 +238,15 @@ public class Socket : IDisposable
 {
     int _fd;
     bool _connected;
+    Catch.Ticket _ticket;  // for a Catch.Run to close the socket after a throw
 
-    /// <summary>A socket for the family, type and protocol. Failing ends the program.</summary>
+    /// <summary>A socket for the family, type and protocol. Failing throws a SocketException.</summary>
     public Socket(AddressFamily addressFamily, SocketType socketType, ProtocolType protocolType)
     {
         SocketError error = SocketNative.Create(addressFamily, socketType, protocolType, out _fd);
         if (error != SocketError.Success)
             throw new SocketException((int)error);
+        unsafe { _ticket = Catch.Opened(_fd, &SocketNative.CloseHandle); } // SAFETY: CloseHandle closes a socket's number
         AddressFamily = addressFamily;
         SocketType = socketType;
         ProtocolType = protocolType == ProtocolType.Unspecified
@@ -259,6 +263,7 @@ public class Socket : IDisposable
     {
         _fd = fd;
         _connected = true;
+        unsafe { _ticket = Catch.Opened(_fd, &SocketNative.CloseHandle); } // SAFETY: CloseHandle closes a socket's number
         AddressFamily = family;
         SocketType = type;
         ProtocolType = protocol;
@@ -271,15 +276,15 @@ public class Socket : IDisposable
     /// <summary>Tcp or Udp.</summary>
     public ProtocolType ProtocolType { get; }
     /// <summary>The system's handle for the socket; -1 once closed.</summary>
-    public nint Handle => _fd;
+    public nint Handle => Number;
     /// <summary>Whether the last Connect or Accept made a connection, and it hasn't failed or closed since.</summary>
-    public bool Connected => _connected && _fd >= 0;
+    public bool Connected => _connected && Number >= 0;
 
     /// <summary>The address and port this end has: after Bind, Connect or Accept.</summary>
-    public EndPoint LocalEndPoint => _fd < 0 ? null : SocketNative.Name(_fd, peer: false);
+    public EndPoint LocalEndPoint => Number < 0 ? null : SocketNative.Name(_fd, peer: false);
 
     /// <summary>The address and port of the other end, once connected.</summary>
-    public EndPoint RemoteEndPoint => _fd < 0 || !_connected ? null : SocketNative.Name(_fd, peer: true);
+    public EndPoint RemoteEndPoint => Number < 0 || !_connected ? null : SocketNative.Name(_fd, peer: true);
 
     /// <summary>Whether small writes go out at once (TCP_NODELAY), rather than gathered.</summary>
     public bool NoDelay
@@ -327,7 +332,7 @@ public class Socket : IDisposable
         set => SocketNative.SetOption(Fd, SocketNative.Option.Broadcast, value ? 1 : 0);
     }
 
-    /// <summary>Gives the socket an address and port of this machine. Failing ends the program.</summary>
+    /// <summary>Gives the socket an address and port of this machine. Failing throws a SocketException.</summary>
     public void Bind(EndPoint localEP)
     {
         SocketError error = SocketNative.Bind(Fd, ToIP(localEP));
@@ -343,7 +348,7 @@ public class Socket : IDisposable
             throw new SocketException((int)error);
     }
 
-    /// <summary>The next connection, waiting for one (other fibers run meanwhile). Failing ends the program.</summary>
+    /// <summary>The next connection, waiting for one (other fibers run meanwhile). Failing throws a SocketException.</summary>
     public Socket Accept()
     {
         if (!TryAccept(out Socket socket, out SocketError error))
@@ -354,7 +359,7 @@ public class Socket : IDisposable
     /// <summary>The next connection, waiting for one, or why there isn't one.</summary>
     public bool TryAccept(out Socket socket, out SocketError error)
     {
-        if (_fd < 0)
+        if (Number < 0)
         {
             socket = null;
             error = SocketError.OperationAborted;
@@ -365,19 +370,19 @@ public class Socket : IDisposable
         return socket != null;
     }
 
-    /// <summary>Connects to the endpoint, waiting until it answers (other fibers run meanwhile). Failing ends the program.</summary>
+    /// <summary>Connects to the endpoint, waiting until it answers (other fibers run meanwhile). Failing throws a SocketException.</summary>
     public void Connect(EndPoint remoteEP)
     {
         if (!TryConnect(remoteEP, out SocketError error))
             throw new SocketException((int)error);
     }
 
-    /// <summary>Connects to the address and port. Failing ends the program.</summary>
+    /// <summary>Connects to the address and port. Failing throws a SocketException.</summary>
     public void Connect(IPAddress address, int port) => Connect(new IPEndPoint(address, port));
 
     /// <summary>
     /// Connects to a host name's port, trying each of its addresses (of this
-    /// socket's family) in turn. Failing ends the program.
+    /// socket's family) in turn. Failing throws a SocketException.
     /// </summary>
     public void Connect(string host, int port)
     {
@@ -388,7 +393,7 @@ public class Socket : IDisposable
     /// <summary>Connects to the endpoint, or says why it couldn't: ConnectionRefused, TimedOut, HostUnreachable...</summary>
     public bool TryConnect(EndPoint remoteEP, out SocketError error)
     {
-        if (_fd < 0)
+        if (Number < 0)
         {
             error = SocketError.OperationAborted;
             return false;
@@ -420,10 +425,10 @@ public class Socket : IDisposable
         return false;
     }
 
-    /// <summary>Sends all of the bytes, waiting while the system's buffer is full. Failing ends the program.</summary>
+    /// <summary>Sends all of the bytes, waiting while the system's buffer is full. Failing throws a SocketException.</summary>
     public int Send(ReadOnlySpan<byte> buffer) => Send(buffer, SocketFlags.None);
 
-    /// <summary>Sends all of the bytes. Failing ends the program.</summary>
+    /// <summary>Sends all of the bytes. Failing throws a SocketException.</summary>
     public int Send(ReadOnlySpan<byte> buffer, SocketFlags socketFlags)
     {
         int sent = Send(buffer, socketFlags, out SocketError error);
@@ -435,7 +440,7 @@ public class Socket : IDisposable
     /// <summary>Sends all of the bytes, or as many as went before a failure, which <paramref name="errorCode"/> says.</summary>
     public int Send(ReadOnlySpan<byte> buffer, SocketFlags socketFlags, out SocketError errorCode)
     {
-        if (_fd < 0)
+        if (Number < 0)
         {
             errorCode = SocketError.OperationAborted;
             return 0;
@@ -446,10 +451,10 @@ public class Socket : IDisposable
         return sent;
     }
 
-    /// <summary>Sends all of the bytes. Failing ends the program.</summary>
+    /// <summary>Sends all of the bytes. Failing throws a SocketException.</summary>
     public int Send(byte[] buffer) => Send(new ReadOnlySpan<byte>(buffer ?? throw new ArgumentNullException(nameof(buffer))));
 
-    /// <summary>Sends <paramref name="size"/> bytes from offset. Failing ends the program.</summary>
+    /// <summary>Sends <paramref name="size"/> bytes from offset. Failing throws a SocketException.</summary>
     public int Send(byte[] buffer, int offset, int size, SocketFlags socketFlags)
     {
         Check(buffer, offset, size);
@@ -459,11 +464,11 @@ public class Socket : IDisposable
     /// <summary>
     /// Receives what has arrived, up to buffer.Length bytes, waiting while
     /// nothing has (other fibers run meanwhile). Returns 0 when the other end
-    /// has shut its sending down. Failing ends the program.
+    /// has shut its sending down. Failing throws a SocketException.
     /// </summary>
     public int Receive(Span<byte> buffer) => Receive(buffer, SocketFlags.None);
 
-    /// <summary>Receive, with flags (Peek). Failing ends the program.</summary>
+    /// <summary>Receive, with flags (Peek). Failing throws a SocketException.</summary>
     public int Receive(Span<byte> buffer, SocketFlags socketFlags)
     {
         int received = Receive(buffer, socketFlags, out SocketError error);
@@ -475,7 +480,7 @@ public class Socket : IDisposable
     /// <summary>Receive, saying why it failed (ConnectionReset...) instead of ending the program.</summary>
     public int Receive(Span<byte> buffer, SocketFlags socketFlags, out SocketError errorCode)
     {
-        if (_fd < 0)
+        if (Number < 0)
         {
             errorCode = SocketError.OperationAborted;
             return 0;
@@ -486,17 +491,17 @@ public class Socket : IDisposable
         return received;
     }
 
-    /// <summary>Receive into an array. Failing ends the program.</summary>
+    /// <summary>Receive into an array. Failing throws a SocketException.</summary>
     public int Receive(byte[] buffer) => Receive(new Span<byte>(buffer ?? throw new ArgumentNullException(nameof(buffer))));
 
-    /// <summary>Receive up to <paramref name="size"/> bytes into buffer from offset. Failing ends the program.</summary>
+    /// <summary>Receive up to <paramref name="size"/> bytes into buffer from offset. Failing throws a SocketException.</summary>
     public int Receive(byte[] buffer, int offset, int size, SocketFlags socketFlags)
     {
         Check(buffer, offset, size);
         return Receive(new Span<byte>(buffer, offset, size), socketFlags);
     }
 
-    /// <summary>Sends a datagram to the endpoint (UDP). Failing ends the program.</summary>
+    /// <summary>Sends a datagram to the endpoint (UDP). Failing throws a SocketException.</summary>
     public int SendTo(ReadOnlySpan<byte> buffer, EndPoint remoteEP)
     {
         SocketError error = SocketNative.Send(Fd, buffer, SocketFlags.None, ToIP(remoteEP), out int sent);
@@ -505,12 +510,12 @@ public class Socket : IDisposable
         return sent;
     }
 
-    /// <summary>Sends a datagram to the endpoint (UDP). Failing ends the program.</summary>
+    /// <summary>Sends a datagram to the endpoint (UDP). Failing throws a SocketException.</summary>
     public int SendTo(byte[] buffer, EndPoint remoteEP) => SendTo(new ReadOnlySpan<byte>(buffer ?? throw new ArgumentNullException(nameof(buffer))), remoteEP);
 
     /// <summary>
     /// Receives a datagram (UDP), waiting for one, and says where it came from.
-    /// Bytes past buffer.Length are lost. Failing ends the program.
+    /// Bytes past buffer.Length are lost. Failing throws a SocketException.
     /// </summary>
     public int ReceiveFrom(Span<byte> buffer, ref EndPoint remoteEP)
     {
@@ -522,7 +527,7 @@ public class Socket : IDisposable
         return received;
     }
 
-    /// <summary>Receives a datagram into an array (UDP). Failing ends the program.</summary>
+    /// <summary>Receives a datagram into an array (UDP). Failing throws a SocketException.</summary>
     public int ReceiveFrom(byte[] buffer, ref EndPoint remoteEP)
         => ReceiveFrom(new Span<byte>(buffer ?? throw new ArgumentNullException(nameof(buffer))), ref remoteEP);
 
@@ -541,17 +546,41 @@ public class Socket : IDisposable
     /// </summary>
     public void Close()
     {
-        if (_fd < 0)
+        if (Number < 0)
             return;
-        SocketNative.Close(_fd);
+        int fd = _fd;
         _fd = -1;
         _connected = false;
+        // Not if a Catch.Run on another thread has just taken it to close.
+        bool mine = Catch.Closing(_ticket);
+        _ticket = default;
+        if (mine)
+            SocketNative.Close(fd);
     }
 
     /// <summary>Closes the socket.</summary>
     public void Dispose() => Close();
 
-    int Fd => _fd >= 0 ? _fd : throw new ObjectDisposedException("Socket");
+    int Fd => Number >= 0 ? _fd : throw new ObjectDisposedException("Socket");
+
+    // Catch.Keep: no Catch.Run closes the socket from here on.
+    internal void KeepOpen() => Catch.Kept(_ticket);
+
+    // The socket's number, or -1 once it's closed: by Close, or by a
+    // Catch.Run after a throw (Catch.cs), which the socket learns here, at
+    // its next use.
+    int Number
+    {
+        get
+        {
+            if (_fd >= 0 && Catch.ClosedByThrow(_ticket))
+            {
+                _fd = -1;
+                _connected = false;
+            }
+            return _fd;
+        }
+    }
 
     IPEndPoint ToIP(EndPoint endPoint)
     {
@@ -582,8 +611,9 @@ public class Socket : IDisposable
 /// stream, Write drops what it's given, and Error says what went wrong.
 /// </summary>
 // .NET throws IOException there, for each connection's code to catch. Here a
-// throw ends the program, so one client resetting its connection would end a
-// server: a broken connection ends its own stream instead.
+// throw ends the program unless the connection's fiber runs under a
+// Catch.Run, so one client resetting its connection could end a server: a
+// broken connection ends its own stream instead.
 public class NetworkStream : Stream
 {
     readonly bool _ownsSocket;
@@ -711,7 +741,7 @@ public class TcpListener
     /// <summary>The address and port listened on: the system's choice if the port was 0.</summary>
     public EndPoint LocalEndpoint => _server?.LocalEndPoint ?? _endpoint;
 
-    /// <summary>Starts listening. Failing (the port is taken, say) ends the program.</summary>
+    /// <summary>Starts listening. Failing (the port is taken, say) throws a SocketException.</summary>
     public void Start() => Start(512);
 
     /// <summary>Starts listening, with room for <paramref name="backlog"/> connections waiting to be accepted.</summary>
@@ -736,7 +766,7 @@ public class TcpListener
     /// <summary>The next connection as a socket, waiting for one (other fibers run meanwhile).</summary>
     public Socket AcceptSocket() => Started.Accept();
 
-    /// <summary>The next connection as a TcpClient, waiting for one (other fibers run meanwhile). Failing ends the program.</summary>
+    /// <summary>The next connection as a TcpClient, waiting for one (other fibers run meanwhile). Failing throws a SocketException.</summary>
     public TcpClient AcceptTcpClient() => new TcpClient(Started.Accept());
 
     /// <summary>
@@ -766,7 +796,7 @@ public class TcpClient : IDisposable
     /// <summary>An unconnected client of the family.</summary>
     public TcpClient(AddressFamily family) => _socket = new Socket(family, SocketType.Stream, ProtocolType.Tcp);
 
-    /// <summary>A client connected to a host name's port. Failing ends the program.</summary>
+    /// <summary>A client connected to a host name's port. Failing throws a SocketException.</summary>
     public TcpClient(string hostname, int port)
     {
         if (!Dns.TryGetHostAddresses(hostname, out IPAddress[] addresses, out SocketError error))
@@ -799,13 +829,13 @@ public class TcpClient : IDisposable
         set => _socket.NoDelay = value;
     }
 
-    /// <summary>Connects to a host name's port. Failing ends the program.</summary>
+    /// <summary>Connects to a host name's port. Failing throws a SocketException.</summary>
     public void Connect(string hostname, int port) => _socket.Connect(hostname, port);
 
-    /// <summary>Connects to the address and port. Failing ends the program.</summary>
+    /// <summary>Connects to the address and port. Failing throws a SocketException.</summary>
     public void Connect(IPAddress address, int port) => _socket.Connect(address, port);
 
-    /// <summary>Connects to the endpoint. Failing ends the program.</summary>
+    /// <summary>Connects to the endpoint. Failing throws a SocketException.</summary>
     public void Connect(IPEndPoint remoteEP) => _socket.Connect(remoteEP);
 
     /// <summary>The connection as a stream; disposing it, or this client, closes the connection.</summary>
@@ -1279,6 +1309,9 @@ static class SocketNative
         Fiber.CancelIO(fd); // before the number can go to another socket
         unsafe { close(fd); } // SAFETY: no pointers
     }
+
+    // Close, as Catch.Run's records call it (Catch.cs).
+    internal static void CloseHandle(nint fd) => Close((int)fd);
 
     internal static IPEndPoint Name(int fd, bool peer)
     {

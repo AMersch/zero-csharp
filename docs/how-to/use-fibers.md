@@ -319,4 +319,5 @@ its stack the copy takes.
 - Reading a file or standard input blocks the whole thread, every fiber on it included. That holds
   for a fiber that feeds a `Pipe` from a file too: only `Pipe`'s own `Read` and `Write`, and sockets
   (see [Use the network](use-the-network.html)), let the other fibers run while one waits.
-- A `throw` ends the program, as it does everywhere in zero mode.
+- A `throw` ends the program, as it does everywhere in zero mode, unless a
+  [`Catch.Run`](recover-from-errors.html) on the same fiber is waiting for it.

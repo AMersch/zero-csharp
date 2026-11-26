@@ -156,6 +156,47 @@ ZeroFiberStart:
     blr     x20
     brk     #1
 
+// Catch.Run (../Runtime/Catch.cs): ZeroCatchCall saves the same frame as
+// ZeroFiberSwitch, stores its stack pointer in *x0 and calls x1(x2). When the
+// callback returns, or a throw inside it calls ZeroCatchJump with that stack
+// pointer, the frame comes back and ZeroCatchCall returns.
+// x0: where to store the frame's stack pointer; x1: callback; x2: its argument
+    .globl _ZeroCatchCall
+_ZeroCatchCall:
+    sub     sp, sp, #160
+    stp     x19, x20, [sp]
+    stp     x21, x22, [sp, #16]
+    stp     x23, x24, [sp, #32]
+    stp     x25, x26, [sp, #48]
+    stp     x27, x28, [sp, #64]
+    stp     x29, x30, [sp, #80]
+    stp     d8, d9, [sp, #96]
+    stp     d10, d11, [sp, #112]
+    stp     d12, d13, [sp, #128]
+    stp     d14, d15, [sp, #144]
+    mov     x9, sp
+    str     x9, [x0]
+    mov     x0, x2
+    blr     x1
+    mov     x0, sp
+
+// x0: the stack pointer ZeroCatchCall stored
+    .globl _ZeroCatchJump
+_ZeroCatchJump:
+    mov     sp, x0
+    ldp     x19, x20, [sp]
+    ldp     x21, x22, [sp, #16]
+    ldp     x23, x24, [sp, #32]
+    ldp     x25, x26, [sp, #48]
+    ldp     x27, x28, [sp, #64]
+    ldp     x29, x30, [sp, #80]
+    ldp     d8, d9, [sp, #96]
+    ldp     d10, d11, [sp, #112]
+    ldp     d12, d13, [sp, #128]
+    ldp     d14, d15, [sp, #144]
+    add     sp, sp, #160
+    ret
+
 // The compiler's module list. On Linux the linker gives zerocore the bounds of
 // the __modules section as __start___modules and __stop___modules. Mach-O
 // linkers name a section's bounds section$start$... and section$end$..., and

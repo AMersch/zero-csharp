@@ -10,8 +10,11 @@ out-of-memory|Arena "small":|Arena: out of memory
 arena-limit|Arena "budget":|Arena: out of memory (it reached its maxCapacity)
 buffer-full|Arena "buffer":|Arena: out of memory (its buffer is full)
 lambda-in-scope|Arena "frame":|Arena.AllocateObjectsHere: a static field points at an object created inside the scope
+lambda-scope-not-closed|Arena "frame":|Arena.AllocateObjectsHere: a static field points at an object created inside the scope
 throw|Unhandled exception: the queue is empty
 throw-null|Unhandled exception: NullReferenceException
+throw-in-static-constructor|Unhandled exception: the settings are missing
+throw-in-parallel-for|Unhandled exception: thrown in a Parallel.For
 union-no-case|Unhandled exception: InvalidOperationException
 debug-assert|Debug.Assert failed: count > 0: the queue is empty|  in DebugAssert at Guards.cs:
 debug-fail|Debug.Fail: unreachable state|  in DebugFail at Guards.cs:

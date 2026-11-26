@@ -50,7 +50,57 @@ int main(void)
 }
 
 void cs_exit(i32 code) { leave((int)code); }
-void cs_abort(void) { leave(134); } // what a Unix shell reports for abort()
+
+void zero_out(char character);
+static void trace(void);
+
+// What a Unix shell reports for abort(). Environment.FailFast ends here,
+// after printing its message (a NullReferenceException, a failed check).
+void cs_abort(void)
+{
+    trace();
+    leave(134);
+}
+
+// Where the program was when it stopped: one line, "at $0DE4 $1DD9 ...",
+// the addresses of the JSR instructions whose calls haven't returned yet,
+// innermost first (FailFast's own and the helper that called it come
+// first). c64/run.sh turns them into method names.
+//
+// They are found on the processor's stack, page 1, from the stack pointer
+// up: a JSR pushes the address of its own last byte. Functions also save
+// registers there, so a pair of bytes counts as a return address only if
+// it points just past a JSR into the program's code. A saved value that
+// happens to look like one would show up as an extra line.
+extern char _start[];
+static void hex(unsigned value)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    zero_out('$');
+    for (int shift = 12; shift >= 0; shift -= 4)
+        zero_out(digits[(value >> shift) & 15]);
+}
+
+static void trace(void)
+{
+    unsigned char sp;
+    __asm__ volatile("tsx" : "=x"(sp));
+    const volatile unsigned char *stack = (const volatile unsigned char *)0x100;
+    unsigned found = 0;
+    zero_out('a');
+    zero_out('t');
+    for (unsigned i = sp + 1u; i < 0xFF && found < 12; i++) {
+        unsigned last = stack[i] | (unsigned)stack[i + 1] << 8;   // the JSR's last byte
+        unsigned jsr = last - 2;
+        if (jsr >= (unsigned)_start && last < 0xD000 && *(const volatile unsigned char *)jsr == 0x20) {
+            zero_out(' ');
+            hex(jsr);
+            found++;
+            i++;
+        }
+    }
+    zero_out('\n');
+}
 
 // zerocore's startup (Runtime/Startup.cs) needs the module header to set up
 // static fields of reference types; C# can't take a data symbol's address.

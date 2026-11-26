@@ -153,6 +153,17 @@ jobs:
         with:
           name: win-programs
           path: bin/win
+      # Page heap: Windows' strict heap checking, which gives each block
+      # pages of its own and takes freed ones away, so a write after free
+      # or past the end stops the program every time, not only when the
+      # heap's layout happens to show it (as Fibers' scratch arena did).
+      - name: Check every heap access
+        shell: pwsh
+        run: |
+          $gflags = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Debuggers' -Recurse -Filter gflags.exe |
+            Where-Object FullName -like '*x64*' | Select-Object -First 1
+          if (-not $gflags) { throw 'gflags.exe not found' }
+          Get-ChildItem bin/win -Filter *.exe | ForEach-Object { & $gflags.FullName /p /enable $_.Name /full | Out-Null }
       - name: Run on Windows
         shell: bash
         run: |

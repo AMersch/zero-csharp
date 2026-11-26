@@ -711,18 +711,31 @@ public partial struct Arena
     // A fiber's scratch arena, once the fiber has ended.
     internal static void FreeScratch(void* thread)
     {
-        // SAFETY: the fiber has ended; nothing uses its scratch memory.
         if (thread != null)
-            unsafe { ((ScratchThread*)thread)->Arena.Destroy(); }
+            DestroyArenaOf(thread);
     }
 
     // Called by the system when a thread with a scratch arena ends.
     [UnmanagedCallersOnly]
     static void DestroyScratch(void* thread)
     {
-        // SAFETY: the thread has ended; nothing of it uses its scratch memory,
-        // the ScratchThread included (it lives in the arena).
-        unsafe { ((ScratchThread*)thread)->Arena.Destroy(); }
+        DestroyArenaOf(thread);
+    }
+
+    // The ScratchThread lives in its own arena's first block, and Destroy
+    // clears the Arena it's called on after freeing the blocks: called on
+    // thread->Arena, that write lands in freed memory (Windows' heap noticed
+    // and stopped Fibers.exe; glibc's and macOS's let it pass). So it's
+    // called on a copy.
+    static void DestroyArenaOf(void* thread)
+    {
+        // SAFETY: the fiber or thread has ended; nothing of it uses its
+        // scratch memory, the ScratchThread included.
+        unsafe
+        {
+            Arena arena = ((ScratchThread*)thread)->Arena;
+            arena.Destroy();
+        }
     }
 
     static void LeaveScratch(ScratchThread* thread, Mark mark)

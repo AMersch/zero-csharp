@@ -164,8 +164,8 @@ thread that opens it, so each thread of a parallel loop can use an arena of its 
 `Arena.DebugChecks` is off by default. Set it first thing in `Main` while testing: arenas created
 after that fill freed memory with `0xDD`, so a stale pointer reads garbage instead of old data that
 looks right, and a collection used after its memory was freed (reset, or grown after `Save()` and
-used after `Restore()`) stops the program with a message. Closing an object scope also checks that
-no static field points into the arena. Raw pointers carry nothing to check against, so with the
+used after `Restore()`) stops the program with a message. For an arena an object scope has used,
+`Reset`, `Restore` and `Destroy` also check that no static field points into what they free. Raw pointers carry nothing to check against, so with the
 checks off a stale one goes unnoticed.
 
 See [Memory without a GC](https://onurgumus.github.io/zero-csharp/concepts/memory.html) and

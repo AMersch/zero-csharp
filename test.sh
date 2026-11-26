@@ -89,6 +89,7 @@ SAMPLES=(
     Threads
     Fibers
     Timers
+    Tasks
     Records
     Shapes
     Refs
@@ -107,12 +108,12 @@ SAMPLES=(
 )
 
 # Samples WebAssembly can't run (as in build.sh): the fiber samples switch stacks.
-NOT_WASM=" Fibers Timers SmallFibers SmallChannels SmallScratch Network "
+NOT_WASM=" Fibers Timers Tasks SmallFibers SmallChannels SmallScratch Network "
 # Samples UEFI can't run (as in build.sh): lib/ has directories only on Linux,
 # macOS, Windows and WebAssembly.
 NOT_UEFI=" Directories Network "
 # Simd and Kernels print timings, so only their exit code is checked.
-TIMED=" Simd Kernels Fibers "
+TIMED=" Simd Kernels Fibers Tasks "
 # Arena and Collections print byte counts that depend on the pointer size, so
 # on WebAssembly, DOS and microcontrollers (32-bit) only their exit code is checked.
 POINTER_SIZED=" Arena Collections "
@@ -149,6 +150,7 @@ DOS_SAMPLES=(
     Patterns
     Fibers
     Timers
+    Tasks
     Scratch
     Links
     Llama
@@ -205,6 +207,7 @@ ARM_SAMPLES=(
     Threads
     Fibers
     Timers
+    Tasks
     Records
     Shapes
     Refs
@@ -388,6 +391,25 @@ run_all() {
         else
             echo "ok   Fibers overflow (stopped, as it must be)"
         fi
+    fi
+
+    # Awaiting a canceled task plainly, ThrowIfCancellationRequested on a
+    # canceled token, ReceiveAsync on a closed channel, and a timer's reused
+    # ValueTask a second time must end the program with a message.
+    if [[ " ${samples[*]} " == *" Tasks "* ]] && [ "$target" != c64 ]; then
+        for case in "canceled|A task was canceled." "throw|The operation was canceled." "closed|The channel has been closed." "twice|awaited after its operation was reused"; do
+            arg=${case%%|*}
+            message=${case#*|}
+            status=0
+            out=$("${run[@]}" Tasks "$arg" < /dev/null 2>&1) || status=$?
+            if [ "$status" = 0 ] || [[ "$out" != *"$message"* ]]; then
+                echo "FAIL Tasks $arg: not stopped with the message (exit code $status)"
+                echo "$out" | tail -3 | sed 's/^/       /'
+                failures=$((failures + 1))
+            else
+                echo "ok   Tasks $arg (stopped, as it must be)"
+            fi
+        done
     fi
 
     # Main returning with a timer still running, never given Fiber.Run, must

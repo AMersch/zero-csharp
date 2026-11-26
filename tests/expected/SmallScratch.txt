@@ -1,0 +1,2 @@
+PASS scratch memory
+PASS each fiber's own scratch memory

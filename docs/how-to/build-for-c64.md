@@ -133,7 +133,7 @@ programs `./test.sh --c64` runs:
 | `SmallDecimalFormats`, `SmallLists`, `SmallText`, `SmallUnicode`, `Paddles`, `C64Demo`, `SmallArena` | 34 to 36 KB | 14 to 16 KB |
 | `SmallBuilders` | 39 KB | 11 KB |
 | `SmallFibers`, `SmallChannels`, `SmallDoubleFormats` | 40 to 41 KB | 9 to 10 KB |
-| `SmallFloats` | 43 KB | 7 KB |
+| `SmallFloats`, `SmallScratch` | 43 KB | 6.6 to 7 KB |
 | `SmallDoubles`, `SmallFormats` | 45 KB | 4.6 to 5.4 KB |
 
 The size includes the 2 KB shadow stack NativeAOT-LLVM's code keeps object references on. The Small

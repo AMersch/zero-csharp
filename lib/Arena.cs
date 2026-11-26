@@ -419,8 +419,9 @@ public partial struct Arena
                     normal = state->MaxCapacity - state->Capacity;
                 bool dedicated = needed > normal;
 
-                if (AddBlock(state, dedicated ? needed : normal) == null)
-                    return OutOfMemory(state);
+                nuint block = dedicated ? needed : normal;
+                if (AddBlock(state, block) == null)
+                    return OutOfMemory(state, block);
 
                 if (!dedicated)
                 {
@@ -1018,8 +1019,10 @@ public partial struct Arena
     }
 
     // What a failed allocation returns: null, unless the arena was created to
-    // end the program instead.
-    static unsafe void* OutOfMemory(State* state)
+    // end the program instead. block is the size of the block that couldn't
+    // be added, if any: the message blames maxCapacity only if that block
+    // was over it, not when malloc said no.
+    static unsafe void* OutOfMemory(State* state, nuint block = 0)
     {
         unsafe
         {
@@ -1028,7 +1031,7 @@ public partial struct Arena
             {
                 if (state->InBuffer)
                     Fail(state, "Arena: out of memory (its buffer is full)");
-                if (state->MaxCapacity != 0)
+                if (block != 0 && state->MaxCapacity != 0 && block > state->MaxCapacity - state->Capacity)
                     Fail(state, "Arena: out of memory (it reached its maxCapacity)");
                 Fail(state, "Arena: out of memory");
             }

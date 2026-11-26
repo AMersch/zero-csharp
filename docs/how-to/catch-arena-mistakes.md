@@ -109,6 +109,7 @@ repository:
 | `out-of-memory` | an allocation the system can't satisfy, in a `stopOnOutOfMemory` arena | no |
 | `arena-limit` | an allocation past a `stopOnOutOfMemory` arena's `maxCapacity` | no |
 | `buffer-full` | an allocation that doesn't fit in a `stopOnOutOfMemory` arena from `FromBuffer` | no |
+| `scratch-limit` | an `Arena.Scratch` callback that allocates past `Arena.ScratchMaxCapacity` | no |
 
 `Guards.fail` holds each case's message. A named arena's name goes to standard output, the message to
 standard error (both to standard output on DOS), and the program aborts with a non-zero exit code.
@@ -171,6 +172,22 @@ arena.Alloc(600);  // 1200 bytes in all: past the limit
 The message is `Arena: out of memory (it reached its maxCapacity)`. An arena from `FromBuffer` stops the
 same way when its buffer is full, with `Arena: out of memory (its buffer is full)`. See
 [Running out of memory](../concepts/memory.html#running-out-of-memory).
+
+`Arena.Scratch` arenas always stop the program when memory runs out. `Arena.ScratchMaxCapacity` gives
+them a budget too, and the message names the arena `"scratch"`:
+
+<!-- sample: samples/Guards.cs scratch-limit -->
+```csharp
+// First thing in Main, before anything calls Arena.Scratch:
+Arena.ScratchSize = 1024;         // a scratch arena's first block,
+Arena.ScratchMaxCapacity = 1024;  // and the most it may grow to
+
+Arena.Scratch(static (scoped ScratchScope scratch) =>
+{
+    scratch.AllocSpan<byte>(600);  // fits
+    scratch.AllocSpan<byte>(600);  // past the limit
+});
+```
 
 ## See where the memory goes
 

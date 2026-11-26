@@ -176,7 +176,10 @@ fetch_c64_tools() {
             "vice-$VICE_ROMS_VERSION/data/DRIVES"
         rm "$archive"
     fi
-    [ -d "$C64_ROMS" ] && echo "roms:   $C64_ROMS"
+    # (an if: as the function's last command, a failed test would end the script)
+    if [ -d "$C64_ROMS" ]; then
+        echo "roms:   $C64_ROMS"
+    fi
 }
 
 # Arm Toolchain for Embedded: clang, lld, and picolibc and compiler-rt built

@@ -114,6 +114,9 @@ NOT_WASM=" Fibers Timers Tasks SmallFibers SmallChannels SmallScratch Network "
 # Samples UEFI can't run (as in build.sh): lib/ has directories only on Linux,
 # macOS, Windows and WebAssembly.
 NOT_UEFI=" Directories Network "
+# Samples the docs site's browser page can't run (docs/content/run-wasm.js):
+# it has no files or directories.
+NOT_PAGE=" Files Streams Directories "
 # Simd and Kernels print timings, so only their exit code is checked.
 TIMED=" Simd Kernels Fibers Tasks "
 # Arena and Collections print byte counts that depend on the pointer size, so
@@ -269,6 +272,14 @@ run_all() {
             [[ "$NOT_WASM" == *" $name "* ]] || samples+=("$name")
         done
     fi
+    # The same modules, run the way the docs site's browser page runs them.
+    if [ "$target" = page ]; then
+        run=(node scripts/run-in-page.mjs)
+        samples=()
+        for name in "${SAMPLES[@]}"; do
+            [[ "$NOT_WASM$NOT_PAGE" == *" $name "* ]] || samples+=("$name")
+        done
+    fi
     [ "$target" = win ] && run+=(--win)
     [ "$target" = mac ] && run+=(--mac)
     [ "$target" = ios ] && run+=(--ios)
@@ -314,7 +325,7 @@ run_all() {
             echo "FAIL $name: exit code $status"
             echo "$out" | tail -5 | sed 's/^/       /'
             failures=$((failures + 1))
-        elif [[ "$TIMED" == *" $name "* ]] || { { [ "$target" = wasm ] || [ "$target" = dos ] || [ "$target" = pico2 ] || [ "$target" = r4 ]; } && [[ "$POINTER_SIZED" == *" $name "* ]]; }; then
+        elif [[ "$TIMED" == *" $name "* ]] || { { [ "$target" = wasm ] || [ "$target" = page ] || [ "$target" = dos ] || [ "$target" = pico2 ] || [ "$target" = r4 ]; } && [[ "$POINTER_SIZED" == *" $name "* ]]; }; then
             echo "ok   $name (exit code only)"
         elif [ "$mode" = update ]; then
             mkdir -p "$EXPECTED"
@@ -361,7 +372,8 @@ run_all() {
     # makes one and leaves it, and it must be here under exactly that name.
     # (Not on DOS, whose names are 8.3, nor UEFI, whose files are on a disk image.)
     # (Nor the Uno R4, which Files doesn't fit in.)
-    if [ "$target" != dos ] && [ "$target" != uefi ] && [ "$target" != r4 ]; then
+    # (Nor the browser page, which has no files.)
+    if [ "$target" != dos ] && [ "$target" != uefi ] && [ "$target" != r4 ] && [ "$target" != page ]; then
         name="zero é☃𝄞.tmp"
         rm -f -- "$name"
         status=0
@@ -442,6 +454,11 @@ test_native() {
 test_wasm() {
     ./build.sh --wasm > /dev/null
     run_all "WebAssembly" wasm check
+    if command -v node > /dev/null; then
+        run_all "WebAssembly in the docs site's browser page (under Node)" page check
+    else
+        echo "(skipping the browser page: no node)"
+    fi
 }
 
 # The GPU samples print timings, so their output isn't compared with a file:

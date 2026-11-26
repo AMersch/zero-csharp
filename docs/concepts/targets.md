@@ -142,7 +142,11 @@ GC, the transitions between native and managed code have nothing else to do.
 What differs from the native build:
 
 - **32-bit pointers**, so structs that hold pointers are smaller and arena byte counts are lower.
-- **No SIMD.** Simd and Kernels take their scalar paths; `lib/Kernels.cs` has no WebAssembly path yet.
+- **SIMD only from C.** NativeAOT-LLVM can't compile vector operations for WebAssembly (it turns
+  them into a `PlatformNotSupportedException`), so the instruction sets report `IsSupported == false`
+  and Simd takes its scalar path. `TensorPrimitives` and `lib/Kernels.cs` call simd128 kernels in
+  `wasm/simd.c` instead, when `System.Runtime.Intrinsics.Wasm.PackedSimd.IsSupported`, which is true
+  only in this build.
 - **No callbacks from native code into C#** inside a running program.
 - **One exact compiler version.** zerocore and `runtime.c` implement NativeAOT-LLVM's internal runtime
   functions, whose names and signatures aren't documented and were read from the compiler's output. A

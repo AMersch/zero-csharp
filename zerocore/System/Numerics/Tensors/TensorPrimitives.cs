@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
+using System.Runtime.Intrinsics.Wasm;
 using System.Runtime.Intrinsics.X86;
 
 // The same check, for x != x (NaN) in the Max and Min operators.
@@ -23,7 +24,9 @@ namespace System.Numerics.Tensors
     // Element-wise arithmetic, the sums and the four fast functions use the
     // processor's vectors: NEON on arm64; on x64 AVX when built with
     // -m x86-64-v3 (AVX2 and FMA for the functions), SSE2 otherwise, since
-    // every x64 processor has it. WebAssembly, DOS and the rest run scalar
+    // every x64 processor has it. On WebAssembly they call wasm/simd.c's
+    // simd128 kernels, which do what the SSE2 path does, so the results are
+    // the same bits as on x64 without -m. DOS and the rest run scalar
     // loops. The arithmetic gives the same bits as the scalar loop, since each
     // element is still one IEEE operation; sums add in another order.
     //
@@ -70,6 +73,8 @@ namespace System.Numerics.Tensors
         private interface IBinary
         {
             static abstract bool Vectorizable { get; }
+            // The operator's number in wasm/simd.c (OP_ADD...), for the vectorizable ones.
+            static abstract int Code { get; }
             static abstract float Invoke(float x, float y);
             static abstract Vector128<float> Invoke(Vector128<float> x, Vector128<float> y);
             static abstract Vector256<float> Invoke(Vector256<float> x, Vector256<float> y);
@@ -78,6 +83,7 @@ namespace System.Numerics.Tensors
         private struct AddOperator : IBinary
         {
             public static bool Vectorizable => true;
+            public static int Code => 0;
             public static float Invoke(float x, float y) => x + y;
             public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => V.Add(x, y);
             public static Vector256<float> Invoke(Vector256<float> x, Vector256<float> y) => Avx.Add(x, y);
@@ -86,6 +92,7 @@ namespace System.Numerics.Tensors
         private struct SubtractOperator : IBinary
         {
             public static bool Vectorizable => true;
+            public static int Code => 1;
             public static float Invoke(float x, float y) => x - y;
             public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => V.Subtract(x, y);
             public static Vector256<float> Invoke(Vector256<float> x, Vector256<float> y) => Avx.Subtract(x, y);
@@ -94,6 +101,7 @@ namespace System.Numerics.Tensors
         private struct MultiplyOperator : IBinary
         {
             public static bool Vectorizable => true;
+            public static int Code => 2;
             public static float Invoke(float x, float y) => x * y;
             public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => V.Multiply(x, y);
             public static Vector256<float> Invoke(Vector256<float> x, Vector256<float> y) => Avx.Multiply(x, y);
@@ -102,6 +110,7 @@ namespace System.Numerics.Tensors
         private struct DivideOperator : IBinary
         {
             public static bool Vectorizable => true;
+            public static int Code => 3;
             public static float Invoke(float x, float y) => x / y;
             public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => V.Divide(x, y);
             public static Vector256<float> Invoke(Vector256<float> x, Vector256<float> y) => Avx.Divide(x, y);
@@ -111,6 +120,7 @@ namespace System.Numerics.Tensors
         private abstract class ScalarOnly
         {
             public static bool Vectorizable => false;
+            public static int Code => -1;
             public static Vector128<float> Invoke(Vector128<float> x, Vector128<float> y) => x;
             public static Vector256<float> Invoke(Vector256<float> x, Vector256<float> y) => x;
         }
@@ -265,6 +275,11 @@ namespace System.Numerics.Tensors
         // A step of 0 makes an argument a scalar, used for every element.
         private static void Binary<TOp>(float* x, int xStep, float* y, int yStep, float* d, int n) where TOp : IBinary
         {
+            if (TOp.Vectorizable && PackedSimd.IsSupported)
+            {
+                W.ZeroSimdBinary(TOp.Code, x, xStep, y, yStep, d, n);
+                return;
+            }
             int i = 0;
             if (TOp.Vectorizable && Avx.IsSupported)
             {
@@ -335,6 +350,11 @@ namespace System.Numerics.Tensors
         private static void Ternary<TFirst, TSecond>(float* x, int xStep, float* y, int yStep, float* z, int zStep, float* d, int n)
             where TFirst : IBinary where TSecond : IBinary
         {
+            if (PackedSimd.IsSupported)
+            {
+                W.ZeroSimdTernary(TFirst.Code, TSecond.Code, x, xStep, y, yStep, z, zStep, d, n);
+                return;
+            }
             int i = 0;
             if (Avx.IsSupported)
             {
@@ -459,6 +479,12 @@ namespace System.Numerics.Tensors
                     SoftMaxScalar(px, pd, n);
                     return;
                 }
+                if (PackedSimd.IsSupported)
+                {
+                    float total = W.ZeroSimdSoftMaxExp(px, pd, n, max);
+                    Binary<DivideOperator>(pd, 1, &total, 0, pd, n);
+                    return;
+                }
                 float sum = 0;
                 int i = 0;
                 if (!(Avx2.IsSupported && Fma.IsSupported))
@@ -533,6 +559,13 @@ namespace System.Numerics.Tensors
         // order NaN the way MaxOperator does, and SoftMaxScalar handles those).
         private static bool MaxIfFinite(float* x, int n, out float max)
         {
+            if (PackedSimd.IsSupported)
+            {
+                float m;
+                bool all = W.ZeroSimdMaxIfFinite(x, n, &m) != 0;
+                max = m;
+                return all;
+            }
             int i = 0;
             float finite = 0; // stays 0 while x * 0 does: NaN for an infinity or a NaN
             max = x[0];
@@ -597,6 +630,8 @@ namespace System.Numerics.Tensors
         // Four running sums of 4 (or 8) lanes each, added at the end.
         private static float Sum(float* x, int n)
         {
+            if (PackedSimd.IsSupported)
+                return W.ZeroSimdSum(x, n);
             int i = 0;
             float sum = 0;
             if (Avx.IsSupported)
@@ -637,6 +672,8 @@ namespace System.Numerics.Tensors
 
         private static float Dot(float* x, float* y, int n)
         {
+            if (PackedSimd.IsSupported)
+                return W.ZeroSimdDot(x, y, n);
             int i = 0;
             float sum = 0;
             if (Avx.IsSupported)
@@ -975,10 +1012,12 @@ namespace System.Numerics.Tensors
         private const float P0 = 1.9875691500e-4f, P1 = 1.3981999507e-3f, P2 = 8.3334519073e-3f;
         private const float P3 = 4.1665795894e-2f, P4 = 1.6666665459e-1f, P5 = 5.0000001201e-1f;
 
-        private static bool FastExpAvailable => V.IsSupported || (Avx2.IsSupported && Fma.IsSupported);
+        private static bool FastExpAvailable => V.IsSupported || PackedSimd.IsSupported || (Avx2.IsSupported && Fma.IsSupported);
 
         private interface IVectorUnary
         {
+            // The function's number in wasm/simd.c (FN_EXP...).
+            static abstract int Code { get; }
             static abstract float Invoke(float x);
             static abstract bool InRange(float x);
             static abstract Vector128<float> Invoke(Vector128<float> x);
@@ -987,6 +1026,7 @@ namespace System.Numerics.Tensors
 
         private struct FastExp : IVectorUnary
         {
+            public static int Code => 0;
             public static float Invoke(float x) => MathF.Exp(x);
             public static bool InRange(float x) => x >= ExpLo && x <= ExpHi;
             public static Vector128<float> Invoke(Vector128<float> x) => V.Exp(x);
@@ -997,6 +1037,7 @@ namespace System.Numerics.Tensors
         // overflow before the result underflows.
         private struct FastSigmoid : IVectorUnary
         {
+            public static int Code => 1;
             public static float Invoke(float x) => (float)(1 / (1 + Math.Exp(-x)));
             public static bool InRange(float x) => x >= -ExpHi && x <= -ExpLo;
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1018,6 +1059,7 @@ namespace System.Numerics.Tensors
         // with |x| capped at 40, where tanh is 1 in float. The sign is x's.
         private struct FastTanh : IVectorUnary
         {
+            public static int Code => 2;
             private const float T0 = -5.70498872745e-3f, T1 = 2.06390887954e-2f, T2 = -5.37397155531e-2f;
             private const float T3 = 1.33314422036e-1f, T4 = -3.33332819422e-1f;
 
@@ -1076,6 +1118,11 @@ namespace System.Numerics.Tensors
             fixed (float* px = x)
             fixed (float* pd = destination)
             {
+                if (PackedSimd.IsSupported)
+                {
+                    W.ZeroSimdUnary(TOp.Code, px, pd, n);
+                    return;
+                }
                 if (Avx2.IsSupported && Fma.IsSupported)
                 {
                     for (; i + 8 <= n; i += 8)
@@ -1144,6 +1191,36 @@ namespace System.Numerics.Tensors
             float* lanes = stackalloc float[8];
             Avx.Store(lanes, v);
             return ((lanes[0] + lanes[4]) + (lanes[1] + lanes[5])) + ((lanes[2] + lanes[6]) + (lanes[3] + lanes[7]));
+        }
+
+        // wasm/simd.c's kernels, linked only into WebAssembly modules: called
+        // only when PackedSimd.IsSupported, and stubs in every other build.
+        private static class W
+        {
+#if WASM_SIMD
+            [DllImport("*"), SuppressGCTransition]
+            public static extern void ZeroSimdBinary(int op, float* x, int xStep, float* y, int yStep, float* d, int n);
+            [DllImport("*"), SuppressGCTransition]
+            public static extern void ZeroSimdTernary(int first, int second, float* x, int xStep, float* y, int yStep, float* z, int zStep, float* d, int n);
+            [DllImport("*"), SuppressGCTransition]
+            public static extern float ZeroSimdSum(float* x, int n);
+            [DllImport("*"), SuppressGCTransition]
+            public static extern float ZeroSimdDot(float* x, float* y, int n);
+            [DllImport("*"), SuppressGCTransition]
+            public static extern void ZeroSimdUnary(int fn, float* x, float* d, int n);
+            [DllImport("*"), SuppressGCTransition]
+            public static extern int ZeroSimdMaxIfFinite(float* x, int n, float* max);
+            [DllImport("*"), SuppressGCTransition]
+            public static extern float ZeroSimdSoftMaxExp(float* x, float* d, int n, float max);
+#else
+            public static void ZeroSimdBinary(int op, float* x, int xStep, float* y, int yStep, float* d, int n) { }
+            public static void ZeroSimdTernary(int first, int second, float* x, int xStep, float* y, int yStep, float* z, int zStep, float* d, int n) { }
+            public static float ZeroSimdSum(float* x, int n) => 0;
+            public static float ZeroSimdDot(float* x, float* y, int n) => 0;
+            public static void ZeroSimdUnary(int fn, float* x, float* d, int n) { }
+            public static int ZeroSimdMaxIfFinite(float* x, int n, float* max) => 0;
+            public static float ZeroSimdSoftMaxExp(float* x, float* d, int n, float max) => 0;
+#endif
         }
 
         // 4 floats at once, with NEON on arm64 and SSE/SSE2 on x64: each

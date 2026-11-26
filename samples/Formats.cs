@@ -232,6 +232,33 @@ public static class Program
         Is(D(1.5).ToString((IFormatProvider)null), "1.5");
         Section("TryFormat and IFormattable");
 
+        // StringBuilder edits, with the results .NET's gives.
+        var text = new StringBuilder("the cat sat on the mat");
+        text.Replace("at", "og").Insert(0, "Look: ").Remove(10, 4);
+        text[6] = 'T';
+        Is(text.ToString(), "Look: The sog on the mog");
+        Check("the indexer reads", text[0] == 'L' && text[text.Length - 1] == 'g');
+        Is(new StringBuilder("abc").Insert(1, D(1.5)).ToString(), "a1.5bc");
+        Is(new StringBuilder("abc").Insert(3, 'd').Insert(0, -7L).Insert(2, false).ToString(), "-7Falseabcd");
+        Is(new StringBuilder("x").Insert(1, "ab", 3).ToString(), "xababab");
+        var cut = new StringBuilder("abcdef");
+        cut.Length = 3;
+        Is(cut.Append('!').ToString(), "abc!");
+        var padded = new StringBuilder("ab");
+        padded.Length = 4;
+        Check("a longer Length pads with \\0", padded[3] == '\0' && padded.Length == 4);
+        Is(new StringBuilder("abcdef").ToString(2, 3), "cde");
+        Is(new StringBuilder("a-b").Replace("-", "=====>").Replace('=', '-').ToString(), "a----->b");
+        Is(new StringBuilder("aaaa").Replace("aa", null).ToString(), "");
+        Is(new StringBuilder("one two two two").Replace("two", "2", 4, 7).ToString(), "one 2 2 two");
+        Is(new StringBuilder("hello").Clear().Append('x', 3).ToString(), "xxx");
+        var grown = new StringBuilder();
+        for (int i = 0; i < 100; i++)
+            grown.Append('a');
+        grown.Replace("a", "bcd");
+        Check("Replace that grows", grown.Length == 300 && grown.ToString(297, 3) == "bcd" && grown.ToString(0, 6) == "bcdbcd");
+        Section("StringBuilder");
+
         Console.WriteLine();
         if (s_failures == 0)
             Console.WriteLine("All checks passed.");

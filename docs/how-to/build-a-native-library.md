@@ -205,7 +205,7 @@ the library the same way and compiles the file before its own:
 ```
 
 <!-- sample: sdk/test/fixtures/nativelib-fsapp/App/Program.fs fsharp-call -->
-```fsharp
+```fsharp no-check reason="uses the generated bindings: the SDK tests build and run it"
 let mutable point = Point()
 point.X <- 1
 point.Y <- 12

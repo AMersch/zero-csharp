@@ -86,13 +86,16 @@ public partial struct Arena
         public bool Poison;        // DebugChecks was on when the arena was created
         public bool StopOnOutOfMemory;
         public bool InBuffer;      // from FromBuffer: the caller owns the memory
-        public bool HadObjects;    // an object scope has sent objects here
         public nuint Used;         // bytes handed out, padding excluded
         public nuint Capacity;     // sum of all block sizes
         public nuint PeakUsed;     // the highest Used and Capacity so far;
         public nuint PeakCapacity; // Reset and Restore don't lower them
         public nuint MaxCapacity;  // 0: no limit
         public nint Name;          // address of the name string, or 0
+        // Set once an object scope has sent objects here: runs before memory
+        // is freed (a mark: Restore; null: everything, for Reset or Destroy).
+        // A pointer, so programs without object scopes don't link the checks.
+        public delegate*<State*, Mark*, bool, void> BeforeFree;
     }
 
     /// <summary>A point in an arena's history, from Save(). Restore() frees everything allocated after it.</summary>
@@ -614,12 +617,8 @@ public partial struct Arena
             if (keep == null || mark.Used > state->Used || (keep == state->Current && mark.Ptr > state->Ptr))
                 Fail(state, "Arena.Restore: the mark was already freed by restoring an older one (restore marks newest first)");
 
-            if (state->HadObjects && state->Poison)
-            {
-                CheckStatics(state, mark.Ptr, keep == state->Current ? state->Ptr : keep->End, "Arena.Restore");
-                for (Block* after = keep->Next; after != null; after = after->Next)
-                    CheckStatics(state, after->Start, after == state->Current ? state->Ptr : after->End, "Arena.Restore");
-            }
+            if (state->BeforeFree != null)
+                state->BeforeFree(state, &mark, false);
 
             // SAFETY: keep is in the chain; the blocks after it were added
             // since the mark and are freed once.
@@ -712,7 +711,7 @@ public partial struct Arena
         {
             // SAFETY: ObjectAllocator only stores the pointers; AllocateObject
             // is given this arena's live state, which the caller keeps alive.
-            _state->HadObjects = true;
+            _state->BeforeFree = &CheckObjectsBeforeFree;
             System.Runtime.ObjectAllocator.Get(out scope.PreviousAllocate, out scope.PreviousContext);
             System.Runtime.ObjectAllocator.Set(&AllocateObject, _state);
         }
@@ -797,32 +796,38 @@ public partial struct Arena
         }
     }
 
-    // With debug checks on, for an arena an object scope has used: stops the
-    // program if a static field points into [start, end), memory about to be
-    // freed. Only an object created inside an object scope can make that
-    // happen; statics that point into memory that stays are fine.
-    static unsafe void CheckStatics(State* state, byte* start, byte* end, string freeing)
+    // State.BeforeFree for an arena an object scope has used, before Restore
+    // frees what came after `mark` (null: Reset or Destroy, everything).
+    // Destroy: stops the program if this thread's open scope still sends
+    // objects here. With debug checks on: stops it if a static field points
+    // into the memory about to be freed. Only an object created inside an
+    // object scope can make that happen; statics that point into memory that
+    // stays are fine.
+    static unsafe void CheckObjectsBeforeFree(State* state, Mark* mark, bool destroying)
     {
         unsafe
         {
-            // SAFETY: callers pass a live state; [start, end) is in its blocks.
-            if (state->HadObjects && state->Poison && start < end
-                && System.Runtime.ObjectAllocator.StaticsReferInto(start, end))
-                Fail(state, freeing + ": a static field points at an object it is about to free. "
-                    + "A C# lambda that captures nothing probably ran for the first time inside an object scope; run it once before.");
-        }
-    }
-
-    // CheckStatics over everything the arena has handed out.
-    static unsafe void CheckAllStatics(State* state, string freeing)
-    {
-        unsafe
-        {
-            // SAFETY: callers pass a live state and the block list is its own.
-            if (!state->HadObjects || !state->Poison)
+            string name = mark != null ? "Arena.Restore" : destroying ? "Arena.Destroy" : "Arena.Reset";
+            if (destroying)
+            {
+                System.Runtime.ObjectAllocator.Get(out _, out void* current);
+                if (current == state)
+                    Fail(state, name + ": the arena is in use by an object scope that is still open on this thread");
+            }
+            if (!state->Poison)
                 return;
-            for (Block* block = state->First; block != null; block = block->Next)
-                CheckStatics(state, block->Start, block == state->Current ? state->Ptr : block->End, freeing);
+            // SAFETY: Restore has checked that the mark's block is in the
+            // chain and its pointer inside it.
+            Block* block = mark != null ? (Block*)mark->Block : state->First;
+            byte* from = mark != null ? mark->Ptr : null;
+            for (; block != null; block = block->Next, from = null)
+            {
+                byte* start = from != null ? from : block->Start;
+                byte* end = block == state->Current ? state->Ptr : block->End;
+                if (start < end && System.Runtime.ObjectAllocator.StaticsReferInto(start, end))
+                    Fail(state, name + ": a static field points at an object it is about to free. "
+                        + "A C# lambda that captures nothing probably ran for the first time inside an object scope; run it once before.");
+            }
         }
     }
 
@@ -910,7 +915,8 @@ public partial struct Arena
 
         unsafe
         {
-            CheckAllStatics(state, "Arena.Reset");
+            if (state->BeforeFree != null)
+                state->BeforeFree(state, null, false);
             state->Used = 0;
             state->Generation++;
 
@@ -957,10 +963,8 @@ public partial struct Arena
 
         unsafe
         {
-            System.Runtime.ObjectAllocator.Get(out _, out void* current);
-            if (current == state)
-                Fail(state, "Arena.Destroy: the arena is in use by an object scope that is still open on this thread");
-            CheckAllStatics(state, "Arena.Destroy");
+            if (state->BeforeFree != null)
+                state->BeforeFree(state, null, true);
             if (state->InBuffer)
             {
                 // The memory is the caller's: nothing to free, but a stale

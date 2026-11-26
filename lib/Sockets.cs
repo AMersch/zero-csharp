@@ -951,6 +951,9 @@ static class SocketNative
     [DllImport("*")] static unsafe extern int ZeroFcntl(int fd, int command, int argument);
 
     static bool Mac => FileSystem.System == SystemKind.MacOS;
+    // Android's C library takes the BSD side in getaddrinfo (struct addrinfo
+    // and the EAI_* numbers), and Linux's everywhere else.
+    static bool BsdLookup => Mac || FileSystem.System == SystemKind.Android;
 
     // Numbers that differ: Linux's (and win/runtime.c's), then macOS's.
     static int AF_INET6 => Mac ? 30 : 10;
@@ -1053,10 +1056,11 @@ static class SocketNative
         };
     }
 
-    // getaddrinfo's own errors (EAI_*): Linux's (and win/runtime.c's), macOS's.
+    // getaddrinfo's own errors (EAI_*): Linux's (and win/runtime.c's), macOS's
+    // and Android's.
     static SocketError LookupError(int e)
     {
-        if (Mac)
+        if (BsdLookup)
             return e switch { 2 => SocketError.TryAgain, 4 => SocketError.NoRecovery, 5 or 7 => SocketError.NoData, 8 => SocketError.HostNotFound, _ => SocketError.SocketError };
         return e switch { -3 => SocketError.TryAgain, -4 => SocketError.NoRecovery, -5 or -6 => SocketError.NoData, -2 => SocketError.HostNotFound, _ => SocketError.SocketError };
     }
@@ -1532,8 +1536,8 @@ static class SocketNative
     }
 
     // struct addrinfo: ai_family at 4, then the address and the next entry.
-    // Linux puts ai_addr at 24 and ai_canonname at 32; macOS (and Windows,
-    // which win/runtime.c turns into Linux's) the other way round.
+    // Linux puts ai_addr at 24 and ai_canonname at 32; macOS and Android the
+    // other way round (Windows: win/runtime.c turns it into Linux's).
     static IPAddress[] Addresses(byte* list)
     {
         unsafe
@@ -1547,7 +1551,7 @@ static class SocketNative
             int n = 0;
             for (byte* entry = list; entry != null; entry = *(byte**)(entry + 40))
             {
-                byte* address = *(byte**)(entry + (Mac ? 32 : 24));
+                byte* address = *(byte**)(entry + (BsdLookup ? 32 : 24));
                 IPEndPoint endpoint = address == null ? null : Read(address);
                 if (endpoint != null)
                     addresses[n++] = endpoint.Address;

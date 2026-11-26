@@ -39,7 +39,11 @@
 # With --ios (on a Mac with Apple Silicon), builds iOS programs for the
 # simulator (bin/ios/*), from the --mac objects; ./run.sh --ios runs them.
 #
-# Usage:  ./build.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --ios | --gpu | --uefi] [Sample ...]
+# With --android, builds command-line programs for Android on arm64
+# (bin/android/*), with bflat and Android's C library from its layout, no NDK;
+# ./run.sh --android runs them on a phone or emulator, through adb.
+#
+# Usage:  ./build.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --ios | --android | --gpu | --uefi] [Sample ...]
 #         ./build.sh --gpu-air [Sample ...]  the GPU build up to AIR, without a Mac (no program)     default: all samples
 #         ./build.sh --cuda-ptx [Sample ...] experimental: the kernels as PTX for NVIDIA GPUs, checked by ptxas
 #         ./build.sh --cuda [Sample ...]     experimental: Linux programs that run them through CUDA;
@@ -931,6 +935,43 @@ build_ios_link() {
     done
 }
 
+# ---- Android -----------------------------------------------------------------
+#
+# Command-line programs for Android on arm64 (bin/android/*), the kind adb
+# shell runs; no app. bflat compiles and links them as for Linux, against
+# Android's C library, Bionic (--libc bionic), which its layout carries, so
+# no Android NDK is needed. android/runtime.c gives lib/ the glibc names
+# Bionic lacks; any clang compiles it (on the host, as win/'s files).
+ANDROID_OBJ=bin/android/obj
+
+# $1: clang
+build_android_objects() {
+    mkdir -p "$ANDROID_OBJ"
+    echo "[clang] android/runtime.c -> $ANDROID_OBJ/runtime.o"
+    "$1" -target aarch64-linux-android21 -O2 -ffreestanding -fPIC -Wall -Wextra -c android/runtime.c -o "$ANDROID_OBJ/runtime.o"
+}
+
+build_android() {
+    local name strip=()
+    check_bflat
+    build_core "$CORE"
+    BFLAT_ARCH=arm64 CORE_NATIVE=$ANDROID_OBJ/zerocore.o build_core_native
+    build_lib
+    # Stripped as the Linux programs are, but position-independent: Android
+    # runs nothing else.
+    [ -z "${KEEP_SYMBOLS:-}" ] && strip=(--no-debug-info --ldflags --strip-all)
+    for name in "$@"; do
+        echo "[bflat] $name -> bin/android/$name"
+        # 16 KB pages: Android 15 and later run on phones with them, and
+        # Google Play asks for it; a 4 KB-page phone loads these too.
+        # shellcheck disable=SC2046
+        "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none \
+            "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os linux --arch arm64 --libc bionic \
+            $(BFLAT_ARCH=arm64 bflat_flags "$name") "${strip[@]}" \
+            --ldflags "$ANDROID_OBJ/zerocore.o $ANDROID_OBJ/runtime.o -z max-page-size=16384" -o "bin/android/$name"
+    done
+}
+
 # ---- GPU (Metal) -------------------------------------------------------------
 #
 # A macOS program whose kernels (its [RuntimeExport] methods) also run on the
@@ -1268,6 +1309,11 @@ if [ "${1:-}" = "--native-win" ]; then
     build_win "$@"
     exit 0
 fi
+if [ "${1:-}" = "--native-android" ]; then
+    shift
+    build_android "$@"
+    exit 0
+fi
 if [ "${1:-}" = "--native-uefi" ]; then
     shift
     build_uefi "$@"
@@ -1299,6 +1345,7 @@ case "${1:-}" in
     --win)  TARGET=win; shift ;;
     --mac)  TARGET=mac; shift ;;
     --ios)  TARGET=ios; shift ;;
+    --android) TARGET=android; shift ;;
     --gpu)  TARGET=gpu; shift ;;
     --gpu-air) TARGET=gpu-air; shift ;;
     --cuda-ptx) TARGET=cuda-ptx; shift ;;
@@ -1388,6 +1435,7 @@ case "$TARGET" in
     pico2 | r4) output() { echo "bin/$TARGET/$1.elf"; } ;;
     win)    output() { echo "bin/win/$1.exe"; } ;;
     mac)    output() { echo "bin/mac/$1"; } ;;
+    android) output() { echo "bin/android/$1"; } ;;
     ios)    output() { echo "bin/ios/$1"; } ;;
     gpu)    output() { echo "bin/gpu/$1"; } ;;
     gpu-air) output() { echo "bin/gpu/obj/$1/kernels.ll"; } ;;
@@ -1545,6 +1593,15 @@ case "$TARGET" in
         fi
         build_win_objects "$WIN_CLANG"
         run win "$@"
+        ;;
+    android)
+        if ! ANDROID_CLANG=$(find_dos_clang); then
+            echo "Error: no clang that can compile for arm64 Android. Install clang (Xcode's works)." >&2
+            exit 1
+        fi
+        build_android_objects "$ANDROID_CLANG"
+        # The container (on macOS) builds for arm64 whatever the host is.
+        BFLAT_ARCH=arm64 run android "$@"
         ;;
     uefi)
         if ! UEFI_CLANG=$(find_dos_clang); then

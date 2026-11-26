@@ -160,9 +160,10 @@ ZeroFiberStart:
 
 // Which system this is, for lib/FileSystem.cs: 2, Linux on arm64. (1 Linux x64,
 // 2 Linux arm64, 3 macOS, 4 Windows, 5 UEFI, 6 WebAssembly, 7 DOS,
-// 8 a microcontroller, 9 the Commodore 64.)
+// 8 a microcontroller, 9 the Commodore 64, 10 Android.) Weak: Android
+// programs link android/runtime.c, whose ZeroSystem says 10.
     .text
-    .globl ZeroSystem
+    .weak ZeroSystem
     .type ZeroSystem, %function
 ZeroSystem:
     mov     w0, #2

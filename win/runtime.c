@@ -54,6 +54,7 @@ i64 write(int fd, const void *buffer, u64 count)
 
 #define KEYS_READ ReadConsoleInputW
 #define KEYS_PEEK PeekConsoleInputW
+#define KEYS_POLL keys_poll
 #include "console-keys.h"
 
 // A console hands over typed lines ending in "\r\n", so carriage returns from
@@ -449,4 +450,363 @@ int usleep(u32 microseconds)
 {
     Sleep((microseconds + 999) / 1000);
     return 0;
+}
+
+// ---- sockets, for lib/Sockets.cs -------------------------------------------
+//
+// lib/Sockets.cs calls the C library's socket functions with Linux's numbers
+// and layouts; these answer through Winsock. The names Winsock also has are
+// linked with /wrap:, like getenv, and find Winsock's own at run time
+// (GetProcAddress): naming them here would make every program link them,
+// and lld can't resolve a wrapped name's original that only this file calls.
+// poll and ZeroFcntl Winsock doesn't have. Failures set errno to Linux's
+// number for what went wrong. SOCKETs go to lib/ as ints: Windows hands out
+// handles that fit in 32 bits.
+
+// Winsock's function `name`, looked up once into *slot.
+static void *winsock_function(void **slot, const char *name)
+{
+    static Handle module;
+    if (!*slot) {
+        if (!module)
+            module = LoadLibraryA("ws2_32.dll");
+        *slot = GetProcAddress(module, name);
+    }
+    return *slot;
+}
+
+#define WINSOCK(result, name, parameters) \
+    static void *name##_slot; \
+    result (*name) parameters = (result (*) parameters)winsock_function(&name##_slot, #name)
+
+static void start_winsock(void)
+{
+    static int started;
+    if (!started) {
+        u64 data[64]; // WSADATA: 408 bytes on x64
+        WINSOCK(int, WSAStartup, (unsigned short, void *));
+        WSAStartup(0x0202, data);
+        started = 1;
+    }
+}
+
+// errno, with Linux's number, for the thread's last Winsock error.
+static int set_errno_from_winsock(void)
+{
+    WINSOCK(int, WSAGetLastError, (void));
+    int e;
+    switch (WSAGetLastError()) {
+    case 10004: e = 4; break;   case 10009: e = 9; break;   case 10013: e = 13; break;
+    case 10022: e = 22; break;  case 10024: e = 24; break;  case 10035: e = 11; break;
+    case 10036: e = 115; break; case 10037: e = 114; break; case 10038: e = 88; break;
+    case 10039: e = 89; break;  case 10040: e = 90; break;  case 10043: e = 93; break;
+    case 10045: e = 95; break;  case 10047: e = 97; break;  case 10048: e = 98; break;
+    case 10049: e = 99; break;  case 10050: e = 100; break; case 10051: e = 101; break;
+    case 10052: e = 102; break; case 10053: e = 103; break; case 10054: e = 104; break;
+    case 10055: e = 105; break; case 10056: e = 106; break; case 10057: e = 107; break;
+    case 10058: e = 108; break; case 10060: e = 110; break; case 10061: e = 111; break;
+    case 10064: e = 112; break; case 10065: e = 113; break;
+    default: e = 5; break; // EIO
+    }
+    *_errno() = e;
+    return -1;
+}
+
+// Linux's address family numbers to Winsock's and back: only IPv6 differs.
+static int to_windows_family(int family) { return family == 10 ? 23 : family; }
+static int to_linux_family(int family) { return family == 23 ? 10 : family; }
+
+// A sockaddr (sockaddr_in or sockaddr_in6, which Winsock lays out as Linux
+// does) with its 16-bit family changed.
+static const void *windows_address(const void *address, int length, unsigned char *copy)
+{
+    if (!address || length < 2 || length > 28)
+        return address;
+    for (int i = 0; i < length; i++)
+        copy[i] = ((const unsigned char *)address)[i];
+    *(unsigned short *)copy = (unsigned short)to_windows_family(*(unsigned short *)copy);
+    return copy;
+}
+
+static void linux_address(void *address, int *length)
+{
+    if (address && length && *length >= 2)
+        *(unsigned short *)address = (unsigned short)to_linux_family(*(unsigned short *)address);
+}
+
+int __wrap_socket(int family, int type, int protocol)
+{
+    start_winsock();
+    WINSOCK(Socket, socket, (int, int, int));
+    Socket s = socket(to_windows_family(family), type, protocol);
+    return s == ~(Socket)0 ? set_errno_from_winsock() : (int)s;
+}
+
+int __wrap_bind(int s, const void *address, unsigned length)
+{
+    unsigned char copy[28];
+    WINSOCK(int, bind, (Socket, const void *, int));
+    return bind((Socket)(unsigned)s, windows_address(address, (int)length, copy), (int)length) == 0 ? 0 : set_errno_from_winsock();
+}
+
+int __wrap_listen(int s, int backlog)
+{
+    WINSOCK(int, listen, (Socket, int));
+    return listen((Socket)(unsigned)s, backlog) == 0 ? 0 : set_errno_from_winsock();
+}
+
+int __wrap_accept(int s, void *address, int *length)
+{
+    WINSOCK(Socket, accept, (Socket, void *, int *));
+    Socket accepted = accept((Socket)(unsigned)s, address, length);
+    if (accepted == ~(Socket)0)
+        return set_errno_from_winsock();
+    linux_address(address, length);
+    return (int)accepted;
+}
+
+int __wrap_connect(int s, const void *address, unsigned length)
+{
+    unsigned char copy[28];
+    WINSOCK(int, connect, (Socket, const void *, int));
+    return connect((Socket)(unsigned)s, windows_address(address, (int)length, copy), (int)length) == 0 ? 0 : set_errno_from_winsock();
+}
+
+// MSG_NOSIGNAL (0x4000) means nothing here: Windows has no SIGPIPE.
+long long __wrap_sendto(int s, const void *buffer, unsigned long long length, int flags, const void *to, unsigned tolength)
+{
+    unsigned char copy[28];
+    WINSOCK(int, sendto, (Socket, const void *, int, int, const void *, int));
+    int n = sendto((Socket)(unsigned)s, buffer, (int)(length > 0x7FFFFFFF ? 0x7FFFFFFF : length), flags & ~0x4000,
+                          windows_address(to, (int)tolength, copy), (int)tolength);
+    return n < 0 ? set_errno_from_winsock() : n;
+}
+
+long long __wrap_recvfrom(int s, void *buffer, unsigned long long length, int flags, void *from, int *fromlength)
+{
+    WINSOCK(int, recvfrom, (Socket, void *, int, int, void *, int *));
+    WINSOCK(int, WSAGetLastError, (void));
+    int n = recvfrom((Socket)(unsigned)s, buffer, (int)(length > 0x7FFFFFFF ? 0x7FFFFFFF : length), flags, from, fromlength);
+    if (n < 0) {
+        // A datagram bigger than the buffer: Linux gives what fits.
+        if (WSAGetLastError() == 10040)
+            return (long long)length;
+        return set_errno_from_winsock();
+    }
+    linux_address(from, fromlength);
+    return n;
+}
+
+int __wrap_shutdown(int s, int how)
+{
+    WINSOCK(int, shutdown, (Socket, int));
+    return shutdown((Socket)(unsigned)s, how) == 0 ? 0 : set_errno_from_winsock();
+}
+
+int __wrap_close(int s)
+{
+    WINSOCK(int, closesocket, (Socket));
+    return closesocket((Socket)(unsigned)s) == 0 ? 0 : set_errno_from_winsock();
+}
+
+// Linux's option numbers to Winsock's. SO_REUSEADDR is left out: on Windows
+// it lets two sockets listen on one port, not what lib/ asks it for.
+static int windows_option(int *level, int *name)
+{
+    if (*level == 1) { // SOL_SOCKET
+        *level = 0xFFFF;
+        switch (*name) {
+        case 2: return 0;                   // SO_REUSEADDR: ignored
+        case 4: *name = 0x1007; break;      // SO_ERROR
+        case 6: *name = 0x20; break;        // SO_BROADCAST
+        }
+    } else if (*level == 41 && *name == 26) { // IPPROTO_IPV6, IPV6_V6ONLY
+        *name = 27;
+    }
+    return 1;
+}
+
+int __wrap_setsockopt(int s, int level, int name, const void *value, unsigned length)
+{
+    if (level == 1 && name == 13 && length >= 8) {
+        // SO_LINGER: Linux's struct linger is two ints, Winsock's two u_shorts.
+        unsigned short linger[2] = { (unsigned short)((const int *)value)[0], (unsigned short)((const int *)value)[1] };
+        WINSOCK(int, setsockopt, (Socket, int, int, const void *, int));
+        return setsockopt((Socket)(unsigned)s, 0xFFFF, 0x80, linger, 4) == 0 ? 0 : set_errno_from_winsock();
+    }
+    if (!windows_option(&level, &name))
+        return 0;
+    WINSOCK(int, setsockopt, (Socket, int, int, const void *, int));
+    return setsockopt((Socket)(unsigned)s, level, name, value, (int)length) == 0 ? 0 : set_errno_from_winsock();
+}
+
+int __wrap_getsockopt(int s, int level, int name, void *value, int *length)
+{
+    if (level == 1 && name == 13 && *length >= 8) {
+        // SO_LINGER, as in __wrap_setsockopt.
+        unsigned short linger[2] = { 0, 0 };
+        int size = 4;
+        WINSOCK(int, getsockopt, (Socket, int, int, void *, int *));
+        if (getsockopt((Socket)(unsigned)s, 0xFFFF, 0x80, linger, &size) != 0)
+            return set_errno_from_winsock();
+        ((int *)value)[0] = linger[0];
+        ((int *)value)[1] = linger[1];
+        *length = 8;
+        return 0;
+    }
+    if (!windows_option(&level, &name)) {
+        *(int *)value = 0;
+        return 0;
+    }
+    WINSOCK(int, getsockopt, (Socket, int, int, void *, int *));
+    if (getsockopt((Socket)(unsigned)s, level, name, value, length) != 0)
+        return set_errno_from_winsock();
+    // SO_ERROR holds a Winsock error: Linux's number for it.
+    if (level == 0xFFFF && name == 0x1007 && *(int *)value != 0) {
+        int e = *(int *)value;
+        *(int *)value = e == 10061 ? 111 : e == 10060 ? 110 : e == 10065 ? 113 : e == 10051 ? 101
+                      : e == 10054 ? 104 : e == 10048 ? 98 : e == 10049 ? 99 : 5;
+    }
+    return 0;
+}
+
+int __wrap_getsockname(int s, void *address, int *length)
+{
+    WINSOCK(int, getsockname, (Socket, void *, int *));
+    if (getsockname((Socket)(unsigned)s, address, length) != 0)
+        return set_errno_from_winsock();
+    linux_address(address, length);
+    return 0;
+}
+
+int __wrap_getpeername(int s, void *address, int *length)
+{
+    WINSOCK(int, getpeername, (Socket, void *, int *));
+    if (getpeername((Socket)(unsigned)s, address, length) != 0)
+        return set_errno_from_winsock();
+    linux_address(address, length);
+    return 0;
+}
+
+// poll over WSAPoll, whose entries are 16 bytes (a 64-bit SOCKET) and whose
+// event bits differ: POLLIN is POLLRDNORM, POLLOUT is POLLWRNORM.
+int poll(void *fds, unsigned long long count, int timeout)
+{
+    typedef struct { Socket fd; short events, revents; } WinPoll;
+    typedef struct { int fd; short events, revents; } LinuxPoll;
+    LinuxPoll *in = fds;
+    // Standard input (Console.KeyAvailable) is the console's, not a socket.
+    if (count == 1 && in[0].fd == 0)
+        return keys_poll(fds, (unsigned long)count, timeout);
+    start_winsock();
+    WinPoll *out = HeapAlloc(GetProcessHeap(), 0, count * sizeof(WinPoll));
+    if (!out) {
+        *_errno() = 12; // ENOMEM
+        return -1;
+    }
+    for (unsigned long long i = 0; i < count; i++) {
+        out[i].fd = (Socket)(unsigned)in[i].fd;
+        out[i].events = (short)(((in[i].events & 1) ? 0x100 : 0) | ((in[i].events & 4) ? 0x10 : 0));
+        out[i].revents = 0;
+    }
+    WINSOCK(int, WSAPoll, (void *, u32, int));
+    int ready = WSAPoll(out, (u32)count, timeout);
+    if (ready < 0) {
+        HeapFree(GetProcessHeap(), 0, out);
+        return set_errno_from_winsock();
+    }
+    for (unsigned long long i = 0; i < count; i++) {
+        short r = out[i].revents;
+        in[i].revents = (short)(((r & 0x300) ? 1 : 0) | ((r & 0x10) ? 4 : 0) | ((r & 1) ? 8 : 0)
+                              | ((r & 2) ? 0x10 : 0) | ((r & 4) ? 0x20 : 0));
+    }
+    HeapFree(GetProcessHeap(), 0, out);
+    return ready;
+}
+
+// fcntl's F_GETFL (3) and F_SETFL (4) with O_NONBLOCK (0x800), which is all
+// lib/Sockets.cs asks of it, over ioctlsocket's FIONBIO.
+int ZeroFcntl(int s, int command, int argument)
+{
+    if (command == 3)
+        return 0;
+    if (command == 4) {
+        u32 on = (argument & 0x800) ? 1 : 0;
+        WINSOCK(int, ioctlsocket, (Socket, long, u32 *));
+        return ioctlsocket((Socket)(unsigned)s, (long)0x8004667E, &on) == 0 ? 0 : set_errno_from_winsock();
+    }
+    *_errno() = 22;
+    return -1;
+}
+
+// getaddrinfo, answering in Linux's struct addrinfo: ai_addr at 24 and
+// ai_canonname at 32, where Winsock has them the other way round (and a
+// 64-bit ai_addrlen). Each entry is copied, with its address after it.
+typedef struct LinuxAddrinfo {
+    int flags, family, socktype, protocol;
+    unsigned addrlen;
+    void *addr;
+    char *canonname;
+    struct LinuxAddrinfo *next;
+    unsigned char address[28];
+} LinuxAddrinfo;
+
+int __wrap_getaddrinfo(const char *node, const char *service, const int *hints, LinuxAddrinfo **result)
+{
+    start_winsock();
+    int windows_hints[12] = { 0 }; // ADDRINFOA: 48 bytes
+    if (hints) {
+        windows_hints[0] = hints[0];
+        windows_hints[1] = to_windows_family(hints[1]);
+        windows_hints[2] = hints[2];
+        windows_hints[3] = hints[3];
+    }
+    unsigned char *list = 0;
+    WINSOCK(int, getaddrinfo, (const char *, const char *, const void *, void **));
+    WINSOCK(void, freeaddrinfo, (void *));
+    int e = getaddrinfo(node, service, hints ? windows_hints : 0, (void **)&list);
+    if (e != 0) {
+        // Linux's EAI_ numbers.
+        return e == 11001 ? -2 : e == 11002 ? -3 : e == 11003 ? -4 : e == 11004 ? -5 : -11;
+    }
+    LinuxAddrinfo *first = 0, **link = &first;
+    for (unsigned char *entry = list; entry; entry = *(unsigned char **)(entry + 40)) {
+        LinuxAddrinfo *copy = HeapAlloc(GetProcessHeap(), 8, sizeof(LinuxAddrinfo)); // zeroed
+        if (!copy)
+            break;
+        copy->flags = ((int *)entry)[0];
+        copy->family = to_linux_family(((int *)entry)[1]);
+        copy->socktype = ((int *)entry)[2];
+        copy->protocol = ((int *)entry)[3];
+        unsigned long long length = *(unsigned long long *)(entry + 16);
+        const unsigned char *address = *(unsigned char **)(entry + 32);
+        if (address && length <= sizeof copy->address) {
+            for (unsigned i = 0; i < length; i++)
+                copy->address[i] = address[i];
+            *(unsigned short *)copy->address = (unsigned short)to_linux_family(*(unsigned short *)copy->address);
+            copy->addr = copy->address;
+            copy->addrlen = (unsigned)length;
+        }
+        *link = copy;
+        link = &copy->next;
+    }
+    freeaddrinfo(list);
+    *result = first;
+    return 0;
+}
+
+void __wrap_freeaddrinfo(LinuxAddrinfo *list)
+{
+    while (list) {
+        LinuxAddrinfo *next = list->next;
+        HeapFree(GetProcessHeap(), 0, list);
+        list = next;
+    }
+}
+
+int __wrap_gethostname(char *name, unsigned long long length)
+{
+    start_winsock();
+    WINSOCK(int, gethostname, (char *, int));
+    return gethostname(name, (int)length) == 0 ? 0 : set_errno_from_winsock();
 }

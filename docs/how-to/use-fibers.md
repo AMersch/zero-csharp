@@ -317,6 +317,6 @@ its stack the copy takes.
 - Fibers spawned on a system thread run on that thread, inside its `Fiber.Run`. To use several
   processors, give each `Parallel.For` part its own fibers and its own `Run`.
 - Reading a file or standard input blocks the whole thread, every fiber on it included. That holds
-  for a fiber that feeds a `Pipe` from a file too: only `Pipe`'s own `Read` and `Write` let the other
-  fibers run while one waits.
+  for a fiber that feeds a `Pipe` from a file too: only `Pipe`'s own `Read` and `Write`, and sockets
+  (see [Use the network](use-the-network.html)), let the other fibers run while one waits.
 - A `throw` ends the program, as it does everywhere in zero mode.

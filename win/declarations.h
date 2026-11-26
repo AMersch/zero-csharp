@@ -78,6 +78,12 @@ IMPORT int MoveFileExW(const wchar *from, const wchar *to, u32 flags);
 IMPORT u32 GetCurrentDirectoryW(u32 size, wchar *buffer);
 IMPORT int SetCurrentDirectoryW(const wchar *path);
 
+// Winsock, for lib/Sockets.cs. A SOCKET is 64 bits, but the system gives
+// out handles that fit in 32, so lib/ keeps them in an int.
+typedef u64 Socket;
+IMPORT Handle LoadLibraryA(const char *name);
+IMPORT void *GetProcAddress(Handle module, const char *name);
+
 #define FILE_ATTRIBUTE_DIRECTORY 0x10
 #define FILE_ATTRIBUTE_REPARSE_POINT 0x400
 #define IO_REPARSE_TAG_MOUNT_POINT 0xA0000003u

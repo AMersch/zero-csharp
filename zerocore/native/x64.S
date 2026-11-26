@@ -207,4 +207,14 @@ ZeroSystem:
     mov     eax, 1
     ret
 
+// fcntl(fd, command, argument), for lib/Sockets.cs. fcntl is variadic; on
+// Linux a variadic call passes its arguments as any other does, so this only
+// says no vector registers carry arguments (al = 0) and jumps.
+    .text
+    .global ZeroFcntl
+    .type ZeroFcntl, @function
+ZeroFcntl:
+    xor     eax, eax
+    jmp     fcntl@PLT
+
     .section .note.GNU-stack, "", @progbits

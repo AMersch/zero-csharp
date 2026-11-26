@@ -183,3 +183,19 @@ ___stop___modules:
 _ZeroSystem:
     mov     w0, #3
     ret
+
+// fcntl(fd, command, argument), for lib/Sockets.cs. fcntl is variadic, and
+// macOS's arm64 passes a variadic function's extra arguments on the stack,
+// not in registers as a call from C# does: this moves the third there.
+    .text
+    .globl _ZeroFcntl
+    .p2align 2
+_ZeroFcntl:
+    sub     sp, sp, #32
+    stp     x29, x30, [sp, #16]
+    add     x29, sp, #16
+    str     x2, [sp]
+    bl      _fcntl
+    ldp     x29, x30, [sp, #16]
+    add     sp, sp, #32
+    ret

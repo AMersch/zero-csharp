@@ -28,6 +28,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   `Path.Combine` and `Normalize`; creating, listing and deleting directories.
 - [Use streams](use-streams.html): `Stream`, `MemoryStream` and `FileStream`, as in .NET, with
   buffers of a size you choose, from an arena.
+- [Use the network](use-the-network.html): TCP and UDP sockets, `TcpListener`, `TcpClient` and
+  `Dns`, as in .NET, with a fiber per connection.
 - [Use the clock and random numbers](use-the-clock-and-random-numbers.html): measure a duration, tell
   the date and time, and roll dice with numbers that are the same on every target.
 - [Read environment variables and exit](use-the-environment.html): `Environment.GetEnvironmentVariable`,

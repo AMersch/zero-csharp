@@ -102,6 +102,7 @@ SAMPLES=(
     Keys
     Tensors
     TensorsAvx
+    Avx2Ops
     TensorTypes
     "${SMALL_SAMPLES[@]}"
 )

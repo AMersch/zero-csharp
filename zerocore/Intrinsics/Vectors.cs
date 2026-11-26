@@ -22,6 +22,18 @@ namespace System.Runtime.Intrinsics
     {
         private readonly Vector128<T> _lower;
         private readonly Vector128<T> _upper;
+
+        public static Vector256<T> Zero
+        {
+            [Intrinsic]
+            get => default;
+        }
+
+        public static Vector256<T> One
+        {
+            [Intrinsic]
+            get => One;
+        }
     }
 
     // As with Unsafe, the compiler replaces each call with one instruction, so
@@ -70,5 +82,33 @@ namespace System.Runtime.Intrinsics
 
         [Intrinsic]
         public static Vector256<int> Create(int value) => Create(value);
+
+        [Intrinsic]
+        public static Vector256<byte> AsByte<T>(this Vector256<T> vector) where T : struct => AsByte(vector);
+
+        [Intrinsic]
+        public static Vector256<short> AsInt16<T>(this Vector256<T> vector) where T : struct => AsInt16(vector);
+
+        [Intrinsic]
+        public static Vector256<ushort> AsUInt16<T>(this Vector256<T> vector) where T : struct => AsUInt16(vector);
+
+        [Intrinsic]
+        public static Vector256<uint> AsUInt32<T>(this Vector256<T> vector) where T : struct => AsUInt32(vector);
+
+        [Intrinsic]
+        public static Vector256<long> AsInt64<T>(this Vector256<T> vector) where T : struct => AsInt64(vector);
+
+        [Intrinsic]
+        public static Vector256<short> Create(short value) => Create(value);
+
+        [Intrinsic]
+        public static Vector256<ushort> Create(ushort value) => Create(value);
+
+        [Intrinsic]
+        public static Vector256<int> Create(int e0, int e1, int e2, int e3, int e4, int e5, int e6, int e7)
+            => Create(e0, e1, e2, e3, e4, e5, e6, e7);
+
+        [Intrinsic]
+        public static T Sum<T>(Vector256<T> vector) where T : struct => Sum(vector);
     }
 }

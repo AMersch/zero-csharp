@@ -1,0 +1,8 @@
+PASS Avx loads, stores and conversions (3 checks)
+PASS Avx2 arithmetic (13 checks)
+PASS Avx2 widening loads (3 checks)
+PASS Avx2 packs and unpacks (4 checks)
+PASS Avx2 permutes and broadcasts (5 checks)
+PASS Vector256 helpers (5 checks)
+
+All checks passed.

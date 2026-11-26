@@ -69,7 +69,7 @@ For WebAssembly, see `build_wasm` in `../build.sh`: the library is built with `-
 | `Runtime/MethodTable.cs` | The layout of the type descriptions the compiler emits |
 | `Runtime/Unsafe.cs` | `Unsafe`, `RuntimeHelpers`, `MemoryMarshal` |
 | `Runtime/Platform.cs` | Everything used from outside: `calloc`, `write`, `abort` |
-| `Intrinsics/*.cs` | `Vector64/128/256<T>` and the NEON, SSE, SSE2, AVX, AVX2 and FMA operations `../lib/Kernels.cs` and `TensorPrimitives` use; the bit instructions `BitOperations` uses |
+| `Intrinsics/*.cs` | `Vector64/128/256<T>` and the NEON, SSE, SSE2, AVX, AVX2 and FMA operations `../lib/Kernels.cs` and `TensorPrimitives` use, and the AVX2 integer ones `../samples/Avx2Ops.cs` checks; the bit instructions `BitOperations` uses |
 | `native/arm64.S`, `native/x64.S` | Three routines per architecture that need a calling convention C# can't express: two for storing object references, one for interface calls; and on x64 the stack probe the compiler calls for frames larger than a few pages (arm64 probes inline). Also the stack switch `../lib/Fibers.cs` uses: save the callee-saved registers, change stacks, restore them |
 | `native/mac-arm64.S` | `arm64.S` as a Mach-O object, for macOS |
 | `native/win-x64.S` | The same for Windows x64's calling convention, plus the stack probe Windows code calls for frames larger than a page. Its stack switch also swaps the thread's stack bounds, which Windows keeps in the thread information block; UEFI has none, and its build defines `ZERO_UEFI` to leave that out. With `../win/start.c` and `../win/runtime.c` (entry point, `write`, `read`) it is all a Windows build adds. UEFI x64 uses it too |

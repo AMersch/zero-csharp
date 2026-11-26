@@ -834,7 +834,7 @@ build_win_objects() {
     local name
     echo "[clang] win/{start,runtime,library}.c, zerocore/native/win-x64.S -> $WIN_OBJ"
     for name in start runtime library; do
-        "$clang" "${WIN_TARGET[@]}" -O2 -ffreestanding -fno-builtin -Wall -Wextra -c "win/$name.c" -o "$WIN_OBJ/$name.obj"
+        "$clang" "${WIN_TARGET[@]}" -O2 -ffreestanding -fno-builtin -ffunction-sections -fdata-sections -Wall -Wextra -c "win/$name.c" -o "$WIN_OBJ/$name.obj"
     done
     "$clang" "${WIN_TARGET[@]}" -c zerocore/native/win-x64.S -o "$WIN_OBJ/zerocore.obj"
 }

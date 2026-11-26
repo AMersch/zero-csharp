@@ -22,9 +22,9 @@
 // the whole picture 133,000 / 650,000, of 100 by 50 pixels 25,000 / 100,000; Line across
 // the picture 6,700 / 116,000 (a line from the helper is within a pixel of the exact one,
 // both ends exact; a line that leaves the picture is drawn without it); Circle 133,000
-// for a radius of 100; FillTriangle 24,000 for one of 10 by 10 pixels, 62,000 / 71,000 for 50
-// by 50, 133,000 / 160,000 for 100 by 100 (about 1,200 a row, edges and all); Text 12,000 a
-// character with a background, 15,000 without; Plot
+// for a radius of 100; FillTriangle (by the chip's polygon helper) 25,000 / 24,000 for one
+// of 10 by 10 pixels, 40,000 / 67,000 for 50 by 50, 93,000 / 140,000 for 100 by 100; Text
+// 12,000 a character with a background, 15,000 without; Plot
 // 1,500, most of it the call from C#: a lot of pixels want Fill, Line or Text. So a
 // frame holds a whole picture's fill, or a few dozen lines; the whole picture can be
 // cleared and redrawn about once a frame.
@@ -90,7 +90,7 @@ public static class Bitmap
         cx16_bitmap_line(x2, y2, x0, y0, color);
     }
 
-    /// <summary>Fills a triangle with corners at three points, in any order. A pixel is inside when its center is, so that triangles with a side in common leave no gap and don't overlap: one that is flat on the top or on the left gets that row or column, the one next to it doesn't. Nothing is drawn for a triangle with no height. What is outside the picture is cut off; a corner more than 8000 pixels away is taken for one at 8000.</summary>
+    /// <summary>Fills a triangle with corners at three points, in any order. A pixel is inside when its center is, so that triangles with a side in common leave no gap and don't overlap: one that is flat on the top or on the left gets that row or column, the one next to it doesn't. Nothing is drawn for a triangle with no height. What is outside the picture is cut off; a corner more than 8000 pixels away is taken for one at 8000. With VERA FX a triangle wholly on the picture is drawn by the chip's polygon helper, whose edges are within 1/32 of a pixel of the exact ones: a pixel whose center is that close to a side may differ from what the chip without FX draws. Two triangles that share a side still agree on it when both are wholly on the picture; one drawn by the helper next to one that is cut by the picture's edge may leave or double a pixel along the common side.</summary>
     public static void FillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, int color)
         => cx16_bitmap_triangle(x0, y0, x1, y1, x2, y2, color);
 

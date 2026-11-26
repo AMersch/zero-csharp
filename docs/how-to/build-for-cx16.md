@@ -68,8 +68,7 @@ pointer, an arrow as an 8-bit sprite that the mouse moves: `./run.sh --cx16 --wi
 pointer covers 0-639 across and 0-479 down. The headless runs
 (`./test.sh --cx16`) draw nothing and have no frame interrupt, so there `WaitFrame` gives up after about
 two frames' time, and the clock, the joysticks and the mouse stand still; the demo's checks read the video memory
-back, and leave those two to a run in a window. The YM2151 FM chip, the PCM audio, the bitmap layers
-have no API yet.
+back, and leave those two to a run in a window. The PCM audio has no API yet.
 
 ## Files on the disk
 
@@ -155,9 +154,10 @@ anything from $00000 to $1F9BF is free):
 |---------|------|
 | $00000 to $12BFF | the bitmap (and, in other layer setups, tile maps and tiles) |
 | $13000 to $14FFF | the 64 shapes of `CX16.Sprite(sprite, slot, ...)`, 128 bytes each |
-| $15000 to $1AFFF | free for sprite shapes at an address of your own (`Sprite(sprite, address, ...)`) |
+| $15000 to $1AFFF | free for sprite shapes at an address of your own (`Sprite(sprite, address, ...)`); `Affine` puts its tiles at $15000 and its map at $19000 unless told otherwise |
 | $1B000 to $1EBFF | the text screen |
 | $1F000 to $1F7FF | the character set |
+| $1F800 to $1F803 | where the multiplier leaves its result |
 | $1F9C0 to $1FFFF | the video chip's own registers: sound, palette, sprite attributes |
 
 Speed, measured at 8 MHz (a frame is 133,000 cycles), with the video chip's FX helpers (see below) and without
@@ -170,10 +170,13 @@ them:
 | `Fill`, 100 by 50 pixels | 25,000 | 100,000 |
 | `Line` across the picture | 6,700 | 116,000 |
 | `Circle` of radius 100 | 133,000 | 133,000 |
-| `FillTriangle`, 50 by 50 | 62,000 | 71,000 |
-| `FillTriangle`, 100 by 100 | 133,000 | 160,000 |
-| `FillTriangle`, 200 wide, 100 high | 153,000 | 213,000 |
-| `FillTriangle`, 10 by 10 | 24,000 | 24,000 |
+| `FillTriangle`, 50 by 50 | 40,000 | 67,000 |
+| `FillTriangle`, 100 by 100 | 93,000 | 140,000 |
+| `FillTriangle`, 200 wide, 100 high | 140,000 | 180,000 |
+| `FillTriangle`, 10 by 10 | 25,000 | 24,000 |
+| `Affine.Draw`, 64 by 64 | 93,000 | 6,300,000 |
+| `CX16.Multiply` (C#'s `a * b`: 2,200) | 400 | 1,300 |
+| `CX16.Dot` of 100 pairs (a C# loop: 167,000) | 15,000 | 170,000 |
 | `Text`, a character | 12,000 | 12,000 |
 | `Plot` | 1,500 | 1,500 |
 
@@ -181,7 +184,8 @@ them:
 picture's fill or a few dozen lines. `samples/BitmapDemo.cs` draws a picture and checks every function against the
 video memory. `samples/BitmapShapes.cs` checks fills of every width and position, lines in all eight directions
 and 15 triangles against an exact rule (a pixel is inside when its center is; the left edge and the top row belong
-to a triangle), with the helpers and again without them.
+to a triangle), with the helpers and again without them. `samples/VeraFxDemo.cs` does the same for the multiplier
+and `Affine`.
 
 ### VERA FX
 
@@ -198,12 +202,48 @@ two ways.
   in the middle of a long line can be one off Bresenham's, and the two ends are always exact.
 - FX is switched on only while a call needs it, with the interrupts off (the KERNAL's own writes to the video memory,
   those of the mouse pointer, must not become cache writes): so a long `Clear` delays the mouse by its 127,000 cycles.
-- **Triangles** (`Bitmap.FillTriangle`) do not use the chip's polygon helper: it steps the two edges itself, but
-  writes one pixel at a time, about as slowly as the line helper (10 cycles a pixel against 1 to 2 for a cache
-  fill), so a row of it is not faster than the cache fill of a row from about 40 pixels wide, and a triangle
-  is mostly wide rows. (That is an estimate; the helper was not built.) The triangle's rows are cache fills, with
-  the edges stepped in 16.16 fixed point; it works without FX as well, a little slower.
-- Not used yet: the polygon helper, the affine helper for tiles and bitmaps, and the 32-bit multiplier.
+- **Triangles** (`Bitmap.FillTriangle`): the polygon helper follows the two edges and says where each row starts and
+  how long it is; the row is written four pixels at a time through the cache. It is about 1.5 times as fast as the
+  software, and no faster for very small triangles.
+  - The helper holds a slope to 1/256 of a pixel a row, so each edge starts again from the exact one every 16 rows.
+    Its edges are within 1/32 of a pixel: a pixel whose center is that close to a side may differ from the software's.
+    In a comparison of 38 triangles, 97 of 5,458 rows differed, none by more than one pixel.
+  - Two triangles with a side in common still leave no gap and don't overlap.
+  - A triangle that isn't wholly on the picture, or has an edge flatter than 60 pixels a row, is drawn in software.
+    Next to one drawn by the helper, such a triangle may leave or double a pixel along the common side.
+
+### The multiplier
+
+`CX16.Multiply(a, b)` multiplies two `short`s to an `int`, and `CX16.Dot(a, b)` adds up the products of two spans
+(vectors, filters), wrapping round at 32 bits. The 65C02 has no multiply instruction, so even one product is about five
+times faster than C#'s `a * b`; the compiler doesn't use the chip for `*` by itself. Without FX both are worked out
+in software.
+
+### Rotating and scaling
+
+`Affine` (`lib/Affine.cs`) draws a rectangle of the bitmap from a picture made of tiles, rotated, scaled, sheared or
+mirrored:
+
+```csharp
+Affine.Source(8);                             // a map of 8 by 8 tiles
+Affine.SetTile(1, pixels);                    // 64 bytes: 8x8, a color each
+Affine.SetMap(0, 0, 1);                       // column, row, tile
+Bitmap.Enable();
+int cos = CX16.Cos(angle) >> 7, sin = CX16.Sin(angle) >> 7;     // 256 is 1
+Affine.Draw(128, 88, 64, 64,                  // where, and how big
+    32 * 256 - 32 * cos + 32 * sin, 32 * 256 - 32 * sin - 32 * cos,    // the source position of the top left corner
+    cos, sin,                                 // its step for each pixel to the right
+    -sin, cos);                               // and for each row down
+```
+
+- The map is 2, 8, 32 or 128 tiles each way, with up to 256 tiles of 8 bits a pixel. Outside it the picture repeats,
+  or shows tile 0 (`clip: true`). `transparent: true` leaves the bitmap as it was where the source has color 0.
+- Positions and steps are in 256ths of a source pixel.
+- A map of 128 is 16 KB and doesn't fit at the usual place: `Affine.Source(128, tileAddress: 0x19000,
+  mapAddress: 0x15000)`, which leaves room for 128 tiles.
+- A large picture is slow even with the helper (a full screen is about 9 frames). The interrupts get in between
+  rows, so the clock and the mouse go on.
+- Without FX the same pixels are worked out in software, about 70 times slower.
 
 ## Tiles
 

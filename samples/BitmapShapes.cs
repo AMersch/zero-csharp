@@ -116,7 +116,8 @@ public static class Program
     // the row of a pixel, the triangle runs from its left edge to its right edge, measured at the middle of
     // the row, and the pixel is in if its own middle is from the left edge up to, not including, the right.
     // Coordinates are doubled so that the middles are whole numbers. `near` says that the middle is within
-    // a fiftieth of a pixel of an edge: such a pixel is a tie that a rounding may fall either way.
+    // a twenty-fourth of a pixel of an edge (the video chip's
+    // polygon helper keeps its edges within a thirty-second): such a pixel is a tie that a rounding may fall either way.
     static bool InTriangle(int x, int y, int[] vx, int[] vy, out bool near)
     {
         near = false;
@@ -136,7 +137,7 @@ public static class Program
                 den = -den;
             }
             long difference = centerX * den - num;            // the pixel's middle minus the edge, times den
-            if ((difference < 0 ? -difference : difference) * 25 < den)
+            if ((difference < 0 ? -difference : difference) * 12 < den)
                 near = true;
             if (crossings == 0)
             {
@@ -275,6 +276,41 @@ public static class Program
         return ok;
     }
 
+    // A quadrilateral drawn as two triangles with the side from (ax, ay) to (cx, cy) in common, looked at in a
+    // band along that side: no pixel is left out, and none belongs to both (drawn in either order, the first
+    // triangle's color covers as many pixels of the band).
+    static bool NoSeam(int ax, int ay, int bx, int by, int cx, int cy, int dx, int dy)
+    {
+        bool ok = true;
+        int firstThenSecond = 0, secondThenFirst = 0;
+        for (int order = 0; order < 2; order++)
+        {
+            Bitmap.Fill(0, 60, 320, 140, 0);
+            if (order == 0)
+                Bitmap.FillTriangle(ax, ay, bx, by, cx, cy, 77);
+            Bitmap.FillTriangle(ax, ay, cx, cy, dx, dy, 78);
+            if (order == 1)
+                Bitmap.FillTriangle(ax, ay, bx, by, cx, cy, 77);
+            for (int y = ay + 12; y < cy - 12; y++)      // away from the ends, where the band would leave the shape
+            {
+                int along = ax + (cx - ax) * (y - ay) / (cy - ay);
+                for (int x = along - 3; x <= along + 3; x++)
+                {
+                    int color = Pixel(x, y);
+                    ok &= color != 0;
+                    if (color == 77)
+                    {
+                        if (order == 0)
+                            firstThenSecond++;
+                        else
+                            secondThenFirst++;
+                    }
+                }
+            }
+        }
+        return ok && firstThenSecond == secondThenFirst;
+    }
+
     static void Everything(string how)
     {
         Bitmap.Fill(0, 60, 320, 140, 0);
@@ -294,6 +330,8 @@ public static class Program
                 seam &= Pixel(x, along + k) != 0;
         }
         Check("two triangles with a side in common leave no gap", seam, how);
+        Check("and neither gap nor overlap where their other corners are in different rows",
+            NoSeam(60, 70, 200, 65, 250, 180, 80, 170) && NoSeam(100, 61, 230, 77, 139, 197, 47, 101), how);
 
         Bitmap.Fill(0, 60, 320, 140, 0);
         Bitmap.Triangle(100, 80, 200, 80, 150, 160, 9);

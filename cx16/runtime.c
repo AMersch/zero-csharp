@@ -1411,17 +1411,164 @@ void cs_cx16_bitmap_circle(i32 cx, i32 cy, i32 radius, i32 color)
     }
 }
 
+// A filled triangle on a chip with VERA FX, by its polygon helper: the chip follows the two
+// edges (a position and an increment each) and says, for each row, where it starts and how
+// long it is; the pixels go four at a time through the cache. Found out in the emulator:
+// each read of data port 1 steps both positions and points port 1 at the row's start (port 0,
+// the row's address, plus the left position); FX_POLY_FILL gives the length and the start's
+// place in its group of four; a read of data port 0 goes to the next row. A row covers the
+// pixels from floor(left) up to floor(right), and a row's step is twice the register's value,
+// in 1/512 of a pixel, so a slope is held to 1/256 of a pixel per row. So that this doesn't
+// add up, an edge starts again from the exact one at each picture row that is a multiple of
+// 16, and in between depends on nothing but the edge and the row, so that two triangles with
+// a common side compute the same pixels on it. The helper's edge is within 1/32 of a pixel of
+// the exact one. A position is set 1/256 low, so that an edge exactly through a pixel's middle
+// falls as in the software.
+typedef struct {
+    int x, y;           // the top of the edge
+    i32 slope;          // x per row, 16.16
+} edge;
+
+static edge edge_of(int xa, int ya, int xb, int yb)
+{
+    edge e;
+    e.x = xa;
+    e.y = ya;
+    e.slope = ((i32)(xb - xa) << 16) / (yb - ya);
+    return e;
+}
+
+// An edge's exact x at the middle of a row `rows` rows further on than `value` is at: for a
+// whole block a shift, else by adding (fewer than 16 times), never a 32-bit multiplication.
+static i32 edge_on(i32 value, i32 slope, int rows)
+{
+    if (rows == 16)
+        return value + (slope << 4);
+    while (rows-- > 0)
+        value += slope;
+    return value;
+}
+
+// Gives the helper one edge: its step per row, and the position that makes the row at
+// hand start at `value` (the exact x at the middle of the row).
+static void fx_edge(char isLeft, i32 value, i32 slope)
+{
+    int step = (int)((slope + 128) >> 8);           // twice this, in 1/512, is a row
+    i32 position = value + 0x8000L - ((i32)step << 7) - 0x100;
+    if (position < 0)
+        position = 0;
+    unsigned char low = (unsigned char)step, high = (unsigned char)(((unsigned)step >> 8) & 0x7F);
+    VERA.control = 3 << 1;                          // the step (this also sets the position's fraction)
+    if (isLeft) {
+        VERA.display.fxxincrl = low;
+        VERA.display.fxxincrh = high;
+        VERA.control = 4 << 1;
+        VERA.display.fxxposl = (unsigned char)(position >> 16);
+        VERA.display.fxxposh = (unsigned char)((position >> 24) & 7);
+        VERA.control = 5 << 1;
+        VERA.display.fxxposs = (unsigned char)(position >> 8);
+    } else {
+        VERA.display.fxyincrl = low;
+        VERA.display.fxyincrh = high;
+        VERA.control = 4 << 1;
+        VERA.display.fxyposl = (unsigned char)(position >> 16);
+        VERA.display.fxyposh = (unsigned char)((position >> 24) & 7);
+        VERA.control = 5 << 1;
+        VERA.display.fxyposs = (unsigned char)(position >> 8);
+    }
+}
+
+static void fx_triangle(int top, int middle, int bottom, const edge *longer, const edge *upper, const edge *lower,
+    char shortIsLeft, unsigned char color)
+{
+    static const unsigned char before[4] = { 0x00, 0x03, 0x0F, 0x3F };
+    static const unsigned char after[4] = { 0xFC, 0xF0, 0xC0, 0x00 };
+    u32 start = ((u32)(unsigned)top << 8) + ((u32)(unsigned)top << 6);
+
+    __asm__ volatile("sei" ::: "memory");
+    VERA.control = 6 << 1;
+    VERA.display.fxcachel = color;
+    VERA.display.fxcachem = color;
+    VERA.display.fxcacheh = color;
+    VERA.display.fxcacheu = color;
+    VERA.control = 2 << 1;
+    VERA.display.fxctrl = 2 | 0x40;                 // port 1: polygon helper; cache writes
+    VERA.control = 0;                               // ADDR0: the row's first pixel, 320 on
+    VERA.address = (unsigned)start;
+    VERA.address_hi = (unsigned char)((14 << 4) | (unsigned char)(start >> 16));
+    VERA.control = 1;                               // ADDR1: 4 on after each cache write
+    VERA.address = 0;
+    VERA.address_hi = 3 << 4;
+
+    // The two edges, each with its exact x at its last anchor row.
+    const edge *shorter = middle > top ? upper : lower;
+    i32 longValue = ((i32)longer->x << 16) + longer->slope / 2, shortValue = ((i32)shorter->x << 16) + shorter->slope / 2;
+    int longRow = top, shortRow = top;
+    int row = top;
+    while (row < bottom) {
+        char atMiddle = row == middle && middle > top;
+        char newBlock = (row & 15) == 0 && row != top;
+        if (atMiddle) {                             // the other short edge starts here
+            shorter = lower;
+            shortValue = ((i32)lower->x << 16) + lower->slope / 2;
+            shortRow = row;
+        }
+        if (newBlock) {
+            longValue = edge_on(longValue, longer->slope, row - longRow);
+            longRow = row;
+            if (!atMiddle) {
+                shortValue = edge_on(shortValue, shorter->slope, row - shortRow);
+                shortRow = row;
+            }
+        }
+        if (row == top || newBlock)
+            fx_edge(!shortIsLeft, longValue, longer->slope);
+        if (row == top || newBlock || atMiddle)
+            fx_edge(shortIsLeft, shortValue, shorter->slope);
+        VERA.control = 5 << 1;                      // the lengths are read here
+
+        int end = (row | 15) + 1;                   // on to the next anchor row,
+        if (row < middle && end > middle)           // the middle vertex
+            end = middle;
+        if (end > bottom)                           // or the bottom
+            end = bottom;
+        for (; row < end; row++) {
+            (void)VERA.data1;                       // step, and point port 1 at the row's start
+            unsigned char low = VERA.display.fxpolyfilll, high = VERA.display.fxpolyfillh;
+            if ((high & 0xC0) != 0xC0) {            // not a negative length
+                unsigned length = ((unsigned)(high >> 1) << 3) | ((low >> 1) & 7);
+                if (length != 0) {
+                    unsigned total = ((low >> 5) & 3) + length;
+                    unsigned char head = before[(low >> 5) & 3], tail = after[(total - 1) & 3];
+                    unsigned groups = (total + 3) >> 2;
+                    if (groups == 1) {
+                        VERA.data1 = head | tail;
+                    } else {
+                        VERA.data1 = head;
+                        for (groups -= 2; groups != 0; groups--)
+                            VERA.data1 = 0;
+                        VERA.data1 = tail;
+                    }
+                }
+            }
+            (void)VERA.data0;                       // the next row
+        }
+    }
+    VERA.control = 2 << 1;
+    VERA.display.fxctrl = 0;
+    VERA.control = 0;
+    __asm__ volatile("cli" ::: "memory");
+}
+
 // A filled triangle, by scan lines. A pixel is inside when its center is: a row of pixels runs from the
 // first whose center is not left of the triangle's left edge up to the first whose center is not left of
 // the right edge, so that triangles which share an edge leave no gap and don't overlap (the left edge
 // and the top row belong to a triangle, the right edge and the bottom row to the next). The edges are
 // followed in 16.16 fixed point: the slope of an edge (the x it moves per row) is added once a row.
-// Each row is a fill, with the video chip's cache where there is one: measured, a row costs about 1,200
-// cycles with the edges and the address, whatever its width, and a little for every four pixels (a
-// triangle 50 by 50 takes 62,000 cycles, 100 by 100 133,000). The chip's polygon helper steps the
-// edges itself, but writes a pixel at a time, as its line helper does, about 10 cycles each: by that
-// estimate (I did not build it) a row of it is not faster than one of these from about 40 pixels wide,
-// and the helper would not work without FX.
+// On a chip with VERA FX a triangle wholly on the picture is drawn by the chip's polygon helper (above),
+// which follows the edges and writes four pixels at a time through the cache. What is left, a triangle
+// that is cut by the picture's edge or has an edge flatter than 60 pixels a row, or a chip without FX, is
+// drawn here: each row a run of writes, the edges added up in 16.16 (exact to 1/65536 a row).
 void cs_cx16_bitmap_triangle(i32 ax, i32 ay, i32 bx, i32 by, i32 cx, i32 cy, i32 color)
 {
     if (!in_bitmap())
@@ -1437,6 +1584,25 @@ void cs_cx16_bitmap_triangle(i32 ax, i32 ay, i32 bx, i32 by, i32 cx, i32 cy, i32
     if (y[0] == y[2])
         return;                                     // no height: no row has its center inside
     unsigned char value = (unsigned char)color;
+
+    // With the polygon helper: a triangle wholly on the picture (the helper doesn't cut) whose
+    // edges aren't flatter than 60 pixels a row (a step has 6 bits of whole pixels).
+    if (has_fx() && x[0] >= 0 && x[0] < BITMAP_WIDTH && x[1] >= 0 && x[1] < BITMAP_WIDTH && x[2] >= 0 && x[2] < BITMAP_WIDTH
+        && y[0] >= 0 && y[2] < BITMAP_HEIGHT) {
+        edge longer = edge_of(x[0], y[0], x[2], y[2]), upper = longer, lower = longer;
+        if (y[1] > y[0])
+            upper = edge_of(x[0], y[0], x[1], y[1]);
+        if (y[2] > y[1])
+            lower = edge_of(x[1], y[1], x[2], y[2]);
+        const i32 limit = 60L << 16;
+        long side = (long)(x[1] - x[0]) * (y[2] - y[0]) - (long)(x[2] - x[0]) * (y[1] - y[0]);
+        if (longer.slope < limit && longer.slope > -limit && upper.slope < limit && upper.slope > -limit
+            && lower.slope < limit && lower.slope > -limit) {
+            if (side != 0)          // (three corners in a line cover no pixel's middle)
+                fx_triangle(y[0], y[1], y[2], &longer, &upper, &lower, side < 0, value);
+            return;
+        }
+    }
 
     i32 longSlope = ((i32)(x[2] - x[0]) << 16) / (y[2] - y[0]);
     i32 longX = ((i32)x[0] << 16) + longSlope / 2;                  // at the center of the top row
@@ -1475,6 +1641,198 @@ void cs_cx16_bitmap_triangle(i32 ax, i32 ay, i32 bx, i32 by, i32 cx, i32 cy, i32
     }
     if (cache)
         fx_end();
+}
+
+// ---- the multiplier (VERA FX) --------------------------------------------------------------
+//
+// The chip multiplies the two 16-bit numbers held in the first and second half of its cache,
+// signed, to 32 bits, and has a 32-bit accumulator: reading FX_ACCUM adds the product to it,
+// and a cache write puts product + accumulator into the video memory, from where it is read
+// back (4 bytes at $1F800, which neither the KERNAL nor anything here uses). Found out in the
+// emulator. Without the chip, C does the same.
+
+#define PRODUCT_ADDRESS 0x1F800ul
+
+static void fx_operands(int a, int b)
+{
+    VERA.control = 6 << 1;
+    VERA.display.fxcachel = (unsigned char)a;
+    VERA.display.fxcachem = (unsigned char)((unsigned)a >> 8);
+    VERA.display.fxcacheh = (unsigned char)b;
+    VERA.display.fxcacheu = (unsigned char)((unsigned)b >> 8);
+}
+
+static void fx_multiply_begin(void)
+{
+    __asm__ volatile("sei" ::: "memory");
+    VERA.control = 2 << 1;
+    VERA.display.fxmult = 0x90;             // reset the accumulator, multiplier on
+    VERA.display.fxmult = 0x10;
+    VERA.display.fxctrl = 0x40;             // cache write: it writes the result
+}
+
+// Writes product + accumulator to the video memory, reads it back, and switches FX off.
+static i32 fx_multiply_end(void)
+{
+    VERA.control = 0;
+    vera_at(PRODUCT_ADDRESS, 0);
+    VERA.data0 = 0;
+    VERA.control = 2 << 1;
+    VERA.display.fxctrl = 0;
+    VERA.display.fxmult = 0;
+    VERA.control = 0;
+    vera_at(PRODUCT_ADDRESS, 1);
+    u32 result = VERA.data0;
+    result |= (u32)VERA.data0 << 8;
+    result |= (u32)VERA.data0 << 16;
+    result |= (u32)VERA.data0 << 24;
+    __asm__ volatile("cli" ::: "memory");
+    return (i32)result;
+}
+
+i32 cs_cx16_multiply(i32 a, i32 b)
+{
+    int x = (int)a, y = (int)b;             // 16 bits, signed
+    if (!has_fx())
+        return (long)x * y;
+    fx_multiply_begin();
+    fx_operands(x, y);
+    return fx_multiply_end();
+}
+
+// The sum of a[i] * b[i], wrapping round at 32 bits: the chip adds up, one product a read.
+i32 cs_cx16_dot(const short *a, const short *b, i32 count)
+{
+    unsigned n = count < 0 ? 0 : (unsigned)count;
+    if (!has_fx()) {
+        u32 sum = 0;
+        for (unsigned i = 0; i < n; i++)
+            sum += (u32)((long)a[i] * b[i]);
+        return (i32)sum;
+    }
+    fx_multiply_begin();
+    for (unsigned i = 0; i < n; i++) {
+        fx_operands(a[i], b[i]);
+        (void)VERA.display.fxcachem;        // FX_ACCUM (DCSEL 6): adds the product
+    }
+    fx_operands(0, 0);
+    return fx_multiply_end();
+}
+
+// ---- textures drawn rotated and scaled (VERA FX's affine helper) -----------------------------
+//
+// The source is a map of 2, 8, 32 or 128 tiles each way (a byte a tile, the tile's number)
+// of 8x8 tiles of 8 bits a pixel (64 bytes each), in the video memory; both addresses
+// multiples of 2048. The position (u, v) in it, in 256ths of a pixel, moves by (du, dv) for
+// each pixel drawn along a row, and by (u_row, v_row) from one row to the next. With the
+// helper a read of data port 1 gives the pixel at the position and moves on; the chip keeps
+// 9 bits after the point, so the 8 given here fit. Past the map's edge it wraps round, or
+// shows tile 0 ("clip"). Without FX the same is worked out here, with the same bits, so
+// that both draw the same pixels.
+
+static u32 texture_tiles, texture_map;
+static unsigned texture_pixels;             // the map's width and height in pixels; 0: no source yet
+static unsigned char texture_size_code;
+static char texture_clip;
+
+i32 cs_cx16_texture(u32 tiles, u32 map, i32 size, i32 clip)
+{
+    unsigned code = size == 2 ? 0 : size == 8 ? 1 : size == 32 ? 2 : size == 128 ? 3 : 4;
+    if (code == 4 || (tiles & 2047) || (map & 2047) || tiles > 0x1F800ul || map + (u32)size * size > 0x1F800ul)
+        return 0;
+    texture_tiles = tiles;
+    texture_map = map;
+    texture_pixels = (unsigned)size * 8;
+    texture_size_code = (unsigned char)code;
+    texture_clip = clip != 0;
+    return 1;
+}
+
+static unsigned char texel(long u, long v)
+{
+    unsigned x = (unsigned)(u >> 8) & 2047, y = (unsigned)(v >> 8) & 2047;
+    unsigned tile;
+    if (texture_clip && (x >= texture_pixels || y >= texture_pixels))
+        tile = 0;
+    else {
+        x &= texture_pixels - 1;
+        y &= texture_pixels - 1;
+        vera_at(texture_map + (u32)(y >> 3) * (texture_pixels >> 3) + (x >> 3), 0);
+        tile = VERA.data0;
+    }
+    vera_at(texture_tiles + (u32)tile * 64 + (y & 7) * 8 + (x & 7), 0);
+    return VERA.data0;
+}
+
+// A width by height rectangle of the bitmap with its top left corner at x, y. u and v are the
+// source position of that corner. transparent: source pixels of color 0 leave the picture as it is.
+void cs_cx16_affine(i32 x, i32 y, i32 width, i32 height, i32 u, i32 v, i32 du, i32 dv, i32 u_row, i32 v_row, i32 transparent)
+{
+    if (!in_bitmap() || texture_pixels == 0 || width <= 0 || height <= 0)
+        return;
+    if (x < 0) { u -= du * x; v -= dv * x; width += x; x = 0; }
+    if (y < 0) { u -= u_row * y; v -= v_row * y; height += y; y = 0; }
+    if (width > BITMAP_WIDTH - x) width = BITMAP_WIDTH - x;
+    if (height > BITMAP_HEIGHT - y) height = BITMAP_HEIGHT - y;
+    if (width <= 0 || height <= 0)
+        return;
+
+    if (!has_fx()) {
+        for (unsigned row = 0; row < (unsigned)height; row++, u += u_row, v += v_row) {
+            long pu = u, pv = v;
+            for (unsigned i = 0; i < (unsigned)width; i++, pu += du, pv += dv) {
+                unsigned char color = texel(pu, pv);
+                if (color != 0 || !transparent)
+                    plot_checked((int)x + (int)i, (int)y + (int)row, color);
+            }
+        }
+        return;
+    }
+
+    unsigned xstep = (unsigned)(du * 2) & 0x7FFF, ystep = (unsigned)(dv * 2) & 0x7FFF;   // 9 bits after the point
+    __asm__ volatile("sei" ::: "memory");
+    VERA.control = 2 << 1;
+    unsigned char mode = (unsigned char)(3 | (transparent ? 0x80 : 0));      // address 1: affine
+    VERA.display.fxctrl = mode;
+    VERA.display.fxtilebase = (unsigned char)(((unsigned)(texture_tiles >> 11) << 2) | (texture_clip ? 2 : 0));
+    VERA.display.fxmapbase = (unsigned char)(((unsigned)(texture_map >> 11) << 2) | texture_size_code);
+    VERA.control = 3 << 1;
+    VERA.display.fxxincrl = (unsigned char)xstep;
+    VERA.display.fxxincrh = (unsigned char)(xstep >> 8);
+    VERA.display.fxyincrl = (unsigned char)ystep;
+    VERA.display.fxyincrh = (unsigned char)(ystep >> 8);
+    for (unsigned row = 0; row < (unsigned)height; row++, u += u_row, v += v_row) {
+        VERA.control = 4 << 1;                      // the position's whole part ...
+        VERA.display.fxxposl = (unsigned char)(u >> 8);
+        VERA.display.fxxposh = (unsigned char)((u >> 16) & 7);
+        VERA.display.fxyposl = (unsigned char)(v >> 8);
+        VERA.display.fxyposh = (unsigned char)((v >> 16) & 7);
+        VERA.control = 5 << 1;                      // ... and what is after the point
+        VERA.display.fxxposs = (unsigned char)u;
+        VERA.display.fxyposs = (unsigned char)v;
+        VERA.control = 0;
+        vera_at_pixel((unsigned)x, (unsigned)y + row, 1);
+        unsigned n = (unsigned)width;
+        for (; n >= 4; n -= 4) {
+            VERA.data0 = VERA.data1; VERA.data0 = VERA.data1;
+            VERA.data0 = VERA.data1; VERA.data0 = VERA.data1;
+        }
+        while (n-- != 0)
+            VERA.data0 = VERA.data1;
+
+        // A large picture takes many frames: let the interrupts in between rows, with the
+        // helper off (the KERNAL's handler saves the addresses, but knows nothing of FX).
+        VERA.control = 2 << 1;
+        VERA.display.fxctrl = 0;
+        VERA.control = 0;
+        __asm__ volatile("cli\n\tnop\n\tsei" ::: "memory");
+        VERA.control = 2 << 1;
+        VERA.display.fxctrl = mode;
+    }
+    VERA.control = 2 << 1;
+    VERA.display.fxctrl = 0;
+    VERA.control = 0;
+    __asm__ volatile("cli" ::: "memory");
 }
 
 // Text: the glyphs of the character set in the video memory (8 bytes a character, from

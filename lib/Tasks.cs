@@ -288,6 +288,32 @@ namespace System.Threading.Tasks
         /// <summary>Delay(milliseconds, cancellationToken), with the delay rounded up to milliseconds.</summary>
         public static Task Delay(TimeSpan delay, CancellationToken cancellationToken) => Delay(DelayTimer.Milliseconds(delay), cancellationToken);
 
+        /// <summary>A task that completes after <paramref name="delay"/> by <paramref name="timeProvider"/>'s clock.</summary>
+        public static Task Delay(TimeSpan delay, TimeProvider timeProvider) => Delay(delay, timeProvider, default);
+
+        /// <summary>
+        /// A task that completes after <paramref name="delay"/> by
+        /// <paramref name="timeProvider"/>'s clock (a timer it creates), or is
+        /// canceled when <paramref name="cancellationToken"/> is.
+        /// TimeProvider.System is the same as Delay(delay, cancellationToken).
+        /// </summary>
+        public static Task Delay(TimeSpan delay, TimeProvider timeProvider, CancellationToken cancellationToken)
+        {
+            if (timeProvider == null)
+                throw new ArgumentNullException(nameof(timeProvider));
+            if (timeProvider == TimeProvider.System)
+                return Delay(delay, cancellationToken);
+            if (delay != Timeout.InfiniteTimeSpan && delay < TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(delay));
+            if (cancellationToken.IsCancellationRequested)
+                return FromCanceled(cancellationToken);
+            if (delay == TimeSpan.Zero)
+                return CompletedTask;
+            var task = new ProviderDelay();
+            task.Start(delay, timeProvider, cancellationToken);
+            return task;
+        }
+
         /// <summary>Runs <paramref name="action"/> on a new fiber.</summary>
         public static Task Run(Action action) => Run(action, default);
 
@@ -731,6 +757,32 @@ namespace System.Threading.Tasks
             }
             unsafe { t_record = null; } // SAFETY: a plain store
             t_fiber = false;
+        }
+    }
+
+    // Task.Delay on a TimeProvider's timer, which it disposes once done.
+    sealed class ProviderDelay : Task
+    {
+        ITimer? _timer;
+        CancellationTokenRegistration _registration;
+
+        internal void Start(TimeSpan delay, TimeProvider provider, CancellationToken token)
+        {
+            if (token.CanBeCanceled)
+                _registration = token.Register(static d => ((ProviderDelay)d!).Finish(true), this);
+            if (delay != Timeout.InfiniteTimeSpan)
+                _timer = provider.CreateTimer(static d => ((ProviderDelay)d!).Finish(false), this, delay, Timeout.InfiniteTimeSpan);
+            if (IsCompleted)
+                _timer?.Dispose(); // the timer fired, or was canceled, as it was made
+        }
+
+        void Finish(bool canceled)
+        {
+            if (IsCompleted)
+                return;
+            _timer?.Dispose();
+            _registration.Dispose();
+            Complete(canceled);
         }
     }
 

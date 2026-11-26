@@ -43,7 +43,8 @@
 // - PeriodicTimer: WaitForNextTick, which blocks, besides .NET's
 //   WaitForNextTickAsync(token), which waits on Task.Delay's timer fiber
 //   and reuses its task, so an async loop over it costs no fiber and
-//   allocates nothing; no TimeProvider. WaitForNextTick needs no Fiber.Run:
+//   allocates nothing. With a TimeProvider (lib/TimeProvider.cs) other than
+//   the system's, it ticks on the provider's timer. WaitForNextTick needs no Fiber.Run:
 //   in a fiber the wait lets the others run, outside one it sleeps the
 //   thread.
 // - StackSize, the size of the timer's fiber's stack, is new on both.
@@ -371,7 +372,7 @@ namespace System.Threading
     /// the due time keeps the timer stopped, and for the period (or 0) makes
     /// it fire once.
     /// </summary>
-    public sealed class Timer : IDisposable
+    public sealed class Timer : ITimer
     {
         sealed class Engine : TimerFiber
         {
@@ -465,6 +466,13 @@ namespace System.Threading
             _engine.Cancel();
         }
 
+        /// <summary>Dispose, as a task (ITimer's IAsyncDisposable).</summary>
+        public ValueTask DisposeAsync()
+        {
+            Dispose();
+            return default;
+        }
+
         static long Unsigned(uint time) => time == Timeout.UnsignedInfinite ? Timeout.Infinite : time;
 
         // Whole milliseconds, as .NET takes them: truncated, -1 for InfiniteTimeSpan.
@@ -500,6 +508,11 @@ namespace System.Threading
         TickDelay? _delay;
         CancellationTokenRegistration _registration;
         Registration? _onCancel;
+        // With a TimeProvider other than the system's: its timer, which
+        // ticks every Period, and whether a tick came since the last wait.
+        TimeProvider? _provider;
+        ITimer? _providerTimer;
+        bool _ticked;
 
         bool AsyncWaiting => _tick != null && !_tick.IsCompleted;
 
@@ -508,6 +521,20 @@ namespace System.Threading
         /// millisecond, at most 2^32 - 2 ms, or Timeout.InfiniteTimeSpan.
         /// </summary>
         public PeriodicTimer(TimeSpan period) => Period = period;
+
+        /// <summary>
+        /// A timer that ticks every <paramref name="period"/> by
+        /// <paramref name="timeProvider"/>'s clock: on a timer the provider
+        /// creates.
+        /// </summary>
+        public PeriodicTimer(TimeSpan period, TimeProvider timeProvider)
+        {
+            if (timeProvider == null)
+                throw new ArgumentNullException(nameof(timeProvider));
+            if (timeProvider != TimeProvider.System)
+                _provider = timeProvider;
+            Period = period;
+        }
 
         /// <summary>
         /// The time between ticks. Setting it starts the count again from now,
@@ -522,6 +549,13 @@ namespace System.Threading
                 if (value != Timeout.InfiniteTimeSpan && (milliseconds < 1 || milliseconds > 0xFFFF_FFFE))
                     throw new ArgumentOutOfRangeException(nameof(value));
                 _period = value;
+                if (_provider != null)
+                {
+                    _ticked = false;
+                    _providerTimer ??= _provider.CreateTimer(static t => ((PeriodicTimer)t!).ProviderTick(), this, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+                    _providerTimer.Change(value, value);
+                    return;
+                }
                 _periodNs = value == Timeout.InfiniteTimeSpan ? 0 : milliseconds * 1_000_000;
                 _due = Clock.Monotonic + _periodNs;
                 WakeWaiter(); // to wait for the new time
@@ -546,6 +580,14 @@ namespace System.Threading
             bool ticked = false;
             while (!_disposed)
             {
+                if (_provider != null)
+                {
+                    // ProviderTick wakes the sleep.
+                    if (ticked = TryTick())
+                        break;
+                    Fiber.Sleep(1_000_000);
+                    continue;
+                }
                 long now = Clock.Monotonic;
                 if (_periodNs != 0 && now >= _due)
                 {
@@ -604,6 +646,12 @@ namespace System.Threading
         // as one) and keeps the rhythm.
         bool TryTick()
         {
+            if (_provider != null)
+            {
+                bool ticked = _ticked;
+                _ticked = false;
+                return ticked;
+            }
             long now = Clock.Monotonic;
             if (_periodNs == 0 || now < _due)
                 return false;
@@ -615,6 +663,8 @@ namespace System.Threading
         // when the period is infinite), counting from now.
         void Arm()
         {
+            if (_provider != null)
+                return; // ProviderTick ends the wait
             _delay ??= new TickDelay(this);
             System.Threading.Tasks.DelayTimer.Remove(_delay);
             long wait = _periodNs == 0 ? 1_000_000 : (_due - Clock.Monotonic + 999_999) / 1_000_000;
@@ -630,6 +680,17 @@ namespace System.Threading
                 else
                     timer.Arm();
             }
+        }
+
+        // The provider's timer ticked: ends a wait, or counts for the next.
+        void ProviderTick()
+        {
+            if (_disposed)
+                return;
+            _ticked = true;
+            if (AsyncWaiting && TryTick())
+                Finish(ticked: true, canceled: false);
+            WakeWaiter();
         }
 
         // Ends WaitForNextTickAsync's wait: with a result, or canceled.
@@ -658,6 +719,7 @@ namespace System.Threading
             if (_disposed)
                 return;
             _disposed = true;
+            _providerTimer?.Dispose();
             WakeWaiter();
             if (AsyncWaiting)
                 Finish(ticked: false, canceled: false);

@@ -20,12 +20,12 @@ doesn't fit goes there (see "Code in banks"), but the heap and the program's dat
 ## Get the tools
 
 ```bash
-./setup.sh --c64
+./setup.sh --cx16
 ```
 
 The tools are the C64's (NativeAOT-LLVM and llvm-mos 23.4.0 or newer, which has `mos-cx16-clang`),
 and the emulator, [x16emu](https://github.com/X16Community/x16-emulator) (release 49 was used). `setup.sh`
-doesn't download it. Put it on the `PATH`, or set `X16_EMULATOR` (`X16_HOME`, `/Applications/X16` and
+doesn't download it, but says whether it and its ROM are found. Put it on the `PATH`, or set `X16_EMULATOR` (`X16_HOME`, `/Applications/X16` and
 `~/X16` are tried too), and `X16_ROM` if its `rom.bin` isn't next to it.
 
 ## The machine, from C#

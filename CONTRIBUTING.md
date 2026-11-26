@@ -24,8 +24,8 @@ built next to this repository. It has no release to download; the
   instructions a 386 doesn't have, and QEMU's `486` doesn't.
 - **Commodore 64:** `./setup.sh --c64` downloads llvm-mos, a compiler for the 6502, into `tools/c64`
   (about 750 MB) and checks for the .NET SDK, Python 3 and VICE, the emulator (`brew install vice`).
-- **Commander X16:** `./setup.sh --c64` fetches the same llvm-mos (the X16 is built with the C64's
-  pipeline). The emulator is x16emu, from [X16Community/x16-emulator](https://github.com/X16Community/x16-emulator):
+- **Commander X16:** `./setup.sh --cx16` fetches the same llvm-mos (the X16 is built with the C64's
+  pipeline) and checks for the emulator and its ROM. The emulator is x16emu, from [X16Community/x16-emulator](https://github.com/X16Community/x16-emulator):
   `X16_EMULATOR` points at it (or put it on the `PATH`, or in `$X16_HOME` or `~/X16`), and `X16_ROM` at its
   ROM if that isn't next to it. Needs the .NET SDK and Python 3 as well.
 - **UEFI:** QEMU with the OVMF firmware (`brew install qemu` includes it; on Ubuntu

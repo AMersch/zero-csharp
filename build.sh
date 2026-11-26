@@ -16,7 +16,7 @@
 # and llvm-mos, a compiler for the 6502 (./setup.sh --c64).
 #
 # With --cx16, builds Commander X16 programs (bin/cx16/*.prg), the same way: an
-# X16 is a 65C02 with 38 KB of fixed RAM (./setup.sh --c64 fetches llvm-mos).
+# X16 is a 65C02 with 38 KB of fixed RAM (./setup.sh --cx16 fetches llvm-mos).
 #
 # With --pico2 or --r4, builds programs for a Cortex-M microcontroller: the
 # Raspberry Pi Pico 2 or the Arduino Uno R4 (bin/pico2/*.elf, bin/r4/*.elf),
@@ -709,7 +709,7 @@ CX16_CORE=bin/cx16/System.Private.CoreLib.dll
 
 check_cx16() {
     if [ ! -x "$LLVM_MOS/bin/mos-cx16-clang" ]; then
-        echo "Error: no llvm-mos in $C64_TOOLS. Run ./setup.sh --c64" >&2
+        echo "Error: no llvm-mos in $C64_TOOLS. Run ./setup.sh --cx16" >&2
         exit 1
     fi
 }

@@ -224,7 +224,7 @@ find_uefi_firmware() {
     return 1
 }
 
-# Commander X16 (./build.sh --cx16, ./run.sh --cx16): the same toolchain as the
+# Commander X16 (./setup.sh --cx16, ./build.sh --cx16, ./run.sh --cx16): the same toolchain as the
 # C64 (llvm-mos, with its cx16 platform), run in x16emu, the X16 community's
 # emulator (https://github.com/X16Community/x16-emulator; release 49 is the
 # one this was written against).

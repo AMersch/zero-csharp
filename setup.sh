@@ -15,10 +15,14 @@
 # $WASM_TOOLS and $ARM_TOOLS: NativeAOT-LLVM (shared with --wasm) and Arm
 # Toolchain for Embedded, about 2 GB unpacked. It also checks for QEMU.
 #
+# With --cx16, downloads what Commander X16 builds need: the same NativeAOT-LLVM
+# and llvm-mos as --c64. It also checks for x16emu, the emulator, and its ROM,
+# which it doesn't download (see env.sh for where they are looked for).
+#
 # bflat comes from the fork (OnurGumus/bflat, branch master), which must be
 # built first; see README, "Getting bflat".
 #
-# Usage: ./setup.sh [--wasm | --dos | --c64 | --arm]
+# Usage: ./setup.sh [--wasm | --dos | --c64 | --cx16 | --arm]
 set -euo pipefail
 cd "$(dirname "$0")"
 source ./env.sh
@@ -27,10 +31,12 @@ ok=1
 want_wasm=0
 want_dos=0
 want_c64=0
+want_cx16=0
 want_arm=0
 [ "${1:-}" = --wasm ] && want_wasm=1
 [ "${1:-}" = --dos ] && want_dos=1
 [ "${1:-}" = --c64 ] && want_c64=1
+[ "${1:-}" = --cx16 ] && want_cx16=1
 case "${1:-}" in --arm | --pico2 | --r4) want_arm=1 ;; esac
 
 # NativeAOT-LLVM: the compiler from C# (IL) to LLVM bitcode.
@@ -127,8 +133,10 @@ fetch_dos_tools() {
 }
 
 # llvm-mos: clang and a linker for the 6502, with a C library and startup
-# code for the C64. Its releases are builds for x64 Linux and for macOS.
-fetch_c64_tools() {
+# code for the C64 and the Commander X16. Its releases are builds for x64
+# Linux and for macOS; for another machine it says so and leaves $LLVM_MOS
+# unmade. (Called on its own, not in a condition: that would switch set -e off.)
+fetch_llvm_mos() {
     fetch_ilc
     mkdir -p "$C64_TOOLS"
 
@@ -140,7 +148,7 @@ fetch_c64_tools() {
             *) echo "Missing: llvm-mos has no build for this machine ($(uname -s), $HOST_ARCH)."
                echo "         Build it from https://github.com/llvm-mos/llvm-mos-sdk and unpack it as $LLVM_MOS"
                ok=0
-               return ;;
+               return 0 ;;
         esac
         archive=$C64_TOOLS/llvm-mos.tar.xz
         echo "Downloading llvm-mos $LLVM_MOS_VERSION ($host, about 190 MB)..."
@@ -151,6 +159,11 @@ fetch_c64_tools() {
         mv "$C64_TOOLS/llvm-mos" "$LLVM_MOS"
         rm "$archive"
     fi
+}
+
+fetch_c64_tools() {
+    fetch_llvm_mos
+    [ -x "$LLVM_MOS/bin/mos-c64-clang" ] || return 0
     echo "c64:    $LLVM_MOS"
 
     local emulator
@@ -179,6 +192,41 @@ fetch_c64_tools() {
     # (an if: as the function's last command, a failed test would end the script)
     if [ -d "$C64_ROMS" ]; then
         echo "roms:   $C64_ROMS"
+    fi
+}
+
+# The Commander X16: llvm-mos, and a check for x16emu and its ROM. The emulator
+# looks for rom.bin in its own folder unless it is given one.
+fetch_cx16_tools() {
+    fetch_llvm_mos
+    [ -x "$LLVM_MOS/bin/mos-cx16-clang" ] || return 0
+    echo "cx16:   $LLVM_MOS"
+
+    local emulator
+    if ! emulator=$(find_x16_emulator); then
+        echo "Missing: x16emu, the emulator run.sh --cx16 uses: https://github.com/X16Community/x16-emulator/releases"
+        echo "         Put it on the PATH or in ~/X16, or set X16_EMULATOR (or its folder as X16_HOME)."
+        ok=0
+        return 0
+    fi
+    # It says its release ("### Release 49 ...") and ends.
+    local release
+    release=$("$emulator" -version 2>/dev/null | head -n 1 || true)
+    echo "x16emu: $emulator${release:+ (${release#\#\#\# })}"
+
+    local rom=${X16_ROM:-}
+    if [ -z "$rom" ]; then
+        # Next to the emulator, and that is where a link to it leads.
+        local real
+        real=$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$emulator" 2>/dev/null || echo "$emulator")
+        rom=$(dirname "$real")/rom.bin
+    fi
+    if [ -f "$rom" ]; then
+        echo "rom:    $rom"
+    else
+        echo "Missing: the X16's ROM, $rom"
+        echo "         It comes with the emulator's release; set X16_ROM if it is somewhere else."
+        ok=0
     fi
 }
 
@@ -238,16 +286,17 @@ fetch_arm_tools() {
     fi
 }
 
-if ! command -v python3 >/dev/null 2>&1 && { [ "$want_dos" = 1 ] || [ "$want_c64" = 1 ]; }; then
-    echo "Missing: python3, which dos/run.sh and c64/run.sh use to run programs in the emulator"
+if ! command -v python3 >/dev/null 2>&1 && { [ "$want_dos" = 1 ] || [ "$want_c64" = 1 ] || [ "$want_cx16" = 1 ]; }; then
+    echo "Missing: python3, which dos/run.sh, c64/run.sh and cx16/run.sh use to run programs in the emulator"
     ok=0
 fi
 
-if ! command -v dotnet >/dev/null 2>&1 && { [ "$want_dos" = 1 ] || [ "$want_c64" = 1 ] || [ "$want_arm" = 1 ]; }; then
-    echo "Missing: the .NET SDK (10 or newer), to build zero-bitcode (sdk/ZeroCSharp.Bitcode) for DOS, the C64 and Cortex-M"
+if ! command -v dotnet >/dev/null 2>&1 && { [ "$want_dos" = 1 ] || [ "$want_c64" = 1 ] || [ "$want_cx16" = 1 ] || [ "$want_arm" = 1 ]; }; then
+    echo "Missing: the .NET SDK (10 or newer), to build zero-bitcode (sdk/ZeroCSharp.Bitcode) for DOS, the C64, the X16 and Cortex-M"
     ok=0
     want_dos=0
     want_c64=0
+    want_cx16=0
     want_arm=0
 fi
 
@@ -287,6 +336,9 @@ fi
 if [ "$want_c64" = 1 ]; then
     fetch_c64_tools
 fi
+if [ "$want_cx16" = 1 ]; then
+    fetch_cx16_tools
+fi
 if [ "$want_arm" = 1 ]; then
     fetch_arm_tools
 fi
@@ -298,6 +350,8 @@ if [ "$ok" = 1 ]; then
         echo "Ready. Run ./build.sh --dos"
     elif [ "$want_c64" = 1 ]; then
         echo "Ready. Run ./build.sh --c64"
+    elif [ "$want_cx16" = 1 ]; then
+        echo "Ready. Run ./build.sh --cx16"
     elif [ "$want_arm" = 1 ]; then
         echo "Ready. Run ./build.sh --pico2 or ./build.sh --r4"
     else

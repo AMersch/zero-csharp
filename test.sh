@@ -16,7 +16,7 @@
 #         ./test.sh --dos      DOS, on an emulated 386 with 4 MB (needs ./setup.sh --dos)
 #         ./test.sh --c64      Commodore 64, in VICE (needs ./setup.sh --c64): the
 #                              samples that fit in it, which the Small ones are made to
-#         ./test.sh --cx16     Commander X16, in x16emu (needs ./setup.sh --c64 and x16emu,
+#         ./test.sh --cx16     Commander X16, in x16emu (needs ./setup.sh --cx16 and x16emu,
 #                              see env.sh): the samples that fit in it
 #         ./test.sh --cx16-audio  its sound: records SoundDemo and PcmDemo in the emulator, with a window, and
 #                              measures pitch, partials, speaker and volume (needs numpy)
@@ -566,7 +566,7 @@ case "${1:-}" in
             test_cx16
         else
             echo
-            echo "(skipping the Commander X16: needs ./setup.sh --c64 and x16emu, see env.sh)"
+            echo "(skipping the Commander X16: needs ./setup.sh --cx16 and x16emu, see env.sh)"
         fi
         if [ -x "$WASM_ILC" ] && [ -x "$ARM_TOOLCHAIN/bin/clang" ] && command -v qemu-system-arm > /dev/null; then
             test_pico2

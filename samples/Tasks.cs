@@ -13,11 +13,38 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace TasksSample;
+
+// Counts turns until told to stop: whether others ran while a file was read.
+public sealed class Ticker
+{
+    public static bool Same(byte[] a, byte[] b)
+    {
+        if (a.Length != b.Length)
+            return false;
+        for (int i = 0; i < a.Length; i++)
+            if (a[i] != b[i])
+                return false;
+        return true;
+    }
+
+    public int Ticks;
+    public bool Stop;
+
+    public async Task RunAsync()
+    {
+        while (!Stop)
+        {
+            await Task.Yield();
+            Ticks++;
+        }
+    }
+}
 
 public static class Program
 {
@@ -595,6 +622,59 @@ public static class Program
             Check("AsTask of a reused task is a copy", await kept && await timer.WaitForNextTickAsync());
         }
         End("No allocation per wait");
+
+        // Files: reads and writes run on another thread (lib/FileAsync.cs),
+        // or, where there are no threads, at once.
+        {
+            const string name = "TASKS.TMP"; // 8.3, for DOS
+            byte[] data = new byte[small ? 3000 : 300_000];
+            for (int i = 0; i < data.Length; i++)
+                data[i] = (byte)(i * 7 + i / 251);
+            var others = new Ticker();
+            Task ticking = others.RunAsync();
+            // docs:files
+            // The write and the read run on another thread; this async
+            // method waits, and the others run meanwhile.
+            await File.WriteAllBytesAsync(name, data);
+            byte[] back = await File.ReadAllBytesAsync(name);
+            // docs:end
+            others.Stop = true;
+            await ticking;
+            Check("bytes there and back", Ticker.Same(back, data));
+            if (Parallel.ProcessorCount > 1 && !small)
+                Check("others ran meanwhile", others.Ticks > 0);
+
+            await File.WriteAllTextAsync(name, "h\u00e9llo, ");
+            await File.AppendAllTextAsync(name, "w\u00f6rld \u2713");
+            Check("text", await File.ReadAllTextAsync(name) == "h\u00e9llo, w\u00f6rld \u2713");
+
+            // A FileStream: small writes gather in its buffer, big ones go
+            // straight to the file; reads come back in pieces.
+            var stream = new FileStream(name, FileMode.Create);
+            for (int at = 0; at < data.Length;)
+            {
+                int piece = Math.Min(at % 3 == 0 ? 100 : 5000, data.Length - at);
+                await stream.WriteAsync(data.AsMemory(at, piece));
+                at += piece;
+            }
+            await stream.FlushAsync();
+            stream.Position = 0;
+            byte[] read = new byte[data.Length];
+            int readTotal = 0, got;
+            while ((got = await stream.ReadAsync(read.AsMemory(readTotal, Math.Min(700, read.Length - readTotal)))) > 0)
+                readTotal += got;
+            Check("stream there and back", readTotal == data.Length && Ticker.Same(read, data));
+            // A write after reads goes where the reads stopped.
+            stream.Position = 10;
+            byte[] ten = new byte[10];
+            await stream.ReadExactlyAsync(ten);
+            await stream.WriteAsync(new byte[] { 1, 2, 3 });
+            await stream.DisposeAsync();
+            back = await File.ReadAllBytesAsync(name);
+            Check("write after read", back.Length == data.Length && back[20] == 1 && back[22] == 3 && back[23] == data[23] && back[19] == data[19]);
+            File.Remove(name);
+        }
+        End("Files");
 
         // Cost: awaits that wait, and ones that don't.
         start = Clock.Monotonic;

@@ -210,6 +210,15 @@ int pthread_create(void *thread, void *attributes, void *(*start)(void *), void 
 // which with one thread never happens.
 int sched_yield(void) { return 0; }
 
+// No pipes (lib/FileAsync.cs then reads and writes files without its I/O
+// thread, blocking, as there are no threads either).
+int pipe(int fds[2])
+{
+    (void)fds;
+    return -1;
+}
+
+
 int pthread_join(void *thread, void **result)
 {
     (void)thread; (void)result;

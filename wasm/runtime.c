@@ -207,3 +207,11 @@ void *readdir64(DIR *dir)
     out.d_name[length] = 0;
     return &out;
 }
+
+// No pipes (lib/FileAsync.cs then reads and writes files without its I/O
+// thread, blocking, as there are no threads either).
+int pipe(int fds[2])
+{
+    (void)fds;
+    return -1;
+}

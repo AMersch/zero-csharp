@@ -147,11 +147,16 @@ There, `Read` waits for bytes and lets the other fibers run in the meantime.
 ## Async methods
 
 `Stream` has .NET's `ReadAsync`, `WriteAsync`, `FlushAsync`, `CopyToAsync`, `ReadExactlyAsync`,
-`ReadAtLeastAsync` and `DisposeAsync`, so `await using` and code written for .NET work. On a file or a
-`MemoryStream` they call the blocking methods and finish at once. A file read blocks the thread meanwhile,
-as `Read` does, since the C library has no other kind. On a pipe's stream, in a fiber, the wait lets the
-other fibers run. `NetworkStream`'s wait without blocking anything (see
-[Use the network](use-the-network.html#async-methods)). A subclass can override `ReadAsync(Memory<byte>,
+`ReadAtLeastAsync` and `DisposeAsync`, so `await using` and code written for .NET work. How they wait
+depends on the stream:
+
+- **`FileStream`:** the read or write runs on another thread, and the other fibers and tasks run
+  meanwhile (see [Read and write files](read-and-write-files.html#without-blocking)).
+- **`MemoryStream`:** there's nothing to wait for, so they finish at once.
+- **A pipe's stream:** in a fiber, the wait lets the other fibers run.
+- **`NetworkStream`:** the wait blocks nothing at all (see
+  [Use the network](use-the-network.html#async-methods)).
+ A subclass can override `ReadAsync(Memory<byte>,
 CancellationToken)` and `WriteAsync(ReadOnlyMemory<byte>, CancellationToken)` with ones that truly wait.
 
 ## What isn't here

@@ -36,8 +36,14 @@ static Handle handle_for(int fd)
     }
 }
 
+static int is_wake_socket(int fd);
+static i64 wake_send(int fd, const void *buffer, u64 count);
+static i64 wake_recv(int fd, void *buffer, u64 count);
+
 i64 write(int fd, const void *buffer, u64 count)
 {
+    if (is_wake_socket(fd))
+        return wake_send(fd, buffer, count);
     Handle file = handle_for(fd);
     const char *next = buffer;
     u64 left = count;
@@ -63,6 +69,8 @@ i64 write(int fd, const void *buffer, u64 count)
 // bytes may not be text (lib/In's Read), and In's ReadLine handles "\r\n".
 i64 read(int fd, void *buffer, u64 count)
 {
+    if (is_wake_socket(fd))
+        return wake_recv(fd, buffer, count);
     Handle file = handle_for(fd);
     char *bytes = buffer;
     u32 chunk = count > 0x40000000 ? 0x40000000 : (u32)count;
@@ -722,6 +730,84 @@ int poll(void *fds, unsigned long long count, int timeout)
     }
     HeapFree(GetProcessHeap(), 0, out);
     return ready;
+}
+
+// pipe, for lib/FileAsync.cs: its I/O thread and Fiber.Run wake each other
+// through two of them, and Fiber.Run waits on one in poll with the sockets.
+// WSAPoll takes only sockets, so a pipe here is a connected pair of loopback
+// sockets (blocking ones: the I/O thread waits in read, and Fiber.Run reads
+// only once poll says there's something). read and write above send and
+// receive on them.
+#define WAKE_SOCKETS 64
+static int wake_sockets[WAKE_SOCKETS];
+static int wake_count;
+
+static int is_wake_socket(int fd)
+{
+    if (fd <= 2)
+        return 0;
+    for (int i = 0; i < wake_count; i++)
+        if (wake_sockets[i] == fd)
+            return 1;
+    return 0;
+}
+
+static i64 wake_send(int fd, const void *buffer, u64 count)
+{
+    WINSOCK(int, send, (Socket, const void *, int, int));
+    int sent = send((Socket)(unsigned)fd, buffer, (int)count, 0);
+    return sent < 0 ? set_errno_from_winsock() : sent;
+}
+
+static i64 wake_recv(int fd, void *buffer, u64 count)
+{
+    WINSOCK(int, recv, (Socket, void *, int, int));
+    int got = recv((Socket)(unsigned)fd, buffer, (int)count, 0);
+    return got < 0 ? set_errno_from_winsock() : got;
+}
+
+int pipe(int fds[2])
+{
+    start_winsock();
+    WINSOCK(Socket, socket, (int, int, int));
+    WINSOCK(int, bind, (Socket, const void *, int));
+    WINSOCK(int, listen, (Socket, int));
+    WINSOCK(int, getsockname, (Socket, void *, int *));
+    WINSOCK(int, connect, (Socket, const void *, int));
+    WINSOCK(Socket, accept, (Socket, void *, int *));
+    WINSOCK(int, closesocket, (Socket));
+    if (wake_count + 2 > WAKE_SOCKETS) {
+        *_errno() = 24; // EMFILE
+        return -1;
+    }
+    // sockaddr_in for 127.0.0.1, port 0 (the system chooses).
+    unsigned char address[16] = { 2, 0, 0, 0, 127, 0, 0, 1 };
+    int length = sizeof address;
+    Socket none = ~(Socket)0;
+    Socket listener = socket(2, 1, 6), writer = none, reader = none;
+    if (listener == none)
+        return set_errno_from_winsock();
+    if (bind(listener, address, length) != 0 || listen(listener, 1) != 0
+        || getsockname(listener, address, &length) != 0)
+        goto failed;
+    writer = socket(2, 1, 6);
+    if (writer == none || connect(writer, address, length) != 0)
+        goto failed;
+    reader = accept(listener, 0, 0);
+    if (reader == none)
+        goto failed;
+    closesocket(listener);
+    fds[0] = (int)reader;
+    fds[1] = (int)writer;
+    wake_sockets[wake_count++] = fds[0];
+    wake_sockets[wake_count++] = fds[1];
+    return 0;
+failed:
+    set_errno_from_winsock();
+    closesocket(listener);
+    if (writer != none)
+        closesocket(writer);
+    return -1;
 }
 
 // fcntl's F_GETFL (3) and F_SETFL (4) with O_NONBLOCK (0x800), which is all

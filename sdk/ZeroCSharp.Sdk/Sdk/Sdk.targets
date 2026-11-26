@@ -625,6 +625,7 @@
       <ZeroNativeFile Include="$(OutDir)native/$(AssemblyName).pdb" />
       <_ZeroNativeLibraryFile Include="$(AssemblyName).so;$(AssemblyName).dylib;$(AssemblyName).dll;$(AssemblyName).lib" />
       <ZeroNativeFile Include="@(_ZeroNativeLibraryFile->'$(OutDir)native/%(Identity)')" />
+      <ZeroNativeFile Include="$(ZeroInteropSource)" Condition="'$(ZeroInteropSource)' != ''" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).so')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).dylib')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).dll')" />
@@ -779,6 +780,40 @@
       <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)ZeroFSharpNative.cs.txt" />
     </Task>
   </UsingTask>
+
+  <!--
+    A native library's bindings for .NET, C# and F# libraries alike: the C#
+    that declares its exports with [DllImport] and copies the structs and enums
+    they use (Sdk/ZeroFSharpNative.cs.txt, WriteInterop), in
+    bin/<AssemblyName>.Interop.cs, one file for every configuration and target.
+    Written only when it changes, so a program that compiles it in isn't
+    rebuilt for nothing. ZeroInteropClass names the class (Namespace.Class;
+    the assembly's name by default); ZeroInterop=false turns it off.
+  -->
+  <PropertyGroup Condition="'$(ZeroNativeLibrary)' == 'true'">
+    <ZeroInteropSource Condition="'$(ZeroInteropSource)' == ''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(BaseOutputPath)', '$(AssemblyName).Interop.cs'))</ZeroInteropSource>
+  </PropertyGroup>
+  <Target Name="ZeroInterop" AfterTargets="CoreCompile" Condition="'$(ZeroNativeLibrary)' == 'true' and '$(ZeroInterop)' != 'false'">
+    <ZeroFSharpNative Assembly="@(IntermediateAssembly->'%(FullPath)')" Interop="$(ZeroInteropSource)"
+                      LibraryName="$(AssemblyName)" InteropClass="$(ZeroInteropClass)" />
+  </Target>
+
+  <!--
+    For a .NET program's ProjectReference to a native library, with
+    Targets="ZeroNativeLibraryFiles" OutputItemType="Content": builds the
+    library and gives back the file to copy next to the program (and into its
+    publish folder), which .NET then finds by name.
+  -->
+  <Target Name="ZeroNativeLibraryFiles" DependsOnTargets="Build" Returns="@(_ZeroNativeLibraryForProgram)"
+          Condition="'$(ZeroNativeLibrary)' == 'true'">
+    <ItemGroup>
+      <!-- A full path: the program resolves it from its own folder. -->
+      <_ZeroNativeLibraryForProgram Include="$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(ZeroNativeOutput)'))"
+                                    Link="$([System.IO.Path]::GetFileName('$(ZeroNativeOutput)'))"
+                                    TargetPath="$([System.IO.Path]::GetFileName('$(ZeroNativeOutput)'))"
+                                    CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 
   <!-- A Windows F# native library: bflat's import library names its own DLL
        (zero-native.dll, see ZeroBflatOutput), so it's made again from the

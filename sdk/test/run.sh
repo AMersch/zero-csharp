@@ -1567,9 +1567,10 @@ test_native_library_reference_kinds() {
     pass "$name"
 }
 
-# The docs' recipe: an ordinary .NET program that builds the library first
-# (a build-order ProjectReference) and copies it next to itself, from a clean
-# folder; .NET then finds it by name ([DllImport("MathLib")]).
+# The docs' recipe: an ordinary .NET program whose ProjectReference builds the
+# library and copies it next to the program (Targets="ZeroNativeLibraryFiles"),
+# and which compiles the bindings the library's build writes, from a clean
+# folder; .NET then finds the library by name. Publish takes the library too.
 test_native_library_app_recipe() {
     local name="native library app recipe" dir out
     can_build "$name" || return
@@ -1578,7 +1579,37 @@ test_native_library_app_recipe() {
     mv "$dir/MathLib/nativelib.csproj" "$dir/MathLib/MathLib.csproj"
     if ! run_in "$dir/App" nativelib-app build; then fail "$name" "dotnet build failed"; return; fi
     out=$(dotnet "$dir/App/bin/Debug/net10.0/App.dll" 2>&1 | tr -d '\r')
-    if [ "$out" != "add 5" ]; then fail "$name" "printed: $out"; return; fi
+    if [ "$out" != $'add 5\noffset 11,22' ]; then fail "$name" "printed: $out"; return; fi
+    if ! run_in "$dir/App" nativelib-app-publish publish -o "$dir/out"; then fail "$name" "dotnet publish failed"; return; fi
+    if [ ! -f "$dir/out/MathLib$HOST_LIB_EXT" ]; then fail "$name" "no MathLib$HOST_LIB_EXT in the publish folder"; return; fi
+    out=$(dotnet "$dir/out/App.dll" 2>&1 | tr -d '\r')
+    if [ "$out" != $'add 5\noffset 11,22' ]; then fail "$name" "published, printed: $out"; return; fi
+    pass "$name"
+}
+
+# The bindings (bin/interoplib.Interop.cs) for every kind of type they copy,
+# called by a .NET program that treats warnings as errors; an export they
+# can't declare is left out with ZERO008. The file is rewritten only when it
+# changes, and dotnet clean removes it.
+test_native_library_bindings() {
+    local name="native library bindings" dir bindings
+    can_build "$name" || return
+    dir=$(fixture interoplib-app native-bindings/interoplib-app)
+    fixture interoplib native-bindings/interoplib > /dev/null
+    bindings=$WORK/native-bindings/interoplib/bin/interoplib.Interop.cs
+    if ! run_in "$dir" native-bindings build; then fail "$name" "dotnet build failed"; return; fi
+    if ! grep -q "ZERO008.*calendar_year.*CalendarTime" "$LOG"; then fail "$name" "no ZERO008 for calendar_year"; return; fi
+    if grep -q "calendar_year" "$bindings"; then fail "$name" "the bindings declare calendar_year"; return; fi
+    dotnet "$dir/bin/Debug/net10.0/interoplib-app.dll" > "$WORK/native-bindings.out" 2>&1
+    if ! same_output "$WORK/native-bindings.out" "$dir/expected.txt" "$WORK/native-bindings.diff"; then
+        fail "$name" "$(cat "$WORK/native-bindings.diff")"; return
+    fi
+    sleep 1; touch "$WORK/native-bindings.stamp" "$WORK/native-bindings/interoplib/Api.cs"
+    if ! run_in "$WORK/native-bindings/interoplib" native-bindings-2 build; then fail "$name" "the second build failed"; return; fi
+    if [ "$bindings" -nt "$WORK/native-bindings.stamp" ]; then fail "$name" "unchanged bindings were written again"; return; fi
+    if ! run_in "$WORK/native-bindings/interoplib" native-bindings-clean clean || [ -e "$bindings" ]; then
+        fail "$name" "dotnet clean left the bindings"; return
+    fi
     pass "$name"
 }
 
@@ -1998,6 +2029,35 @@ test_fsharp_native_library_cross() {
     pass "$name"
 }
 
+# An F# library's bindings, made from its IL, called from C#.
+test_fsharp_native_library_bindings() {
+    local name="F# native library bindings" dir
+    can_build "$name" || return
+    dir=$(fixture fsnativelib-app fs-bindings/fsnativelib-app)
+    fixture fsnativelib fs-bindings/fsnativelib > /dev/null
+    if ! run_in "$dir" fs-bindings build; then fail "$name" "dotnet build failed"; return; fi
+    dotnet "$dir/bin/Debug/net10.0/fsnativelib-app.dll" > "$WORK/fs-bindings.out" 2>&1
+    if ! same_output "$WORK/fs-bindings.out" "$dir/expected.txt" "$WORK/fs-bindings.diff"; then
+        fail "$name" "$(cat "$WORK/fs-bindings.diff")"; return
+    fi
+    pass "$name"
+}
+
+# An F# program calls a C# native library through a C# project that compiles
+# the bindings; the library comes along to the program's folder.
+test_fsharp_program_calls_native_library() {
+    local name="F# program calls native library" dir out
+    can_build "$name" || return
+    dir=$(fixture nativelib-fsapp)
+    fixture nativelib nativelib-fsapp/MathLib > /dev/null
+    mv "$dir/MathLib/nativelib.csproj" "$dir/MathLib/MathLib.csproj"
+    if ! run_in "$dir/App" nativelib-fsapp build; then fail "$name" "dotnet build failed"; return; fi
+    if [ ! -f "$dir/App/bin/Debug/net10.0/MathLib$HOST_LIB_EXT" ]; then fail "$name" "MathLib$HOST_LIB_EXT wasn't copied to the program"; return; fi
+    out=$(dotnet "$dir/App/bin/Debug/net10.0/App.dll" 2>&1 | tr -d '\r')
+    if [ "$out" != $'add 5\noffset 11,22' ]; then fail "$name" "printed: $out"; return; fi
+    pass "$name"
+}
+
 # An export C can't call (a bool) or reach (a private function): ZERO005.
 test_fsharp_native_library_errors() {
     local name="F# native library errors" dir
@@ -2030,9 +2090,10 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name
     native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
     link_library link_library_passed_on link_library_newer_glibc sdl3 sdl3_windows
-    native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe
+    native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe native_library_bindings
     fsharp_program fsharp_printf fsharp_collections fsharp_builders fsharp_memory fsharp_must_not_compile fsharp_scratch_ref_struct_state fsharp_unsafe_calls fsharp_unsafe_calls_libraries fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
-    fsharp_native_library fsharp_native_library_cross fsharp_native_library_errors)
+    fsharp_native_library fsharp_native_library_cross fsharp_native_library_errors
+    fsharp_native_library_bindings fsharp_program_calls_native_library)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim

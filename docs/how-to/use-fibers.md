@@ -8,7 +8,7 @@ index: 27
 `Fiber` from `lib/Fibers.cs` runs many functions on one system thread, each on a stack of its own. They
 take turns: a fiber runs until it yields, sleeps, waits on a channel or ends, and then the next one in
 line runs. `Channel<T>` passes values between them, and `Pipe` streams bytes. Switching is
-cooperative, so fibers need no locks among themselves. `samples/Fibers.cs` runs every example below;
+cooperative, so fibers need no locks among themselves. `samples/Fibers.cs` runs every example below (and `samples/Tasks.cs` the async ones);
 `SmallFibers`, `SmallChannels` and `SmallScratch` test the same on machines too small for it.
 
 Fibers work on Linux (x64 and arm64), macOS, Windows, UEFI, DOS, microcontrollers (the Raspberry Pi
@@ -197,9 +197,22 @@ Fiber.Run();
 (`Timeout.Infinite` for a timer that fires once, or `Change(Timeout.Infinite, Timeout.Infinite)` to
 stop it).
 
-`PeriodicTimer` has `WaitForNextTick()`, which blocks, in place of .NET's `WaitForNextTickAsync()`
-(zero mode has no `async`). In a fiber it lets the other fibers run; outside one it sleeps the thread,
-so it needs no `Fiber.Run`.
+`PeriodicTimer` has .NET's `WaitForNextTickAsync`, and also `WaitForNextTick()`, which blocks. In a
+fiber it lets the other fibers run; outside one it sleeps the thread, so it needs no `Fiber.Run`.
+The async one waits on `Task.Delay`'s timer, with no fiber of its own:
+
+<!-- sample: samples/Tasks.cs periodic-async -->
+```csharp
+// Ticks every 10 ms without a fiber of its own; Dispose ends the loop.
+using (var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(10)))
+{
+    int ticks = 0;
+    while (await timer.WaitForNextTickAsync())
+        if (++ticks == 3)
+            timer.Dispose();
+    Console.WriteLine($"ticks: {ticks}");
+}
+```
 
 A handler runs on the same thread as everything else, so it needs no locks, and two calls of one
 timer's handlers never overlap. It can use `Console`, `Fiber.Sleep` and channels. `AutoReset = false`
@@ -222,6 +235,179 @@ Where it differs from .NET:
 - `StackSize` sets the size of the timer's fiber's stack (0, the default, is
   `Fiber.DefaultStackSize`). There's no `SynchronizingObject`, and `System.Threading.Timer` has no
   `TimeSpan` overloads, `Dispose(WaitHandle)` or `ActiveCount`.
+
+## Use async and await
+
+`lib/Tasks.cs` builds `Task`, `Task<T>` and `async`/`await` on fibers. As in .NET, an async method
+starts on its caller's stack and runs until it awaits something that isn't done yet. Then its state
+machine is copied into a small box on the heap, about a hundred bytes, and the call returns, so the
+caller goes on:
+
+<!-- sample: samples/Tasks.cs order -->
+```csharp
+static async Task<int> Twice(string name, int value, int delay)
+{
+    s_log += name + "1 ";
+    await Task.Delay(delay);
+    s_log += name + "2 ";
+    return value * 2;
+}
+```
+
+<!-- sample: samples/Tasks.cs await -->
+```csharp
+// Each call runs until its first await, then returns, and the
+// caller goes on: a and b wait at the same time, on fibers.
+Task<int> a = Twice("a", 1, 30), b = Twice("b", 2, 10);
+s_log += "main ";
+```
+
+When the awaited task completes, the box goes on a queue that one fiber per thread, the dispatcher,
+works through: it runs each method on to its next await or its end. `Task.WhenAll` and
+`Task.WhenAny` wait for several tasks at once:
+
+<!-- sample: samples/Tasks.cs when-all -->
+```csharp
+// Three delays of 50 ms side by side take about 50 ms, not 150.
+int[] all = await Task.WhenAll(
+    Twice("x", 1, 50), Twice("y", 2, 50), Twice("z", 3, 50));
+```
+
+`Main` can be `async`. Awaiting outside a fiber, as `Main` does, runs the fibers until the task is
+done, so an async program needs no `Fiber.Run`. `samples/Tasks.cs` runs these examples and more.
+
+- A method that finishes without waiting makes no box. Its `Task<T>` is the only allocation, and a
+  `Task` that returns nothing is a shared, already completed one. A million calls waiting at once
+  take about 250 MB, and no fiber each: `Task.Delay` has one timer fiber per thread for all of them.
+- `Task.Run` runs its function on a new fiber, `Task.Yield` lets the other fibers run first, and
+  `TaskCompletionSource` completes a task by hand.
+- `Wait()` and `.Result` are safe here, unlike in .NET: in a fiber they park only that fiber, and
+  outside one they run the fibers until the task is done. An async method may also block on a
+  channel or call `Fiber.Sleep` after its first await. The dispatcher that runs into such a call
+  keeps that method until it ends or awaits, and a new dispatcher (a new fiber) takes over the
+  others.
+- A method that blocks more than it awaits can have a fiber of its own instead, from its first wait
+  to its end:
+
+<!-- sample: samples/Tasks.cs own-fiber -->
+```csharp
+// A fiber of its own from the first await to the end, for a method
+// that mostly blocks.
+[AsyncMethodBuilder(typeof(OwnFiberMethodBuilder<>))]
+static async Task<int> Sleeper(int times)
+{
+    await Task.Yield();
+    for (int i = 0; i < times; i++)
+        Fiber.Sleep(1);
+    return times;
+}
+```
+
+- `ValueTask` and `ValueTask<T>` work as in .NET, and so do `async ValueTask` methods: one that
+  finishes without waiting allocates nothing at all. A timer's or a channel's `ValueTask` reuses
+  its task, so, as in .NET, it can be awaited only once: awaiting it again after the timer or
+  channel has reused it ends the program with a message. `AsTask()` or `Preserve()` gives
+  something to keep. `IAsyncEnumerable<T>` works with `await foreach`, but there are no async
+  iterators (`yield return` in an async method).
+- `throw` ends the program, so a task is never faulted. There's no `ContinueWith` or
+  `SynchronizationContext`. `ConfigureAwait(bool)` changes nothing, since there's no context to
+  return to.
+- Tasks are ordinary objects, and zero mode never frees them. An async method's box is made once
+  and reused for every await in it, and timers and channels reuse their tasks. But `Task.Delay`
+  and an async method that waits return a new `Task` each time, which stays allocated:
+
+  | Each round of a loop | Bytes |
+  |---|---|
+  | `await Task.Yield()` | 0 |
+  | `await timer.WaitForNextTickAsync(token)` | 0 |
+  | `await channel.ReceiveAsync(token)`, `SendAsync`, `await foreach` | 0 |
+  | `channel.Receive` and `Fiber.Sleep` in a fiber | 0 |
+  | `await Task.Delay(1)` | 96 |
+  | `await` an async method that waits | 120 |
+
+  That's fine for a program that does its work and ends. A loop that never ends, on a
+  microcontroller above all, should wait on a timer or a channel, or with the fibers' own calls,
+  rather than `Task.Delay`. An arena doesn't help: after its first wait an async method runs on
+  the dispatcher, under its allocator.
+- If an arena makes a task, the arena must stay alive until whoever awaits the task has finished
+  with it.
+
+## Await a channel
+
+A channel also has .NET's `ChannelReader`/`ChannelWriter` methods: `ReceiveAsync`, `SendAsync`,
+`WaitToReceiveAsync` (with `TryReceive`) and `ReceiveAllAsync` for `await foreach`. An async method
+waiting on a channel costs no fiber, and fibers and async methods can share a channel. When both
+wait, the fibers are served first:
+
+<!-- sample: samples/Tasks.cs channel-async -->
+```csharp
+// Sends 1..10 and closes; the reader's await foreach ends there.
+static async Task Produce(Channel<int> channel)
+{
+    for (int i = 1; i <= 10; i++)
+        await channel.SendAsync(i);
+    channel.Close();
+}
+
+static async Task<int> Consume(Channel<int> channel)
+{
+    int sum = 0;
+    await foreach (int value in channel.ReceiveAllAsync())
+        sum += value;
+    return sum;
+}
+```
+
+`ReceiveAllAsync` and `WaitToReceiveAsync` stop when the channel is closed and empty. Awaiting
+`ReceiveAsync` then ends the program, as .NET's `ReadAsync` throws. The channel reuses the tasks
+behind these waits, so a loop over them allocates nothing, and a program that never calls them
+doesn't link their code.
+
+## Cancel
+
+`CancellationTokenSource` and `CancellationToken` (`lib/Cancellation.cs`) work as in .NET: `Cancel`,
+`CancelAfter`, `Register`, linked sources, and token overloads of `Task.Delay`, `Task.Run` and
+`WaitAsync`. A canceled delay leaves the timer, so `Fiber.Run` doesn't wait for it.
+
+The difference is what a canceled task does to its awaiter. .NET throws `OperationCanceledException`,
+and zero mode has no exceptions, so a plain `await` of a canceled task ends the program, as an
+unhandled exception would. So do `.Result`, `Wait()` and `ThrowIfCancellationRequested`. To carry on
+instead, await with .NET 8's `SuppressThrowing` and look at `IsCanceled`:
+
+<!-- sample: samples/Tasks.cs cancel -->
+```csharp
+// A delay of 10 s, canceled after 20 ms: SuppressThrowing makes the
+// await return (a plain await would end the program).
+using (var cts = new CancellationTokenSource(20))
+{
+    Task pause = Task.Delay(10_000, cts.Token);
+    await pause.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+    Console.WriteLine($"canceled: {pause.IsCanceled}");
+}
+```
+
+Or check the token between steps:
+
+<!-- sample: samples/Tasks.cs cancel-loop -->
+```csharp
+// Works until canceled, checking the token between steps; returns how
+// many steps it did.
+static async Task<int> Work(CancellationToken token)
+{
+    int steps = 0;
+    while (!token.IsCancellationRequested)
+    {
+        await Task.Delay(5);
+        steps++;
+    }
+    return steps;
+}
+```
+
+Code ported from .NET that catches `OperationCanceledException` has to be changed to one of these.
+`SuppressThrowing` works on a `Task`, not a `Task<T>` (there would be no result to return), as in
+.NET: cast to `Task` first. Fibers' own waits take a token too: `Fiber.Sleep(ms, token)` and
+`channel.Receive(out value, token)` return `false` if canceled.
 
 ## Use scratch memory and arenas
 

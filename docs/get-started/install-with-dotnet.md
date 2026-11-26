@@ -93,6 +93,7 @@ dotnet build -p:ZeroTarget=win-x64        # bin/Debug/zero03/win-x64/Hello.exe
 dotnet build -p:ZeroTarget=linux-arm64    # bin/Debug/zero03/linux-arm64/Hello
 dotnet build -p:ZeroTarget=linux-x64      # from Windows: bin\Debug\zero03\linux-x64\Hello
 dotnet build -p:ZeroTarget=osx-arm64      # bin/Debug/zero03/osx-arm64/Hello, for Apple Silicon Macs
+dotnet build -p:ZeroTarget=iossimulator-arm64  # bin/Debug/zero03/iossimulator-arm64/Hello, for the iOS simulator
 dotnet build -p:ZeroTarget=uefi-x64       # bin/Debug/zero03/uefi-x64/Hello.efi, no OS needed
 dotnet build -p:ZeroTarget=c64            # bin/Debug/zero03/c64/Hello.prg, for a Commodore 64
 dotnet build -p:ZeroTarget=pico2          # bin/Debug/zero03/pico2/Hello.uf2, for a Raspberry Pi Pico 2
@@ -109,6 +110,9 @@ your user folder, and on a Mac it needs Docker: see
 `pico2` and `r4` make a program for a microcontroller, a Raspberry Pi Pico 2 or an Arduino Uno R4,
 the same way, and `dotnet run` runs it in QEMU. `dotnet new zeropico` starts such a project: see
 [Build for microcontrollers](../how-to/build-for-microcontrollers.html#with-dotnet-build).
+
+`iossimulator-arm64` makes a console program for the iOS simulator on an Apple Silicon Mac, and
+`dotnet run` runs it there: see [The iOS simulator](#the-ios-simulator) below.
 
 `dotnet clean` removes all of them.
 
@@ -145,7 +149,9 @@ or not: see [Make a game window](../how-to/make-a-game-window.html), which uses 
 
 | Property | Values | Default |
 |---|---|---|
-| `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64`, `osx-arm64`, `uefi-x64`, `uefi-arm64`, `c64`, `pico2`, `r4` | the build machine's |
+| `ZeroTarget` | `linux-x64`, `linux-arm64`, `win-x64`, `osx-arm64`, `iossimulator-arm64`, `uefi-x64`, `uefi-arm64`, `c64`, `pico2`, `r4` | the build machine's |
+| `ZeroIosMinimum` | the oldest iOS an `iossimulator-arm64` program starts on | `17.0` |
+| `ZeroIosSimulator` | the simulator `dotnet run` runs an `iossimulator-arm64` program in, by name (`iPhone 16`) or UDID | the booted one, else the first iPhone |
 | `ZeroOptimizeFor` | `None` (bflat's `-O0`), `Speed`, or `Size` (bflat's `-Os`) | `None` in Debug, `Speed` otherwise |
 | `ZeroStripSymbols` | `true`: no debug information and no symbol table, about half of a Linux or macOS program; `false` keeps them for a debugger | `false` in Debug, `true` otherwise |
 | `ZeroInstructionSet` | passed to bflat as `-m`, e.g. `x86-64-v3` or `dotprod` (see [Use SIMD](../how-to/use-simd.html)) | none |
@@ -161,6 +167,24 @@ and `dotnet run` make) isn't optimized, so a debugger stops on every line and sh
 to time and ship. `dotnet publish` builds Release, and copies the program to the publish folder. It
 needs nothing next to it, unless a C library it links with has a file for run time, like SDL's
 `SDL3.dll` on Windows: that's copied too.
+
+## The iOS simulator
+
+An `iossimulator-arm64` program is built the same way as a macOS one, on any machine: iOS runs the
+same arm64 code, and the package's lld links it against the same list of C functions, which names
+both systems. It's a console program, with no app bundle, which the simulator runs the way test runners
+start programs there. On an Apple Silicon Mac with Xcode's iOS platform, `dotnet run` runs it: in the
+simulator that is booted, or else in the first iPhone simulator, which it boots, through `xcrun
+simctl spawn`. The program starts in the project's folder, as with the other targets, gets its
+arguments, and its exit code is `dotnet run`'s:
+
+```bash
+dotnet run -p:ZeroTarget=iossimulator-arm64 -- some arguments
+```
+
+A simulator program is a Mac process with iOS's C library: passing there shows that the code runs on
+iOS, not that it fits an iPhone, where only a signed app runs, inside its own folder, with a 1 MB
+stack on the main thread. Programs only: no native libraries (`NativeLib=Shared`) and no `ZeroGpu`.
 
 ## What dotnet build does
 

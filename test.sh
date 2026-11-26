@@ -21,6 +21,7 @@
 #                              samples that fit in it
 #         ./test.sh --win      Windows x64, under Wine in a container
 #         ./test.sh --mac      macOS, natively (on a Mac with Apple Silicon)
+#         ./test.sh --ios      iOS, in the simulator (on a Mac with Apple Silicon and Xcode's iOS platform)
 #         ./test.sh --uefi     UEFI, in QEMU on OVMF, for BFLAT_ARCH (x64 or arm64)
 #         ./test.sh --all      native, the other architecture (macOS only, run
 #                              under emulation), Windows, macOS (on Apple
@@ -91,6 +92,7 @@ SAMPLES=(
     Threads
     Fibers
     Timers
+    Tasks
     Records
     Shapes
     Refs
@@ -104,17 +106,21 @@ SAMPLES=(
     Keys
     Tensors
     TensorsAvx
+    Avx2Ops
     TensorTypes
     "${SMALL_SAMPLES[@]}"
 )
 
 # Samples WebAssembly can't run (as in build.sh): the fiber samples switch stacks.
-NOT_WASM=" Fibers Timers SmallFibers SmallChannels SmallScratch SmallCatches Network Catches "
+NOT_WASM=" Fibers Timers Tasks SmallFibers SmallChannels SmallScratch SmallCatches Network Catches "
 # Samples UEFI can't run (as in build.sh): lib/ has directories only on Linux,
 # macOS, Windows and WebAssembly.
 NOT_UEFI=" Directories Network "
+# Samples the docs site's browser page can't run (docs/content/run-wasm.js):
+# it has no files or directories.
+NOT_PAGE=" Files Streams Directories "
 # Simd and Kernels print timings, so only their exit code is checked.
-TIMED=" Simd Kernels Fibers "
+TIMED=" Simd Kernels Fibers Tasks "
 # Arena and Collections print byte counts that depend on the pointer size, so
 # on WebAssembly, DOS and microcontrollers (32-bit) only their exit code is checked.
 POINTER_SIZED=" Arena Collections "
@@ -152,6 +158,7 @@ DOS_SAMPLES=(
     Patterns
     Fibers
     Timers
+    Tasks
     Scratch
     Links
     Llama
@@ -209,6 +216,7 @@ ARM_SAMPLES=(
     Threads
     Fibers
     Timers
+    Tasks
     Records
     Shapes
     Refs
@@ -268,8 +276,17 @@ run_all() {
             [[ "$NOT_WASM" == *" $name "* ]] || samples+=("$name")
         done
     fi
+    # The same modules, run the way the docs site's browser page runs them.
+    if [ "$target" = page ]; then
+        run=(node scripts/run-in-page.mjs)
+        samples=()
+        for name in "${SAMPLES[@]}"; do
+            [[ "$NOT_WASM$NOT_PAGE" == *" $name "* ]] || samples+=("$name")
+        done
+    fi
     [ "$target" = win ] && run+=(--win)
     [ "$target" = mac ] && run+=(--mac)
+    [ "$target" = ios ] && run+=(--ios)
     if [ "$target" = uefi ]; then
         run+=(--uefi)
         samples=(Vga)
@@ -312,7 +329,7 @@ run_all() {
             echo "FAIL $name: exit code $status"
             echo "$out" | tail -5 | sed 's/^/       /'
             failures=$((failures + 1))
-        elif [[ "$TIMED" == *" $name "* ]] || { { [ "$target" = wasm ] || [ "$target" = dos ] || [ "$target" = pico2 ] || [ "$target" = r4 ]; } && [[ "$POINTER_SIZED" == *" $name "* ]]; }; then
+        elif [[ "$TIMED" == *" $name "* ]] || { { [ "$target" = wasm ] || [ "$target" = page ] || [ "$target" = dos ] || [ "$target" = pico2 ] || [ "$target" = r4 ]; } && [[ "$POINTER_SIZED" == *" $name "* ]]; }; then
             echo "ok   $name (exit code only)"
         elif [ "$mode" = update ]; then
             mkdir -p "$EXPECTED"
@@ -359,7 +376,8 @@ run_all() {
     # makes one and leaves it, and it must be here under exactly that name.
     # (Not on DOS, whose names are 8.3, nor UEFI, whose files are on a disk image.)
     # (Nor the Uno R4, which Files doesn't fit in.)
-    if [ "$target" != dos ] && [ "$target" != uefi ] && [ "$target" != r4 ]; then
+    # (Nor the browser page, which has no files.)
+    if [ "$target" != dos ] && [ "$target" != uefi ] && [ "$target" != r4 ] && [ "$target" != page ]; then
         name="zero é☃𝄞.tmp"
         rm -f -- "$name"
         status=0
@@ -409,6 +427,25 @@ run_all() {
         fi
     fi
 
+    # Awaiting a canceled task plainly, ThrowIfCancellationRequested on a
+    # canceled token, ReceiveAsync on a closed channel, and a timer's reused
+    # ValueTask a second time must end the program with a message.
+    if [[ " ${samples[*]} " == *" Tasks "* ]] && [ "$target" != c64 ]; then
+        for case in "canceled|A task was canceled." "throw|The operation was canceled." "closed|The channel has been closed." "twice|awaited after its operation was reused"; do
+            arg=${case%%|*}
+            message=${case#*|}
+            status=0
+            out=$("${run[@]}" Tasks "$arg" < /dev/null 2>&1) || status=$?
+            if [ "$status" = 0 ] || [[ "$out" != *"$message"* ]]; then
+                echo "FAIL Tasks $arg: not stopped with the message (exit code $status)"
+                echo "$out" | tail -3 | sed 's/^/       /'
+                failures=$((failures + 1))
+            else
+                echo "ok   Tasks $arg (stopped, as it must be)"
+            fi
+        done
+    fi
+
     # Main returning with a timer still running, never given Fiber.Run, must
     # stop the program with a message. (A C64 program gets no arguments.)
     if [[ " ${samples[*]} " == *" Timers "* ]] && [ "$target" != c64 ]; then
@@ -436,6 +473,11 @@ test_native() {
 test_wasm() {
     ./build.sh --wasm > /dev/null
     run_all "WebAssembly" wasm check
+    if command -v node > /dev/null; then
+        run_all "WebAssembly in the docs site's browser page (under Node)" page check
+    else
+        echo "(skipping the browser page: no node)"
+    fi
 }
 
 # The GPU samples print timings, so their output isn't compared with a file:
@@ -490,6 +532,11 @@ test_mac() {
     run_all "macOS arm64" mac check
 }
 
+test_ios() {
+    ./build.sh --ios > /dev/null
+    run_all "iOS simulator arm64" ios check
+}
+
 test_win() {
     ./build.sh --win > /dev/null
     # Build the Wine image now, if needed, so its build log doesn't end up in
@@ -538,6 +585,7 @@ case "${1:-}" in
     --r4)     test_r4 ;;
     --win)    test_win ;;
     --mac)    test_mac ;;
+    --ios)    test_ios ;;
     --gpu)    test_gpu ;;
     --gpu-air) TMPDIR_GPU_AIR=$(mktemp); test_gpu_air; rm -f "$TMPDIR_GPU_AIR" ;;
     --uefi)   test_uefi ;;
@@ -596,7 +644,7 @@ case "${1:-}" in
             echo "(skipping the microcontrollers: run ./setup.sh --arm first)"
         fi
         ;;
-    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --gpu-air | --uefi | --all | --update]" >&2; exit 2 ;;
+    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --ios | --gpu | --gpu-air | --uefi | --all | --update]" >&2; exit 2 ;;
 esac
 
 echo

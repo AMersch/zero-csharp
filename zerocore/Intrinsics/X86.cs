@@ -32,10 +32,22 @@ namespace System.Runtime.Intrinsics.X86
         public static Vector256<float> AndNot(Vector256<float> left, Vector256<float> right) => AndNot(left, right);
         public static Vector256<float> CompareLessThan(Vector256<float> left, Vector256<float> right) => CompareLessThan(left, right);
         public static Vector256<float> BlendVariable(Vector256<float> left, Vector256<float> right, Vector256<float> mask) => BlendVariable(left, right, mask);
+
+        public static Vector256<float> ConvertToVector256Single(Vector256<int> value) => ConvertToVector256Single(value);
+        public static Vector256<int> ConvertToVector256Int32WithTruncation(Vector256<float> value) => ConvertToVector256Int32WithTruncation(value);
+        public static Vector256<float> Permute2x128(Vector256<float> left, Vector256<float> right, byte control) => Permute2x128(left, right, control);
+        public static Vector256<byte> LoadVector256(byte* address) => LoadVector256(address);
+        public static Vector256<short> LoadVector256(short* address) => LoadVector256(address);
+        public static Vector256<ushort> LoadVector256(ushort* address) => LoadVector256(address);
+        public static Vector256<uint> LoadVector256(uint* address) => LoadVector256(address);
+        public static void Store(byte* address, Vector256<byte> source) => Store(address, source);
+        public static void Store(short* address, Vector256<short> source) => Store(address, source);
+        public static void Store(ushort* address, Vector256<ushort> source) => Store(address, source);
+        public static void Store(uint* address, Vector256<uint> source) => Store(address, source);
     }
 
     [Intrinsic]
-    public abstract class Avx2
+    public abstract unsafe class Avx2
     {
         public static bool IsSupported => false;
 
@@ -45,6 +57,33 @@ namespace System.Runtime.Intrinsics.X86
         public static Vector256<short> MultiplyAddAdjacent(Vector256<byte> left, Vector256<sbyte> right) => MultiplyAddAdjacent(left, right);
         public static Vector256<int> MultiplyAddAdjacent(Vector256<short> left, Vector256<short> right) => MultiplyAddAdjacent(left, right);
         public static Vector256<int> ShiftLeftLogical(Vector256<int> value, byte count) => ShiftLeftLogical(value, count);
+
+        public static Vector256<short> Add(Vector256<short> left, Vector256<short> right) => Add(left, right);
+        public static Vector256<ushort> Add(Vector256<ushort> left, Vector256<ushort> right) => Add(left, right);
+        public static Vector256<short> Subtract(Vector256<short> left, Vector256<short> right) => Subtract(left, right);
+        public static Vector256<ushort> Subtract(Vector256<ushort> left, Vector256<ushort> right) => Subtract(left, right);
+        public static Vector256<int> Subtract(Vector256<int> left, Vector256<int> right) => Subtract(left, right);
+        public static Vector256<short> MultiplyLow(Vector256<short> left, Vector256<short> right) => MultiplyLow(left, right);
+        public static Vector256<ushort> MultiplyLow(Vector256<ushort> left, Vector256<ushort> right) => MultiplyLow(left, right);
+        public static Vector256<int> MultiplyLow(Vector256<int> left, Vector256<int> right) => MultiplyLow(left, right);
+        public static Vector256<int> CompareGreaterThan(Vector256<int> left, Vector256<int> right) => CompareGreaterThan(left, right);
+        public static Vector256<int> And(Vector256<int> left, Vector256<int> right) => And(left, right);
+        public static Vector256<ushort> And(Vector256<ushort> left, Vector256<ushort> right) => And(left, right);
+        public static Vector256<int> Xor(Vector256<int> left, Vector256<int> right) => Xor(left, right);
+        public static Vector256<ushort> Xor(Vector256<ushort> left, Vector256<ushort> right) => Xor(left, right);
+
+        public static Vector256<short> ConvertToVector256Int16(byte* address) => ConvertToVector256Int16(address);
+        public static Vector256<int> ConvertToVector256Int32(byte* address) => ConvertToVector256Int32(address);
+        public static Vector256<int> ConvertToVector256Int32(ushort* address) => ConvertToVector256Int32(address);
+
+        public static Vector256<byte> PackUnsignedSaturate(Vector256<short> left, Vector256<short> right) => PackUnsignedSaturate(left, right);
+        public static Vector256<ushort> PackUnsignedSaturate(Vector256<int> left, Vector256<int> right) => PackUnsignedSaturate(left, right);
+        public static Vector256<short> UnpackLow(Vector256<short> left, Vector256<short> right) => UnpackLow(left, right);
+        public static Vector256<short> UnpackHigh(Vector256<short> left, Vector256<short> right) => UnpackHigh(left, right);
+        public static Vector256<ushort> BroadcastScalarToVector256(ushort* source) => BroadcastScalarToVector256(source);
+        public static Vector256<int> PermuteVar8x32(Vector256<int> left, Vector256<int> control) => PermuteVar8x32(left, control);
+        public static Vector256<long> Permute4x64(Vector256<long> value, byte control) => Permute4x64(value, control);
+        public static Vector256<int> Permute2x128(Vector256<int> left, Vector256<int> right, byte control) => Permute2x128(left, right, control);
     }
 
     [Intrinsic]

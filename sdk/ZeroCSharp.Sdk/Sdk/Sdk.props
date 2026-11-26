@@ -73,7 +73,11 @@
     <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">linux-arm64</ZeroHostRid>
     <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">win-x64</ZeroHostRid>
     <ZeroHostRid Condition="$([MSBuild]::IsOSPlatform('OSX')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">osx-arm64</ZeroHostRid>
-    <!-- linux-x64, linux-arm64, win-x64, osx-arm64, uefi-x64 and uefi-arm64
+    <!-- linux-x64, linux-arm64, win-x64, osx-arm64, iossimulator-arm64 (the
+         iOS simulator on an Apple Silicon Mac: a console program, no app
+         bundle; ZeroIosMinimum, default 17.0, is the oldest iOS it starts on,
+         and dotnet run runs it in ZeroIosSimulator, a simulator's name or
+         UDID, or the booted one, or the first iPhone), uefi-x64 and uefi-arm64
          (a program the firmware starts, no operating system), c64 (the
          Commodore 64), or pico2 and r4 (the Raspberry Pi Pico 2 and the
          Arduino Uno R4 microcontrollers); the host's own by default. A chosen

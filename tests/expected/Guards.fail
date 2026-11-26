@@ -20,6 +20,7 @@ debug-assert|Debug.Assert failed: count > 0: the queue is empty|  in DebugAssert
 debug-fail|Debug.Fail: unreachable state|  in DebugFail at Guards.cs:
 range-too-long|Range: out of range for the length
 bad-base64|Convert.FromBase64String: not valid Base64
+string-builder-range|Unhandled exception: Index was out of range. Must be non-negative and less than or equal to the size of the collection. (Parameter 'length')
 bad-pattern|Regex: missing ) at 0 in the pattern
 scratch-outer-scope|Arena.Scratch: a scope allocated inside a nested Arena.Scratch
 scratch-outer-list|Arena.Scratch: a ScratchList added to inside a nested Arena.Scratch

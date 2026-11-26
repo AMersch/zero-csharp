@@ -1,16 +1,22 @@
 // Runs the samples' WebAssembly builds (./build.sh --wasm) in the page.
 //
-// The modules are WASI 0.1 programs. Of WASI they use only what a console
-// program needs: arguments, the clock, reading standard input, writing
-// standard output and error, yielding, and exiting. This file is that much of WASI,
-// written against the page instead of an operating system, so no library is
-// loaded from anywhere.
+// The modules are WASI 0.1 programs. What a console program needs works:
+// arguments, the clock, reading standard input, writing standard output and
+// error, waiting, yielding, and exiting. The rest of what they import, files,
+// directories and the environment, is here only so they load: the page has no
+// directories and no environment variables, and says so the way a system with
+// none would. This file is that much of WASI, written against the page instead
+// of an operating system, so no library is loaded from anywhere.
+//
+// Every import of every module must be here, or no sample runs at all (the
+// browser refuses the whole module). ./test.sh --wasm checks it: it runs the
+// samples through this file under Node too (scripts/run-in-page.mjs).
 //
 // A page opts in with an element carrying data-wasm-runner; the build
 // (scripts/build-docs.py) adds this script to such pages and copies the
 // modules to wasm/ next to them.
 
-const EBADF = 8, ESPIPE = 70;
+const EBADF = 8, ENOENT = 44, ENOTCAPABLE = 76, ESPIPE = 70;
 
 class Exit {
   constructor(code) { this.code = code; }
@@ -20,15 +26,19 @@ class Exit {
 // size }: segments is the output with the input echoed, as { text, input }. A
 // program that aborts (zerocore and lib/ abort after printing why) ends in a
 // WebAssembly trap, reported here as trapped with exit code 134, the code a
-// shell shows for an abort.
-export async function runWasm(url, { args = [], stdin = '' } = {}) {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`${url}: ${response.status} ${response.statusText}`);
-  const bytes = await response.arrayBuffer();
+// shell shows for an abort. module is the module's URL or its bytes; stdin is
+// text or bytes.
+export async function runWasm(module, { args = [], stdin = '' } = {}) {
+  let bytes = module;
+  if (typeof module === 'string') {
+    const response = await fetch(module);
+    if (!response.ok) throw new Error(`${module}: ${response.status} ${response.statusText}`);
+    bytes = await response.arrayBuffer();
+  }
 
   const encoder = new TextEncoder();
   const argv = ['program', ...args].map(a => encoder.encode(a + '\0'));
-  const input = encoder.encode(stdin);
+  const input = typeof stdin === 'string' ? encoder.encode(stdin) : stdin;
   let inputPosition = 0;
   const written = []; // { bytes, input } chunks: output, and the input echoed, in order
   let memory;
@@ -63,6 +73,26 @@ export async function runWasm(url, { args = [], stdin = '' } = {}) {
       return 0;
     },
     fd_close() { return 0; },
+    // No environment variables.
+    environ_sizes_get(countOut, sizeOut) {
+      view().setUint32(countOut, 0, true);
+      view().setUint32(sizeOut, 0, true);
+      return 0;
+    },
+    environ_get() { return 0; },
+    // No preopened directories: the C library asks for them from fd 3 up and
+    // stops at the first EBADF, so every path is outside them and its open
+    // fails with ENOENT before reaching path_open.
+    fd_prestat_get() { return EBADF; },
+    fd_prestat_dir_name() { return EBADF; },
+    path_open() { return ENOENT; },
+    path_filestat_get() { return ENOENT; },
+    path_create_directory() { return ENOTCAPABLE; },
+    path_remove_directory() { return ENOENT; },
+    path_unlink_file() { return ENOENT; },
+    path_rename() { return ENOENT; },
+    fd_readdir() { return EBADF; },
+    fd_fdstat_set_flags(fd) { return fd > 2 ? EBADF : 0; },
     fd_fdstat_get(fd, out) {
       if (fd > 2) return EBADF;
       view().setUint8(out, 2); // a character device, like a terminal
@@ -98,6 +128,42 @@ export async function runWasm(url, { args = [], stdin = '' } = {}) {
         total += length;
       }
       view().setUint32(writtenOut, total, true);
+      return 0;
+    },
+    // poll(): standard input is always ready (it is all here, or at its end),
+    // and a clock waits, on the one thread the page has, if nothing is ready.
+    poll_oneoff(subscriptions, events, count, eventsOut) {
+      let ready = 0, wait = Infinity;
+      const event = (i, type, nbytes) => {
+        const e = events + 32 * ready++;
+        view().setBigUint64(e, view().getBigUint64(subscriptions + 48 * i, true), true);
+        view().setUint16(e + 8, type === 0 || nbytes !== null ? 0 : EBADF, true);
+        view().setUint8(e + 10, type);
+        view().setBigUint64(e + 16, BigInt(nbytes ?? 0), true);
+        view().setUint16(e + 24, type === 1 && nbytes === 0 ? 1 : 0, true); // 1: the input has ended
+      };
+      for (let i = 0; i < count; i++) {
+        const s = subscriptions + 48 * i, type = view().getUint8(s + 8);
+        if (type === 0) {
+          // A clock: an absolute time (flag 1) or one from now, in nanoseconds.
+          const clock = view().getUint32(s + 16, true);
+          const now = clock === 0 ? Date.now() : performance.now();
+          let ms = Number(view().getBigUint64(s + 24, true)) / 1e6;
+          if (view().getUint16(s + 40, true) & 1) ms -= now;
+          wait = Math.min(wait, Math.max(0, ms));
+        } else {
+          const fd = view().getUint32(s + 16, true);
+          event(i, type, fd === 0 && type === 1 ? input.length - inputPosition : fd <= 2 && type === 2 ? 65536 : null);
+        }
+      }
+      if (ready === 0 && wait !== Infinity) {
+        const until = performance.now() + wait;
+        while (performance.now() < until) { /* the page has one thread */ }
+        for (let i = 0; i < count; i++) {
+          if (view().getUint8(subscriptions + 48 * i + 8) === 0) event(i, 0, null);
+        }
+      }
+      view().setUint32(eventsOut, ready, true);
       return 0;
     },
     proc_exit(code) { throw new Exit(code); },
@@ -148,7 +214,8 @@ function sourceOf(base, name) {
 
 const kilobytes = n => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.round(n / 1000)} KB`);
 
-for (const runner of document.querySelectorAll('[data-wasm-runner]')) {
+// (Under Node, which scripts/run-in-page.mjs uses, there is no page to wire up.)
+for (const runner of globalThis.document?.querySelectorAll('[data-wasm-runner]') ?? []) {
   const base = runner.dataset.wasmRunner;
   const picks = [...runner.querySelectorAll('[data-sample]')];
   const args = runner.querySelector('.term-command input');

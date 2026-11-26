@@ -67,6 +67,10 @@ public static class Program
         return s_failures;
     }
 
-    static byte Expected(int index) =>
-        index < 512 ? (byte)index : (byte)"end"[index - 512];
+    // A byte past "end" is wrong whatever it is: Expected gives one no byte
+    // is (-1), so the check fails instead of indexing past the end.
+    static int Expected(int index) =>
+        index < 512 ? (byte)index
+        : index < 512 + 3 ? (byte)"end"[index - 512]
+        : -1;
 }

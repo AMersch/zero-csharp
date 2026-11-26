@@ -1,5 +1,5 @@
-<!-- An ordinary .NET program that builds a zero native library (../MathLib,
-     a copy of fixtures/nativelib) first and copies it next to itself: the
+<!-- An ordinary .NET program that calls a zero native library (../MathLib,
+     a copy of fixtures/nativelib) through the bindings its build writes: the
      recipe docs/how-to/build-a-native-library.md gives. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
@@ -7,19 +7,18 @@
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
 
-  <!-- docs:build-order -->
+  <!-- docs:reference -->
+  <PropertyGroup>
+    <!-- MathLib has exports that take pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../MathLib/MathLib.csproj"
                       ReferenceOutputAssembly="false"
-                      SkipGetTargetFrameworkProperties="true" />
+                      SkipGetTargetFrameworkProperties="true"
+                      Targets="ZeroNativeLibraryFiles"
+                      OutputItemType="Content" />
+    <Compile Include="../MathLib/bin/MathLib.Interop.cs" />
   </ItemGroup>
-
-  <Target Name="CopyMathLib" AfterTargets="Build">
-    <ItemGroup>
-      <MathLibNative
-        Include="../MathLib/bin/$(Configuration)/zero03/native/MathLib.*" />
-    </ItemGroup>
-    <Copy SourceFiles="@(MathLibNative)" DestinationFolder="$(OutDir)" />
-  </Target>
   <!-- docs:end -->
 </Project>

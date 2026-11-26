@@ -20,7 +20,7 @@ instruction sets that target's baseline and the `-m` flags include:
 |---|---|---|
 | arm64 | `AdvSimd` (NEON) is true; `Dp` is false | `-m dotprod`: `Dp` is true (ARMv8.2+, such as Apple M1 or Cortex-A76) |
 | x64 | `Sse`, `Sse2` are true; `Avx`, `Avx2`, `Fma` are false | `-m x86-64-v3`: all five are true (Haswell, 2013, or newer) |
-| WebAssembly, DOS | all false | not applicable |
+| WebAssembly, DOS | all false (see below for WebAssembly) | not applicable |
 
 Each check is a constant in the compiled program, not a test at run time. The other side of that: a
 binary built with `-m x86-64-v3` assumes AVX2 and FMA. Zero mode doesn't detect
@@ -148,8 +148,14 @@ Silicon, per the README). `test.sh` checks only their exit codes, since timings 
 - **Only the declared operations exist.** zerocore declares the operations `lib/Kernels.cs` uses. To
   add one, declare it in `zerocore/Intrinsics/` with the name and signature it has in .NET; the
   compiler does the rest.
-- **No SIMD on WebAssembly or DOS.** WebAssembly has 128-bit SIMD, but `Kernels.cs` has no path for it
-  yet, so the scalar paths run. DOS doesn't build Simd or Kernels: a 386 has no SIMD instructions.
+- **WebAssembly's SIMD is in C.** NativeAOT-LLVM can't compile vector operations for WebAssembly,
+  and it can't vectorize C# loops either: it checks every memory access for null, and the loop
+  vectorizer won't touch a loop that can leave from the middle. So `wasm/simd.c` holds simd128
+  kernels for `TensorPrimitives` and `Kernels.cs`, and they call them when
+  `System.Runtime.Intrinsics.Wasm.PackedSimd.IsSupported` (true only in the WebAssembly build).
+  To vectorize your own code there, add a kernel to that file and call it with
+  `[DllImport("*")]` behind the same check. Simd's own NEON and AVX paths have no WebAssembly path.
+- **No SIMD on DOS.** DOS doesn't build Simd or Kernels: a 386 has no SIMD instructions.
 - **UEFI works like the native targets.** The table above applies to `uefi-x64` and `uefi-arm64`.
   The firmware leaves AVX off, so `efi/start.c` turns it on before `Main`; without that, a
   `-m x86-64-v3` program would stop at its first AVX instruction. In QEMU, `run.sh --uefi` passes

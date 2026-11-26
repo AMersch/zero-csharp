@@ -69,6 +69,35 @@ zerocore is unchanged. The link maps Apple's names for the module section's boun
 `__start___modules` and `__stop___modules` symbols that GNU ld provides on Linux. Programs start at
 50 KB, because macOS arm64 aligns each of a program's four segments to 16 KB pages.
 
+## iOS simulator
+
+`./build.sh --ios` builds iOS programs and runs them in the iOS simulator, on an Apple Silicon Mac
+with Xcode's iOS platform. They are console programs, started without an app bundle, the way test
+runners start programs there; an app with a window and real devices are still to come.
+
+The program's object is the one `--mac` builds: iOS runs the same arm64 code. But bflat compiles for
+Apple only as macOS, the object's build-version load command says so, and Apple's linker won't put an
+object built for macOS into an iOS program. `ios/retag.py` marks a copy as built for the simulator
+(iOS 17 and later; `IOS_MIN` changes it), and clang links it against the simulator's SDK with
+`mac/`'s C files, compiled again for the simulator.
+
+```bash
+./build.sh --ios Core     # bin/ios/Core
+./run.sh --ios Core       # in the booted simulator, or the first iPhone, which it boots
+```
+
+`./run.sh --ios` runs the program with `xcrun simctl spawn`. That starts programs in the simulated
+device's data directory, and the simulator has no shell, so `ios/launch.c`, a small simulator
+program, moves to the caller's directory and then becomes the program: relative paths mean what they
+do on the Mac, which sees the same files. Standard input and output and the exit code pass through.
+`IOS_SIMULATOR` picks a simulator by name or UDID. `./test.sh --ios` runs every sample there.
+
+Passing there shows that the code and iOS's own C library, which the simulator loads, work together.
+It doesn't show that a program will run on an iPhone. A simulator program is a Mac process, on the
+Mac's kernel, with no sandbox and the Mac's stack size. On an iPhone only a signed app runs; it can
+write only inside its own container, it gets a 1 MB main-thread stack, and iOS stops it if it uses
+too much memory.
+
 ## Windows x64
 
 `./build.sh --win` uses the same bflat, with `--os windows --arch x64`, and the same zerocore and
@@ -113,7 +142,11 @@ GC, the transitions between native and managed code have nothing else to do.
 What differs from the native build:
 
 - **32-bit pointers**, so structs that hold pointers are smaller and arena byte counts are lower.
-- **No SIMD.** Simd and Kernels take their scalar paths; `lib/Kernels.cs` has no WebAssembly path yet.
+- **SIMD only from C.** NativeAOT-LLVM can't compile vector operations for WebAssembly (it turns
+  them into a `PlatformNotSupportedException`), so the instruction sets report `IsSupported == false`
+  and Simd takes its scalar path. `TensorPrimitives` and `lib/Kernels.cs` call simd128 kernels in
+  `wasm/simd.c` instead, when `System.Runtime.Intrinsics.Wasm.PackedSimd.IsSupported`, which is true
+  only in this build.
 - **No callbacks from native code into C#** inside a running program.
 - **One exact compiler version.** zerocore and `runtime.c` implement NativeAOT-LLVM's internal runtime
   functions, whose names and signatures aren't documented and were read from the compiler's output. A

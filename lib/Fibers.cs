@@ -166,6 +166,29 @@ public static class Fiber
 
     [ThreadStatic] static Scheduler* t_scheduler;
 
+    // The fiber that runs async methods' continuations on this thread
+    // (lib/Tasks.cs), if any. A fiber that waits (Park, Sleep, WaitForIO)
+    // gives the role up, keeping the continuation it was running, and Tasks
+    // starts another dispatcher for the continuations queued or due
+    // meanwhile.
+    [ThreadStatic] internal static Record* t_dispatcher;
+
+    // What Tasks does when the dispatcher gives the role up: set by the
+    // dispatcher itself, so programs without async methods link none of it.
+    internal static delegate*<void> s_dispatcherLeft;
+
+    static void LeaveDispatcher(Record* current)
+    {
+        if (current != t_dispatcher)
+            return;
+        t_dispatcher = null;
+        unsafe
+        {
+            // SAFETY: set before t_dispatcher ever was, to a static method.
+            s_dispatcherLeft();
+        }
+    }
+
     static Scheduler* This
     {
         get
@@ -267,7 +290,12 @@ public static class Fiber
     /// Runs the fibers spawned on this thread, and the ones they spawn, until
     /// all have ended.
     /// </summary>
-    public static void Run()
+    public static void Run() => RunUntil(null);
+
+    // Run, stopping early once `until` has completed. Awaiting a task outside
+    // a fiber (in an async Main, say) runs the fibers this way until the task
+    // is done (lib/Tasks.cs).
+    internal static void RunUntil(System.Threading.Tasks.Task? until)
     {
         Scheduler* s = This;
         unsafe
@@ -276,7 +304,7 @@ public static class Fiber
                 Environment.FailFast("Fiber.Run: called from a fiber");
             // SAFETY: every record in the queues is a live fiber's; a fiber's
             // memory is freed here, on Run's own stack, after it has ended.
-            while (s->Live > 0)
+            while (s->Live > 0 && (until == null || !until.IsCompleted))
             {
                 Record* f = Dequeue(s);
                 if (f == null)
@@ -291,7 +319,9 @@ public static class Fiber
                         continue;
                     }
                     if (s->Sleepers == null)
-                        Environment.FailFast("Fiber.Run: every fiber is waiting on a channel, so none can run again");
+                        Environment.FailFast(until == null
+                            ? "Fiber.Run: every fiber is waiting on a channel or a task, so none can run again"
+                            : "await: every fiber is waiting on a channel or a task, so the awaited task can never complete");
                     WakeSleepers(s, wait: true);
                     continue;
                 }
@@ -333,6 +363,8 @@ public static class Fiber
                 if (s->IoWaiters != null && (s->Switches & 63) == 0)
                     s_pollIO(s, false);
             }
+            if (until != null && !until.IsCompleted)
+                Environment.FailFast("await: no fiber is left that could complete the awaited task");
         }
     }
 
@@ -348,6 +380,9 @@ public static class Fiber
             Record* current = s->Current;
             if (current == null)
                 return 0;
+            // A continuation waiting for a socket keeps its fiber; the other
+            // continuations get a new dispatcher (as in Park and Sleep).
+            LeaveDispatcher(current);
             s_pollIO = &PollIO;
             current->Fd = fd;
             current->Events = events;
@@ -487,6 +522,7 @@ public static class Fiber
                 usleep((uint)(milliseconds * 1000));
             return;
         }
+        LeaveDispatcher(current);
         unsafe
         {
             // SAFETY: the sleepers are live fibers' records.
@@ -498,6 +534,35 @@ public static class Fiber
             *link = current;
         }
         SwitchToScheduler(s, current);
+    }
+
+    /// <summary>
+    /// Sleep, ending early if <paramref name="cancellationToken"/> is canceled:
+    /// true if it slept the whole time, false if canceled (before or during).
+    /// Outside a fiber, the thread sleeps and the token is only checked
+    /// before.
+    /// </summary>
+    public static bool Sleep(long milliseconds, System.Threading.CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return false;
+        Record* current;
+        unsafe { current = This->Current; } // SAFETY: the thread's scheduler
+        if (current == null || !cancellationToken.CanBeCanceled)
+        {
+            Sleep(milliseconds);
+            return true;
+        }
+        var waker = new Waker(current);
+        using (cancellationToken.Register(static w => ((Waker)w!).WakeEarly(), waker))
+            Sleep(milliseconds);
+        return !cancellationToken.IsCancellationRequested;
+    }
+
+    // A sleeping fiber, for a cancellation callback to wake.
+    sealed class Waker(Record* fiber)
+    {
+        public void WakeEarly() => Fiber.WakeEarly(fiber);
     }
 
     // Moves the sleepers whose time has come to the run queue; with wait, first
@@ -543,6 +608,7 @@ public static class Fiber
         unsafe { current = s->Current; } // SAFETY: the thread's scheduler
         if (current == null)
             Environment.FailFast(operation);
+        LeaveDispatcher(current);
         unsafe
         {
             // SAFETY: the current fiber's record.
@@ -676,7 +742,7 @@ public static class Fiber
 /// A queue that fibers pass values through: Send waits while it's full,
 /// Receive while it's empty. Capacity 0 makes every Send wait for a Receive.
 /// </summary>
-public sealed class Channel<T>
+public sealed partial class Channel<T>
 {
     readonly T[] _items;
     int _head, _count;
@@ -686,6 +752,21 @@ public sealed class Channel<T>
     // A value moves straight into or out of a slot, so a woken fiber finds its
     // work done and nothing can take its place in the meantime.
     unsafe Fiber.Record* _senders, _receivers;
+    // Async methods waiting (lib/ChannelAsync.cs), once ReceiveAsync,
+    // SendAsync or WaitToReceiveAsync has had to wait. Fibers waiting go
+    // first. Behind an abstract class, so a program that never uses them
+    // links none of their code (on a C64, every KB counts).
+    AsyncWaiters? _async;
+
+    internal abstract class AsyncWaiters
+    {
+        internal abstract bool HasSender { get; }
+        internal abstract bool HasReceiver { get; }
+        internal abstract bool Give(T value);       // to a waiting ReceiveAsync: true if one took it
+        internal abstract bool Take(out T value);   // from a waiting SendAsync: true if there was one
+        internal abstract void Available();        // a value is ready: WaitToReceiveAsync's wake
+        internal abstract void Closed();
+    }
 
     /// <summary>A channel that holds up to <paramref name="capacity"/> values before Send waits.</summary>
     public Channel(int capacity = 0)
@@ -723,15 +804,19 @@ public sealed class Channel<T>
                 Fiber.Wake(receiver, true);
                 return;
             }
+            if (_async != null && _async.Give(value))
+                return;
             if (_count < Capacity)
             {
                 Push(value);
+                _async?.Available();
                 return;
             }
             Fiber.Record* current = Fiber.CurrentRecord;
             if (current != null)
                 current->Slot = System.Runtime.CompilerServices.Unsafe.AsPointer(ref value);
             Append(ref _senders, current);
+            _async?.Available(); // capacity 0: a value waits to be taken
             if (!Fiber.Park("Channel.Send: the channel is full, and only a fiber can wait"))
                 Environment.FailFast("Channel.Send: the channel was closed while sending");
         }
@@ -756,6 +841,10 @@ public sealed class Channel<T>
                     Push(*(T*)sender->Slot);
                     Fiber.Wake(sender, true);
                 }
+                else if (_async != null && _async.Take(out T next))
+                {
+                    Push(next);
+                }
                 return true;
             }
             if (_senders != null)
@@ -766,6 +855,8 @@ public sealed class Channel<T>
                 Fiber.Wake(sender, true);
                 return true;
             }
+            if (_async != null && _async.Take(out value))
+                return true;
             value = default!;
             if (_closed)
                 return false;
@@ -777,12 +868,74 @@ public sealed class Channel<T>
         }
     }
 
+    /// <summary>
+    /// Receive, giving up when <paramref name="cancellationToken"/> is
+    /// canceled: false, with the default value, if canceled (before or while
+    /// waiting) or once the channel is closed and empty. Look at the token
+    /// to tell which.
+    /// </summary>
+    public bool Receive(out T value, System.Threading.CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            value = default!;
+            return false;
+        }
+        if (_count > 0 || _closed || !cancellationToken.CanBeCanceled)
+            return Receive(out value);
+        unsafe
+        {
+            // SAFETY: as in Receive; the registration is removed before the
+            // waiter's record and slot can go.
+            if (_senders != null || (_async != null && _async.HasSender))
+                return Receive(out value);
+            Fiber.Record* current = Fiber.CurrentRecord;
+            if (current == null)
+                Environment.FailFast("Channel.Receive: the channel is empty, and only a fiber can wait");
+            value = default!;
+            current->Slot = System.Runtime.CompilerServices.Unsafe.AsPointer(ref value);
+            Append(ref _receivers, current);
+            var waiter = new CanceledReceiver(this, current);
+            bool received;
+            using (cancellationToken.Register(static w => ((CanceledReceiver)w!).Cancel(), waiter))
+                received = Fiber.Park("Channel.Receive: the channel is empty, and only a fiber can wait");
+            return received;
+        }
+    }
+
+    // A fiber waiting in Receive(out, token): canceling takes it off the
+    // waiters and wakes it with false, unless a sender got to it first.
+    sealed class CanceledReceiver(Channel<T> channel, Fiber.Record* fiber)
+    {
+        public void Cancel()
+        {
+            if (channel.RemoveReceiver(fiber))
+                Fiber.Wake(fiber, false);
+        }
+    }
+
+    bool RemoveReceiver(Fiber.Record* f)
+    {
+        unsafe
+        {
+            // SAFETY: parked fibers' records.
+            ref Fiber.Record* link = ref _receivers;
+            while (link != null && link != f)
+                link = ref link->Next;
+            if (link == null)
+                return false;
+            link = f->Next;
+            f->Next = null;
+            return true;
+        }
+    }
+
     /// <summary>Takes a value if one is ready, without waiting. False when there's none.</summary>
     public bool TryReceive(out T value)
     {
         unsafe
         {
-            if (_count > 0 || _senders != null)
+            if (_count > 0 || _senders != null || (_async != null && _async.HasSender))
                 return Receive(out value);
         }
         value = default!;
@@ -806,6 +959,7 @@ public sealed class Channel<T>
             while (_senders != null)
                 Fiber.Wake(Take(ref _senders), false);
         }
+        _async?.Closed();
     }
 
     void Push(T value)

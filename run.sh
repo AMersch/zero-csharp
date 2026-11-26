@@ -12,10 +12,11 @@
 # With --win, runs bin/win/<Sample>.exe under Wine, in a container (see
 # docker/wine). On Windows itself, run the .exe directly.
 # With --mac, runs bin/mac/<Sample>, directly (it's a macOS program).
+# With --ios, runs bin/ios/<Sample> in the iOS simulator (ios/run.sh).
 # With --gpu, runs bin/gpu/<Sample>, a macOS program whose kernels run on the GPU.
 # With --uefi, runs bin/uefi/<Sample>.efi in QEMU on UEFI firmware, x64 or
 # arm64; --uefi --window shows the screen. See efi/run.sh.
-# Usage: ./run.sh [--wasm | --dos [--window] | --c64 [--window] | --pico2 | --r4 | --win | --mac | --gpu | --uefi [--window]] Arena
+# Usage: ./run.sh [--wasm | --dos [--window] | --c64 [--window] | --pico2 | --r4 | --win | --mac | --ios | --gpu | --uefi [--window]] Arena
 # Standard input reaches the program on every target (on DOS, from a file or a pipe).
 # Env:   BFLAT_ARCH (see env.sh): on macOS, runs a cross-compiled binary under emulation
 set -euo pipefail
@@ -64,6 +65,11 @@ if [ "${1:-}" = --mac ]; then
     exec "./bin/mac/$name" "$@"
 fi
 
+if [ "${1:-}" = --ios ]; then
+    shift
+    exec ios/run.sh "$@"
+fi
+
 if [ "${1:-}" = --gpu ]; then
     shift
     if [ $# -lt 1 ]; then
@@ -95,7 +101,7 @@ if [ "${1:-}" = --wasm ]; then
     shift
 fi
 if [ $# -lt 1 ]; then
-    echo "Usage: ./run.sh [--wasm | --dos [--window] | --c64 [--window] | --pico2 | --r4 | --win | --mac | --gpu | --uefi [--window]] <Sample> [args...]" >&2
+    echo "Usage: ./run.sh [--wasm | --dos [--window] | --c64 [--window] | --pico2 | --r4 | --win | --mac | --ios | --gpu | --uefi [--window]] <Sample> [args...]" >&2
     exit 1
 fi
 name=$1

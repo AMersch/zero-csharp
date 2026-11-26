@@ -90,6 +90,19 @@ is_macho_arm64() {
     [ "$(byte_at "$1" 0)" = 207 ] && [ "$(byte_at "$1" 1)" = 250 ] && [ "$(byte_at "$1" 2)" = 237 ] && [ "$(byte_at "$1" 3)" = 254 ] &&
         [ "$(byte_at "$1" 4)" = 12 ] && [ "$(byte_at "$1" 5)" = 0 ] && [ "$(byte_at "$1" 6)" = 0 ] && [ "$(byte_at "$1" 7)" = 1 ]
 }
+# macho_platform <file>: the platform its LC_BUILD_VERSION names (1 macOS,
+# 2 iOS, 7 the iOS simulator), or nothing.
+macho_platform() {
+    local f=$1 count offset=32 i command size
+    count=$(od -An -tu4 -j16 -N4 "$f" | tr -d ' ')
+    for ((i = 0; i < count; i++)); do
+        command=$(od -An -tu4 -j"$offset" -N4 "$f" | tr -d ' ')
+        size=$(od -An -tu4 -j$((offset + 4)) -N4 "$f" | tr -d ' ')
+        if [ "$command" = 50 ]; then od -An -tu4 -j$((offset + 8)) -N4 "$f" | tr -d ' '; return; fi
+        [ "${size:-0}" -gt 0 ] || return
+        offset=$((offset + size))
+    done
+}
 # The host's own target's native library suffix (NativeLib=Shared).
 case "$HOST_OS" in Windows) HOST_LIB_EXT=.dll ;; Darwin) HOST_LIB_EXT=.dylib ;; *) HOST_LIB_EXT=.so ;; esac
 # is_elf_shared <file>, is_macho_dylib <file>, is_pe_dll <file>: a native
@@ -248,6 +261,7 @@ test_payload_complete() {
              native/win-x64/start.obj native/win-x64/runtime.obj native/win-x64/library.obj native/win-x64/zerocore.obj \
              native/osx-arm64/start.o native/osx-arm64/runtime.o native/osx-arm64/library.o native/osx-arm64/zerocore.o \
              native/osx-arm64/libSystem.tbd VERSIONS.txt \
+             native/iossimulator-arm64/{start,runtime,zerocore,launch}.o native/iossimulator-arm64/{libSystem.tbd,boot.sh} \
              native/uefi-x64/{start,runtime,machine,stack,zerocore}.obj native/uefi-x64/libm.lib \
              native/uefi-arm64/{start,runtime,machine,stack,zerocore}.obj native/uefi-arm64/libm.lib \
              native/c64/System.Private.CoreLib.dll native/c64/runtime.c native/gpu/metal.m \
@@ -276,6 +290,13 @@ test_payload_complete() {
     if ! grep -q "install-name: *'/usr/lib/libSystem.B.dylib'" "$payload/native/osx-arm64/libSystem.tbd" ||
        ! grep -q "arm64-macos" "$payload/native/osx-arm64/libSystem.tbd"; then
         fail "payload complete" "libSystem.tbd doesn't name /usr/lib/libSystem.B.dylib for arm64-macos"; return
+    fi
+    for f in start.o runtime.o zerocore.o launch.o; do
+        if ! is_macho_arm64 "$payload/native/iossimulator-arm64/$f"; then fail "payload complete" "iossimulator-arm64/$f isn't arm64 Mach-O"; return; fi
+        if [ "$(macho_platform "$payload/native/iossimulator-arm64/$f")" != 7 ]; then fail "payload complete" "iossimulator-arm64/$f isn't built for the iOS simulator"; return; fi
+    done
+    if ! grep -q "arm64-ios-simulator" "$payload/native/iossimulator-arm64/libSystem.tbd"; then
+        fail "payload complete" "iossimulator-arm64/libSystem.tbd doesn't name arm64-ios-simulator"; return
     fi
     pass "payload complete"
 }
@@ -1567,9 +1588,10 @@ test_native_library_reference_kinds() {
     pass "$name"
 }
 
-# The docs' recipe: an ordinary .NET program that builds the library first
-# (a build-order ProjectReference) and copies it next to itself, from a clean
-# folder; .NET then finds it by name ([DllImport("MathLib")]).
+# The docs' recipe: an ordinary .NET program whose ProjectReference builds the
+# library and copies it next to the program (Targets="ZeroNativeLibraryFiles"),
+# and which compiles the bindings the library's build writes, from a clean
+# folder; .NET then finds the library by name. Publish takes the library too.
 test_native_library_app_recipe() {
     local name="native library app recipe" dir out
     can_build "$name" || return
@@ -1578,7 +1600,72 @@ test_native_library_app_recipe() {
     mv "$dir/MathLib/nativelib.csproj" "$dir/MathLib/MathLib.csproj"
     if ! run_in "$dir/App" nativelib-app build; then fail "$name" "dotnet build failed"; return; fi
     out=$(dotnet "$dir/App/bin/Debug/net10.0/App.dll" 2>&1 | tr -d '\r')
-    if [ "$out" != "add 5" ]; then fail "$name" "printed: $out"; return; fi
+    if [ "$out" != $'add 5\noffset 11,22' ]; then fail "$name" "printed: $out"; return; fi
+    if ! run_in "$dir/App" nativelib-app-publish publish -o "$dir/out"; then fail "$name" "dotnet publish failed"; return; fi
+    if [ ! -f "$dir/out/MathLib$HOST_LIB_EXT" ]; then fail "$name" "no MathLib$HOST_LIB_EXT in the publish folder"; return; fi
+    out=$(dotnet "$dir/out/App.dll" 2>&1 | tr -d '\r')
+    if [ "$out" != $'add 5\noffset 11,22' ]; then fail "$name" "published, printed: $out"; return; fi
+    pass "$name"
+}
+
+# The recipe as Visual Studio builds it, simulated: it builds the solution's
+# projects itself (here, the library first) and asks a reference only for
+# GetTargetPath, given the solution's configuration. The library answers with
+# its native file, which is copied next to the program.
+test_native_library_visual_studio() {
+    local name="native library visual studio" dir lib app out
+    can_build "$name" || return
+    dir=$(fixture nativelib-app nativelib-vs)
+    fixture nativelib nativelib-vs/MathLib > /dev/null
+    mv "$dir/MathLib/nativelib.csproj" "$dir/MathLib/MathLib.csproj"
+    lib=$(native_path "$dir/MathLib/MathLib.csproj"); app=$(native_path "$dir/App/App.csproj")
+    cat > "$WORK/nativelib-vs.rsp" <<EOF
+-p:BuildingInsideVisualStudio=true
+"-p:CurrentSolutionConfigurationContents=<SolutionConfiguration><ProjectConfiguration Project=\\"{11111111-1111-1111-1111-111111111111}\\" AbsolutePath=\\"$lib\\" BuildProjectInSolution=\\"True\\">Debug|AnyCPU</ProjectConfiguration><ProjectConfiguration Project=\\"{22222222-2222-2222-2222-222222222222}\\" AbsolutePath=\\"$app\\" BuildProjectInSolution=\\"True\\">Debug|AnyCPU</ProjectConfiguration></SolutionConfiguration>"
+EOF
+    if ! run_in "$dir/MathLib" nativelib-vs-lib build "@$(native_path "$WORK/nativelib-vs.rsp")"; then fail "$name" "the library's build failed"; return; fi
+    if ! run_in "$dir/App" nativelib-vs-app build "@$(native_path "$WORK/nativelib-vs.rsp")"; then fail "$name" "the program's build failed"; return; fi
+    if [ ! -f "$dir/App/bin/Debug/net10.0/MathLib$HOST_LIB_EXT" ]; then fail "$name" "MathLib$HOST_LIB_EXT wasn't copied to the program"; return; fi
+    out=$(dotnet "$dir/App/bin/Debug/net10.0/App.dll" 2>&1 | tr -d '\r')
+    if [ "$out" != $'add 5\noffset 11,22' ]; then fail "$name" "printed: $out"; return; fi
+    pass "$name"
+}
+
+# The bindings (bin/interoplib.Interop.cs) for every kind of type they copy,
+# called by a .NET program that treats warnings as errors, through
+# [LibraryImport] and again through [DllImport]; an export they can't declare
+# is left out with ZERO008. The file is rewritten only when it
+# changes, and dotnet clean removes it.
+test_native_library_bindings() {
+    local name="native library bindings" dir bindings generated
+    can_build "$name" || return
+    dir=$(fixture interoplib-app native-bindings/interoplib-app)
+    fixture interoplib native-bindings/interoplib > /dev/null
+    bindings=$WORK/native-bindings/interoplib/bin/interoplib.Interop.cs
+    if ! run_in "$dir" native-bindings build; then fail "$name" "dotnet build failed"; return; fi
+    if ! grep -q "ZERO008.*calendar_year.*CalendarTime" "$LOG"; then fail "$name" "no ZERO008 for calendar_year"; return; fi
+    if grep -q "calendar_year" "$bindings"; then fail "$name" "the bindings declare calendar_year"; return; fi
+    dotnet "$dir/bin/Debug/net10.0/interoplib-app.dll" > "$WORK/native-bindings.out" 2>&1
+    if ! same_output "$WORK/native-bindings.out" "$dir/expected.txt" "$WORK/native-bindings.diff"; then
+        fail "$name" "$(cat "$WORK/native-bindings.diff")"; return
+    fi
+    # [LibraryImport]: its generator wrote a file with the calls.
+    generated=$dir/obj/Debug/net10.0/generated/Microsoft.Interop.LibraryImportGenerator
+    if ! grep -rqs "shape_move" "$generated"; then fail "$name" "the bindings didn't use [LibraryImport]"; return; fi
+    # ZERO_INTEROP_DLLIMPORT turns them back to [DllImport].
+    rm -rf "$generated"
+    if ! run_in "$dir" native-bindings-dllimport build -p:InteropDllImport=true; then fail "$name" "the [DllImport] build failed"; return; fi
+    if grep -rqs "shape_move" "$generated"; then fail "$name" "ZERO_INTEROP_DLLIMPORT still used [LibraryImport]"; return; fi
+    dotnet "$dir/bin/Debug/net10.0/interoplib-app.dll" > "$WORK/native-bindings.out" 2>&1
+    if ! same_output "$WORK/native-bindings.out" "$dir/expected.txt" "$WORK/native-bindings.diff"; then
+        fail "$name" "[DllImport]: $(cat "$WORK/native-bindings.diff")"; return
+    fi
+    sleep 1; touch "$WORK/native-bindings.stamp" "$WORK/native-bindings/interoplib/Api.cs"
+    if ! run_in "$WORK/native-bindings/interoplib" native-bindings-2 build; then fail "$name" "the second build failed"; return; fi
+    if [ "$bindings" -nt "$WORK/native-bindings.stamp" ]; then fail "$name" "unchanged bindings were written again"; return; fi
+    if ! run_in "$WORK/native-bindings/interoplib" native-bindings-clean clean || [ -e "$bindings" ] || [ -e "${bindings%.cs}.fs" ]; then
+        fail "$name" "dotnet clean left the bindings"; return
+    fi
     pass "$name"
 }
 
@@ -2016,6 +2103,50 @@ test_fsharp_native_library_cross() {
     pass "$name"
 }
 
+# An F# library's bindings, made from its IL, called from C#.
+test_fsharp_native_library_bindings() {
+    local name="F# native library bindings" dir
+    can_build "$name" || return
+    dir=$(fixture fsnativelib-app fs-bindings/fsnativelib-app)
+    fixture fsnativelib fs-bindings/fsnativelib > /dev/null
+    if ! run_in "$dir" fs-bindings build; then fail "$name" "dotnet build failed"; return; fi
+    dotnet "$dir/bin/Debug/net10.0/fsnativelib-app.dll" > "$WORK/fs-bindings.out" 2>&1
+    if ! same_output "$WORK/fs-bindings.out" "$dir/expected.txt" "$WORK/fs-bindings.diff"; then
+        fail "$name" "$(cat "$WORK/fs-bindings.diff")"; return
+    fi
+    pass "$name"
+}
+
+# An F# program calls a C# native library through the F# bindings
+# (bin/MathLib.Interop.fs); the library is copied to the program's folder.
+test_fsharp_program_calls_native_library() {
+    local name="F# program calls native library" dir out
+    can_build "$name" || return
+    dir=$(fixture nativelib-fsapp)
+    fixture nativelib nativelib-fsapp/MathLib > /dev/null
+    mv "$dir/MathLib/nativelib.csproj" "$dir/MathLib/MathLib.csproj"
+    if ! run_in "$dir/App" nativelib-fsapp build; then fail "$name" "dotnet build failed"; return; fi
+    if [ ! -f "$dir/App/bin/Debug/net10.0/MathLib$HOST_LIB_EXT" ]; then fail "$name" "MathLib$HOST_LIB_EXT wasn't copied to the program"; return; fi
+    out=$(dotnet "$dir/App/bin/Debug/net10.0/App.dll" 2>&1 | tr -d '\r')
+    if [ "$out" != $'add 5\noffset 11,22' ]; then fail "$name" "printed: $out"; return; fi
+    pass "$name"
+}
+
+# The F# bindings of every kind of type (fixtures/interoplib), called from F#:
+# the same output as the C# program's.
+test_fsharp_native_library_bindings_all_types() {
+    local name="F# bindings of every type" dir
+    can_build "$name" || return
+    dir=$(fixture interoplib-fsapp fs-all-bindings/interoplib-fsapp)
+    fixture interoplib fs-all-bindings/interoplib > /dev/null
+    if ! run_in "$dir" fs-all-bindings build; then fail "$name" "dotnet build failed"; return; fi
+    dotnet "$dir/bin/Debug/net10.0/interoplib-fsapp.dll" > "$WORK/fs-all-bindings.out" 2>&1
+    if ! same_output "$WORK/fs-all-bindings.out" "$ROOT/sdk/test/fixtures/interoplib-app/expected.txt" "$WORK/fs-all-bindings.diff"; then
+        fail "$name" "$(cat "$WORK/fs-all-bindings.diff")"; return
+    fi
+    pass "$name"
+}
+
 # An export C can't call (a bool) or reach (a private function): ZERO005.
 test_fsharp_native_library_errors() {
     local name="F# native library errors" dir
@@ -2041,6 +2172,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template sdl_template pico_template
     framework_from_property newer_sdk_library
     mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
+    ios_simulator_target ios_simulator_errors
     trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd mac_target_newer_dylib
     tutorial_steps simd_instruction_set static_constructor_threads
     native_library_dotnet native_library_exports native_library_two native_library_errors
@@ -2048,9 +2180,11 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name
     native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
     link_library link_library_passed_on link_library_newer_glibc sdl3 sdl3_windows
-    native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe
+    native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe native_library_bindings
+    native_library_visual_studio
     fsharp_program fsharp_printf fsharp_collections fsharp_builders fsharp_catch fsharp_memory fsharp_must_not_compile fsharp_scratch_ref_struct_state fsharp_unsafe_calls fsharp_unsafe_calls_libraries fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
-    fsharp_native_library fsharp_native_library_cross fsharp_native_library_errors)
+    fsharp_native_library fsharp_native_library_cross fsharp_native_library_errors
+    fsharp_native_library_bindings fsharp_program_calls_native_library fsharp_native_library_bindings_all_types)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim
@@ -2250,6 +2384,46 @@ test_mac_target_links_libm_and_threads() {
     if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/threads"; then fail "$name" "osx-arm64/threads isn't an arm64 Mach-O program"; return; fi
     mkdir -p "$WORK/mac-built/$HOST_RID"
     cp "$dir/bin/Debug/$TFM/osx-arm64/threads" "$WORK/mac-built/$HOST_RID/threads"
+    pass "$name"
+}
+
+# ZeroTarget=iossimulator-arm64: bflat's macOS object, marked as built for the
+# iOS simulator (zero-bitcode macho-platform) and linked by the package's
+# ld64.lld, so every host builds it. A path with spaces and a non-ASCII
+# letter goes through the build and through dotnet run's launcher. On a Mac
+# with a simulator, dotnet run starts it in the project's folder, with its
+# arguments, and returns its exit code.
+test_ios_simulator_target() {
+    local name="ios simulator target" dir program code
+    can_build "$name" || return
+    dir=$(fixture iosrun "ios space/Zoë Ann")
+    if ! run_in "$dir" iossim build -p:ZeroTarget=iossimulator-arm64; then fail "$name" "dotnet build failed"; return; fi
+    program=$dir/bin/Debug/$TFM/iossimulator-arm64/iosrun
+    if ! is_macho_arm64 "$program"; then fail "$name" "no arm64 Mach-O program"; return; fi
+    if [ "$(macho_platform "$program")" != 7 ]; then fail "$name" "the program isn't built for the iOS simulator"; return; fi
+    if [ "$HOST_RID" != osx-arm64 ]; then pass "$name (built; running needs a Mac)"; return; fi
+    if ! xcrun simctl list devices available 2> /dev/null | grep -qE '^ +iPhone'; then
+        skip "$name" "built; no iPhone simulator to run it in (Xcode's iOS platform)"; return
+    fi
+    code=0
+    run_in "$dir" iossim-run run -p:ZeroTarget=iossimulator-arm64 -- "an argument" é || code=$?
+    if [ "$code" != 3 ]; then fail "$name" "dotnet run exited with $code, not the program's 3"; return; fi
+    if [ "$(tail -3 "$LOG")" != "$(printf 'in the project folder\nan argument\né')" ]; then
+        fail "$name" "dotnet run printed something else"; return
+    fi
+    pass "$name"
+}
+
+# The iOS simulator takes programs only: no native libraries, no GPU kernels.
+test_ios_simulator_errors() {
+    local name="ios simulator errors" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib iossimlib)
+    if run_in "$dir" iossim-lib build -p:ZeroTarget=iossimulator-arm64; then fail "$name" "a native library built for the simulator"; return; fi
+    if ! grep -q "ZeroTarget 'iossimulator-arm64' has no shared libraries" "$LOG"; then fail "$name" "no message about native libraries"; return; fi
+    dir=$(fixture native iossimgpu)
+    if run_in "$dir" iossim-gpu build -p:ZeroTarget=iossimulator-arm64 -p:ZeroGpu=Metal; then fail "$name" "ZeroGpu=Metal built for the simulator"; return; fi
+    if ! grep -q "ZeroGpu=Metal builds for ZeroTarget osx-arm64" "$LOG"; then fail "$name" "no message about the GPU"; return; fi
     pass "$name"
 }
 

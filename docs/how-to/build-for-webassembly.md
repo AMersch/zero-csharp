@@ -71,13 +71,20 @@ To check every sample against the native output:
 ./test.sh --wasm
 ```
 
+With Node installed, it then runs the samples again through the docs site's browser page
+(`docs/content/run-wasm.js`, via `scripts/run-in-page.mjs`), so a module the page can't load fails the
+test instead of the site.
+
 ## What's different
 
 - **32-bit pointers.** Structs that hold pointers are smaller, so code that prints sizes prints smaller
   numbers: the arena byte counts in Arena and Collections differ, and `test.sh` checks only their exit
   codes on WebAssembly.
-- **No SIMD.** Instruction sets report `IsSupported == false`, so Simd and Kernels take their scalar
-  paths. WebAssembly has 128-bit SIMD, but `lib/Kernels.cs` has no path for it yet.
+- **SIMD only from C.** Instruction sets report `IsSupported == false`, so Simd takes its scalar
+  path: NativeAOT-LLVM can't compile vector operations for WebAssembly. `TensorPrimitives` and
+  `lib/Kernels.cs` call simd128 kernels in `wasm/simd.c` instead, which `build.sh` compiles with
+  `-msimd128` and links into every module. Every current engine runs simd128 (Chrome 91,
+  Firefox 89, Safari 16.4, Node 16.4, wasmtime).
 - **One thread.** zerocore's WebAssembly build is its single-threaded 32-bit build.
 - **Clocks.** `lib/Clock.cs` and the samples call `clock_gettime` with Linux's clock numbers, 0 for
   the wall clock and 1 for the monotonic one. In WASI's C library a clock ID is a pointer, so

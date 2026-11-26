@@ -21,6 +21,7 @@ Usage: Guards <case>, where the case is one of:
   debug-fail           a Debug.Fail
   range-too-long       an array range that ends past the array
   bad-base64           Convert.FromBase64String on text that isn't Base64
+  string-builder-range a StringBuilder.Remove past the end
   bad-pattern          Regex.Create with a pattern that isn't valid
   scratch-outer-scope  an Arena.Scratch scope allocating inside a nested one
   scratch-outer-list   a ScratchList added to inside a nested Arena.Scratch

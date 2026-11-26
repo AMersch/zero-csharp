@@ -1,6 +1,7 @@
 --- !tapi-tbd
 # Our own stand-in for macOS's libSystem, which the SDK links osx-arm64
-# programs against (ld64.lld), so no Apple SDK is needed. It lists names
+# programs against (ld64.lld), so no Apple SDK is needed; and iOS's, which
+# has the same names, for iossimulator-arm64 programs. It lists names
 # only: at run time the programs bind to the real /usr/lib/libSystem.B.dylib,
 # which has all of them (libc, libm and pthreads are one library on macOS).
 #
@@ -13,11 +14,11 @@
 # project's own with this install name, in ZeroNativeInput
 # (docs/get-started/install-with-dotnet.md).
 tbd-version:     4
-targets:         [ arm64-macos ]
+targets:         [ arm64-macos, arm64-ios-simulator ]
 install-name:    '/usr/lib/libSystem.B.dylib'
 current-version: 1351
 exports:
-  - targets:     [ arm64-macos ]
+  - targets:     [ arm64-macos, arm64-ios-simulator ]
     symbols:     [ ___error, ___stack_chk_fail, ___stack_chk_guard, ___stderrp,
                    ___stdinp, ___stdoutp, _abort, _abs, _accept, _access, _acos,
                    _acosf, _aligned_alloc, _arc4random, _arc4random_buf,

@@ -1,0 +1,23 @@
+<!-- An ordinary .NET program that calls fixtures/interoplib (../interoplib)
+     through the bindings the library's build writes. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- The test looks for the [LibraryImport] generator's file, then builds
+         once more with [DllImport] instead. -->
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <DefineConstants Condition="'$(InteropDllImport)' == 'true'">$(DefineConstants);ZERO_INTEROP_DLLIMPORT</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../interoplib/interoplib.csproj"
+                      ReferenceOutputAssembly="false"
+                      SkipGetTargetFrameworkProperties="true"
+                      Targets="ZeroNativeLibraryFiles"
+                      OutputItemType="Content" />
+    <Compile Include="../interoplib/bin/interoplib.Interop.cs" />
+  </ItemGroup>
+</Project>

@@ -9,6 +9,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading.Tasks;
 
 namespace NetworkSample;
 
@@ -60,6 +61,15 @@ public sealed class Lookup
 {
     public bool Found;
     public int OthersRan;
+}
+
+// Two async methods on one connection (see Main's "Async" section).
+public sealed class AsyncPair
+{
+    public NetworkStream Reader, Writer;
+    public byte[] Buffer = new byte[16];
+    public int Read;
+    public bool WriterRan;
 }
 
 public static class Program
@@ -150,6 +160,19 @@ public static class Program
         return error == null;
     }
     // docs:end
+
+    static async Task ReadAsync(AsyncPair p)
+    {
+        await Task.Yield(); // from here on, in the async methods' fiber
+        p.Read = p.Reader.Read(p.Buffer);
+    }
+
+    static async Task WriteAsync(AsyncPair p)
+    {
+        await Task.Yield();
+        p.WriterRan = true;
+        p.Writer.Write("hello"u8);
+    }
 
     public static int Main()
     {
@@ -479,6 +502,27 @@ public static class Program
         Check("an address is its own answer", Dns.GetHostAddresses("10.1.2.3")[0].ToString() == "10.1.2.3");
         Check("host name", Dns.GetHostName().Length > 0);
         Section("Names");
+
+        // Async methods: after an await they go on in a fiber shared by all
+        // of them (lib/Tasks.cs). One that waits for a socket keeps that
+        // fiber, and another takes over for the rest: here the writer, which
+        // is queued behind the reader and is the only one that can wake it.
+        var asyncListener = new TcpListener(IPAddress.Loopback, 0);
+        asyncListener.Start();
+        var dialer = new TcpClient();
+        dialer.Connect(IPAddress.Loopback, ((IPEndPoint)asyncListener.LocalEndpoint).Port);
+        TcpClient answered = asyncListener.AcceptTcpClient();
+        var pair = new AsyncPair { Reader = answered.GetStream(), Writer = dialer.GetStream() };
+        Task reading = ReadAsync(pair);
+        Task writing = WriteAsync(pair);
+        Fiber.Run();
+        Check("both done", reading.IsCompleted && writing.IsCompleted);
+        Check("the writer ran", pair.WriterRan);
+        Check("read what was written", pair.Read == 5 && pair.Buffer[4] == (byte)'o');
+        dialer.Dispose();
+        answered.Dispose();
+        asyncListener.Stop();
+        Section("Async");
 
         return s_failures;
     }

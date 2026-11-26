@@ -49,3 +49,5 @@ sdk/ZeroCSharp.Sdk/payload/
 sdk/test/work/
 sdk/test/work.pack.log
 sdk/trimmed/
+# Android's loader, which android/sysroot keeps at the path it has on Android.
+!android/sysroot/system/bin/

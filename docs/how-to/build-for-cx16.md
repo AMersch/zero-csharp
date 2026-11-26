@@ -245,6 +245,12 @@ Affine.Draw(128, 88, 64, 64,                  // where, and how big
   rows, so the clock and the mouse go on.
 - Without FX the same pixels are worked out in software, about 70 times slower.
 
+### A wireframe ship
+
+`samples/Jameson.cs` puts several of these together: a ship that grows out of a point and turns about three axes,
+hidden lines left out, with `CX16.Multiply` for the rotation and `Bitmap.Line` for the picture, about 27 pictures a
+second: `./run.sh --cx16 --window Jameson`. With no room for a second picture, it replaces one line at a time.
+
 ## Tiles
 
 `Tiles` (`lib/Tiles.cs`) is layer 0 of the video chip as a map of tiles that scrolls smoothly: the background

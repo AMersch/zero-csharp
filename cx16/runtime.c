@@ -1962,6 +1962,25 @@ i32 cs_cx16_joystick(i32 number)
         | (d1 & 128 ? 16 : 0) | (d0 & 128 ? 32 : 0);
 }
 
+// The wheel's movement, collected from every read of the mouse until the program asks.
+static int wheel;
+
+// The KERNAL's mouse_get ($FF6B): the position into four bytes of the zero page (X says
+// where), the buttons in A and, in X, how far the wheel turned since the last call, which
+// that call forgets. llvm-mos's cx16_k_mouse_get throws X away, so every read goes
+// through here.
+__attribute__((section(".zp.bss"))) static volatile unsigned char mouse_position[4];
+
+static unsigned char mouse_read(void)
+{
+    unsigned char buttons;
+    signed char turned;
+    __asm__ volatile("ldx #mos8(mouse_position)\n\tjsr $FF6B"
+        : "=a"(buttons), "=x"(turned) : : "y", "c", "v", "memory");
+    wheel += turned;
+    return buttons;
+}
+
 // The mouse, through the KERNAL's driver: with a cursor to show, it moves
 // sprite 0 itself, in every frame's interrupt. show: 0 off, 1 the default
 // arrow, $FF the sprite as the program left it. The area is the screen's
@@ -1971,16 +1990,28 @@ void cs_cx16_mouse_config(i32 show)
     screen_mode_info_t info;
     cx16_k_screen_mode_get(&info);
     cx16_k_mouse_config((unsigned char)show, info.columns, info.rows);
+    if (show == 0 || !mouse_on) {       // the wheel starts from rest
+        mouse_read();
+        wheel = 0;
+    }
     mouse_show = (unsigned char)show;
     mouse_on = show != 0;
+}
+
+i32 cs_cx16_mouse_wheel(void)
+{
+    mouse_read();
+    int turned = wheel;
+    wheel = 0;
+    return turned;
 }
 
 // 0: the pointer's x, 1: its y, 2: the buttons (1 left, 2 right, 4 middle).
 i32 cs_cx16_mouse(i32 field)
 {
-    mouse_pos_t position;
-    unsigned char buttons = cx16_k_mouse_get(&position);
-    return field == 0 ? position.x : field == 1 ? position.y : buttons;
+    unsigned char buttons = mouse_read();
+    int x = mouse_position[0] | mouse_position[1] << 8, y = mouse_position[2] | mouse_position[3] << 8;
+    return field == 0 ? x : field == 1 ? y : buttons;
 }
 
 // The YM2151 (FM): an address register at $9F40, a data register at $9F41 (which reads as the status:

@@ -1,8 +1,8 @@
 // Example: a mouse pointer on a Commander X16. The arrow is an 8-bit sprite
 // (16x16 pixels, 256 colors) that the program defines and the KERNAL's mouse
 // driver then moves: in every frame's interrupt it sets sprite 0's position
-// from the mouse. The program only reads the position and the buttons, and
-// prints them. Any key stops it. Exit code = number of failed checks.
+// from the mouse. The program only reads the position, the buttons and the
+// wheel, and prints them. Any key stops it. Exit code = number of failed checks.
 // Build: ./build.sh --cx16 Mouse    Run: ./run.sh --cx16 --window Mouse
 //
 // The picture is the arrow of a small assembler demo for the X16 (a 16x16
@@ -64,11 +64,15 @@ public static class Program
         CX16.Print(column, row, "     ", CX16.White);
     }
 
+    static int s_wheel;
+
     static void Update()
     {
+        s_wheel += CX16.ReadMouseWheel();       // notches since the last call: down counts up
         int buttons = CX16.MouseButtons;
         Show(4, "x: ", CX16.MouseX);
         Show(5, "y: ", CX16.MouseY);
+        Show(6, "wheel: ", s_wheel);
         CX16.Print(4, 7, (buttons & CX16.LeftButton) != 0 ? " LEFT " : " left ", CX16.White + 16 * ((buttons & CX16.LeftButton) != 0 ? CX16.Red : CX16.DarkGray));
         CX16.Print(11, 7, (buttons & CX16.RightButton) != 0 ? " RIGHT " : " right ", CX16.White + 16 * ((buttons & CX16.RightButton) != 0 ? CX16.Blue : CX16.DarkGray));
     }
@@ -78,7 +82,7 @@ public static class Program
     {
         CX16.Clear(CX16.Black);
         CX16.Border(CX16.Black);
-        CX16.Print(4, 2, "Move the mouse. Any key stops.", CX16.Yellow);
+        CX16.Print(4, 2, "Move the mouse, turn the wheel. Any key stops.", CX16.Yellow);
 
         // The picture, as sprite 0: where the KERNAL's mouse driver puts the pointer.
         Check("the arrow is accepted", CX16.Sprite(0, ArrowAddress, Arrow, 16, 16, 8));
@@ -112,6 +116,8 @@ public static class Program
 
         // Leave the machine as BASIC expects it.
         CX16.MouseOff();
+        CX16.ReadMouseWheel();                  // takes what is left
+        Check("a wheel that has been read", CX16.ReadMouseWheel() == 0);
         CX16.HideSprite(0);
         CX16.HideSprite(1);
         CX16.Border(CX16.LightBlue);

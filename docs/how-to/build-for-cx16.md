@@ -56,7 +56,9 @@ while (CX16.ReadKey() == 0)
   doesn't fit.
 - **Mouse:** `MouseOn` switches the KERNAL's mouse driver on, which then moves sprite 0 as the pointer
   in every frame's interrupt: `MouseOn()` shows its arrow, `MouseOn(defaultCursor: false)` keeps
-  whatever picture the program gave sprite 0. `MouseX`, `MouseY` and `MouseButtons` read it.
+  whatever picture the program gave sprite 0. `MouseX`, `MouseY` and `MouseButtons` read it, and
+  `ReadMouseWheel` says how many notches the wheel has turned since it was last asked: negative away from you,
+  positive towards you (the emulator passes on the host's direction, which "natural scrolling" turns round).
 - **Sound:** `Tone` plays a note on one of the 16 voices of the VERA's sound generator (pulse, sawtooth,
   triangle or noise).
 - **Input:** `ReadKey`, and `Joystick(0)` for the keyboard's cursor keys, Ctrl and Alt, or 1-4 for
@@ -64,7 +66,7 @@ while (CX16.ReadKey() == 0)
 - **Time:** `WaitFrame` and `Ticks`, at 60 Hz.
 
 `samples/CX16Demo.cs` uses most of it: `./run.sh --cx16 --window CX16Demo`. `samples/Mouse.cs` is a
-pointer, an arrow as an 8-bit sprite that the mouse moves: `./run.sh --cx16 --window --capture Mouse`: `--capture` keeps the mouse in the window, whose
+pointer, an arrow as an 8-bit sprite that the mouse moves, with the wheel counted: `./run.sh --cx16 --window --capture Mouse`: `--capture` keeps the mouse in the window, whose
 pointer covers 0-639 across and 0-479 down. The headless runs
 (`./test.sh --cx16`) draw nothing and have no frame interrupt, so there `WaitFrame` gives up after about
 two frames' time, and the clock, the joysticks and the mouse stand still; the demo's checks read the video memory

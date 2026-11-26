@@ -14,6 +14,7 @@ output and no mouse: what can only be heard or seen needs a check in a window, o
 
 - **VERA FX, a first part:** the cache for `Bitmap.Clear`, `Fill` and `Tiles.Fill` (4 to 9 times faster), the line helper for `Bitmap.Line` (17 times faster), `CX16.HasVeraFx` and `UseVeraFx`. **Filled triangles** (`Bitmap.FillTriangle`, `Triangle`) by the polygon helper with cache writes. **The rest:** the multiplier (`CX16.Multiply`, `Dot`) and the affine helper (`Affine`, rotating and scaling into the bitmap; `samples/VeraFxDemo.cs`). Not yet: the helper for triangles that are cut by the picture's edge, 4-bit and 2-bit modes, affine drawing from a bitmap rather than tiles.
 - **FM sound (YM2151):** `Fm` (patches in the chip's register order, notes by MIDI number, volume, pan, raw writes) and the PSG's pitch checked, both measured from recordings by `./test.sh --cx16-audio`. Not yet: the ROM's 162 instrument presets, the LFO (vibrato, tremolo) and noise as calls, a sequencer.
+- **Mouse wheel:** `CX16.ReadMouseWheel` (the KERNAL's `mouse_get` returns it in X, which llvm-mos's wrapper drops). Turned by hand in the emulator; the headless tests have no mouse, and the read path was tested by writing the KERNAL's counter.
 - **PCM audio:** `Pcm` plays 8 and 16 bit, mono and stereo samples from an array or the banked RAM, once or in a loop, refilled by an interrupt (`samples/PcmDemo.cs`, `./test.sh --cx16-audio`). Not yet: playing straight from a file, reading WAV files, telling the program when a sound ends other than by asking, more than one sound at a time.
 - **Real-time clock:** `Clock.UtcNow` and `UnixMilliseconds` read it; `CX16.SetDateTime` sets it.
 - **Bitmap:** `Bitmap` (clear, plot, get, fill, rectangle, line, circle, text) and the palette (`CX16.SetColor`) in 320x240 with 256 colors, directly on the VERA; sprite shapes moved to $13000 to keep clear of the bitmap. (`samples/BitmapDemo.cs`) Not yet: other depths (4, 2, 1 bit), 640x480, speed with VERA FX.
@@ -21,12 +22,6 @@ output and no mouse: what can only be heard or seen needs a check in a window, o
 - **Screen modes:** `CX16.SetMode`, `CX16.Mode` (all of the KERNAL's modes, sprites and the mouse follow). (`samples/ScreenModes.cs`)
 - **Hardware random seed:** `CX16.Entropy`, and `Clock.Monotonic` starts at a random moment, so
   `Random.FromClock()` differs from run to run. (`samples/ClockSeed.cs`)
-
-## 2. Later, and what needs finding out
-
-| # | Task | Effort | Why it is last |
-|---|------|--------|----------------|
-| 1 | **Mouse wheel** | S once known | `mouse_get` in this KERNAL's documentation returns position and buttons only; the wheel isn't in it. Find out first (a newer KERNAL's `mouse_get`, or the PS/2 packets of a 4-byte mouse, read through the I/O chip). Low value next to the rest. |
 
 ## Also open
 

@@ -73,6 +73,7 @@ public static class CX16
     [DllImport("libc")] static safe extern int cx16_joystick(int number);
     [DllImport("libc")] static safe extern void cx16_mouse_config(int show);
     [DllImport("libc")] static safe extern int cx16_mouse(int field);
+    [DllImport("libc")] static safe extern int cx16_mouse_wheel();
     [DllImport("libc")] static safe extern void cx16_set_date_time(int year, int month, int day, int hour, int minute, int second);
     [DllImport("libc")] static safe extern int cx16_entropy();
     [DllImport("libc")] static safe extern int cx16_in_emulator();
@@ -350,6 +351,9 @@ public static class CX16
 
     /// <summary>The buttons held down: LeftButton, RightButton and MiddleButton, added up.</summary>
     public static int MouseButtons => cx16_mouse(2);
+
+    /// <summary>The notches the wheel has turned since the last call: negative away from you (up, as in a list), positive towards you. 0 for a mouse without a wheel, and while the mouse is off (MouseOn).</summary>
+    public static int ReadMouseWheel() => cx16_mouse_wheel();
 
     // ---- timing --------------------------------------------------------------------
 

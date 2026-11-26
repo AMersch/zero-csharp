@@ -41,6 +41,7 @@ public static class Program
             Console.WriteLine("  debug-fail           a Debug.Fail");
             Console.WriteLine("  range-too-long       an array range that ends past the array");
             Console.WriteLine("  bad-base64           Convert.FromBase64String on text that isn't Base64");
+            Console.WriteLine("  string-builder-range a StringBuilder.Remove past the end");
             Console.WriteLine("  bad-pattern          Regex.Create with a pattern that isn't valid");
             Console.WriteLine("  scratch-outer-scope  an Arena.Scratch scope allocating inside a nested one");
             Console.WriteLine("  scratch-outer-list   a ScratchList added to inside a nested Arena.Scratch");
@@ -86,6 +87,7 @@ public static class Program
             case "debug-fail": DebugFail(); break;
             case "range-too-long": RangeTooLong(Opaque(10)); break;
             case "bad-base64": System.Convert.FromBase64String("not base64!"); break;
+            case "string-builder-range": new System.Text.StringBuilder("abc").Remove(2, 2); break;
             case "bad-pattern": Regex.Create(Arena.Create(4096), "(abc"); break;
             case "scratch-outer-scope": ScratchOuterScope(); break;
             case "scratch-outer-list": ScratchOuterList(); break;

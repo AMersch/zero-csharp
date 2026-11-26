@@ -78,12 +78,15 @@ public static class Program
         unsafe { input.Close(); }
 
         // The device in the path.
+        // (The RAM bank is where this program's code may be: no disk call may change it.)
+        int bank = CX16.Peek(0);
         input = File.OpenRead("#8:" + Path);
         Check("an explicit device 8", input.IsOpen);
         unsafe { input.Close(); }
         Check("a device that isn't there", !File.OpenRead("#9:" + Path).IsOpen);
         Check("a device that isn't a number", !File.OpenRead("#x:" + Path).IsOpen);
         Check("and the disk still works", File.Exists(Path));
+        Check("the RAM bank is as before", CX16.Peek(0) == bank);
 
         Check("Delete", File.Delete(Path) && !File.Exists(Path));
         Check("Delete again", !File.Delete(Path));

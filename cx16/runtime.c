@@ -844,6 +844,13 @@ static const char *take_path(const char *given, unsigned char *device)
     return into;
 }
 
+// The RAM bank, which a call to the KERNAL must not lose: the caller may be code in a bank
+// (see load_code_banks). ROM R47 comes back with bank 0 from a device that isn't there (R49
+// doesn't), and the program would go on in the KERNAL's data. So every function here that
+// talks to a drive puts back the bank it was called with.
+static void put_back_bank(const unsigned char *bank) { RAM_BANK = *bank; }
+#define KEEP_RAM_BANK __attribute__((cleanup(put_back_bank), unused)) unsigned char bank_kept = RAM_BANK
+
 // Opening anything on a device that isn't there leaves the KERNAL unable to open
 // anything, on any device, until it has closed everything. So that is what
 // happens: every open file of the program is closed too.
@@ -1026,6 +1033,7 @@ static long file_size(unsigned char device, const char *path);
 
 i32 cs_fopen(const char *given, const char *mode)
 {
+    KEEP_RAM_BANK;
     unsigned char device;
     file_errno = 22;                        // a path or a mode that won't do
     const char *path = take_path(given, &device);
@@ -1137,6 +1145,7 @@ static unsigned read_bytes(int slot, unsigned char *buffer, unsigned count)
 
 u32 cs_fread(void *buffer, u32 size, u32 count, i32 handle)
 {
+    KEEP_RAM_BANK;
     int slot = file_slot(handle);
     if (slot < 0 || size == 0 || size > 0xFFFF || count > 0xFFFF || size * count > 0xFFFF)
         return 0;
@@ -1166,6 +1175,7 @@ static unsigned write_bytes(int slot, const unsigned char *bytes, unsigned count
 
 u32 cs_fwrite(const void *buffer, u32 size, u32 count, i32 handle)
 {
+    KEEP_RAM_BANK;
     int slot = file_slot(handle);
     if (slot < 0 || files[slot].mode == 'r' || size == 0 || count == 0 || size > 0xFFFF || count > 0xFFFF || size * count > 0xFFFF)
         return 0;
@@ -1185,6 +1195,7 @@ u32 cs_fwrite(const void *buffer, u32 size, u32 count, i32 handle)
 
 i32 cs_fclose(i32 handle)
 {
+    KEEP_RAM_BANK;
     int slot = file_slot(handle);
     if (slot < 0)
         return -1;
@@ -1205,6 +1216,7 @@ static void skip_to(int slot, unsigned long target)
 
 i32 cs_fseeko(i32 handle, long long offset, i32 origin)
 {
+    KEEP_RAM_BANK;
     int slot = file_slot(handle);
     if (slot < 0)
         return -1;
@@ -1251,6 +1263,7 @@ long long cs_ftello(i32 handle)
 
 i32 cs_remove(const char *given)
 {
+    KEEP_RAM_BANK;
     unsigned char device;
     const char *path = take_path(given, &device);
     file_errno = 22;
@@ -1264,6 +1277,7 @@ i32 cs_remove(const char *given)
 // fine), or -1 if there is no such drive. The word before the colon is made capitals.
 i32 cs_cx16_dos(const char *given)
 {
+    KEEP_RAM_BANK;
     unsigned char device;
     const char *command = take_device(given, &device);
     if (command == 0 || *command == 0 || strlen(command) >= MAX_NAME)
@@ -1500,6 +1514,7 @@ void cs_cx16_dir_close(void)
 // given: "" for the current folder, "folder", "#9:". 1 if the folder was read.
 i32 cs_cx16_dir_open(const char *given)
 {
+    KEEP_RAM_BANK;
     unsigned char device;
     const char *path = take_path(given, &device);
     cs_cx16_dir_close();
@@ -1629,6 +1644,7 @@ static long file_size(unsigned char device, const char *path)
 // at 48, the time at 88 (seconds) and 96 (nanoseconds).
 i32 cs___xstat64(i32 version, const char *given, unsigned char *status)
 {
+    KEEP_RAM_BANK;
     (void)version;
     unsigned char device;
     const char *path = take_path(given, &device);
@@ -1672,6 +1688,7 @@ static int folder_command(const char *verb, const char *given, unsigned char *de
 
 i32 cs_mkdir(const char *given, u32 mode)
 {
+    KEEP_RAM_BANK;
     (void)mode;
     unsigned char device;
     const char *path;
@@ -1681,6 +1698,7 @@ i32 cs_mkdir(const char *given, u32 mode)
 
 i32 cs_rmdir(const char *given)
 {
+    KEEP_RAM_BANK;
     unsigned char device;
     const char *path = take_path(given, &device);
     char command[MAX_NAME + 8];
@@ -1697,6 +1715,7 @@ i32 cs_rmdir(const char *given)
 
 i32 cs_chdir(const char *given)
 {
+    KEEP_RAM_BANK;
     unsigned char device;
     const char *path;
     int code = folder_command("CD:", given, &device, &path);
@@ -1706,6 +1725,7 @@ i32 cs_chdir(const char *given)
 // "R0:new=old". As rename(2), it replaces a file that has the new name.
 i32 cs_rename(const char *from_given, const char *to_given)
 {
+    KEEP_RAM_BANK;
     unsigned char device, to_device;
     const char *from = take_path(from_given, &device), *to = take_path(to_given, &to_device);
     file_errno = 22;
@@ -1731,6 +1751,7 @@ i32 cs_rename(const char *from_given, const char *to_given)
 // "$=C" lists the current folder, its parent, and so on up to "/".
 char *cs_getcwd(char *buffer, u32 room)
 {
+    KEEP_RAM_BANK;
     file_errno = 5;
     cbm_k_setnam("$=C");
     cbm_k_setlfs(DIR_FILE, program_device, 0);
@@ -1780,6 +1801,7 @@ typedef struct {
 
 void *cs_opendir(const char *given)
 {
+    KEEP_RAM_BANK;
     unsigned char device;
     const char *path = take_path(given, &device);
     file_errno = 22;

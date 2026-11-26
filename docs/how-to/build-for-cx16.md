@@ -24,7 +24,9 @@ doesn't fit goes there (see "Code in banks"), but the heap and the program's dat
 ```
 
 The tools are the C64's (NativeAOT-LLVM and llvm-mos 23.4.0 or newer, which has `mos-cx16-clang`),
-and the emulator, [x16emu](https://github.com/X16Community/x16-emulator) (release 49 was used). `setup.sh`
+and the emulator, [x16emu](https://github.com/X16Community/x16-emulator) (release 49 was used).
+The samples also pass in the emulator with ROM R47, which an X16 may still have: there a call to a drive that
+isn't there comes back with the wrong RAM bank, which `cx16/runtime.c` puts back. `setup.sh`
 doesn't download it, but says whether it and its ROM are found. Put it on the `PATH`, or set `X16_EMULATOR` (`X16_HOME`, `/Applications/X16` and
 `~/X16` are tried too), and `X16_ROM` if its `rom.bin` isn't next to it.
 

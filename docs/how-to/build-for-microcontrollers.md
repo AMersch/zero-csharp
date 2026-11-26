@@ -89,7 +89,8 @@ Code and read-only data stay in flash; RAM holds the writable data, the stacks a
   program needs about 10.5 KB of RAM before its heap and has some 20 KB left. Arena (which allocates a
   16 KB array), Collections, Files, Strings, Queries, Threads, Fibers, Patterns, Scratch, Links and
   Unicode don't fit. `Arena.Scratch` starts each arena with a 2 KB block on a microcontroller instead
-  of 16 KB, and so does each fiber's scratch arena.
+  of 16 KB, and so does each fiber's scratch arena. `Arena.ScratchSize` sets another size, and
+  `Arena.ScratchMaxCapacity` a limit.
 
 String literals go to flash too, so the RAM they would cost is free. Flash is read-only: the memory
 protection unit makes a write to it fault, in QEMU as on a chip, so a bug that writes to a string

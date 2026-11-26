@@ -20,7 +20,11 @@
 // yours, so a List or StrBuilder of yours that grows during the callback grows
 // in its own arena and is unaffected (with Arena.OpenScope it would grow into
 // memory the scope then frees). Scratch calls nest. Each thread keeps its
-// scratch arena for its whole life, sized to the most it ever needed at once.
+// scratch arena for its whole life, but only the arena's first block (16 KB,
+// or 2 KB on a small machine): what a callback needs beyond that comes from
+// malloc and goes back when the callback returns. Arena.ScratchSize sets the
+// first block's size and Arena.ScratchMaxCapacity a limit, for the scratch
+// arenas made afterwards.
 //
 // To pass data in and out without a closure (which would allocate), use the
 // overloads with a state passed by ref; it may be a ref struct holding spans
@@ -570,13 +574,38 @@ public partial struct Arena
 
     [DllImport("libc")] static safe extern int getpagesize();
 
-    // A scratch arena's first block. Scratch frees with Restore, so a scope
-    // that goes past the first block mallocs and frees a block each time:
-    // 16 KB keeps that rare where memory is plentiful. On a microcontroller
-    // or a C64 (whose runtimes report pages of 1 KB and 256 bytes, as Fibers
-    // relies on too) 16 KB is most of the heap, and every fiber has a
-    // scratch arena of its own, so the first block is 2 KB and grows from there.
-    static nuint ScratchBlockSize => getpagesize() <= 1024 ? (nuint)(2 * 1024) : 16 * 1024;
+    /// <summary>
+    /// The size in bytes of a scratch arena's first block, which is the memory
+    /// each thread, and each fiber, that calls Scratch keeps until it ends.
+    /// 0, the default, means 16 KB, or 2 KB on a microcontroller or a
+    /// Commodore 64. A callback that needs more gets it from malloc and gives
+    /// it back when it returns, on every call: set this to what your
+    /// callbacks need at once and that stops. Set it lower where many fibers
+    /// need a little scratch memory each. The arena keeps a few bytes of the
+    /// block for itself. The setting applies to the scratch arenas made
+    /// afterwards, and a thread or fiber makes its own on its first Scratch
+    /// call, so set it first thing in Main.
+    /// </summary>
+    public static nuint ScratchSize;
+
+    /// <summary>
+    /// The most bytes a scratch arena may hold, its first block included: a
+    /// callback that needs more ends the program with a message. 0, the
+    /// default, means no limit. Set to the same as ScratchSize, each scratch
+    /// arena is one block that never calls malloc again. It applies to the
+    /// scratch arenas made afterwards, as ScratchSize does.
+    /// </summary>
+    public static nuint ScratchMaxCapacity;
+
+    // A scratch arena's first block, unless ScratchSize says otherwise.
+    // Scratch frees with Restore, so a scope that goes past the first block
+    // mallocs and frees a block each time: 16 KB keeps that rare where memory
+    // is plentiful. On a microcontroller or a C64 (whose runtimes report
+    // pages of 1 KB and 256 bytes, as Fibers relies on too) 16 KB is most of
+    // the heap, and every fiber has a scratch arena of its own, so the first
+    // block is 2 KB and grows from there.
+    static nuint ScratchBlockSize
+        => ScratchSize != 0 ? ScratchSize : getpagesize() <= 1024 ? (nuint)(2 * 1024) : 16 * 1024;
 
     /// <summary>
     /// Runs <paramref name="action"/> with a scope to allocate temporary memory
@@ -653,7 +682,10 @@ public partial struct Arena
             ScratchThread* thread = (ScratchThread*)Platform.pthread_getspecific(s_scratchKey);
             if (thread == null)
             {
-                Arena arena = Create(ScratchBlockSize, "scratch", stopOnOutOfMemory: true);
+                // The arena stops the program rather than return null, here
+                // too if ScratchMaxCapacity has no room for the ScratchThread.
+                Arena arena = Create(ScratchBlockSize, "scratch", stopOnOutOfMemory: true,
+                    maxCapacity: ScratchMaxCapacity);
                 thread = arena.Alloc<ScratchThread>();
                 thread->Arena = arena;
                 if (Platform.pthread_setspecific(s_scratchKey, thread) != 0)

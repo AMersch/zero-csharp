@@ -177,8 +177,16 @@ delegate. `tests/must-not-compile/` holds one program per way, and `test.sh` che
 refuses each. No `unsafe` is needed anywhere.
 
 The memory comes from a scratch arena of the thread's own, not from one of yours, so the Restore hazard
-can't happen: a `List` of yours that grows during the callback grows in its own arena. Calls nest, and
-each thread keeps its scratch arena, sized to the most it ever needed at once, until it ends.
+can't happen: a `List` of yours that grows during the callback grows in its own arena. Calls nest.
+
+Each thread, and each fiber, keeps the first block of its scratch arena until it ends: 16 KB, or 2 KB on
+a microcontroller or a C64. A callback that needs more gets it from malloc and gives it back when it
+returns, every time. `Arena.ScratchSize` changes the first block's size, larger so that big callbacks
+stop calling malloc, or smaller where many fibers each need a little. `Arena.ScratchMaxCapacity` limits
+how far a scratch arena may grow: a callback that needs more stops the program, with a message. Set to
+the same as `ScratchSize`, it makes each scratch arena one block that never calls malloc again. Both
+apply to the scratch arenas made afterwards, and a thread or fiber makes its own on its first `Scratch`
+call, so set them first thing in `Main`.
 
 The price is the callback. Data goes in and out through a state passed by `ref` (it may be a
 `ref struct` holding spans of yours) and through the callback's return value, so the lambda can be

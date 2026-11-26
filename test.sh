@@ -57,6 +57,7 @@ SMALL_SAMPLES=(
     SmallKeys
     SmallFibers
     SmallChannels
+    SmallScratch
 )
 SAMPLES=(
     Tiny
@@ -106,7 +107,7 @@ SAMPLES=(
 )
 
 # Samples WebAssembly can't run (as in build.sh): the fiber samples switch stacks.
-NOT_WASM=" Fibers Timers SmallFibers SmallChannels Network "
+NOT_WASM=" Fibers Timers SmallFibers SmallChannels SmallScratch Network "
 # Samples UEFI can't run (as in build.sh): lib/ has directories only on Linux,
 # macOS, Windows and WebAssembly.
 NOT_UEFI=" Directories Network "

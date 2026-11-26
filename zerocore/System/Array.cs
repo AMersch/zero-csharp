@@ -10,6 +10,14 @@ namespace System
         private int _length;
 
         public int Length => _length;
+
+        /// <summary>An empty T[]: the same one every time, so asking for it allocates nothing.</summary>
+        public static T[] Empty<T>() => EmptyArray<T>.Value;
+    }
+
+    internal static class EmptyArray<T>
+    {
+        internal static readonly T[] Value = new T[0];
     }
 
     // The compiler makes every T[] derive from this, with its interfaces: so an

@@ -1,7 +1,7 @@
 // Test: doubles as text with .NET's format strings, sized for a small
 // machine. A double is printed exactly, with big-number arithmetic that a
 // 6502 does 8 bits at a time: on a Commodore 64 (./build.sh --c64) that is
-// about 14 KB of code, so it has a sample to itself. SmallFormats.cs has the
+// about 24 KB of code, so it has a sample to itself. SmallFormats.cs has the
 // integers and string.Format, SmallDecimalFormats.cs decimal; Formats.cs
 // checks far more. Every expected string is what .NET 10 prints. It runs on
 // every target.

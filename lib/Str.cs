@@ -75,6 +75,25 @@ namespace System
             return s.Slice(start, length);
         }
 
+        // ---- array -> span -----------------------------------------------
+
+        /// <summary>The array's elements, without copying. Null gives an empty span.</summary>
+        public static Span<T> AsSpan<T>(this T[]? array) => new Span<T>(array);
+
+        /// <summary>The elements from start on. A start past the end stops the program.</summary>
+        public static Span<T> AsSpan<T>(this T[]? array, int start)
+            => new Span<T>(array, start, (array?.Length ?? 0) - start);
+
+        /// <summary>length elements from start. A range outside the array stops the program.</summary>
+        public static Span<T> AsSpan<T>(this T[]? array, int start, int length) => new Span<T>(array, start, length);
+
+        /// <summary>The elements in a range: array.AsSpan(1..^1).</summary>
+        public static Span<T> AsSpan<T>(this T[]? array, Range range)
+        {
+            (int start, int length) = range.GetOffsetAndLength(array?.Length ?? 0);
+            return new Span<T>(array, start, length);
+        }
+
         // ---- comparison ---------------------------------------------------
 
         /// <summary>Ordinal equality: the replacement for a == b.</summary>

@@ -1,4 +1,4 @@
-// Test: List<T> in an arena, sized for a small machine. Collections.cs
+// Test: List<T> in an arena, and spans over arrays, sized for a small machine. Collections.cs
 // checks more and doesn't fit in a Commodore 64 (./build.sh --c64).
 // It runs on every target. Exit code = number of failed checks.
 // Build: ./build.sh SmallLists
@@ -81,6 +81,23 @@ public static class Program
         List<int> none = default;
         Check("a list that wasn't created", none.Count == 0 && !none.Add(1));
         End("List");
+
+        int[] numbers = [1, 2, 3, 4, 5];
+        numbers.AsSpan()[0] = 10;
+        Check("AsSpan writes through to the array", numbers[0] == 10 && numbers.AsSpan().Length == 5);
+        Check("AsSpan(start), AsSpan(start, length)",
+            Sum(numbers.AsSpan(3)) == 9 && Sum(numbers.AsSpan(1, 2)) == 5);
+        Check("AsSpan(range)", Sum(numbers.AsSpan(1..^1)) == 9 && numbers.AsSpan(^2..).Length == 2);
+        int[]? missing = null;
+        Check("a null array is an empty span", missing.AsSpan().IsEmpty && missing.AsSpan(0, 0).IsEmpty);
+        int[] copy = numbers.AsSpan(1, 3).ToArray();
+        copy[0] = 0;
+        Check("ToArray copies", copy.Length == 3 && copy[2] == 4 && numbers[1] == 2);
+        ReadOnlySpan<int> readOnly = numbers;
+        Check("ReadOnlySpan.ToArray", Sum(readOnly.ToArray()) == 24);
+        Check("an empty span gives Array.Empty",
+            (object)Span<int>.Empty.ToArray() == Array.Empty<int>() && Array.Empty<int>().Length == 0);
+        End("Array");
 
         Console.WriteLine();
         if (s_failures == 0)

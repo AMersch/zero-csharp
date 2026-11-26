@@ -56,6 +56,7 @@ public static class Program
             Console.WriteLine("  builder-index        a StrBuilder index out of range");
             Console.WriteLine("  builder-replace-empty  a StrBuilder Replace of an empty string");
             Console.WriteLine("  scratch-outer-edit   a ScratchText inserted into inside a nested Arena.Scratch");
+            Console.WriteLine("  scratch-limit        an Arena.Scratch callback allocating past Arena.ScratchMaxCapacity");
             Console.WriteLine("  native-overflow      NativeMemory.Alloc with a count times size past the address space");
             Console.WriteLine("  native-zeroed-overflow  the same for NativeMemory.AllocZeroed");
             Console.WriteLine("  native-out-of-memory NativeMemory.Alloc of more than the system can give");
@@ -102,6 +103,7 @@ public static class Program
             case "builder-index": BuilderIndex(); break;
             case "builder-replace-empty": BuilderReplaceEmpty(); break;
             case "scratch-outer-edit": ScratchOuterEdit(); break;
+            case "scratch-limit": ScratchLimit(); break;
             case "native-overflow": NativeOverflow(); break;
             case "native-zeroed-overflow": NativeZeroedOverflow(); break;
             case "native-out-of-memory": NativeOutOfMemory(); break;
@@ -388,6 +390,21 @@ public static class Program
                 state.Text.Insert(0, 'a');
             });
         });
+    }
+
+    static void ScratchLimit()
+    {
+        // docs:scratch-limit
+        // First thing in Main, before anything calls Arena.Scratch:
+        Arena.ScratchSize = 1024;         // a scratch arena's first block,
+        Arena.ScratchMaxCapacity = 1024;  // and the most it may grow to
+
+        Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            scratch.AllocSpan<byte>(600);  // fits
+            scratch.AllocSpan<byte>(600);  // past the limit
+        });
+        // docs:end
     }
 
     static void PtrNull()

@@ -8,6 +8,7 @@
 
 using System;
 using System.Runtime;
+using System.Runtime.CompilerServices;
 
 namespace FibersSample;
 
@@ -86,6 +87,16 @@ public static class Program
             s.log.Add(s.id);
     }
     // docs:end
+
+    // Logs its id if two spans of 12 KB came out side by side, which only
+    // one block gives: a block of its own starts behind a header.
+    static void TwoSpans(scoped ScratchScope scratch, (Log log, int id) s)
+    {
+        Span<byte> first = scratch.AllocSpan<byte>(12_000);
+        Span<byte> second = scratch.AllocSpan<byte>(12_000);
+        if (Unsafe.AreSame(ref Unsafe.Add(ref first[0], 12_000), ref second[0]))
+            s.log.Add(s.id);
+    }
 
     // Uses an eighth more than the smallest stack (18 KB of 16, or 1.1 KB of
     // 1 on DOS or a microcontroller), then yields, so Run looks at the stack's
@@ -375,6 +386,20 @@ public static class Program
         Fiber.Run();
         // docs:end
         Check("both buffers intact", intact.Count == 2);
+        // A fiber's scratch arena keeps one block, 16 KB unless told otherwise
+        // (2 KB on a small machine): two spans of 12 KB don't both fit in it.
+        // In the 32 KB that Arena.ScratchSize asks for, they do.
+        var together = new Log();
+        Fiber.Spawn((together, 1), static s => Arena.Scratch(s, TwoSpans));
+        Fiber.Run();
+        Arena.ScratchSize = 32 * 1024;
+        Fiber.Spawn((together, 2), static s => Arena.Scratch(s, TwoSpans));
+        Fiber.Run();
+        Arena.ScratchSize = 0;
+        Fiber.Spawn((together, 3), static s => Arena.Scratch(s, TwoSpans));
+        Fiber.Run();
+        Check("ScratchSize sets the first block",
+            together.Count == 1 && together.Entries[0] == 2);
         Section("Scratch");
 
         // How long a switch takes: two fibers yielding to each other.

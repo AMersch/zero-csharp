@@ -61,6 +61,7 @@ SMALL_SAMPLES=(
     SmallKeys
     SmallFibers
     SmallChannels
+    SmallScratch
 )
 SAMPLES=(
     Tiny
@@ -111,7 +112,7 @@ SAMPLES=(
 )
 
 # Samples WebAssembly can't run (as in build.sh): the fiber samples switch stacks.
-NOT_WASM=" Fibers Timers SmallFibers SmallChannels Network "
+NOT_WASM=" Fibers Timers SmallFibers SmallChannels SmallScratch Network "
 # Samples UEFI can't run (as in build.sh): lib/ has directories only on Linux,
 # macOS, Windows and WebAssembly.
 NOT_UEFI=" Directories Network "
@@ -232,6 +233,7 @@ CX16_SAMPLES=(
     DiskInfo
     SmallFibers
     SmallChannels
+    SmallScratch
 )
 # Microcontrollers: no SIMD to benchmark, no PC screen for Vga. Blink is
 # theirs only, and checks itself. The Uno R4
@@ -582,6 +584,7 @@ test_cx16() {
 }
 
 test_c64() {
+    tests/c64-math/run.sh
     ./build.sh --c64 > /dev/null
     run_all "Commodore 64 (VICE)" c64 check
 }

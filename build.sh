@@ -78,6 +78,7 @@ SMALL_SAMPLES=(
     SmallKeys
     SmallFibers
     SmallChannels
+    SmallScratch
 )
 ALL_SAMPLES=(
     Tiny
@@ -128,7 +129,7 @@ ALL_SAMPLES=(
 )
 # Samples WebAssembly can't run: the fiber samples switch stacks, which a WebAssembly
 # program has no way to do.
-NOT_WASM=" Fibers Timers SmallFibers SmallChannels Network "
+NOT_WASM=" Fibers Timers SmallFibers SmallChannels SmallScratch Network "
 # Programs with kernels for the GPU (Metal): only --gpu builds them.
 GPU_SAMPLES=(Gpu)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
@@ -243,6 +244,7 @@ CX16_SAMPLES=(
     DiskInfo
     SmallFibers
     SmallChannels
+    SmallScratch
 )
 # A microcontroller has no SIMD to benchmark, and Vga is a PC game. Blink is
 # for microcontrollers only (lib/Board.cs: the LED, registers, a timer). The Uno R4

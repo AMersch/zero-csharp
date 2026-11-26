@@ -34,6 +34,7 @@ scratch-set-outer|Arena.Scratch: a ScratchHashSet added to inside a nested Arena
 builder-index|StrBuilder: index out of range
 builder-replace-empty|StrBuilder: Replace of an empty string
 scratch-outer-edit|Arena.Scratch: a ScratchText changed by Insert or Replace inside a nested Arena.Scratch
+scratch-limit|Arena "scratch":|Arena: out of memory (it reached its maxCapacity)
 native-overflow|NativeMemory: the size overflows
 native-zeroed-overflow|NativeMemory: the size overflows
 native-out-of-memory|NativeMemory: out of memory

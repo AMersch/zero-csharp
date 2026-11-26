@@ -9,7 +9,7 @@ index: 27
 take turns: a fiber runs until it yields, sleeps, waits on a channel or ends, and then the next one in
 line runs. `Channel<T>` passes values between them, and `Pipe` streams bytes. Switching is
 cooperative, so fibers need no locks among themselves. `samples/Fibers.cs` runs every example below;
-`SmallFibers` and `SmallChannels` test the same on machines too small for it.
+`SmallFibers`, `SmallChannels` and `SmallScratch` test the same on machines too small for it.
 
 Fibers work on Linux (x64 and arm64), macOS, Windows, UEFI, DOS, microcontrollers (the Raspberry Pi
 Pico 2 and the Arduino Uno R4) and the Commodore 64. They need a way to switch stacks, so there are

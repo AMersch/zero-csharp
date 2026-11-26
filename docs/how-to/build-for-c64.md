@@ -100,6 +100,21 @@ one: `xvfb-run -a ./test.sh --c64` (`sudo apt install xvfb xauth`). A run that h
 With `--window` you get the machine itself: its screen, sound and keyboard, at 1 MHz. Close the window
 to end.
 
+A program that stops (a `NullReferenceException`, an index out of range, `Environment.FailFast`) also
+says where: the calls it was in, innermost first, read from the processor's stack. `run.sh --c64`
+shows them as method names:
+
+```text
+NullReferenceException
+  at Crash_Program__Read
+  at Crash_Program__Outer
+  at Crash_Program__Main
+```
+
+On the C64's own screen (`--window`, or a real machine) they stay addresses, `at $0A80 $19AF $089B
+...`, the first two being the helpers that stopped the program. `llvm-nm -n bin/c64/<Sample>.prg.elf`
+lists where each method starts: an address belongs to the last method that starts before it.
+
 ## Memory
 
 A program, its data, its heap and its stack share the 50 KB from `$0801` to `$CFFF`. These are the
@@ -118,43 +133,47 @@ programs `./test.sh --c64` runs:
 | `SmallDecimalFormats`, `SmallLists`, `SmallText`, `SmallUnicode`, `Paddles`, `C64Demo`, `SmallArena` | 34 to 36 KB | 14 to 16 KB |
 | `SmallBuilders` | 39 KB | 11 KB |
 | `SmallFibers`, `SmallChannels`, `SmallDoubleFormats` | 40 to 41 KB | 9 to 10 KB |
-| `SmallFloats` | 43 KB | 7 KB |
+| `SmallFloats`, `SmallScratch` | 43 KB | 6.6 to 7 KB |
 | `SmallDoubles`, `SmallFormats` | 45 KB | 4.6 to 5.4 KB |
 
 The size includes the 2 KB shadow stack NativeAOT-LLVM's code keeps object references on. The Small
 samples are tests written to fit: each covers a piece of what Strings, Casts, Collections and the
 other large samples check.
 
-What a feature costs once a program uses it, measured in these programs:
+What a feature adds to a program, measured as the difference between small programs with and without
+it (the collections and strings on top of an arena):
 
 | Feature | Cost |
 |---|---|
-| The runtime, with nothing else | 7 KB |
-| `Console.WriteLine` with `$"..."` formatting of whole numbers | 3 KB |
-| An arena | 4 KB |
-| `List<T>`, for two element types | 7 KB |
-| `Dict<int, int>` | 7 KB |
-| `StrDict<int>` | 9 KB |
-| `StrBuilder`, `Str.Format` and `Str.Concat` | 8 KB |
-| Arithmetic on `float` and `double` | 25 to 29 KB |
-| Printing a `double` | 7 KB more |
-| `char.IsLetter`, `IsDigit`, `IsUpper`, `IsLower`, `GetUnicodeCategory` (their Unicode table) | 16 KB |
-| `char.ToUpper`, `ToLower` above ASCII (their table) | 1.6 KB |
+| The runtime, with nothing else | 7.5 KB |
+| `Console.WriteLine` with `$"..."` formatting of whole numbers | 4 KB |
+| An arena | 9 KB |
+| `List<T>`, for two element types | 5.5 KB |
+| `Dict<int, int>` | 7.5 KB |
+| `StrDict<int>` | 10 KB |
+| `StrBuilder`, `Str.Format` and `Str.Concat` | 10 KB |
+| Arithmetic on `float` | 4.5 KB |
+| Arithmetic on `double` | 22 KB |
+| Printing a `float` or a `double` (`ToString`) | 24.5 KB |
+| `char.IsLetter`, `IsDigit`, `IsUpper`, `IsLower`, `GetUnicodeCategory` (their Unicode table) | 16.5 KB |
+| `char.ToUpper`, `ToLower` above ASCII (their table) | 2 KB |
 
-Floating point is the expensive one: the 6502 has none, and the software that stands in for it takes
-half the machine. Every kind of collection (each set of type arguments) is compiled separately and
-costs again.
+Floating point is the expensive one: the 6502 has none, and the software that stands in for it is far
+larger for `double` than for `float`. Printing either brings the code that prints a value exactly,
+with big-number arithmetic. A program that computes with `double` and prints the result doesn't fit;
+with `float` it does, with about 8 KB to spare. Every kind of collection (each set of type arguments)
+is compiled separately and costs again.
 
 The `char` methods know every Unicode character, so they bring tables. For text typed on a C64, the
 ASCII ones do the same job for free: `char.IsAsciiDigit`, `IsAsciiLetter`, `IsAsciiLetterUpper` and the
 rest are plain comparisons, and so are `IsWhiteSpace` and `IsControl`.
 
-So keep to whole numbers where you can, share collection types, and keep arenas small: 1 KB blocks
-instead of the default 4 KB. Memory really does run out here; `Arena.Create(..., stopOnOutOfMemory:
-true)` says so when it does (see [Catch arena mistakes](catch-arena-mistakes.html)). `maxCapacity` caps
-an arena so it leaves the rest of the heap alone, and `Arena.FromBuffer` over a static buffer takes its
-memory out of the program's data instead, so the arena is sure to have it once the program has loaded
-(see [An arena in a buffer of your own](../concepts/memory.html#an-arena-in-a-buffer-of-your-own)).
+So keep to whole numbers where you can, and to `float` where you can't; share collection types, and
+keep arenas small: 1 KB blocks instead of the default 4 KB. Memory really does run out here;
+`Arena.Create(..., stopOnOutOfMemory: true)` says so when it does (see [Catch arena
+mistakes](catch-arena-mistakes.html)). `maxCapacity` caps an arena so it leaves the rest of the heap
+alone, and `Arena.FromBuffer` over a static buffer takes its memory out of the program's data instead,
+so the arena is sure to have it once the program has loaded (see [An arena in a buffer of your own](../concepts/memory.html#an-arena-in-a-buffer-of-your-own)).
 
 The build already favors size everywhere: the C# compiler runs with `--Os`, every function is marked
 to be compiled for size, and llvm-mos optimizes the whole program at link time, which makes it a fifth
@@ -260,10 +279,16 @@ static void Frame(int frame, ref int x, ref int y, ref int dx, ref int dy)
 }
 ```
 
-`C64.ReadKey` gives the next key pressed without waiting, `C64.Joystick` the joystick in port 2, and
+`C64.ReadKey` gives the next key pressed without waiting, `C64.KeyHeld('w')` whether a key is held down
+(several at once: move and fire), `C64.Joystick` the joystick in port 2, and
 `C64.Peek` and `C64.Poke` reach every address there is, and cost what a load or a store costs:
 `C64.Poke(0xD020, 0)` compiles to one `STA $D020`. `C64.Print` takes about 170 processor cycles a
 character, of the 20,000 in a frame, so a full line is a third of a frame.
+
+The KERNAL's interrupt scans the keyboard, counts `C64.Ticks` and blinks the cursor 60 times a second,
+at about a tenth of the processor's time. A game that reads keys with `KeyHeld` can switch it off while
+it plays, `C64.KernalInterrupt = false`; `ReadKey` then gets nothing and `Ticks` stands still. The
+program's end switches it back on.
 
 ## A game
 

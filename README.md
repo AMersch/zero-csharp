@@ -105,8 +105,9 @@ that needs the runtime: no allocation, strings, `double` or calls into other met
 - P/Invoke and `[UnmanagedCallersOnly]` callbacks
 - Files, a monotonic clock and the date, and seeded random numbers, from `lib/`, on every target
 - SIMD intrinsics (NEON, AVX2, FMA), `Interlocked`, `Volatile`, threads through `Parallel.For`, and green threads (fibers) with channels
+- `async`/`await` with `Task`, `ValueTask` and cancellation, on fibers; async sockets and files
 
-Every `new` is a `calloc` that is never freed. There is no async/await, no LINQ from .NET (`lib/Seq.cs`
+Every `new` is a `calloc` that is never freed. There is no LINQ from .NET (`lib/Seq.cs`
 has `Where`, `Select` and friends without allocating), no culture-aware formatting, and casts that need
 variance stop the program. [Limits](https://onurgumus.github.io/zero-csharp/concepts/limits.html) has
 the full list.

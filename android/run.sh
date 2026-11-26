@@ -26,6 +26,11 @@ if [ ! -f "$program" ]; then
 fi
 
 if [ "${ANDROID_RUN:-}" = container ]; then
+    # Fetched first, quietly: docker run would report the download in the
+    # program's output.
+    if ! docker image inspect ubuntu:24.04 > /dev/null 2>&1; then
+        docker pull -q ubuntu:24.04 > /dev/null
+    fi
     tty=()
     [ -t 0 ] && tty=(-t)
     exec docker run --rm -i ${tty[@]+"${tty[@]}"} --platform linux/arm64 --user "$(id -u):$(id -g)" \

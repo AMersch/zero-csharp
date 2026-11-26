@@ -63,6 +63,7 @@ More: [Coming from .NET](https://onurgumus.github.io/zero-csharp/get-started/com
 |---|---|---|
 | Linux x64 and arm64 | `./build.sh` | 12 KB (Tiny) to 84 KB (Collections) |
 | macOS, Apple Silicon | `./build.sh --mac`, on a Mac | from 50 KB |
+| iOS simulator, Apple Silicon | `./build.sh --ios`, on a Mac with Xcode | from 50 KB |
 | macOS with C# kernels on the GPU (Metal), experimental | `./build.sh --gpu`, on a Mac | 118 KB (the Gpu sample) |
 | Windows x64 | `./build.sh --win`, from Linux or macOS | 9 KB to 68 KB |
 | WebAssembly (WASI) | `./build.sh --wasm` | 16 KB to 80 KB |

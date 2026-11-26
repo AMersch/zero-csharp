@@ -13,6 +13,8 @@
 //                                               for the NVPTX backend (Ptx.cs)
 //   zero-bitcode gpu-bitcode, gpu-kernels       a program's GPU kernels (Gpu.cs)
 //   zero-bitcode cuda-kernels, cuda-clang       the same for NVIDIA GPUs (Cuda.cs)
+//   zero-bitcode macho-platform OBJ PLATFORM MINOS  a macOS object marked as built
+//                                               for the iOS simulator (MachO.cs)
 //
 // They began as Python scripts (c64/ll2mos.py, c64/wasm2mos.py,
 // dos/wasm2i386.py, removed after the port was checked to write the same
@@ -58,6 +60,7 @@ static class Program
                zero-bitcode gpu-kernels BITCODEDIR NAME METAL.m OUTDIR
                zero-bitcode cuda-kernels BITCODEDIR NAME ARCH OUTDIR [CLANG] [SM]
                zero-bitcode cuda-clang [CLANG]
+               zero-bitcode macho-platform OBJECT macos|ios|ios-simulator MINOS
         """;
 
     static int Main(string[] args)
@@ -113,6 +116,9 @@ static class Program
                     return 0;
                 case "cuda-clang":
                     Cuda.CheckClang(args[1..]);
+                    return 0;
+                case "macho-platform":
+                    MachO.Platform(args[1..]);
                     return 0;
                 default:
                     Console.Error.WriteLine(Usage);

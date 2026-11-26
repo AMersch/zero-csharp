@@ -90,6 +90,19 @@ is_macho_arm64() {
     [ "$(byte_at "$1" 0)" = 207 ] && [ "$(byte_at "$1" 1)" = 250 ] && [ "$(byte_at "$1" 2)" = 237 ] && [ "$(byte_at "$1" 3)" = 254 ] &&
         [ "$(byte_at "$1" 4)" = 12 ] && [ "$(byte_at "$1" 5)" = 0 ] && [ "$(byte_at "$1" 6)" = 0 ] && [ "$(byte_at "$1" 7)" = 1 ]
 }
+# macho_platform <file>: the platform its LC_BUILD_VERSION names (1 macOS,
+# 2 iOS, 7 the iOS simulator), or nothing.
+macho_platform() {
+    local f=$1 count offset=32 i command size
+    count=$(od -An -tu4 -j16 -N4 "$f" | tr -d ' ')
+    for ((i = 0; i < count; i++)); do
+        command=$(od -An -tu4 -j"$offset" -N4 "$f" | tr -d ' ')
+        size=$(od -An -tu4 -j$((offset + 4)) -N4 "$f" | tr -d ' ')
+        if [ "$command" = 50 ]; then od -An -tu4 -j$((offset + 8)) -N4 "$f" | tr -d ' '; return; fi
+        [ "${size:-0}" -gt 0 ] || return
+        offset=$((offset + size))
+    done
+}
 # The host's own target's native library suffix (NativeLib=Shared).
 case "$HOST_OS" in Windows) HOST_LIB_EXT=.dll ;; Darwin) HOST_LIB_EXT=.dylib ;; *) HOST_LIB_EXT=.so ;; esac
 # is_elf_shared <file>, is_macho_dylib <file>, is_pe_dll <file>: a native
@@ -248,6 +261,7 @@ test_payload_complete() {
              native/win-x64/start.obj native/win-x64/runtime.obj native/win-x64/library.obj native/win-x64/zerocore.obj \
              native/osx-arm64/start.o native/osx-arm64/runtime.o native/osx-arm64/library.o native/osx-arm64/zerocore.o \
              native/osx-arm64/libSystem.tbd VERSIONS.txt \
+             native/iossimulator-arm64/{start,runtime,zerocore,launch}.o native/iossimulator-arm64/{libSystem.tbd,boot.sh} \
              native/uefi-x64/{start,runtime,machine,stack,zerocore}.obj native/uefi-x64/libm.lib \
              native/uefi-arm64/{start,runtime,machine,stack,zerocore}.obj native/uefi-arm64/libm.lib \
              native/c64/System.Private.CoreLib.dll native/c64/runtime.c native/gpu/metal.m \
@@ -276,6 +290,13 @@ test_payload_complete() {
     if ! grep -q "install-name: *'/usr/lib/libSystem.B.dylib'" "$payload/native/osx-arm64/libSystem.tbd" ||
        ! grep -q "arm64-macos" "$payload/native/osx-arm64/libSystem.tbd"; then
         fail "payload complete" "libSystem.tbd doesn't name /usr/lib/libSystem.B.dylib for arm64-macos"; return
+    fi
+    for f in start.o runtime.o zerocore.o launch.o; do
+        if ! is_macho_arm64 "$payload/native/iossimulator-arm64/$f"; then fail "payload complete" "iossimulator-arm64/$f isn't arm64 Mach-O"; return; fi
+        if [ "$(macho_platform "$payload/native/iossimulator-arm64/$f")" != 7 ]; then fail "payload complete" "iossimulator-arm64/$f isn't built for the iOS simulator"; return; fi
+    done
+    if ! grep -q "arm64-ios-simulator" "$payload/native/iossimulator-arm64/libSystem.tbd"; then
+        fail "payload complete" "iossimulator-arm64/libSystem.tbd doesn't name arm64-ios-simulator"; return
     fi
     pass "payload complete"
 }
@@ -2023,6 +2044,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     artifacts_path_with_spaces trim_windows_layout trim_stamp llama_template sdl_template pico_template
     framework_from_property newer_sdk_library
     mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
+    ios_simulator_target ios_simulator_errors
     trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd mac_target_newer_dylib
     tutorial_steps simd_instruction_set static_constructor_threads
     native_library_dotnet native_library_exports native_library_two native_library_errors
@@ -2232,6 +2254,46 @@ test_mac_target_links_libm_and_threads() {
     if ! is_macho_arm64 "$dir/bin/Debug/$TFM/osx-arm64/threads"; then fail "$name" "osx-arm64/threads isn't an arm64 Mach-O program"; return; fi
     mkdir -p "$WORK/mac-built/$HOST_RID"
     cp "$dir/bin/Debug/$TFM/osx-arm64/threads" "$WORK/mac-built/$HOST_RID/threads"
+    pass "$name"
+}
+
+# ZeroTarget=iossimulator-arm64: bflat's macOS object, marked as built for the
+# iOS simulator (zero-bitcode macho-platform) and linked by the package's
+# ld64.lld, so every host builds it. A path with spaces and a non-ASCII
+# letter goes through the build and through dotnet run's launcher. On a Mac
+# with a simulator, dotnet run starts it in the project's folder, with its
+# arguments, and returns its exit code.
+test_ios_simulator_target() {
+    local name="ios simulator target" dir program code
+    can_build "$name" || return
+    dir=$(fixture iosrun "ios space/Zoë Ann")
+    if ! run_in "$dir" iossim build -p:ZeroTarget=iossimulator-arm64; then fail "$name" "dotnet build failed"; return; fi
+    program=$dir/bin/Debug/$TFM/iossimulator-arm64/iosrun
+    if ! is_macho_arm64 "$program"; then fail "$name" "no arm64 Mach-O program"; return; fi
+    if [ "$(macho_platform "$program")" != 7 ]; then fail "$name" "the program isn't built for the iOS simulator"; return; fi
+    if [ "$HOST_RID" != osx-arm64 ]; then pass "$name (built; running needs a Mac)"; return; fi
+    if ! xcrun simctl list devices available 2> /dev/null | grep -qE '^ +iPhone'; then
+        skip "$name" "built; no iPhone simulator to run it in (Xcode's iOS platform)"; return
+    fi
+    code=0
+    run_in "$dir" iossim-run run -p:ZeroTarget=iossimulator-arm64 -- "an argument" é || code=$?
+    if [ "$code" != 3 ]; then fail "$name" "dotnet run exited with $code, not the program's 3"; return; fi
+    if [ "$(tail -3 "$LOG")" != "$(printf 'in the project folder\nan argument\né')" ]; then
+        fail "$name" "dotnet run printed something else"; return
+    fi
+    pass "$name"
+}
+
+# The iOS simulator takes programs only: no native libraries, no GPU kernels.
+test_ios_simulator_errors() {
+    local name="ios simulator errors" dir
+    can_build "$name" || return
+    dir=$(fixture nativelib iossimlib)
+    if run_in "$dir" iossim-lib build -p:ZeroTarget=iossimulator-arm64; then fail "$name" "a native library built for the simulator"; return; fi
+    if ! grep -q "ZeroTarget 'iossimulator-arm64' has no shared libraries" "$LOG"; then fail "$name" "no message about native libraries"; return; fi
+    dir=$(fixture native iossimgpu)
+    if run_in "$dir" iossim-gpu build -p:ZeroTarget=iossimulator-arm64 -p:ZeroGpu=Metal; then fail "$name" "ZeroGpu=Metal built for the simulator"; return; fi
+    if ! grep -q "ZeroGpu=Metal builds for ZeroTarget osx-arm64" "$LOG"; then fail "$name" "no message about the GPU"; return; fi
     pass "$name"
 }
 

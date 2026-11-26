@@ -21,6 +21,7 @@
 #                              samples that fit in it
 #         ./test.sh --win      Windows x64, under Wine in a container
 #         ./test.sh --mac      macOS, natively (on a Mac with Apple Silicon)
+#         ./test.sh --ios      iOS, in the simulator (on a Mac with Apple Silicon and Xcode's iOS platform)
 #         ./test.sh --uefi     UEFI, in QEMU on OVMF, for BFLAT_ARCH (x64 or arm64)
 #         ./test.sh --all      native, the other architecture (macOS only, run
 #                              under emulation), Windows, macOS (on Apple
@@ -266,6 +267,7 @@ run_all() {
     fi
     [ "$target" = win ] && run+=(--win)
     [ "$target" = mac ] && run+=(--mac)
+    [ "$target" = ios ] && run+=(--ios)
     if [ "$target" = uefi ]; then
         run+=(--uefi)
         samples=(Vga)
@@ -471,6 +473,11 @@ test_mac() {
     run_all "macOS arm64" mac check
 }
 
+test_ios() {
+    ./build.sh --ios > /dev/null
+    run_all "iOS simulator arm64" ios check
+}
+
 test_win() {
     ./build.sh --win > /dev/null
     # Build the Wine image now, if needed, so its build log doesn't end up in
@@ -519,6 +526,7 @@ case "${1:-}" in
     --r4)     test_r4 ;;
     --win)    test_win ;;
     --mac)    test_mac ;;
+    --ios)    test_ios ;;
     --gpu)    test_gpu ;;
     --gpu-air) TMPDIR_GPU_AIR=$(mktemp); test_gpu_air; rm -f "$TMPDIR_GPU_AIR" ;;
     --uefi)   test_uefi ;;
@@ -577,7 +585,7 @@ case "${1:-}" in
             echo "(skipping the microcontrollers: run ./setup.sh --arm first)"
         fi
         ;;
-    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --gpu | --gpu-air | --uefi | --all | --update]" >&2; exit 2 ;;
+    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --ios | --gpu | --gpu-air | --uefi | --all | --update]" >&2; exit 2 ;;
 esac
 
 echo

@@ -418,8 +418,8 @@ nothing may keep a reference to one. The compiler can break that rule for you in
 - **Cached lambdas.** A lambda that captures nothing is created the first time it runs and kept in a
   hidden static field. If that first time is inside the scope, the static field ends up pointing into
   the arena. Run such code once before opening a scope. With `Arena.DebugChecks` on when the arena
-  was created, closing the scope checks every static field and stops the program if one points into
-  the arena. Static constructors are safe: whatever one creates is allocated outside every scope, since
+  was created, `Reset`, `Restore` and `Destroy` check every static field and stop the program if one
+  points into the memory they are about to free. Static constructors are safe: whatever one creates is allocated outside every scope, since
   it's kept for the rest of the program.
 - **Captured variables from outside.** A lambda that captures a variable declared outside the scope is
   cached in the object that holds that variable, which the check can't see. Declare what a lambda
@@ -428,8 +428,8 @@ nothing may keep a reference to one. The compiler can break that rule for you in
 <!-- sample: samples/Queries.cs capture-in-scope -->
 ```csharp
 // In an arena's object scope the closure and delegate go into the
-// arena, and each Reset frees them. With DebugChecks on, closing the
-// scope also checks that no static field points into the arena: the
+// arena, and each Reset frees them. With DebugChecks on, each Reset
+// also checks that no static field points into the arena: the
 // lambdas the compiler caches in static fields all ran before, so
 // none does.
 Arena.DebugChecks = true;

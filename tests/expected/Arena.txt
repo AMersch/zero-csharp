@@ -49,5 +49,7 @@ FromBuffer 1024: capacity 880, 2000 bytes refused
 Arena "local": 16 of 880 bytes used (peak 16 of 880), 1 block, in a buffer
   block 1: 880 bytes, 864 free (current)
 
+Static kept from a scope on a lasting arena: True, a second Dispose left the newer scope: True
+
 DebugChecks: pointer is live before Reset: True
 After Reset the stale pointer reads 0xDDDDDDDD, IsLive: False

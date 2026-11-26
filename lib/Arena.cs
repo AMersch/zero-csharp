@@ -86,6 +86,7 @@ public partial struct Arena
         public bool Poison;        // DebugChecks was on when the arena was created
         public bool StopOnOutOfMemory;
         public bool InBuffer;      // from FromBuffer: the caller owns the memory
+        public bool HadObjects;    // an object scope has sent objects here
         public nuint Used;         // bytes handed out, padding excluded
         public nuint Capacity;     // sum of all block sizes
         public nuint PeakUsed;     // the highest Used and Capacity so far;
@@ -136,6 +137,8 @@ public partial struct Arena
     ///   That catches a collection used after its arena was reset, and one that
     ///   grew after a Save() (into a new buffer or in place) and was used after
     ///   the Restore().
+    /// - For an arena an object scope has used, Reset, Restore and Destroy
+    ///   first check that no static field points into what they free.
     /// It can't catch everything: once freed memory has been handed out again,
     /// a stale pointer into it looks valid. And it costs time: a fill on every
     /// free, a check on every collection operation.
@@ -611,6 +614,13 @@ public partial struct Arena
             if (keep == null || mark.Used > state->Used || (keep == state->Current && mark.Ptr > state->Ptr))
                 Fail(state, "Arena.Restore: the mark was already freed by restoring an older one (restore marks newest first)");
 
+            if (state->HadObjects && state->Poison)
+            {
+                CheckStatics(state, mark.Ptr, keep == state->Current ? state->Ptr : keep->End, "Arena.Restore");
+                for (Block* after = keep->Next; after != null; after = after->Next)
+                    CheckStatics(state, after->Start, after == state->Current ? state->Ptr : after->End, "Arena.Restore");
+            }
+
             // SAFETY: keep is in the chain; the blocks after it were added
             // since the mark and are freed once.
             Block* block = keep->Next;
@@ -681,8 +691,10 @@ public partial struct Arena
     /// before opening the scope. (Static constructors are no concern: what
     /// one creates is allocated outside every scope, so F#'s cached lambdas,
     /// made by static constructors, are too.) With Arena.DebugChecks on when the
-    /// arena was created, closing the scope checks every static field and
-    /// stops the program if one points into the arena.
+    /// arena was created, Reset, Restore and Destroy check every static field
+    /// and stop the program if one points into the memory they are about to
+    /// free. Statics pointing into memory that stays are fine: an object kept
+    /// in a static from an arena that is never freed is no mistake.
     /// The compiler also caches delegates outside static fields: a lambda that
     /// captures a variable declared outside the scope is cached in the closure
     /// that holds that variable, an object from outside, and the check can't
@@ -691,12 +703,16 @@ public partial struct Arena
     /// </safety>
     public unsafe ObjectScope AllocateObjectsHere()
     {
+        if (_state == null)
+            Environment.FailFast("Arena.AllocateObjectsHere: the arena was not created");
         ObjectScope scope = default;
         scope.State = _state;
+        scope.Open = true;
         unsafe
         {
             // SAFETY: ObjectAllocator only stores the pointers; AllocateObject
             // is given this arena's live state, which the caller keeps alive.
+            _state->HadObjects = true;
             System.Runtime.ObjectAllocator.Get(out scope.PreviousAllocate, out scope.PreviousContext);
             System.Runtime.ObjectAllocator.Set(&AllocateObject, _state);
         }
@@ -730,17 +746,14 @@ public partial struct Arena
     /// </safety>
     public unsafe ObjectScope OpenObjectScope()
     {
-        ObjectScope scope = default;
-        scope.Mark = Save();
-        scope.FreeOnDispose = _state != null;
-        unsafe
-        {
-            // SAFETY: as in AllocateObjectsHere.
-            ObjectScope objects = AllocateObjectsHere();
-            scope.PreviousAllocate = objects.PreviousAllocate;
-            scope.PreviousContext = objects.PreviousContext;
-            scope.State = objects.State;
-        }
+        if (_state == null)
+            Environment.FailFast("Arena.OpenObjectScope: the arena was not created");
+        Mark mark = Save();
+        ObjectScope scope;
+        // SAFETY: as in AllocateObjectsHere.
+        unsafe { scope = AllocateObjectsHere(); }
+        scope.Mark = mark;
+        scope.FreeOnDispose = true;
         return scope;
     }
 
@@ -761,22 +774,22 @@ public partial struct Arena
         internal void* State; // the arena's State*
         internal Mark Mark;
         internal bool FreeOnDispose; // from OpenObjectScope
+        internal bool Open;          // until the first Dispose
 
         /// <summary>
-        /// Puts back the previous allocator; with DebugChecks, also checks that
-        /// no static field points into the arena. From OpenObjectScope, then
-        /// frees everything allocated inside.
+        /// Puts back the previous allocator. From OpenObjectScope, then frees
+        /// everything allocated inside. A second Dispose, or one of a scope
+        /// that was never opened, does nothing.
         /// </summary>
         public void Dispose()
         {
+            if (!Open)
+                return;
+            Open = false;
             // SAFETY: puts back what AllocateObjectsHere found.
             unsafe { System.Runtime.ObjectAllocator.Set(PreviousAllocate, PreviousContext); }
-            // Checked before freeing, while the scope's objects are still in
-            // the arena's blocks.
-            unsafe { CheckStatics((State*)State); } // SAFETY: State is the scope's live arena.
             if (FreeOnDispose)
             {
-                FreeOnDispose = false; // a second Dispose frees nothing
                 // SAFETY: OpenObjectScope's caller promised that nothing created
                 // inside the scope is used after it.
                 unsafe { new Arena { _state = (State*)State }.Restore(Mark); }
@@ -784,23 +797,32 @@ public partial struct Arena
         }
     }
 
-    // With debug checks on: stops the program if a static field points into
-    // the arena, which only an object created inside AllocateObjectsHere can
-    // make happen.
-    static unsafe void CheckStatics(State* state)
+    // With debug checks on, for an arena an object scope has used: stops the
+    // program if a static field points into [start, end), memory about to be
+    // freed. Only an object created inside an object scope can make that
+    // happen; statics that point into memory that stays are fine.
+    static unsafe void CheckStatics(State* state, byte* start, byte* end, string freeing)
     {
         unsafe
         {
-            // SAFETY: the scope's caller keeps the arena alive until the scope
-            // is disposed, and the block list belongs to it.
-            if (state == null || !state->Poison)
+            // SAFETY: callers pass a live state; [start, end) is in its blocks.
+            if (state->HadObjects && state->Poison && start < end
+                && System.Runtime.ObjectAllocator.StaticsReferInto(start, end))
+                Fail(state, freeing + ": a static field points at an object it is about to free. "
+                    + "A C# lambda that captures nothing probably ran for the first time inside an object scope; run it once before.");
+        }
+    }
+
+    // CheckStatics over everything the arena has handed out.
+    static unsafe void CheckAllStatics(State* state, string freeing)
+    {
+        unsafe
+        {
+            // SAFETY: callers pass a live state and the block list is its own.
+            if (!state->HadObjects || !state->Poison)
                 return;
             for (Block* block = state->First; block != null; block = block->Next)
-            {
-                if (System.Runtime.ObjectAllocator.StaticsReferInto(block->Start, block->End))
-                    Fail(state, "Arena.AllocateObjectsHere: a static field points at an object created inside the scope. "
-                        + "A C# lambda that captures nothing probably ran for the first time inside it; run it once before.");
-            }
+                CheckStatics(state, block->Start, block == state->Current ? state->Ptr : block->End, freeing);
         }
     }
 
@@ -888,6 +910,7 @@ public partial struct Arena
 
         unsafe
         {
+            CheckAllStatics(state, "Arena.Reset");
             state->Used = 0;
             state->Generation++;
 
@@ -934,6 +957,10 @@ public partial struct Arena
 
         unsafe
         {
+            System.Runtime.ObjectAllocator.Get(out _, out void* current);
+            if (current == state)
+                Fail(state, "Arena.Destroy: the arena is in use by an object scope that is still open on this thread");
+            CheckAllStatics(state, "Arena.Destroy");
             if (state->InBuffer)
             {
                 // The memory is the caller's: nothing to free, but a stale

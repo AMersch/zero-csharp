@@ -100,6 +100,21 @@ one: `xvfb-run -a ./test.sh --c64` (`sudo apt install xvfb xauth`). A run that h
 With `--window` you get the machine itself: its screen, sound and keyboard, at 1 MHz. Close the window
 to end.
 
+A program that stops (a `NullReferenceException`, an index out of range, `Environment.FailFast`) also
+says where: the calls it was in, innermost first, read from the processor's stack. `run.sh --c64`
+shows them as method names:
+
+```text
+NullReferenceException
+  at Crash_Program__Read
+  at Crash_Program__Outer
+  at Crash_Program__Main
+```
+
+On the C64's own screen (`--window`, or a real machine) they stay addresses, `at $0A80 $19AF $089B
+...`, the first two being the helpers that stopped the program. `llvm-nm -n bin/c64/<Sample>.prg.elf`
+lists where each method starts: an address belongs to the last method that starts before it.
+
 ## Memory
 
 A program, its data, its heap and its stack share the 50 KB from `$0801` to `$CFFF`. These are the

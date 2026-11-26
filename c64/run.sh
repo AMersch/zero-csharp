@@ -101,8 +101,16 @@ code=0
 
 # The log has, for each character printed, a line like
 #   .C:950c  86 34       STX $34        - A:61 X:00 Y:00 SP:de ..-...ZC    3249844
+#
+# A program that stops (a NullReferenceException, Environment.FailFast)
+# prints "at $0A80 $19AF ...": the calls it was in, innermost first (see
+# trace in c64/runtime.c). That line becomes the methods' names, from the
+# program's symbols, without the helpers that stopped it and the startup
+# code that called Main.
 if [ -f "$work/monitor.log" ]; then
-    python3 - "$work/monitor.log" "$address" <<'EOF'
+    "$LLVM_MOS/bin/llvm-nm" -n "$program.elf" > "$work/symbols.txt"
+    python3 - "$work/monitor.log" "$address" "$work/symbols.txt" <<'EOF'
+import bisect
 import re
 import sys
 
@@ -113,7 +121,31 @@ with open(sys.argv[1], "rb") as log:
         m = line.match(text)
         if m:
             out.append(int(m.group(1), 16))
-sys.stdout.buffer.write(out)
+
+functions = []
+with open(sys.argv[3]) as symbols:
+    for text in symbols:
+        parts = text.split()
+        if len(parts) == 3 and parts[1] in "tTW":
+            functions.append((int(parts[0], 16), parts[2]))
+starts = [address for address, _ in functions]
+
+def name(address):
+    i = bisect.bisect_right(starts, address) - 1
+    return functions[i][1] if i >= 0 else f"${address:04X}"
+
+def methods(match):
+    names = [name(int(h, 16)) for h in re.findall(rb"\$([0-9A-F]{4})", match.group(0))]
+    while names and re.search(r"FailFast|ThrowHelpers|RhpThrow", names[0]):
+        names.pop(0)
+    shown = []
+    for n in names:
+        if "__Module___MainMethodWrapper" in n or "__Module___StartupCodeMain" in n:
+            break
+        shown.append(b"  at " + n.encode())
+    return b"\n".join(shown) if shown else match.group(0)
+
+sys.stdout.buffer.write(re.sub(rb"(?m)^at( \$[0-9A-F]{4})+$", methods, bytes(out)))
 EOF
 fi
 

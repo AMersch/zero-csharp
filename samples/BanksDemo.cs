@@ -60,8 +60,9 @@ public static class Program
     public static int Main()
     {
         // The emulator starts with 512 KB: 64 banks, and the KERNAL has the first.
-        Check("banks", Banks.Count == 63);
-        Check("size", Banks.Size == 63 * Banks.BankSize);
+        // An X16 has 512 KB to 2 MB of banked RAM, 64 banks to each 512 KB; the KERNAL's isn't counted.
+        Check("banks", Banks.Count >= 63 && Banks.Count <= 255 && (Banks.Count + 1) % 64 == 0);
+        Check("size", Banks.Size == Banks.Count * Banks.BankSize);
 
         // The first, the middle and the last bank, each with the borders around them.
         int last = Banks.Size - 1;

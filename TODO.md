@@ -28,9 +28,9 @@ output and no mouse: what can only be heard or seen needs a check in a window, o
 
 ## Also open
 
-- **Real hardware:** nothing here has run on a real X16. Test at least `Mouse`, `DiskFiles` and a program with code in banks (two files on the SD card).
+- **Real hardware:** tried on an X16 with ROM R47, VERA 47.0.2, SMC 47.0.0 and 2 MB of banked RAM. Passed there: `Tiny`, code and data in banks (`BanksWithCode`, `BanksDemo`), files on the SD card (`DiskFiles`, `DiskList`, `DiskInfo`, `DiskFolders`, `DiskChange`) and, once the clock was set, `ClockSeed`. **Not yet tried there:** the graphics (`ScreenModes`, `BitmapShapes`, `BitmapDemo`, `TileDemo`, `VeraFxDemo`, `Jameson`), sound (`SoundDemo`, `PcmDemo`), `Mouse` and `CX16Demo`, the rest of the samples, fibers, ROM R49, and a drive on the serial bus.
 - **`cx16/math.c` for the C64:** the C64 runtime has no sin, cos, exp, log or pow either; the file stands alone and could be shared.
 - **Heap with code in banks:** the build now moves the floating point library too and goes on until 4 KB are left, but it can only move what is code in a function of up to 7 KB: not the runtime (`cx16/runtime.c`, 5 KB for filled triangles), the data (3 KB), the 2 KB shadow stack, or one huge method. The functions are picked by size, not by how often they run.
-- **Files:** four open at once. Reading is byte by byte through the KERNAL: its block read (`MACPTR`) would be much faster. A listing for `Disk` holds some 250 entries. The code of `File`, `Directory` and `FileStream` is large, and `cx16/runtime.c`'s file functions can't go into banks. Tested on a card image in the emulator, not on a real card or a serial drive.
+- **Files:** four open at once. Reading is byte by byte through the KERNAL: its block read (`MACPTR`) would be much faster. A listing for `Disk` holds some 250 entries. The code of `File`, `Directory` and `FileStream` is large, and `cx16/runtime.c`'s file functions can't go into banks. Tested on a card image in the emulator and on a real card, not on a drive on the serial bus.
 - **Sockets** (`lib/Net.cs`): not there, as the X16 has no network.
 - **Headless testing** has no frame interrupt: the clock, joysticks and mouse can't be tested there.

@@ -29,7 +29,8 @@ public static class Program
     {
         // What the clock says at the start, to put back at the end.
         CalendarTime started = Clock.UtcNow;
-        Check("the year is this one or later", started.Year >= 2025 && started.Year < 2100);
+        // (A real X16 whose clock has never been set starts at 2000.)
+        Check("the year is in this century", started.Year >= 2000 && started.Year < 2100);
         Check("the other fields are in range", started.Month >= 1 && started.Month <= 12 && started.Day >= 1 && started.Day <= 31
             && started.Hour < 24 && started.Minute < 60 && started.Second < 60);
 

@@ -32,8 +32,9 @@ public static class Program
     {
         Check("formatting before", Show(0.1 + 0.2) == "0.30000000000000004" && Show(2.5) == "2.5");
 
-        // Some of the program is in banks 1 to n, so there are fewer for data.
-        Check("data banks start after the code", Banks.Count < 63 && Banks.Count >= 40);
+        // Some of the program is in banks 1 to n, so there are fewer for data than the machine's
+        // banks (64 to each 512 KB of its banked RAM) less the KERNAL's one.
+        Check("data banks start after the code, banks: " + Banks.Count.ToString(), (Banks.Count + 1) % 64 != 0 && Banks.Count >= 40);
 
         // 3,000 doubles: 24,000 bytes, over four banks.
         BankedArray<double> roots = BankedArray<double>.Create(3000);

@@ -493,6 +493,7 @@ test_dos() {
 }
 
 test_c64() {
+    tests/c64-math/run.sh
     ./build.sh --c64 > /dev/null
     run_all "Commodore 64 (VICE)" c64 check
 }

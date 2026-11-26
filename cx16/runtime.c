@@ -45,8 +45,13 @@ static char in_emulator;
 // and ends the emulator.
 static char iso_mode;       // cs_cx16_clear switched the screen to ISO text
 
+// Set by the PCM code once it has hooked the interrupt, which must not stay hooked.
+static void (*pcm_shutdown)(void);
+
 static void leave(int code)
 {
+    if (pcm_shutdown)
+        pcm_shutdown();
     if (iso_mode)
         cbm_k_chrout(0x8F); // back to PETSCII, for BASIC
     if (in_emulator)
@@ -2010,6 +2015,290 @@ void cs_cx16_voice(i32 voice, i32 frequency, i32 volume, i32 waveform)
     bytes[2] = (unsigned char)(0xC0 | (volume & 63));   // both speakers
     bytes[3] = (unsigned char)(waveform << 6 | 63);
     cs_cx16_vcopy(0x1F9C0u + (unsigned)voice * 4, bytes, 4);
+}
+
+// ---- PCM audio, for lib/Pcm.cs ---------------------------------------------------------
+//
+// VERA plays samples from a 4 KB FIFO and can interrupt when it is less than a quarter
+// full (AFLOW). The handler below then puts the next bytes into it, so a sound plays
+// while the program does something else. It is hooked into the KERNAL's interrupt
+// vector, CINV, where the registers are already saved and the KERNAL's ROM is switched
+// in: for AFLOW alone it returns by itself (ply, plx, pla, rti, which goes back through
+// the KERNAL's own stub), for anything else it goes on to the old handler. It is in
+// assembly because C code in an interrupt would need the compiler's zero page registers
+// saved. The data is read through the operand of an instruction it writes itself, from
+// fixed RAM or, bank after bank, from the banked RAM.
+
+__asm__(
+    ".section .text.cx16_pcm,\"awx\",@progbits\n"
+    ".global cx16_pcm_irq\n"
+    "cx16_pcm_irq:\n"
+    "  lda $9f27\n"                 // ISR
+    "  and $9f26\n"                 // IEN
+    "  and #$08\n"                  // AFLOW?
+    "  beq 1f\n"
+    "  stz cx16_pcm_budget\n"
+    "  lda #6\n"                    // 1536 bytes: there is room, with less than 1 KB in the FIFO
+    "  sta cx16_pcm_budget+1\n"
+    "  jsr cx16_pcm_feed\n"
+    "  lda $9f27\n"
+    "  and $9f26\n"
+    "  and #$07\n"                  // a frame or line interrupt as well?
+    "  bne 1f\n"
+    "  ply\n"
+    "  plx\n"
+    "  pla\n"
+    "  rti\n"
+    "1:\n"
+    "  jmp (cx16_pcm_old)\n"
+
+    // Puts at least cx16_pcm_budget bytes (at most 255 more) into the FIFO, or all that is left.
+    ".global cx16_pcm_feed\n"
+    "cx16_pcm_feed:\n"
+    "  lda $00\n"                   // the program's RAM bank
+    "  pha\n"
+    "  lda cx16_pcm_bank\n"         // 0: the data is in fixed RAM
+    "  beq 2f\n"
+    "  sta $00\n"
+    "2:\n"                          // the next run: 256 bytes (written 0), or less
+    "  lda cx16_pcm_left+1\n"
+    "  ora cx16_pcm_left+2\n"
+    "  bne 3f\n"
+    "  lda cx16_pcm_left\n"
+    "  bne 4f\n"
+    "  jmp 8f\n"                    // nothing left
+    "3:\n"
+    "  lda #0\n"
+    "4:\n"
+    "  sta cx16_pcm_run\n"
+    "  ldx cx16_pcm_bank\n"         // not past the end of a bank
+    "  beq 5f\n"
+    "  ldx cx16_pcm_src+1\n"
+    "  cpx #$bf\n"
+    "  bne 5f\n"
+    "  sec\n"
+    "  lda #0\n"
+    "  sbc cx16_pcm_src\n"          // what is left of the bank, 0 for all 256
+    "  beq 5f\n"
+    "  ldx cx16_pcm_run\n"
+    "  beq 41f\n"
+    "  cmp cx16_pcm_run\n"
+    "  bcs 5f\n"
+    "41:\n"
+    "  sta cx16_pcm_run\n"
+    "5:\n"
+    "  ldy #0\n"
+    "6:\n"
+    ".global cx16_pcm_src\n"
+    "cx16_pcm_src = . + 1\n"
+    "  lda $ffff,y\n"
+    "  sta $9f3d\n"
+    "  iny\n"
+    "  cpy cx16_pcm_run\n"
+    "  bne 6b\n"
+    // move on
+    "  lda cx16_pcm_run\n"
+    "  bne 61f\n"
+    "  inc cx16_pcm_src+1\n"        // 256
+    "  lda cx16_pcm_left+1\n"
+    "  bne 62f\n"
+    "  dec cx16_pcm_left+2\n"
+    "62:\n"
+    "  dec cx16_pcm_left+1\n"
+    "  dec cx16_pcm_budget+1\n"
+    "  bra 7f\n"
+    "61:\n"
+    "  clc\n"
+    "  adc cx16_pcm_src\n"
+    "  sta cx16_pcm_src\n"
+    "  bcc 63f\n"
+    "  inc cx16_pcm_src+1\n"
+    "63:\n"
+    "  sec\n"
+    "  lda cx16_pcm_left\n"
+    "  sbc cx16_pcm_run\n"
+    "  sta cx16_pcm_left\n"
+    "  lda cx16_pcm_left+1\n"
+    "  sbc #0\n"
+    "  sta cx16_pcm_left+1\n"
+    "  lda cx16_pcm_left+2\n"
+    "  sbc #0\n"
+    "  sta cx16_pcm_left+2\n"
+    "  sec\n"
+    "  lda cx16_pcm_budget\n"
+    "  sbc cx16_pcm_run\n"
+    "  sta cx16_pcm_budget\n"
+    "  lda cx16_pcm_budget+1\n"
+    "  sbc #0\n"
+    "  sta cx16_pcm_budget+1\n"
+    "7:\n"
+    "  lda cx16_pcm_bank\n"
+    "  beq 71f\n"
+    "  lda cx16_pcm_src+1\n"
+    "  cmp #$c0\n"
+    "  bne 71f\n"
+    "  lda #$a0\n"                  // on into the next bank
+    "  sta cx16_pcm_src+1\n"
+    "  inc cx16_pcm_bank\n"
+    "  lda cx16_pcm_bank\n"
+    "  sta $00\n"
+    "71:\n"
+    "  lda cx16_pcm_left\n"
+    "  ora cx16_pcm_left+1\n"
+    "  ora cx16_pcm_left+2\n"
+    "  beq 8f\n"
+    "72:\n"
+    "  lda cx16_pcm_budget+1\n"
+    "  bmi 9f\n"                    // below 0
+    "  ora cx16_pcm_budget\n"
+    "  beq 9f\n"
+    "  jmp 2b\n"
+    "8:\n"                          // all sent: again from the start, or no more interrupts
+    "  lda cx16_pcm_loop\n"
+    "  beq 81f\n"
+    "  ldx #3\n"                    // left (3 bytes) and bank lie together
+    "80:\n"
+    "  lda cx16_pcm_start,x\n"
+    "  sta cx16_pcm_left,x\n"
+    "  dex\n"
+    "  bpl 80b\n"
+    "  lda cx16_pcm_start+4\n"
+    "  sta cx16_pcm_src\n"
+    "  lda cx16_pcm_start+5\n"
+    "  sta cx16_pcm_src+1\n"
+    "  lda cx16_pcm_bank\n"
+    "  beq 83f\n"
+    "  sta $00\n"
+    "83:\n"
+    "  jmp 72b\n"
+    "81:\n"                          // the end: silence after it, or the chip would hold the last sample
+    "  stz $9f3d\n"                   // (4 bytes are whole samples in every format)
+    "  stz $9f3d\n"
+    "  stz $9f3d\n"
+    "  stz $9f3d\n"
+    "  lda $9f26\n"
+    "  and #$f7\n"
+    "  sta $9f26\n"
+    "9:\n"
+    "  pla\n"
+    "  sta $00\n"
+    "  rts\n"
+
+    ".global cx16_pcm_old, cx16_pcm_budget, cx16_pcm_left, cx16_pcm_bank, cx16_pcm_loop, cx16_pcm_start\n"
+    "cx16_pcm_old:    .zero 2\n"
+    "cx16_pcm_budget: .zero 2\n"
+    "cx16_pcm_run:    .zero 1\n"
+    "cx16_pcm_left:   .zero 3\n"   // bytes not yet in the FIFO ...
+    "cx16_pcm_bank:   .zero 1\n"   // ... and the bank they are in; these four are copied as one
+    "cx16_pcm_loop:   .zero 1\n"
+    "cx16_pcm_start:  .zero 6\n"   // left, bank and source as at the start, for a loop
+);
+
+extern unsigned char cx16_pcm_irq[], cx16_pcm_src[2], cx16_pcm_old[2], cx16_pcm_budget[2], cx16_pcm_left[3];
+extern volatile unsigned char cx16_pcm_bank, cx16_pcm_loop, cx16_pcm_start[6];
+
+#define AUDIO_CTRL (*(volatile unsigned char *)0x9F3B)
+#define AUDIO_RATE (*(volatile unsigned char *)0x9F3C)
+#define AUDIO_DATA (*(volatile unsigned char *)0x9F3D)
+#define VERA_IEN (*(volatile unsigned char *)0x9F26)
+#define CINV (*(void *volatile *)0x0314)
+
+static unsigned char pcm_volume = 15;
+
+void cs_cx16_pcm_stop(void)
+{
+    __asm__ volatile("sei" ::: "memory");
+    VERA_IEN &= (unsigned char)~0x08;
+    AUDIO_RATE = 0;
+    AUDIO_CTRL = (unsigned char)(0x80 | pcm_volume);        // empties the FIFO
+    if (pcm_shutdown) {                                     // the chip holds the last sample: play a silent one
+        AUDIO_DATA = 0;
+        AUDIO_RATE = 128;
+        for (unsigned char spin = 0; !(AUDIO_CTRL & 0x40) && spin != 200; spin++) {}
+        AUDIO_RATE = 0;
+        AUDIO_CTRL = (unsigned char)(0x80 | pcm_volume);
+    }
+    cx16_pcm_left[0] = cx16_pcm_left[1] = cx16_pcm_left[2] = 0;
+    cx16_pcm_loop = 0;
+    __asm__ volatile("cli" ::: "memory");
+}
+
+static void pcm_unhook(void)
+{
+    cs_cx16_pcm_stop();
+    __asm__ volatile("sei" ::: "memory");
+    if (CINV == (void *)cx16_pcm_irq)
+        CINV = *(void **)(void *)cx16_pcm_old;
+    __asm__ volatile("cli" ::: "memory");
+}
+
+// format: bit 0 16 bits a sample, bit 1 stereo. rate: the chip's, 1 to 128 (128 is 48828 Hz).
+static i32 pcm_start(unsigned address, unsigned char bank, u32 length, i32 rate, i32 format, i32 loop)
+{
+    unsigned char mode = (unsigned char)(((format & 1) ? 0x20 : 0) | ((format & 2) ? 0x10 : 0));
+    unsigned frame = ((format & 1) ? 2 : 1) * ((format & 2) ? 2 : 1);
+    length -= length % frame;
+    if (length == 0 || length > 0xFFFFFFul || rate < 1 || rate > 128)
+        return 0;
+    cs_cx16_pcm_stop();
+    if (pcm_shutdown == 0) {
+        __asm__ volatile("sei" ::: "memory");
+        *(void **)(void *)cx16_pcm_old = CINV;
+        CINV = (void *)cx16_pcm_irq;
+        __asm__ volatile("cli" ::: "memory");
+        pcm_shutdown = pcm_unhook;
+    }
+    AUDIO_CTRL = (unsigned char)(0x80 | mode | pcm_volume);
+    cx16_pcm_start[0] = cx16_pcm_left[0] = (unsigned char)length;
+    cx16_pcm_start[1] = cx16_pcm_left[1] = (unsigned char)(length >> 8);
+    cx16_pcm_start[2] = cx16_pcm_left[2] = (unsigned char)(length >> 16);
+    cx16_pcm_start[3] = cx16_pcm_bank = bank;
+    cx16_pcm_start[4] = cx16_pcm_src[0] = (unsigned char)address;
+    cx16_pcm_start[5] = cx16_pcm_src[1] = (unsigned char)(address >> 8);
+    cx16_pcm_loop = loop != 0;
+    __asm__ volatile("sei" ::: "memory");
+    cx16_pcm_budget[0] = 0;
+    cx16_pcm_budget[1] = 14;                                // 3584 bytes to begin with
+    __asm__ volatile("jsr cx16_pcm_feed" ::: "a", "x", "y", "c", "v", "memory");
+    if (cx16_pcm_left[0] | cx16_pcm_left[1] | cx16_pcm_left[2] | cx16_pcm_loop)
+        VERA_IEN |= 0x08;
+    __asm__ volatile("cli" ::: "memory");
+    AUDIO_RATE = (unsigned char)rate;
+    return 1;
+}
+
+i32 cs_cx16_pcm_play(const unsigned char *data, i32 length, i32 rate, i32 format, i32 loop)
+{
+    return pcm_start((unsigned)data, 0, length < 0 ? 0 : (u32)length, rate, format, loop);
+}
+
+// address: as lib/Banks.cs counts, from the first byte of the program's first bank.
+i32 cs_cx16_pcm_play_banked(i32 address, i32 length, i32 rate, i32 format, i32 loop)
+{
+    if (address < 0 || length < 0)
+        return 0;
+    unsigned char bank = (unsigned char)(((u32)address >> 13) + 1 + CODE_BANKS);
+    return pcm_start(0xA000u + ((unsigned)address & 0x1FFF), bank, (u32)length, rate, format, loop);
+}
+
+// The bytes not yet handed to the chip (what a loop has left of its round).
+i32 cs_cx16_pcm_left(void)
+{
+    __asm__ volatile("sei" ::: "memory");
+    u32 left = cx16_pcm_left[0] | (u32)cx16_pcm_left[1] << 8 | (u32)cx16_pcm_left[2] << 16;
+    __asm__ volatile("cli" ::: "memory");
+    return (i32)left;
+}
+
+i32 cs_cx16_pcm_playing(void)
+{
+    return cs_cx16_pcm_left() != 0 || cx16_pcm_loop || !(AUDIO_CTRL & 0x40);        // bit 6: the FIFO is empty
+}
+
+void cs_cx16_pcm_volume(i32 volume)
+{
+    pcm_volume = (unsigned char)(volume < 0 ? 0 : volume > 15 ? 15 : volume);
+    AUDIO_CTRL = (unsigned char)((AUDIO_CTRL & 0x30) | pcm_volume);
 }
 
 // ---- banked RAM, for lib/Banks.cs --------------------------------------------------

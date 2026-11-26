@@ -18,7 +18,7 @@
 #                              samples that fit in it, which the Small ones are made to
 #         ./test.sh --cx16     Commander X16, in x16emu (needs ./setup.sh --c64 and x16emu,
 #                              see env.sh): the samples that fit in it
-#         ./test.sh --cx16-audio  its sound: records SoundDemo in the emulator, with a window, and
+#         ./test.sh --cx16-audio  its sound: records SoundDemo and PcmDemo in the emulator, with a window, and
 #                              measures pitch, partials, speaker and volume (needs numpy)
 #         ./test.sh --pico2    Raspberry Pi Pico 2 (Cortex-M33), in QEMU (needs ./setup.sh --arm)
 #         ./test.sh --r4       Arduino Uno R4 (Cortex-M4, 32 KB of RAM), in QEMU: the
@@ -205,6 +205,7 @@ CX16_SAMPLES=(
     SoundDemo
     VeraFxDemo
     Jameson
+    PcmDemo
 )
 # Microcontrollers: no SIMD to benchmark, no PC screen for Vga. Blink is
 # theirs only, and checks itself. The Uno R4

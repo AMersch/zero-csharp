@@ -68,7 +68,7 @@ pointer, an arrow as an 8-bit sprite that the mouse moves: `./run.sh --cx16 --wi
 pointer covers 0-639 across and 0-479 down. The headless runs
 (`./test.sh --cx16`) draw nothing and have no frame interrupt, so there `WaitFrame` gives up after about
 two frames' time, and the clock, the joysticks and the mouse stand still; the demo's checks read the video memory
-back, and leave those two to a run in a window. The PCM audio has no API yet.
+back, and leave those two to a run in a window.
 
 ## Files on the disk
 
@@ -288,7 +288,7 @@ video memory for every function and for other sizes.
 
 ## Sound
 
-The X16 has two sound chips, both reached from C#.
+The X16 makes sound in three ways, all reached from C#.
 
 - **The video chip's sound generator (PSG)**, `CX16.Tone(voice, hertz, volume, waveform)`: 16 voices of pulse, sawtooth,
   triangle or noise waves, `CX16.Silence(voice)`. The frequency is rounded to the chip's steps of 0.37 Hz.
@@ -316,13 +316,42 @@ Fm.NoteOff(0);                    // it dies away as the instrument's release sa
   read back, so `Fm` keeps what it needs (the algorithm of each channel, the levels, the volume) and `Write` should
   stay off the registers $20-$27 and $60-$7F.
 
-**Testing sound.** The emulator makes no sound without a window, and cannot record without one either, so
-`./test.sh --cx16` only runs `samples/SoundDemo.cs` through and checks what `Fm` refuses. `./test.sh --cx16-audio`
-(`cx16/test-audio.sh`) opens the emulator for about ten seconds with `-wav`, which records what it plays, lets the
+### Sampled sound
+
+`Pcm` (`lib/Pcm.cs`) plays samples on the video chip's PCM channel, in the background:
+
+```csharp
+Pcm.Play(samples, 8000);                          // a byte[] of signed 8-bit samples; returns at once
+Pcm.Play(music, 22050, sixteenBit: true, stereo: true, loop: true);
+Pcm.PlayBanked(address, count, 16000);            // from the banked RAM, as Banks counts it
+Pcm.Volume = 10;                                  // 0 to 15
+if (!Pcm.IsPlaying) Pcm.Stop();
+```
+
+- **The samples are signed**, 16-bit ones low byte first, stereo left before right. A WAV file's 8-bit samples are
+  unsigned: flip the top bit of each. Rates are 1 to 48828 Hz, in the chip's steps of 381 Hz (8000 plays at 8011).
+- **Nothing to call while it plays:** the chip interrupts when its 4 KB buffer is down to 1 KB, and a handler in the
+  runtime fills it up. The handler is hooked into the KERNAL's interrupt vector ($0314) at the first `Play`, and
+  taken out when the program ends.
+- **Long sounds** don't fit in 38 KB: load them from a file a piece at a time into the banks (`Banks.Write`), then
+  `PlayBanked`. The bytes must stay as they are while they play. Playing straight from a file is not there.
+- **Gaps:** a refill that comes later than the last 1 KB lasts (an eighth of a second at 8000 Hz mono 8-bit, 5 ms at
+  48828 Hz stereo 16-bit) is heard. Interrupts are off during disk loads and during some drawing with VERA FX.
+- **Processor time**, measured: 2% at 8000 Hz mono 8-bit, 4% at 16000, 10% at 22050 Hz mono 16-bit, 46% at 48828 Hz
+  stereo 16-bit.
+- `samples/PcmDemo.cs` plays each kind.
+
+### Testing sound
+
+ The emulator makes no sound without a window, and cannot record without one either, so
+`./test.sh --cx16` only runs `samples/SoundDemo.cs` and `PcmDemo.cs` through and checks what `Fm` and `Pcm` refuse and
+what they tell the chips (its PCM buffer never empties there). `./test.sh --cx16-audio`
+(`cx16/test-audio.sh`) opens the emulator for each of the two with `-wav`, which records what it plays, lets the
 program start the recording itself (`CX16.StartRecording()`, the emulator's debug register $9FB6) and measures the
 file (`cx16/audio-check.py`, with numpy): the pitch of the PSG tone and of the FM notes within 1.5 Hz, the partials of
 the organ, a fifth as two peaks, a note in the left speaker only, and the volume ratio of two volumes to a few percent
 of what 0.75 dB a step gives. That is how the pitch formulas were checked, and a regression in them shows there.
+For `PcmDemo` it measures the pitch and length of each sound, the speaker and the volume.
 
 ## Date, time and random numbers
 

@@ -14,6 +14,7 @@ output and no mouse: what can only be heard or seen needs a check in a window, o
 
 - **VERA FX, a first part:** the cache for `Bitmap.Clear`, `Fill` and `Tiles.Fill` (4 to 9 times faster), the line helper for `Bitmap.Line` (17 times faster), `CX16.HasVeraFx` and `UseVeraFx`. **Filled triangles** (`Bitmap.FillTriangle`, `Triangle`) by the polygon helper with cache writes. **The rest:** the multiplier (`CX16.Multiply`, `Dot`) and the affine helper (`Affine`, rotating and scaling into the bitmap; `samples/VeraFxDemo.cs`). Not yet: the helper for triangles that are cut by the picture's edge, 4-bit and 2-bit modes, affine drawing from a bitmap rather than tiles.
 - **FM sound (YM2151):** `Fm` (patches in the chip's register order, notes by MIDI number, volume, pan, raw writes) and the PSG's pitch checked, both measured from recordings by `./test.sh --cx16-audio`. Not yet: the ROM's 162 instrument presets, the LFO (vibrato, tremolo) and noise as calls, a sequencer.
+- **PCM audio:** `Pcm` plays 8 and 16 bit, mono and stereo samples from an array or the banked RAM, once or in a loop, refilled by an interrupt (`samples/PcmDemo.cs`, `./test.sh --cx16-audio`). Not yet: playing straight from a file, reading WAV files, telling the program when a sound ends other than by asking, more than one sound at a time.
 - **Real-time clock:** `Clock.UtcNow` and `UnixMilliseconds` read it; `CX16.SetDateTime` sets it.
 - **Bitmap:** `Bitmap` (clear, plot, get, fill, rectangle, line, circle, text) and the palette (`CX16.SetColor`) in 320x240 with 256 colors, directly on the VERA; sprite shapes moved to $13000 to keep clear of the bitmap. (`samples/BitmapDemo.cs`) Not yet: other depths (4, 2, 1 bit), 640x480, speed with VERA FX.
 - **Tiles:** `Tiles` (map and tile pictures in 2, 4 and 8 bits, 8x8 and 16x16, flips and palette offsets, scrolling) on layer 0. (`samples/TileDemo.cs`) Not yet: the 1-bit text-like tile mode, layer 1 as tiles (it is the text), a second layer of tiles.
@@ -21,17 +22,11 @@ output and no mouse: what can only be heard or seen needs a check in a window, o
 - **Hardware random seed:** `CX16.Entropy`, and `Clock.Monotonic` starts at a random moment, so
   `Random.FromClock()` differs from run to run. (`samples/ClockSeed.cs`)
 
-## 2. Next: sound
-
-| # | Task | Effort | Why |
-|---|------|--------|-----|
-| 1 | **PCM audio** (VERA FIFO: format, rate, `audio.data`) | M | Samples, speech, and music played as wave data. The FIFO has to be fed faster than it is drained, from a frame interrupt or a tight loop; an interrupt handler written in C# is a new thing here, and the KERNAL's own handler must still run. Needs a plan for where the data is (a file read in chunks, or `Banks`). `-wav` to test. |
-
-## 3. Later, and what needs finding out
+## 2. Later, and what needs finding out
 
 | # | Task | Effort | Why it is last |
 |---|------|--------|----------------|
-| 2 | **Mouse wheel** | S once known | `mouse_get` in this KERNAL's documentation returns position and buttons only; the wheel isn't in it. Find out first (a newer KERNAL's `mouse_get`, or the PS/2 packets of a 4-byte mouse, read through the I/O chip). Low value next to the rest. |
+| 1 | **Mouse wheel** | S once known | `mouse_get` in this KERNAL's documentation returns position and buttons only; the wheel isn't in it. Find out first (a newer KERNAL's `mouse_get`, or the PS/2 packets of a 4-byte mouse, read through the I/O chip). Low value next to the rest. |
 
 ## Also open
 

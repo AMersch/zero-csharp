@@ -71,6 +71,10 @@ To check every sample against the native output:
 ./test.sh --wasm
 ```
 
+With Node installed, it then runs the samples again through the docs site's browser page
+(`docs/content/run-wasm.js`, via `scripts/run-in-page.mjs`), so a module the page can't load fails the
+test instead of the site.
+
 ## What's different
 
 - **32-bit pointers.** Structs that hold pointers are smaller, so code that prints sizes prints smaller

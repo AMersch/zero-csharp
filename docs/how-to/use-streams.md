@@ -144,10 +144,18 @@ stream only loses its unwritten bytes; it can't corrupt anything.
 `Pipe.AsStream` (see [Run green threads](use-fibers.html)) turns a pipe between fibers into a `Stream`.
 There, `Read` waits for bytes and lets the other fibers run in the meantime.
 
+## Async methods
+
+`Stream` has .NET's `ReadAsync`, `WriteAsync`, `FlushAsync`, `CopyToAsync`, `ReadExactlyAsync`,
+`ReadAtLeastAsync` and `DisposeAsync`, so `await using` and code written for .NET work. On a file or a
+`MemoryStream` they call the blocking methods and finish at once. A file read blocks the thread meanwhile,
+as `Read` does, since the C library has no other kind. On a pipe's stream, in a fiber, the wait lets the
+other fibers run. `NetworkStream`'s wait without blocking anything (see
+[Use the network](use-the-network.html#async-methods)). A subclass can override `ReadAsync(Memory<byte>,
+CancellationToken)` and `WriteAsync(ReadOnlyMemory<byte>, CancellationToken)` with ones that truly wait.
+
 ## What isn't here
 
-- **`ReadAsync`, `WriteAsync` and `Task`:** streams are synchronous. For work that waits, use fibers
-  and a pipe.
 - **Exceptions you can catch:** a throw ends the program, so check `CanRead`, `CanWrite` and
   `CanSeek`, and open files with `TryOpen`, where failing is expected.
 - **`BufferedStream`, `StreamReader` and `StreamWriter`:** for text, `File.TryReadAllText`,

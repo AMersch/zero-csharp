@@ -12,10 +12,11 @@
 //   throw for (reading a stream that can't read, a failed write, a file that
 //   won't open) stops the program with the message. To open a file that may
 //   not be there, use FileStream.TryOpen, which returns a FileError instead.
-// - Streams are synchronous: there's no ReadAsync, WriteAsync or Task. Read
-//   waits for the bytes, as a blocking read does. Pipe.AsStream (lib/Fibers.cs)
-//   makes a stream between fibers, whose Read lets the other fibers run while
-//   it waits.
+// - The async methods (ReadAsync, WriteAsync, CopyToAsync...) of Stream
+//   itself call the blocking ones, so for a file and a MemoryStream they
+//   finish at once, the file having blocked the thread meanwhile. In a fiber,
+//   Pipe.AsStream's (lib/Fibers.cs) lets the other fibers run while it waits.
+//   NetworkStream's wait with no fiber at all (lib/SocketsAsync.cs).
 // - Memory is bounded and comes from where objects come from: a FileStream's
 //   buffer is a byte[] of the size you give it (4096 by default; the C
 //   library's own buffering is off), and a MemoryStream's bytes are a byte[].
@@ -28,6 +29,8 @@
 
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace System.IO;
 
@@ -110,7 +113,7 @@ public class EndOfStreamException : IOException
 /// subclass overrides the byte[] Read and Write at least; the span ones go
 /// through them unless overridden too.
 /// </summary>
-public abstract class Stream : IDisposable
+public abstract class Stream : IDisposable, IAsyncDisposable
 {
     static Stream s_null;
     byte[] _chunk; // for the span Read and Write of a subclass that has only the byte[] ones
@@ -232,6 +235,146 @@ public abstract class Stream : IDisposable
         int n;
         while ((n = Read(chunk)) > 0)
             destination.Write(chunk.Slice(0, n));
+    }
+
+    // ---- timeouts ---------------------------------------------------------
+
+    /// <summary>Whether ReadTimeout and WriteTimeout work: false unless a subclass says so (NetworkStream).</summary>
+    public virtual bool CanTimeout => false;
+
+    /// <summary>Milliseconds a read waits before giving up. Ends the program on a stream that can't time out.</summary>
+    public virtual int ReadTimeout
+    {
+        get => throw new InvalidOperationException("Timeouts are not supported on this stream.");
+        set => throw new InvalidOperationException("Timeouts are not supported on this stream.");
+    }
+
+    /// <summary>Milliseconds a write waits before giving up. Ends the program on a stream that can't time out.</summary>
+    public virtual int WriteTimeout
+    {
+        get => throw new InvalidOperationException("Timeouts are not supported on this stream.");
+        set => throw new InvalidOperationException("Timeouts are not supported on this stream.");
+    }
+
+    // ---- async ------------------------------------------------------------
+    // The base methods call the blocking ones and return a completed task,
+    // as .NET's would after its thread pool ran them: a file read blocks the
+    // thread, as Read does. In a fiber a blocking call lets the others run
+    // (Pipe, sockets), so these are safe, if not free, in an async method.
+    // NetworkStream overrides them with waits that need no fiber.
+
+    /// <summary>Reads up to buffer.Length bytes; the task's result is how many, 0 at the end.</summary>
+    public virtual ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return ValueTask.FromCanceled<int>(cancellationToken);
+        return new ValueTask<int>(Read(buffer.Span));
+    }
+
+    /// <summary>Reads up to <paramref name="count"/> bytes into buffer from offset.</summary>
+    public Task<int> ReadAsync(byte[] buffer, int offset, int count) => ReadAsync(buffer, offset, count, default);
+
+    /// <summary>Reads up to <paramref name="count"/> bytes into buffer from offset.</summary>
+    public virtual Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        return ReadAsync(new Memory<byte>(buffer, offset, count), cancellationToken).AsTask();
+    }
+
+    /// <summary>Writes all of buffer.</summary>
+    public virtual ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return ValueTask.FromCanceled(cancellationToken);
+        Write(buffer.Span);
+        return default;
+    }
+
+    /// <summary>Writes <paramref name="count"/> bytes of buffer from offset.</summary>
+    public Task WriteAsync(byte[] buffer, int offset, int count) => WriteAsync(buffer, offset, count, default);
+
+    /// <summary>Writes <paramref name="count"/> bytes of buffer from offset.</summary>
+    public virtual Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        return WriteAsync(new ReadOnlyMemory<byte>(buffer, offset, count), cancellationToken).AsTask();
+    }
+
+    /// <summary>Flush, as a task.</summary>
+    public Task FlushAsync() => FlushAsync(default);
+
+    /// <summary>Flush, as a task.</summary>
+    public virtual Task FlushAsync(CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return Task.FromCanceled(cancellationToken);
+        Flush();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Reads until buffer is full; reaching the end first ends the program (EndOfStreamException).</summary>
+    public async ValueTask ReadExactlyAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        => await ReadAtLeastAsync(buffer, buffer.Length, true, cancellationToken);
+
+    /// <summary>Reads exactly <paramref name="count"/> bytes into buffer from offset.</summary>
+    public ValueTask ReadExactlyAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken = default)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        return ReadExactlyAsync(new Memory<byte>(buffer, offset, count), cancellationToken);
+    }
+
+    /// <summary>ReadAtLeast, without blocking.</summary>
+    public async ValueTask<int> ReadAtLeastAsync(Memory<byte> buffer, int minimumBytes, bool throwOnEndOfStream = true, CancellationToken cancellationToken = default)
+    {
+        if (minimumBytes < 0 || minimumBytes > buffer.Length)
+            throw new ArgumentOutOfRangeException(nameof(minimumBytes));
+        int total = 0;
+        while (total < minimumBytes)
+        {
+            int n = await ReadAsync(buffer.Slice(total), cancellationToken);
+            if (n == 0)
+            {
+                if (throwOnEndOfStream)
+                    throw new EndOfStreamException();
+                break;
+            }
+            total += n;
+        }
+        return total;
+    }
+
+    /// <summary>Reads the rest of this stream and writes it to <paramref name="destination"/>.</summary>
+    public Task CopyToAsync(Stream destination) => CopyToAsync(destination, 4096, default);
+
+    /// <summary>CopyToAsync, in pieces of up to <paramref name="bufferSize"/> bytes.</summary>
+    public Task CopyToAsync(Stream destination, int bufferSize) => CopyToAsync(destination, bufferSize, default);
+
+    /// <summary>CopyToAsync, until <paramref name="cancellationToken"/> is canceled.</summary>
+    public Task CopyToAsync(Stream destination, CancellationToken cancellationToken) => CopyToAsync(destination, 4096, cancellationToken);
+
+    /// <summary>
+    /// Reads the rest of this stream and writes it to
+    /// <paramref name="destination"/>, in pieces of up to
+    /// <paramref name="bufferSize"/> bytes, through a buffer on the heap (an
+    /// async method can't keep one on the stack).
+    /// </summary>
+    public virtual async Task CopyToAsync(Stream destination, int bufferSize, CancellationToken cancellationToken)
+    {
+        if (destination == null)
+            throw new ArgumentNullException(nameof(destination));
+        if (bufferSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(bufferSize));
+        byte[] buffer = new byte[bufferSize];
+        int n;
+        while ((n = await ReadAsync(buffer, cancellationToken)) > 0)
+            await destination.WriteAsync(new ReadOnlyMemory<byte>(buffer, 0, n), cancellationToken);
+    }
+
+    /// <summary>Dispose, as a task.</summary>
+    public virtual ValueTask DisposeAsync()
+    {
+        Dispose();
+        return default;
     }
 
     /// <summary>Flushes and closes the stream (Dispose does the same).</summary>

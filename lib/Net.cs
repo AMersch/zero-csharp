@@ -10,8 +10,8 @@
 // numbers for IPv4; hexadecimal groups, "::" and a trailing IPv4 part for
 // IPv6, with an optional numeric %scope), and a throw ends the program, so
 // TryParse and Dns.TryGetHostAddresses are the ones to use on input that may
-// be wrong. Dns asks the system (getaddrinfo), which waits for the answer
-// without letting other fibers run.
+// be wrong. Dns asks the system (getaddrinfo), on a thread of its own when
+// called from a fiber or async, so the other fibers and tasks run meanwhile.
 
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -636,8 +636,8 @@ public static class Dns
     /// <summary>
     /// The addresses of a host name (or the address itself, if it is one), or
     /// why there are none: HostNotFound, TryAgain (the name servers didn't
-    /// answer), NoData... The system's resolver waits for the answer without
-    /// letting other fibers run.
+    /// answer), NoData... In a fiber, the other fibers run while the
+    /// system's resolver works, on a thread of its own.
     /// </summary>
     public static bool TryGetHostAddresses(string hostNameOrAddress, out IPAddress[] addresses, out SocketError error)
     {
@@ -650,6 +650,30 @@ public static class Dns
             return true;
         }
         return SocketNative.Resolve(hostNameOrAddress, out addresses, out error);
+    }
+
+    /// <summary>
+    /// The addresses of a host name (or the address itself, if it is one),
+    /// without blocking: the system's resolver runs on a thread of its own,
+    /// and the task completes when it answers. A name that can't be found
+    /// ends the program (SocketException).
+    /// </summary>
+    public static System.Threading.Tasks.Task<IPAddress[]> GetHostAddressesAsync(string hostNameOrAddress)
+        => GetHostAddressesAsync(hostNameOrAddress, default);
+
+    /// <summary>
+    /// GetHostAddressesAsync, canceled with the token. The lookup itself
+    /// can't be stopped: its thread finishes in the background.
+    /// </summary>
+    public static System.Threading.Tasks.Task<IPAddress[]> GetHostAddressesAsync(string hostNameOrAddress, System.Threading.CancellationToken cancellationToken)
+    {
+        if (hostNameOrAddress == null)
+            throw new ArgumentNullException(nameof(hostNameOrAddress));
+        if (cancellationToken.IsCancellationRequested)
+            return System.Threading.Tasks.Task.FromCanceled<IPAddress[]>(cancellationToken);
+        if (IPAddress.TryParse(hostNameOrAddress, out IPAddress literal))
+            return System.Threading.Tasks.Task.FromResult(new[] { literal });
+        return SocketNative.ResolveAsync(hostNameOrAddress).WaitAsync(cancellationToken);
     }
 
     /// <summary>This machine's host name.</summary>

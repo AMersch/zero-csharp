@@ -22,6 +22,8 @@
 #         ./test.sh --win      Windows x64, under Wine in a container
 #         ./test.sh --mac      macOS, natively (on a Mac with Apple Silicon)
 #         ./test.sh --ios      iOS, in the simulator (on a Mac with Apple Silicon and Xcode's iOS platform)
+#         ./test.sh --android  Android arm64, through adb (a phone, or Android Studio's emulator);
+#                              ANDROID_RUN=container: in an arm64 Linux container (android/sysroot)
 #         ./test.sh --uefi     UEFI, in QEMU on OVMF, for BFLAT_ARCH (x64 or arm64)
 #         ./test.sh --all      native, the other architecture (macOS only, run
 #                              under emulation), Windows, macOS (on Apple
@@ -287,6 +289,7 @@ run_all() {
     [ "$target" = win ] && run+=(--win)
     [ "$target" = mac ] && run+=(--mac)
     [ "$target" = ios ] && run+=(--ios)
+    [ "$target" = android ] && run+=(--android)
     if [ "$target" = uefi ]; then
         run+=(--uefi)
         samples=(Vga)
@@ -382,6 +385,12 @@ run_all() {
         rm -f -- "$name"
         status=0
         "${run[@]}" Files --keep "$name" < /dev/null > /dev/null 2>&1 || status=$?
+        # On an Android device the file is there: fetched back by that name.
+        if [ "$target" = android ] && [ "${ANDROID_RUN:-}" != container ] && [ "$status" = 0 ]; then
+            adb=$(sh android/boot.sh < /dev/null)
+            "$adb" pull "/data/local/tmp/zero/$name" "$name" < /dev/null > /dev/null 2>&1 || true
+            "$adb" shell rm -f "'/data/local/tmp/zero/$name'" < /dev/null > /dev/null 2>&1 || true
+        fi
         if [ "$status" != 0 ]; then
             echo "FAIL Files --keep: exit code $status"
             failures=$((failures + 1))
@@ -537,6 +546,11 @@ test_ios() {
     run_all "iOS simulator arm64" ios check
 }
 
+test_android() {
+    ./build.sh --android > /dev/null
+    run_all "Android arm64" android check
+}
+
 test_win() {
     ./build.sh --win > /dev/null
     # Build the Wine image now, if needed, so its build log doesn't end up in
@@ -586,6 +600,7 @@ case "${1:-}" in
     --win)    test_win ;;
     --mac)    test_mac ;;
     --ios)    test_ios ;;
+    --android) test_android ;;
     --gpu)    test_gpu ;;
     --gpu-air) TMPDIR_GPU_AIR=$(mktemp); test_gpu_air; rm -f "$TMPDIR_GPU_AIR" ;;
     --uefi)   test_uefi ;;
@@ -644,7 +659,7 @@ case "${1:-}" in
             echo "(skipping the microcontrollers: run ./setup.sh --arm first)"
         fi
         ;;
-    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --ios | --gpu | --gpu-air | --uefi | --all | --update]" >&2; exit 2 ;;
+    *) echo "Usage: ./test.sh [--wasm | --dos | --c64 | --pico2 | --r4 | --win | --mac | --ios | --android | --gpu | --gpu-air | --uefi | --all | --update]" >&2; exit 2 ;;
 esac
 
 echo

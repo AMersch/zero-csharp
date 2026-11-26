@@ -207,8 +207,8 @@ public static class Program
 
         // docs:capture-in-scope
         // In an arena's object scope the closure and delegate go into the
-        // arena, and each Reset frees them. With DebugChecks on, closing the
-        // scope also checks that no static field points into the arena: the
+        // arena, and each Reset frees them. With DebugChecks on, each Reset
+        // also checks that no static field points into the arena: the
         // lambdas the compiler caches in static fields all ran before, so
         // none does.
         Arena.DebugChecks = true;

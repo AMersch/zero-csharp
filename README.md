@@ -64,6 +64,7 @@ More: [Coming from .NET](https://onurgumus.github.io/zero-csharp/get-started/com
 | Linux x64 and arm64 | `./build.sh` | 12 KB (Tiny) to 84 KB (Collections) |
 | macOS, Apple Silicon | `./build.sh --mac`, on a Mac | from 50 KB |
 | iOS simulator, Apple Silicon | `./build.sh --ios`, on a Mac with Xcode | from 50 KB |
+| Android arm64 (command-line programs) | `./build.sh --android` | 13 KB (Tiny) to 94 KB (Collections) |
 | macOS with C# kernels on the GPU (Metal), experimental | `./build.sh --gpu`, on a Mac | 118 KB (the Gpu sample) |
 | Windows x64 | `./build.sh --win`, from Linux or macOS | 9 KB to 68 KB |
 | WebAssembly (WASI) | `./build.sh --wasm` | 16 KB to 80 KB |
@@ -161,7 +162,7 @@ nothing AGPL is linked into them.
 | `Core` | 32 checks of `Math`, `MathF`, `Interlocked`, `Volatile` and interface dispatch | 48 KB |
 | `Simd` | A dot product with NEON or AVX and FMA, 12x faster than scalar on Apple Silicon | 18 KB |
 | `Kernels` | `lib/Kernels.cs`: exp, softmax, SiLU, RMSNorm, matrix-vector, int8 dot product; softmax is 7x faster than scalar libm on Apple Silicon | 24 KB |
-| `Avx2Ops` | AVX2 integer operations (16- and 32-bit arithmetic, widening loads, saturating packs, permutes), each checked lane by lane against scalar code | 36 KB (Windows) |
+| `Avx2Ops` | AVX2 integer operations (16- and 32-bit arithmetic, widening loads, saturating packs, permutes), each checked lane by lane against scalar code | 24 KB |
 | `Strings` | 140 checks of span operations, parsing, `$"..."` formatting, arena strings and `StrBuilder` | 67 KB |
 | `Quiz`, `QuizStep1` to `QuizStep3` | A quiz that reads answers with `In.ReadLine`, and the tutorial's steps towards it | 16 to 25 KB |
 | `Guards` | One mistake per run that `lib/` stops the program for, such as marks restored out of order | 56 KB |

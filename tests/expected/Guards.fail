@@ -9,8 +9,10 @@ list-index|List: index out of range
 out-of-memory|Arena "small":|Arena: out of memory
 arena-limit|Arena "budget":|Arena: out of memory (it reached its maxCapacity)
 buffer-full|Arena "buffer":|Arena: out of memory (its buffer is full)
-lambda-in-scope|Arena "frame":|Arena.AllocateObjectsHere: a static field points at an object created inside the scope
-lambda-scope-not-closed|Arena "frame":|Arena.AllocateObjectsHere: a static field points at an object created inside the scope
+lambda-in-scope|Arena "frame":|Arena.Reset: a static field points at an object it is about to free
+lambda-in-open-scope|Arena "frame":|Arena.Restore: a static field points at an object it is about to free
+scope-not-created|Arena.AllocateObjectsHere: the arena was not created
+destroy-in-scope|Arena "frame":|Arena.Destroy: the arena is in use by an object scope that is still open on this thread
 throw|Unhandled exception: the queue is empty
 throw-null|Unhandled exception: NullReferenceException
 throw-in-static-constructor|Unhandled exception: the settings are missing

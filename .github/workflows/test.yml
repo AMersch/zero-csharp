@@ -1,5 +1,6 @@
 # Builds the samples and runs ./test.sh on every target CI can run:
-# Linux x64 and arm64, macOS on Apple Silicon, the iOS simulator, Windows x64 (under Wine),
+# Linux x64 and arm64, Android arm64 (in a container), macOS on Apple Silicon,
+# the iOS simulator, Windows x64 (under Wine),
 # WebAssembly, and UEFI x64 and arm64 (in QEMU, on OVMF). DOS isn't here: it runs under an emulated 386 for 15 minutes
 # and more, so run ./test.sh --dos locally. The GPU's kernels are checked up to
 # Metal (./test.sh --gpu-air) and to CUDA's ptxas (./build.sh --cuda), not run:
@@ -110,6 +111,18 @@ jobs:
         env:
           BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-${{ matrix.arch }}
         run: ./test.sh
+      # Android programs are arm64 Linux programs linked against Android's C
+      # library: in a container with Android's loader and C library
+      # (android/sysroot), they run here without an emulator.
+      - name: Build and test for Android, in a container
+        if: matrix.arch == 'arm64'
+        working-directory: zero-csharp
+        env:
+          BFLAT_DIR: ${{ github.workspace }}/bflat/layouts/linux-glibc-${{ matrix.arch }}
+          ANDROID_RUN: container
+        run: |
+          sudo apt-get install -y --no-install-recommends clang
+          ./test.sh --android
 
   windows:
     needs: bflat

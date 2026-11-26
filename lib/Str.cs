@@ -94,6 +94,20 @@ namespace System
             return new Span<T>(array, start, length);
         }
 
+        // ---- array, string -> memory ----------------------------------------
+
+        /// <summary>The array as Memory, which (unlike a span) an async method can keep.</summary>
+        public static Memory<T> AsMemory<T>(this T[]? array) => new Memory<T>(array);
+
+        public static Memory<T> AsMemory<T>(this T[]? array, int start)
+            => new Memory<T>(array, start, (array?.Length ?? 0) - start);
+
+        public static Memory<T> AsMemory<T>(this T[]? array, int start, int length) => new Memory<T>(array, start, length);
+
+        /// <summary>The string's characters as ReadOnlyMemory, without copying.</summary>
+        public static ReadOnlyMemory<char> AsMemory(this string? text)
+            => text == null ? default : new ReadOnlyMemory<char>(null, 0, text.Length, text);
+
         // ---- comparison ---------------------------------------------------
 
         /// <summary>Ordinal equality: the replacement for a == b.</summary>

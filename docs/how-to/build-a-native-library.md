@@ -125,9 +125,8 @@ programs. `dotnet run` refuses a library.
 ## Call it from .NET
 
 The library's build also writes its .NET bindings, `bin/MathLib.Interop.cs` (and the same in F#,
-below). That's C# with a
-`[DllImport]` for each export, under its method's name, and a copy of each struct and enum the exports
-use, with the same fields and layout. A .NET program compiles that file in and calls the library like
+below). That's C# with a `[LibraryImport]` for each export, under its method's name, and a copy of
+each struct and enum the exports use, with the same fields and layout. A .NET program compiles that file in and calls the library like
 any class:
 
 <!-- sample: sdk/test/fixtures/nativelib-app/App/Program.cs call -->
@@ -144,7 +143,7 @@ The program's project file references the library and compiles the bindings:
 
 ```xml
 <PropertyGroup>
-  <!-- MathLib has exports that take pointers. -->
+  <!-- [LibraryImport] needs it. -->
   <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 </PropertyGroup>
 <ItemGroup>
@@ -168,9 +167,14 @@ copies it into the publish folder too. .NET then finds it by name. The metadata 
 Visual Studio builds the library itself and asks the reference only for its output file; the library
 answers with its native file there, so the copy works the same.
 
-A program can leave out `AllowUnsafeBlocks` when none of the library's exports take pointers. A zero
-project can't reference a native library this way: a reference that would compile its IL in is an
-error.
+`[LibraryImport]` has .NET's source generator write each call when the program compiles, which
+NativeAOT and trimming prefer. The bindings use it on .NET 7 and later, and `[DllImport]` before
+that. To have `[DllImport]` anyway, define `ZERO_INTEROP_DLLIMPORT` in the program
+(`<DefineConstants>$(DefineConstants);ZERO_INTEROP_DLLIMPORT</DefineConstants>`); the program can then
+leave out `AllowUnsafeBlocks` when none of the library's exports take pointers.
+
+A zero project can't reference a native library this way: a reference that would compile its IL in is
+an error.
 
 The class takes the library's name: `MathLib` here, or `My.Native` as class `Native` in namespace
 `My`. Set `ZeroInteropClass` in the library's project to name it yourself (`Shapes.Native`). Two

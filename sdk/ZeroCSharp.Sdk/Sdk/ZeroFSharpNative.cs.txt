@@ -17,8 +17,8 @@
 //   for the import library, which names the DLL.
 //
 // With Interop and InteropFSharp, for a native library in C# or F#, the
-// library's bindings for .NET, in C# and in F#: a [DllImport] for each export
-// and a copy of each struct and enum they use (WriteInterop).
+// library's bindings for .NET, in C# and in F#: a [LibraryImport] (C#, on
+// .NET 7 and later) or [DllImport] for each export and a copy of each struct and enum they use (WriteInterop).
 //
 // With Check, for every F# project, it writes nothing and checks the IL
 // instead: ZERO006 for an Arena.Scratch callback whose state is a ref struct.
@@ -65,7 +65,7 @@ public class ZeroFSharpNative : Task
     /// takes arguments gets none, and the program has no code to read them.</summary>
     public bool NoArguments { get; set; }
     /// <summary>A native library, C# or F#: where to write its bindings for
-    /// .NET, the C# that declares its exports with [DllImport] and copies the
+    /// .NET, the C# that declares its exports with [LibraryImport] and copies the
     /// structs and enums they use. Written only when it changes.</summary>
     public string Interop { get; set; }
     /// <summary>The same bindings in F#, for an F# program.</summary>
@@ -1055,7 +1055,7 @@ public class ZeroFSharpNative : Task
     // ---- A native library's bindings for .NET -------------------------------
 
     // The code a .NET program compiles to call the library, in C# (Interop)
-    // and F# (InteropFSharp): a [DllImport] for each export, under its
+    // and F# (InteropFSharp): a [LibraryImport] or [DllImport] for each export, under its
     // method's name, and a copy of each struct and enum those use, with the
     // same name, fields and layout. The IL is read once into BType and BDef;
     // each language prints them. An export they can't declare (a type from
@@ -1392,17 +1392,30 @@ public class ZeroFSharpNative : Task
             foreach (var t in b.Types) anyUnsafe |= CSharpUnsafe(t);
         }
         var cls = new StringBuilder();
-        cls.Append("public static " + (anyUnsafe ? "unsafe " : "") + "partial class " + className + "\n{\n");
+        // @: the [LibraryImport] generator copies the name into a file of its
+        // own, which the #pragma below doesn't cover, and a lower-case name
+        // there (a library called mathlib) would warn, CS8981.
+        cls.Append("public static " + (anyUnsafe ? "unsafe " : "") + "partial class @" + className + "\n{\n");
         cls.Append("    public const string LibraryName = @\"" + library.Replace("\"", "\"\"") + "\";\n");
         foreach (var b in bindings)
         {
-            cls.Append('\n');
-            cls.Append("    [global::System.Runtime.InteropServices.DllImport(LibraryName, EntryPoint = @\""
-                + b.EntryPoint.Replace("\"", "\"\"") + "\", ExactSpelling = true)]\n");
+            // [LibraryImport] where the program's .NET has it (7 and later):
+            // its source generator writes the call at compile time, which
+            // NativeAOT and trimming prefer. [DllImport] before that, or when
+            // the program defines ZERO_INTEROP_DLLIMPORT.
+            string entryPoint = "EntryPoint = @\"" + b.EntryPoint.Replace("\"", "\"\"") + "\"";
             var parameters = new StringBuilder();
             for (int i = 0; i < b.Types.Count; i++)
                 parameters.Append(i > 0 ? ", " : "").Append(CSharpType(b.Types[i])).Append(' ').Append(Escape(b.Names[i]));
-            cls.Append("    public static extern " + CSharpType(b.Return) + " " + Escape(b.Name) + "(" + parameters + ");\n");
+            string signature = CSharpType(b.Return) + " " + Escape(b.Name) + "(" + parameters + ");\n";
+            cls.Append('\n');
+            cls.Append("#if NET7_0_OR_GREATER && !ZERO_INTEROP_DLLIMPORT\n");
+            cls.Append("    [global::System.Runtime.InteropServices.LibraryImport(LibraryName, " + entryPoint + ")]\n");
+            cls.Append("    public static partial " + signature);
+            cls.Append("#else\n");
+            cls.Append("    [global::System.Runtime.InteropServices.DllImport(LibraryName, " + entryPoint + ", ExactSpelling = true)]\n");
+            cls.Append("    public static extern " + signature);
+            cls.Append("#endif\n");
         }
         cls.Append("}\n");
         // The class, then the types, a block for each namespace.

@@ -784,7 +784,7 @@
 
   <!--
     A native library's bindings for .NET, C# and F# libraries alike: the code
-    that declares its exports with [DllImport] and copies the structs and enums
+    that declares its exports with [LibraryImport] (or [DllImport]) and copies the structs and enums
     they use (Sdk/ZeroFSharpNative.cs.txt, WriteInterop), in C# in
     bin/<AssemblyName>.Interop.cs and in F# in bin/<AssemblyName>.Interop.fs,
     one of each for every configuration and target.

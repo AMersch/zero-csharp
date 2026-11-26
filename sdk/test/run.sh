@@ -1611,11 +1611,12 @@ EOF
 }
 
 # The bindings (bin/interoplib.Interop.cs) for every kind of type they copy,
-# called by a .NET program that treats warnings as errors; an export they
-# can't declare is left out with ZERO008. The file is rewritten only when it
+# called by a .NET program that treats warnings as errors, through
+# [LibraryImport] and again through [DllImport]; an export they can't declare
+# is left out with ZERO008. The file is rewritten only when it
 # changes, and dotnet clean removes it.
 test_native_library_bindings() {
-    local name="native library bindings" dir bindings
+    local name="native library bindings" dir bindings generated
     can_build "$name" || return
     dir=$(fixture interoplib-app native-bindings/interoplib-app)
     fixture interoplib native-bindings/interoplib > /dev/null
@@ -1626,6 +1627,17 @@ test_native_library_bindings() {
     dotnet "$dir/bin/Debug/net10.0/interoplib-app.dll" > "$WORK/native-bindings.out" 2>&1
     if ! same_output "$WORK/native-bindings.out" "$dir/expected.txt" "$WORK/native-bindings.diff"; then
         fail "$name" "$(cat "$WORK/native-bindings.diff")"; return
+    fi
+    # [LibraryImport]: its generator wrote a file with the calls.
+    generated=$dir/obj/Debug/net10.0/generated/Microsoft.Interop.LibraryImportGenerator
+    if ! grep -rqs "shape_move" "$generated"; then fail "$name" "the bindings didn't use [LibraryImport]"; return; fi
+    # ZERO_INTEROP_DLLIMPORT turns them back to [DllImport].
+    rm -rf "$generated"
+    if ! run_in "$dir" native-bindings-dllimport build -p:InteropDllImport=true; then fail "$name" "the [DllImport] build failed"; return; fi
+    if grep -rqs "shape_move" "$generated"; then fail "$name" "ZERO_INTEROP_DLLIMPORT still used [LibraryImport]"; return; fi
+    dotnet "$dir/bin/Debug/net10.0/interoplib-app.dll" > "$WORK/native-bindings.out" 2>&1
+    if ! same_output "$WORK/native-bindings.out" "$dir/expected.txt" "$WORK/native-bindings.diff"; then
+        fail "$name" "[DllImport]: $(cat "$WORK/native-bindings.diff")"; return
     fi
     sleep 1; touch "$WORK/native-bindings.stamp" "$WORK/native-bindings/interoplib/Api.cs"
     if ! run_in "$WORK/native-bindings/interoplib" native-bindings-2 build; then fail "$name" "the second build failed"; return; fi

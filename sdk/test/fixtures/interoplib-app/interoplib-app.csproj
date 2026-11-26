@@ -7,6 +7,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- The test looks for the [LibraryImport] generator's file, then builds
+         once more with [DllImport] instead. -->
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <DefineConstants Condition="'$(InteropDllImport)' == 'true'">$(DefineConstants);ZERO_INTEROP_DLLIMPORT</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../interoplib/interoplib.csproj"

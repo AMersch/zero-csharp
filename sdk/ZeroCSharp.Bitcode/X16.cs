@@ -25,7 +25,8 @@
 //
 // Fitting isn't enough: what the code leaves is the heap. After the first link
 // that works, more functions are moved while less than X16Heap bytes are left,
-// and the link that left the most is the one that is kept.
+// and the link that left the most is the one that is kept. A program that fits
+// without banks but would have next to no heap gets banks for the same reason.
 
 using System.Text;
 using System.Text.RegularExpressions;
@@ -62,6 +63,9 @@ static partial class C64
 
     // What is aimed for: the bytes of heap (with 1 KB for the stack on top of them).
     const int X16Heap = 4096;
+
+    // A program that fits with less than this can't allocate: it gets banks although it fits.
+    const int X16NoHeap = 512;
 
     /// <summary>
     /// Links once with room for all of the program, to see how big its functions
@@ -129,11 +133,20 @@ static partial class C64
     /// before, and says whether to try again with more functions in banks. When
     /// not, the output is the best link's.
     /// </summary>
-    static bool X16Improve(X16Banks? banks, X16Context c, List<string> options)
+    static bool X16Improve(ref X16Banks? banks, X16Context c, List<string> options)
     {
-        if (banks == null)
-            return false;
         int free = X16HeapLeft(c);
+        if (banks == null)
+        {
+            if (free < 0 || free >= X16NoHeap)
+                return false;
+            File.Copy(c.Output, c.Output + ".best", overwrite: true);
+            File.Copy(c.Output + ".elf", c.Output + ".best.elf", overwrite: true);
+            banks = X16Measure(c);
+            if (banks == null)
+                return false;
+            banks.BestFree = free;          // the link without banks, to go back to
+        }
         if (free > banks.BestFree)
         {
             banks.BestFree = free;
@@ -278,12 +291,16 @@ static partial class C64
     static void X16Finish(X16Banks? banks, string llvmMos, string outDir, string output, string name)
     {
         string file = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, Banking.FileName(name));
-        if (banks == null)
+        if (banks == null || banks.Count == 0)
         {
             File.Delete(file);
-            return;
         }
-        Banking.Extract(llvmMos, output + ".elf", banks.Count, outDir, file);
+        else
+        {
+            Banking.Extract(llvmMos, output + ".elf", banks.Count, outDir, file);
+        }
+        if (banks == null)
+            return;
 
         // What the heap and the stack have is what the code leaves: say if it isn't much.
         if (banks.BestFree is >= 0 and < 3072)

@@ -209,7 +209,7 @@ static partial class C64
             {
                 if (platform == "cx16")
                 {
-                    if (X16Improve(banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos), options))
+                    if (X16Improve(ref banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos), options))
                         continue;
                     X16Finish(banks, llvmMos, outDir, output, name);
                 }

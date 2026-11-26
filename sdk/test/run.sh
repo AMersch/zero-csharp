@@ -1587,6 +1587,29 @@ test_native_library_app_recipe() {
     pass "$name"
 }
 
+# The recipe as Visual Studio builds it, simulated: it builds the solution's
+# projects itself (here, the library first) and asks a reference only for
+# GetTargetPath, given the solution's configuration. The library answers with
+# its native file, which is copied next to the program.
+test_native_library_visual_studio() {
+    local name="native library visual studio" dir lib app out
+    can_build "$name" || return
+    dir=$(fixture nativelib-app nativelib-vs)
+    fixture nativelib nativelib-vs/MathLib > /dev/null
+    mv "$dir/MathLib/nativelib.csproj" "$dir/MathLib/MathLib.csproj"
+    lib=$(native_path "$dir/MathLib/MathLib.csproj"); app=$(native_path "$dir/App/App.csproj")
+    cat > "$WORK/nativelib-vs.rsp" <<EOF
+-p:BuildingInsideVisualStudio=true
+"-p:CurrentSolutionConfigurationContents=<SolutionConfiguration><ProjectConfiguration Project=\\"{11111111-1111-1111-1111-111111111111}\\" AbsolutePath=\\"$lib\\" BuildProjectInSolution=\\"True\\">Debug|AnyCPU</ProjectConfiguration><ProjectConfiguration Project=\\"{22222222-2222-2222-2222-222222222222}\\" AbsolutePath=\\"$app\\" BuildProjectInSolution=\\"True\\">Debug|AnyCPU</ProjectConfiguration></SolutionConfiguration>"
+EOF
+    if ! run_in "$dir/MathLib" nativelib-vs-lib build "@$(native_path "$WORK/nativelib-vs.rsp")"; then fail "$name" "the library's build failed"; return; fi
+    if ! run_in "$dir/App" nativelib-vs-app build "@$(native_path "$WORK/nativelib-vs.rsp")"; then fail "$name" "the program's build failed"; return; fi
+    if [ ! -f "$dir/App/bin/Debug/net10.0/MathLib$HOST_LIB_EXT" ]; then fail "$name" "MathLib$HOST_LIB_EXT wasn't copied to the program"; return; fi
+    out=$(dotnet "$dir/App/bin/Debug/net10.0/App.dll" 2>&1 | tr -d '\r')
+    if [ "$out" != $'add 5\noffset 11,22' ]; then fail "$name" "printed: $out"; return; fi
+    pass "$name"
+}
+
 # The bindings (bin/interoplib.Interop.cs) for every kind of type they copy,
 # called by a .NET program that treats warnings as errors; an export they
 # can't declare is left out with ZERO008. The file is rewritten only when it
@@ -2091,6 +2114,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_c native_library_c_linked native_library_with_zero_exe native_library_cross
     link_library link_library_passed_on link_library_newer_glibc sdl3 sdl3_windows
     native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe native_library_bindings
+    native_library_visual_studio
     fsharp_program fsharp_printf fsharp_collections fsharp_builders fsharp_memory fsharp_must_not_compile fsharp_scratch_ref_struct_state fsharp_unsafe_calls fsharp_unsafe_calls_libraries fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
     fsharp_native_library fsharp_native_library_cross fsharp_native_library_errors
     fsharp_native_library_bindings fsharp_program_calls_native_library)

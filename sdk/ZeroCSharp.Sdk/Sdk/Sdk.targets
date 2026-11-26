@@ -804,14 +804,29 @@
     library and gives back the file to copy next to the program (and into its
     publish folder), which .NET then finds by name.
   -->
-  <Target Name="ZeroNativeLibraryFiles" DependsOnTargets="Build" Returns="@(_ZeroNativeLibraryForProgram)"
-          Condition="'$(ZeroNativeLibrary)' == 'true'">
+  <Target Name="ZeroNativeLibraryFiles" DependsOnTargets="Build;_ZeroNativeLibraryForProgram" Returns="@(_ZeroNativeLibraryForProgram)"
+          Condition="'$(ZeroNativeLibrary)' == 'true'" />
+  <Target Name="_ZeroNativeLibraryForProgram" DependsOnTargets="ZeroNativeCommand" Condition="'$(ZeroNativeLibrary)' == 'true'">
     <ItemGroup>
       <!-- A full path: the program resolves it from its own folder. -->
       <_ZeroNativeLibraryForProgram Include="$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(ZeroNativeOutput)'))"
                                     Link="$([System.IO.Path]::GetFileName('$(ZeroNativeOutput)'))"
                                     TargetPath="$([System.IO.Path]::GetFileName('$(ZeroNativeOutput)'))"
                                     CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+  <!--
+    Visual Studio builds the solution's projects itself and asks a reference
+    only for GetTargetPath, ignoring its Targets metadata: the program would
+    get the library's IL .dll as Content, not copied. There the library
+    answers with its native file instead, with the same copy metadata.
+  -->
+  <Target Name="_ZeroNativeLibraryTargetPathInVisualStudio" AfterTargets="GetTargetPathWithTargetPlatformMoniker"
+          DependsOnTargets="_ZeroNativeLibraryForProgram"
+          Condition="'$(ZeroNativeLibrary)' == 'true' and '$(BuildingInsideVisualStudio)' == 'true'">
+    <ItemGroup>
+      <TargetPathWithTargetPlatformMoniker Remove="@(TargetPathWithTargetPlatformMoniker)" />
+      <TargetPathWithTargetPlatformMoniker Include="@(_ZeroNativeLibraryForProgram)" />
     </ItemGroup>
   </Target>
 

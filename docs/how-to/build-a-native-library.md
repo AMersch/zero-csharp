@@ -164,9 +164,8 @@ copies it into the publish folder too. .NET then finds it by name. The metadata 
 - `Targets="ZeroNativeLibraryFiles"` and `OutputItemType="Content"` bring back the native library as
   a file to copy.
 
-Full Visual Studio builds references its own way and copies the library's IL `.dll` instead. On
-Windows, that file has the native library's name, so build with `dotnet build` there (VS Code and
-Rider do).
+Visual Studio builds the library itself and asks the reference only for its output file; the library
+answers with its native file there, so the copy works the same.
 
 A program can leave out `AllowUnsafeBlocks` when none of the library's exports take pointers. A zero
 project can't reference a native library this way: a reference that would compile its IL in is an

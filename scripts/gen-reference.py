@@ -47,6 +47,7 @@ PAGES = [
     ('Path.cs', ['Path'], 'path', 'The parts of a path, joining paths, and tidying them up.'),
     ('Directory.cs', ['Directory', 'DirectoryEntries', 'DirectoryEntry'], 'directory', 'Creating, listing, moving and deleting directories; the current directory.'),
     ('Clock.cs', ['Clock', 'CalendarTime'], 'clock', 'The monotonic clock for durations, and the date and time of day.'),
+    ('TimeProvider.cs', ['TimeProvider', 'ITimer'], 'time-provider', 'Where time comes from: the system clock, or a fake one in tests.'),
     ('Random.cs', ['Random'], 'random', 'Random numbers with .NET\'s method names, the same on every target.'),
     ('Kernels.cs', ['Kernels'], 'kernels', 'SIMD math for inference: dot products, softmax, norms.'),
     ('Dos.cs', ['Dos'], 'dos', 'DOS only: VGA graphics, keyboard, mouse, speaker, files, clock.'),

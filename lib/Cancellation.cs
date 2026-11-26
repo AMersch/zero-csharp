@@ -54,8 +54,11 @@ namespace System.Threading
         bool _canceled;
         // Callbacks, the latest first.
         internal Registration? _callbacks;
-        // CancelAfter's timer, on Task.Delay's list.
+        // CancelAfter's timer, on Task.Delay's list; or, for a source made
+        // with a TimeProvider other than the system's, the provider's timer.
         DelayTimer? _timer;
+        TimeProvider? _provider;
+        ITimer? _providerTimer;
         // A linked source's registrations on its parents, removed by Dispose.
         CancellationTokenRegistration[]? _links;
 
@@ -75,6 +78,20 @@ namespace System.Threading
 
         /// <summary>A source that cancels itself after <paramref name="delay"/>.</summary>
         public CancellationTokenSource(TimeSpan delay) => CancelAfter(delay);
+
+        /// <summary>
+        /// A source that cancels itself after <paramref name="delay"/> by
+        /// <paramref name="timeProvider"/>'s clock; its later CancelAfter calls
+        /// use that clock too.
+        /// </summary>
+        public CancellationTokenSource(TimeSpan delay, TimeProvider timeProvider)
+        {
+            if (timeProvider == null)
+                throw new ArgumentNullException(nameof(timeProvider));
+            if (timeProvider != TimeProvider.System)
+                _provider = timeProvider;
+            CancelAfter(delay);
+        }
 
         public bool IsCancellationRequested => _canceled;
 
@@ -125,6 +142,12 @@ namespace System.Threading
                 Cancel();
                 return;
             }
+            if (_provider != null)
+            {
+                _providerTimer ??= _provider.CreateTimer(static s => ((CancellationTokenSource)s!).Cancel(), this, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+                _providerTimer.Change(TimeSpan.FromMilliseconds(millisecondsDelay), Timeout.InfiniteTimeSpan);
+                return;
+            }
             _timer ??= new CancelTimer(this);
             _timer.Schedule(millisecondsDelay);
         }
@@ -145,6 +168,8 @@ namespace System.Threading
         public void Dispose()
         {
             StopTimer();
+            _providerTimer?.Dispose();
+            _providerTimer = null;
             if (_links != null)
             {
                 foreach (CancellationTokenRegistration link in _links)
@@ -157,6 +182,7 @@ namespace System.Threading
         {
             if (_timer != null)
                 DelayTimer.Remove(_timer); // kept, to schedule again
+            _providerTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         }
 
         // CancelAfter's timer, one per source, scheduled again by each call.

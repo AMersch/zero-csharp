@@ -626,6 +626,7 @@
       <_ZeroNativeLibraryFile Include="$(AssemblyName).so;$(AssemblyName).dylib;$(AssemblyName).dll;$(AssemblyName).lib" />
       <ZeroNativeFile Include="@(_ZeroNativeLibraryFile->'$(OutDir)native/%(Identity)')" />
       <ZeroNativeFile Include="$(ZeroInteropSource)" Condition="'$(ZeroInteropSource)' != ''" />
+      <ZeroNativeFile Include="$(ZeroInteropFSharpSource)" Condition="'$(ZeroInteropFSharpSource)' != ''" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).so')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).dylib')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).dll')" />
@@ -782,19 +783,21 @@
   </UsingTask>
 
   <!--
-    A native library's bindings for .NET, C# and F# libraries alike: the C#
+    A native library's bindings for .NET, C# and F# libraries alike: the code
     that declares its exports with [DllImport] and copies the structs and enums
-    they use (Sdk/ZeroFSharpNative.cs.txt, WriteInterop), in
-    bin/<AssemblyName>.Interop.cs, one file for every configuration and target.
+    they use (Sdk/ZeroFSharpNative.cs.txt, WriteInterop), in C# in
+    bin/<AssemblyName>.Interop.cs and in F# in bin/<AssemblyName>.Interop.fs,
+    one of each for every configuration and target.
     Written only when it changes, so a program that compiles it in isn't
     rebuilt for nothing. ZeroInteropClass names the class (Namespace.Class;
     the assembly's name by default); ZeroInterop=false turns it off.
   -->
   <PropertyGroup Condition="'$(ZeroNativeLibrary)' == 'true'">
     <ZeroInteropSource Condition="'$(ZeroInteropSource)' == ''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(BaseOutputPath)', '$(AssemblyName).Interop.cs'))</ZeroInteropSource>
+    <ZeroInteropFSharpSource Condition="'$(ZeroInteropFSharpSource)' == ''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(BaseOutputPath)', '$(AssemblyName).Interop.fs'))</ZeroInteropFSharpSource>
   </PropertyGroup>
   <Target Name="ZeroInterop" AfterTargets="CoreCompile" Condition="'$(ZeroNativeLibrary)' == 'true' and '$(ZeroInterop)' != 'false'">
-    <ZeroFSharpNative Assembly="@(IntermediateAssembly->'%(FullPath)')" Interop="$(ZeroInteropSource)"
+    <ZeroFSharpNative Assembly="@(IntermediateAssembly->'%(FullPath)')" Interop="$(ZeroInteropSource)" InteropFSharp="$(ZeroInteropFSharpSource)"
                       LibraryName="$(AssemblyName)" InteropClass="$(ZeroInteropClass)" />
   </Target>
 

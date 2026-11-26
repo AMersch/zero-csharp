@@ -1,14 +1,23 @@
 <!-- An F# program that calls MathLib (a copy of fixtures/nativelib) through
-     ../Interop, which compiles the bindings and brings the library along. -->
+     the F# bindings MathLib's build writes. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
+  <!-- docs:fsharp-reference -->
   <ItemGroup>
+    <ProjectReference Include="../MathLib/MathLib.csproj"
+                      ReferenceOutputAssembly="false"
+                      SkipGetTargetFrameworkProperties="true"
+                      Targets="ZeroNativeLibraryFiles"
+                      OutputItemType="Content" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Before the files that use it. -->
+    <Compile Include="../MathLib/bin/MathLib.Interop.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="../Interop/Interop.csproj" />
-  </ItemGroup>
+  <!-- docs:end -->
 </Project>

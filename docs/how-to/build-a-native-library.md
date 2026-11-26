@@ -124,7 +124,8 @@ programs. `dotnet run` refuses a library.
 
 ## Call it from .NET
 
-The library's build also writes its .NET bindings, `bin/MathLib.Interop.cs`. That's C# with a
+The library's build also writes its .NET bindings, `bin/MathLib.Interop.cs` (and the same in F#,
+below). That's C# with a
 `[DllImport]` for each export, under its method's name, and a copy of each struct and enum the exports
 use, with the same fields and layout. A .NET program compiles that file in and calls the library like
 any class:
@@ -184,28 +185,24 @@ warning `ZERO008`: the library still builds and exports it, and you declare that
 
 ### Call it from F#
 
-F# can't compile the C# bindings, so an F# program references a small C# project that does. It's
-the same project file as above, with nothing else in it:
+The build writes the same bindings in F#, `bin/MathLib.Interop.fs`: a module of `extern` functions,
+and the structs and enums as `[<Struct>]` types with `val mutable` fields. An F# program references
+the library the same way and compiles the file before its own:
 
 ```xml
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-  </PropertyGroup>
-  <ItemGroup>
-    <ProjectReference Include="../MathLib/MathLib.csproj"
-                      ReferenceOutputAssembly="false"
-                      SkipGetTargetFrameworkProperties="true"
-                      Targets="ZeroNativeLibraryFiles"
-                      OutputItemType="Content" />
-    <Compile Include="../MathLib/bin/MathLib.Interop.cs" />
-  </ItemGroup>
-</Project>
+<ItemGroup>
+  <ProjectReference Include="../MathLib/MathLib.csproj"
+                    ReferenceOutputAssembly="false"
+                    SkipGetTargetFrameworkProperties="true"
+                    Targets="ZeroNativeLibraryFiles"
+                    OutputItemType="Content" />
+</ItemGroup>
+<ItemGroup>
+  <!-- Before the files that use it. -->
+  <Compile Include="../MathLib/bin/MathLib.Interop.fs" />
+  <Compile Include="Program.fs" />
+</ItemGroup>
 ```
-
-The F# program references that project the usual way, and the native library comes along to its
-output folder:
 
 <!-- sample: sdk/test/fixtures/nativelib-fsapp/App/Program.fs fsharp-call -->
 ```fsharp
@@ -217,7 +214,16 @@ printfn "add %d" (MathLib.Add(2, 3))
 printfn "offset %d,%d" moved.X moved.Y
 ```
 
-An F# library gets bindings the same way, made from its IL, and a C# program calls it like a C# one.
+F# has no fixed-size buffers or function-pointer types, so the F# bindings differ in two places:
+
+- A fixed-size buffer is a struct of the buffer's size, `Name_BytesBuffer`, whose first element is
+  `Element0`. Take its address for a pointer to the elements.
+- A `delegate* unmanaged` parameter is a `nativeint`. Pass `Marshal.GetFunctionPointerForDelegate`'s
+  result, and keep the delegate alive while the library may call it.
+
+Pointers are `nativeptr<_>` in fields and `T*` in the `extern` declarations, as F# writes them.
+
+An F# library gets both files the same way, made from its IL.
 
 ### Declare the exports yourself
 

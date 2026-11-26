@@ -1630,7 +1630,7 @@ test_native_library_bindings() {
     sleep 1; touch "$WORK/native-bindings.stamp" "$WORK/native-bindings/interoplib/Api.cs"
     if ! run_in "$WORK/native-bindings/interoplib" native-bindings-2 build; then fail "$name" "the second build failed"; return; fi
     if [ "$bindings" -nt "$WORK/native-bindings.stamp" ]; then fail "$name" "unchanged bindings were written again"; return; fi
-    if ! run_in "$WORK/native-bindings/interoplib" native-bindings-clean clean || [ -e "$bindings" ]; then
+    if ! run_in "$WORK/native-bindings/interoplib" native-bindings-clean clean || [ -e "$bindings" ] || [ -e "${bindings%.cs}.fs" ]; then
         fail "$name" "dotnet clean left the bindings"; return
     fi
     pass "$name"
@@ -2066,8 +2066,8 @@ test_fsharp_native_library_bindings() {
     pass "$name"
 }
 
-# An F# program calls a C# native library through a C# project that compiles
-# the bindings; the library comes along to the program's folder.
+# An F# program calls a C# native library through the F# bindings
+# (bin/MathLib.Interop.fs); the library is copied to the program's folder.
 test_fsharp_program_calls_native_library() {
     local name="F# program calls native library" dir out
     can_build "$name" || return
@@ -2078,6 +2078,21 @@ test_fsharp_program_calls_native_library() {
     if [ ! -f "$dir/App/bin/Debug/net10.0/MathLib$HOST_LIB_EXT" ]; then fail "$name" "MathLib$HOST_LIB_EXT wasn't copied to the program"; return; fi
     out=$(dotnet "$dir/App/bin/Debug/net10.0/App.dll" 2>&1 | tr -d '\r')
     if [ "$out" != $'add 5\noffset 11,22' ]; then fail "$name" "printed: $out"; return; fi
+    pass "$name"
+}
+
+# The F# bindings of every kind of type (fixtures/interoplib), called from F#:
+# the same output as the C# program's.
+test_fsharp_native_library_bindings_all_types() {
+    local name="F# bindings of every type" dir
+    can_build "$name" || return
+    dir=$(fixture interoplib-fsapp fs-all-bindings/interoplib-fsapp)
+    fixture interoplib fs-all-bindings/interoplib > /dev/null
+    if ! run_in "$dir" fs-all-bindings build; then fail "$name" "dotnet build failed"; return; fi
+    dotnet "$dir/bin/Debug/net10.0/interoplib-fsapp.dll" > "$WORK/fs-all-bindings.out" 2>&1
+    if ! same_output "$WORK/fs-all-bindings.out" "$ROOT/sdk/test/fixtures/interoplib-app/expected.txt" "$WORK/fs-all-bindings.diff"; then
+        fail "$name" "$(cat "$WORK/fs-all-bindings.diff")"; return
+    fi
     pass "$name"
 }
 
@@ -2117,7 +2132,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_library_visual_studio
     fsharp_program fsharp_printf fsharp_collections fsharp_builders fsharp_memory fsharp_must_not_compile fsharp_scratch_ref_struct_state fsharp_unsafe_calls fsharp_unsafe_calls_libraries fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
     fsharp_native_library fsharp_native_library_cross fsharp_native_library_errors
-    fsharp_native_library_bindings fsharp_program_calls_native_library)
+    fsharp_native_library_bindings fsharp_program_calls_native_library fsharp_native_library_bindings_all_types)
 
 # sdk/trim-windows-layout.sh with a stub objdump: a DLL that lld.exe imports
 # is found whatever its capitals, and an objdump failure stops the trim

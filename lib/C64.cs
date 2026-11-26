@@ -16,10 +16,10 @@
 // editor: text scrolls, and a typed line is handed over at RETURN. Print
 // puts characters at a position without moving that cursor.
 //
-// Everything here is a few Peeks and Pokes, and each of those costs about
-// 125 processor cycles, of the 20,000 in a frame: a call from C# passes
-// 32-bit numbers through an 8-bit processor. Print loops in C, at about 170
-// cycles a character.
+// Everything here is a few Peeks and Pokes, and each of those compiles to
+// the processor's own load or store: C64.Poke(0xD020, 0) is one STA $D020.
+// (The functions are in C, and the build inlines them.) Print loops in C,
+// at about 170 cycles a character, of the 20,000 in a frame.
 
 using System;
 using System.Runtime.InteropServices;

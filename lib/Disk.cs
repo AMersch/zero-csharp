@@ -19,7 +19,9 @@
 // holds some 250 entries with ordinary names (IsComplete says false if there were more). "." and ".."
 // are left out.
 // Names come as the drive has them, a byte a character. In the emulator's host folder (-fsroot) a
-// folder's name is not looked at: it always lists the root. On an SD card it is.
+// folder's name is not looked at: it always lists the root. On an SD card it is. For the same reason
+// give Command plain paths ("s:folder/name", not "s/folder/:name"): there the second removes the
+// root's "name".
 
 using System;
 using System.Runtime.InteropServices;
@@ -54,7 +56,7 @@ public static class Disk
     }
 
     /// <summary>
-    /// Reads a folder, for Next to hand out: "" for the current one, a name or "outer/inner", with "#9:" in front for
+    /// Reads a folder, for Next to hand out: "" for the current one, "outer/inner" from there or "/outer" from the root, with "#9:" in front for
     /// another device. False if there is no such device. A folder that isn't there has no entries.
     /// </summary>
     public static bool OpenDirectory(ReadOnlySpan<char> folder = default)

@@ -135,7 +135,7 @@ leaves a second file, `bin/cx16/NAME.BNK`, which has to stay next to the `.prg`;
 take care of it. `ZERO_CX16_BANK=Name` forces the functions whose names contain `Name` into banks even
 when the program fits, to test banking or to measure what a call costs (about 33 cycles, in
 `x16emu`, with the jiffy clock: run it without `-testbench`, which has no frame interrupt).
-`BanksWithCode`, `BanksDemo`, `BankedDemo`, `BankedListDemo`, `DiskFiles`, `DiskList`, `Mouse` and `CX16Demo` are for the X16 only.
+`BanksWithCode`, `BanksDemo`, `BankedDemo`, `BankedListDemo`, `DiskFiles`, `DiskList`, `DiskInfo`, `DiskFolders`, `DiskChange`, `Mouse` and `CX16Demo` are for the X16 only.
 For `dotnet build -p:ZeroTarget=cx16` the SDK carries `cx16/runtime.c` and `math.c`; `sdk/pack-local.sh`
 packs the checkout for projects on this machine, and `sdk/test/run.sh cx16_target` tests it.
 

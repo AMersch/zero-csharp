@@ -85,13 +85,24 @@ Code and read-only data stay in flash; RAM holds the writable data, the stacks a
   included. A program needs 35 KB of RAM before its heap, most of it the stacks: 16 KB each for the
   processor's stack and the stack managed code keeps its references on. Llama's 1.1 MB model stays in
   flash, and its key/value cache, sized for the 64 tokens it makes, is 82 KB of RAM.
-- **Uno R4:** 29 of the samples, those that don't need a big heap. The stacks are 4 KB each, so a
+- **Uno R4:** 38 of the samples, those that don't need a big heap. The stacks are 4 KB each, so a
   program needs about 10.5 KB of RAM before its heap and has some 20 KB left. Arena (which allocates a
-  16 KB array), Collections, Files, Strings, Queries, Threads, Patterns, Scratch and Unicode don't fit.
+  16 KB array), Collections, Files, Strings, Queries, Threads, Fibers, Patterns, Scratch, Links and
+  Unicode don't fit. `Arena.Scratch` starts each arena with a 2 KB block on a microcontroller instead
+  of 16 KB, and so does each fiber's scratch arena.
 
 String literals go to flash too, so the RAM they would cost is free. Flash is read-only: the memory
 protection unit makes a write to it fault, in QEMU as on a chip, so a bug that writes to a string
 literal or through a null pointer stops the program instead of going unnoticed.
+
+To decide how much of the RAM each part of a program gets, give an arena its own memory with
+`Arena.FromBuffer`: a struct with a `fixed` byte array, in a static field, is part of the program's
+writable data, so `build.sh` counts it in the RAM the program takes before its heap. It costs as much
+flash too, because statics are stored as initialized data and copied to RAM at startup: a 4 KB buffer
+adds 4 KB to both figures. That arena never touches the heap and can't grow past its buffer. Keep `stackalloc` buffers small here: on
+the Uno R4 the whole stack is 4 KB. An arena that does use the heap can still take a budget,
+`Arena.Create(..., maxCapacity: n)`. See
+[An arena in a buffer of your own](../concepts/memory.html#an-arena-in-a-buffer-of-your-own).
 
 ## The LED, registers and interrupts
 
@@ -139,6 +150,11 @@ written.
 ```csharp no-sample
 Board.Write(0xd0000018, 1u << 15);   // Pico 2: GP15 high (SIO GPIO_OUT_SET)
 ```
+
+For several things going on at once (blink one LED, watch a button, print), [fibers](use-fibers.html)
+give each its own loop: `Fiber.Spawn` each one, call `Fiber.Sleep` or `Fiber.Yield` in its loop, and
+`Fiber.Run`. A fiber's stack is 4 KB by default here; see
+[Fibers on a microcontroller](use-fibers.html#fibers-on-a-microcontroller) for what they cost.
 
 ## On a real Pico 2
 

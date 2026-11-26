@@ -1,6 +1,6 @@
 <!--
   ZeroCSharp.Sdk: zero-mode C# and F# projects (.csproj, .fsproj).
-  <Project Sdk="ZeroCSharp.Sdk/0.13.0">.
+  <Project Sdk="ZeroCSharp.Sdk/0.14.0">.
 
   A project gets a target framework of its own, ZeroFramework (zero03, in
   version.props), and compiles against zerocore (the core library,
@@ -108,7 +108,14 @@
          for the GPU as well, as kernels lib/Gpu.cs launches (Gpu.Run("Name", ...)).
          For ZeroTarget osx-arm64, on an Apple Silicon Mac with Xcode, its Metal
          Toolchain (xcodebuild -downloadComponent MetalToolchain) and Docker,
-         which runs NativeAOT-LLVM, the compiler of the kernels' first step. -->
+         which runs NativeAOT-LLVM, the compiler of the kernels' first step.
+         Cuda (experimental: not yet run on an NVIDIA GPU) does the same for
+         NVIDIA GPUs: ZeroTarget linux-x64 or linux-arm64, built on any host
+         with a clang that has the NVPTX backend (Linux's clang, LLVM's own,
+         Homebrew's llvm; not Apple's), found or set as ZeroCudaClang. The
+         kernels are PTX for ZeroCudaArch (default sm_70), checked by ptxas
+         when it's on the PATH; the program opens the CUDA driver when it
+         runs, so building needs no CUDA toolkit. -->
 
     <!-- dotnet pack: the dll goes to lib/<framework>/ by a target in Sdk.targets,
          because NuGet's pack rejects build output for a framework it doesn't know. -->

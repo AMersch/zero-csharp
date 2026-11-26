@@ -210,6 +210,120 @@ foreach (ref int item in list)
     item *= 10;                         // 10, 30, 40, 50
 ```
 
+### A graph whose nodes come and go
+
+Handles can link items in several pools, and an item can have as many links as it needs: here a
+town holds a handle to its first road, and each road one to the next, so the roads form a list per
+town:
+
+<!-- sample: samples/Links.cs map -->
+```csharp
+// A map: towns joined by roads, in two pools. A town holds a handle to the
+// first of its roads and each road one to the next, so a town has as many
+// roads as it needs, and every link is a plain struct.
+public struct Town
+{
+    public int Id;
+    public Handle<Road> FirstRoad;
+}
+
+public struct Road
+{
+    public Handle<Town> To;
+    public int Km;
+    public Handle<Road> Next;
+}
+```
+
+`Map` keeps the two pools and adds a road both ways. Removing a town removes it and its own roads,
+and leaves the roads that lead to it from other towns:
+
+<!-- sample: samples/Links.cs map-remove -->
+```csharp
+// The town and its own roads go. Roads to it from other towns stay,
+// but their handle no longer finds it.
+public void RemoveTown(Handle<Town> town)
+{
+    Handle<Road> road = Towns[town].FirstRoad;
+    while (!road.IsNull)
+    {
+        Handle<Road> next = Roads[road].Next;
+        Roads.Remove(road);
+        road = next;
+    }
+    Towns.Remove(town);
+}
+```
+
+Those roads are safe to keep: their `To` belongs to a removed town, so `Contains` says false, even
+after the slot holds a new town, where a pointer to the slot would read the new town as the old.
+A search skips them, and keeps its own tables in scratch memory, keyed by handle:
+
+<!-- sample: samples/Links.cs distance -->
+```csharp
+// The shortest way by road, in km, or -1 if there is none. The search's
+// own tables are scratch memory, gone when it returns.
+static int Distance(Map map, Handle<Town> from, Handle<Town> to)
+{
+    var trip = new Trip { Map = map, From = from, To = to };
+    return Arena.Scratch(ref trip,
+        static (scoped ScratchScope scratch, scoped ref Trip trip) =>
+        {
+            var best = scratch.Dict<Handle<Town>, int>();
+            var done = scratch.HashSet<Handle<Town>>();
+            best.Set(trip.From, 0);
+            while (true)
+            {
+                // The nearest town not done yet (a scan, to keep it short).
+                Handle<Town> here = default;
+                int km = int.MaxValue;
+                foreach (var entry in best)
+                    if (!done.Contains(entry.Key) && entry.Value < km)
+                    {
+                        here = entry.Key;
+                        km = entry.Value;
+                    }
+                if (here.IsNull)
+                    return -1;
+                if (here == trip.To)
+                    return km;
+                done.Add(here);
+
+                Handle<Road> road = trip.Map.Towns[here].FirstRoad;
+                for (; !road.IsNull; road = trip.Map.Roads[road].Next)
+                {
+                    Road r = trip.Map.Roads[road];
+                    if (!trip.Map.Towns.Contains(r.To))
+                        continue;           // a road to a removed town
+                    int via = km + r.Km;
+                    if (!best.TryGet(r.To, out int known) || via < known)
+                        best.Set(r.To, via);
+                }
+            }
+        });
+}
+```
+
+<!-- sample: samples/Links.cs map-use -->
+```csharp
+Map map = Map.Create(arena);
+Handle<Town> harbor = map.AddTown(1), mill = map.AddTown(2);
+Handle<Town> ford = map.AddTown(3), hill = map.AddTown(4);
+Handle<Town> lake = map.AddTown(5);
+map.Join(harbor, mill, 230);
+map.Join(mill, ford, 150);
+map.Join(ford, lake, 150);
+map.Join(mill, lake, 330);
+map.Join(harbor, hill, 260);
+int before = Distance(map, harbor, lake);   // 530, through ford
+map.RemoveTown(ford);
+int after = Distance(map, harbor, lake);    // 560, mill to lake
+```
+
+The roads left behind still take their slots in the pool. Where towns come and go often, remove
+them too: when a town is removed, follow each of its roads to the town at the other end and take out
+the road back, or now and then sweep for roads whose `To` is gone.
+
 ## Key by an id, not by an object
 
 `Dict` and `RefDict` keys must be unmanaged, and zerocore's `object` has no `Equals` or `GetHashCode`,

@@ -107,18 +107,19 @@ programs `./test.sh --c64` runs:
 
 | Sample | Size | What is left for heap and stack |
 |---|---|---|
-| `Tiny`, `Minimal` | 7 KB | 42 KB |
-| `QuizStep1` | 13 KB | 36 KB |
-| `VirtualTest` | 15 KB | 34 KB |
-| `SmallIntegers` | 18 KB | 31 KB |
-| `QuizStep2` | 20 KB | 29 KB |
-| `SmallText`, `SmallArena`, `SmallDicts`, `SmallStrings`, `SmallEncoding` | 25 to 28 KB | 21 to 24 KB |
-| `Refs`, `SmallLists`, `SmallStrDicts`, `SmallObjects` | 32 to 34 KB | 15 to 17 KB |
-| `C64Demo` | 36 KB | 13 KB |
-| `SmallUnicode` | 37 KB | 12 KB |
-| `SmallBuilders` | 43 KB | 6 KB |
-| `SmallDoubles` | 47 KB | 2.4 KB |
-| `SmallFloats` | 49 KB | 0.6 KB |
+| `Tiny`, `Minimal` | 6 KB | 44 KB |
+| `Hello` | 7 KB | 43 KB |
+| `QuizStep1` | 11 KB | 39 KB |
+| `VirtualTest` | 13 KB | 37 KB |
+| `SmallIntegers`, `SmallNative`, `QuizStep2` | 17 to 18 KB | 32 to 33 KB |
+| `SmallKeys` | 20 KB | 30 KB |
+| `SmallEncoding`, `SmallStrings`, `SmallDicts` | 26 to 28 KB | 22 to 24 KB |
+| `Refs`, `SmallStrDicts`, `SmallObjects` | 31 to 32 KB | 18 to 19 KB |
+| `SmallDecimalFormats`, `SmallLists`, `SmallText`, `SmallUnicode`, `Paddles`, `C64Demo`, `SmallArena` | 34 to 36 KB | 14 to 16 KB |
+| `SmallBuilders` | 39 KB | 11 KB |
+| `SmallFibers`, `SmallChannels`, `SmallDoubleFormats` | 40 to 41 KB | 9 to 10 KB |
+| `SmallFloats` | 43 KB | 7 KB |
+| `SmallDoubles`, `SmallFormats` | 45 KB | 4.6 to 5.4 KB |
 
 The size includes the 2 KB shadow stack NativeAOT-LLVM's code keeps object references on. The Small
 samples are tests written to fit: each covers a piece of what Strings, Casts, Collections and the
@@ -150,7 +151,10 @@ rest are plain comparisons, and so are `IsWhiteSpace` and `IsControl`.
 
 So keep to whole numbers where you can, share collection types, and keep arenas small: 1 KB blocks
 instead of the default 4 KB. Memory really does run out here; `Arena.Create(..., stopOnOutOfMemory:
-true)` says so when it does (see [Catch arena mistakes](catch-arena-mistakes.html)).
+true)` says so when it does (see [Catch arena mistakes](catch-arena-mistakes.html)). `maxCapacity` caps
+an arena so it leaves the rest of the heap alone, and `Arena.FromBuffer` over a static buffer takes its
+memory out of the program's data instead, so the arena is sure to have it once the program has loaded
+(see [An arena in a buffer of your own](../concepts/memory.html#an-arena-in-a-buffer-of-your-own)).
 
 The build already favors size everywhere: the C# compiler runs with `--Os`, every function is marked
 to be compiled for size, and llvm-mos optimizes the whole program at link time, which makes it a fifth
@@ -257,9 +261,9 @@ static void Frame(int frame, ref int x, ref int y, ref int dx, ref int dy)
 ```
 
 `C64.ReadKey` gives the next key pressed without waiting, `C64.Joystick` the joystick in port 2, and
-`C64.Peek` and `C64.Poke` reach every address there is. Each call from C# costs about 125 processor
-cycles, of the 20,000 in a frame, because it passes 32-bit numbers through an 8-bit processor;
-`C64.Print` takes about 170 a character, so a full line is a third of a frame.
+`C64.Peek` and `C64.Poke` reach every address there is, and cost what a load or a store costs:
+`C64.Poke(0xD020, 0)` compiles to one `STA $D020`. `C64.Print` takes about 170 processor cycles a
+character, of the 20,000 in a frame, so a full line is a third of a frame.
 
 ## A game
 
@@ -456,7 +460,7 @@ that `c64/runtime.c` defines with 32-bit parameters: C#'s `calloc` is `cs_calloc
 - **40 columns, and ASCII.** Text prints in the C64's character set with both cases. Characters outside
   ASCII come out as something else.
 - **No arguments, files, environment or threads.** `Environment` has no variables; `lib/File.cs` and
-  `Parallel.For` don't link.
+  `Parallel.For` don't link. [Fibers](use-fibers.html#fibers-on-a-commodore-64) work, on small stacks.
 - **No `Sin`, `Pow`, `Log` and the like:** a program that calls them doesn't link. `+ - * /`, `%`, `Sqrt`,
   `Floor`, `Ceiling`, `Truncate` and the conversions work, in software; `SmallDoubles` checks that they
   give the same results as on other targets.
@@ -471,10 +475,13 @@ that `c64/runtime.c` defines with 32-bit parameters: C#'s `calloc` is `cs_calloc
 - **Tested in VICE only:** 3.10 on macOS, and 3.7.1 on Ubuntu 24.04 x64, where CI runs
   `./test.sh --c64` on every change. Nothing has run on a real C64 yet. The disk image route was
   checked in VICE with its drive emulation.
-- **Programs that fit can still run out of memory.** `SmallFloats` runs with 0.6 KB to spare.
+- **Programs that fit can still run out of memory.** `SmallFormats` runs with 4.6 KB to spare.
 - **A long method can be too much for llvm-mos:** the 6502 has three registers, and the error is
   "ran out of registers". `build.sh` then compiles that method's module separately and tries again; if
   it still fails, split the method.
+- **No pointers to generic methods over classes.** `&Method<SomeClass>` is a "fat" pointer, marked by
+  the top bit of 32, which a 16-bit pointer can't keep; the build stops with a message saying so.
+  Call through a generic class's virtual method instead, as `lib/Fibers.cs` does.
 - **The compiler versions are a set,** as for WebAssembly and DOS, and llvm-mos is one more.
 - **A C64 build is always optimized for size.** `ZeroOptimizeFor` doesn't apply, nor do
   `ZeroInstructionSet` and `ZeroDllImports`.

@@ -47,6 +47,7 @@ SMALL_SAMPLES=(
     SmallDoubles
     SmallObjects
     SmallArena
+    SmallNative
     SmallLists
     SmallDicts
     SmallStrDicts
@@ -58,6 +59,8 @@ SMALL_SAMPLES=(
     SmallDoubleFormats
     SmallDecimalFormats
     SmallKeys
+    SmallFibers
+    SmallChannels
 )
 SAMPLES=(
     Tiny
@@ -70,6 +73,10 @@ SAMPLES=(
     Core
     Bits
     Files
+    Paths
+    Streams
+    Network
+    Directories
     Dice
     Pipe
     Env
@@ -83,6 +90,8 @@ SAMPLES=(
     Guards
     Queries
     Threads
+    Fibers
+    Timers
     Records
     Shapes
     Refs
@@ -96,12 +105,18 @@ SAMPLES=(
     Keys
     Tensors
     TensorsAvx
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
     SmallMath
 )
 
+# Samples WebAssembly can't run (as in build.sh): the fiber samples switch stacks.
+NOT_WASM=" Fibers Timers SmallFibers SmallChannels Network "
+# Samples UEFI can't run (as in build.sh): lib/ has directories only on Linux,
+# macOS, Windows and WebAssembly.
+NOT_UEFI=" Directories Network "
 # Simd and Kernels print timings, so only their exit code is checked.
-TIMED=" Simd Kernels "
+TIMED=" Simd Kernels Fibers "
 # Arena and Collections print byte counts that depend on the pointer size, so
 # on WebAssembly, DOS and microcontrollers (32-bit) only their exit code is checked.
 POINTER_SIZED=" Arena Collections "
@@ -119,6 +134,8 @@ DOS_SAMPLES=(
     Core
     Bits
     Files
+    Paths
+    Streams
     Dice
     Pipe
     Env
@@ -134,6 +151,8 @@ DOS_SAMPLES=(
     Shapes
     Refs
     Patterns
+    Fibers
+    Timers
     Scratch
     Links
     Llama
@@ -142,6 +161,7 @@ DOS_SAMPLES=(
     Formats
     Keys
     Tensors
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
     Vga
 )
@@ -207,6 +227,11 @@ CX16_SAMPLES=(
     Jameson
     PcmDemo
     DiskList
+    DiskFolders
+    DiskChange
+    DiskInfo
+    SmallFibers
+    SmallChannels
 )
 # Microcontrollers: no SIMD to benchmark, no PC screen for Vga. Blink is
 # theirs only, and checks itself. The Uno R4
@@ -222,6 +247,8 @@ ARM_SAMPLES=(
     Core
     Bits
     Files
+    Paths
+    Streams
     Dice
     Pipe
     Env
@@ -233,6 +260,8 @@ ARM_SAMPLES=(
     Guards
     Queries
     Threads
+    Fibers
+    Timers
     Records
     Shapes
     Refs
@@ -245,11 +274,14 @@ ARM_SAMPLES=(
     Formats
     Keys
     Tensors
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
     Blink
 )
-# Arena, Collections, Files, Strings, Queries, Threads, Patterns, Scratch and
-# Unicode need more (Arena, for one, allocates a 16 KB array).
+# Arena, Collections, Files, Strings, Queries, Threads, Fibers, Patterns,
+# Scratch, Links and Unicode need more (Arena, for one, allocates a 16 KB
+# array; Fibers runs three fibers of 5 KB at once). Links passes, but with
+# less than 2 KB to spare, so a small change elsewhere would break it.
 R4_SAMPLES=(
     Tiny
     Minimal
@@ -282,12 +314,21 @@ run_all() {
     local fields=()
     local run=(./run.sh)
     local samples=("${SAMPLES[@]}")
-    [ "$target" = wasm ] && run+=(--wasm)
+    if [ "$target" = wasm ]; then
+        run+=(--wasm)
+        samples=()
+        for name in "${SAMPLES[@]}"; do
+            [[ "$NOT_WASM" == *" $name "* ]] || samples+=("$name")
+        done
+    fi
     [ "$target" = win ] && run+=(--win)
     [ "$target" = mac ] && run+=(--mac)
     if [ "$target" = uefi ]; then
         run+=(--uefi)
-        samples=("${SAMPLES[@]}" Vga)
+        samples=(Vga)
+        for name in "${SAMPLES[@]}"; do
+            [[ "$NOT_UEFI" == *" $name "* ]] || samples+=("$name")
+        done
     fi
     if [ "$target" = dos ]; then
         run+=(--dos)
@@ -391,6 +432,38 @@ run_all() {
         fi
         rm -f -- "$name"
     fi
+
+    # A fiber that overflows its stack must stop the program: the guard page
+    # does it where there is one, and on UEFI and DOS, which have none, the
+    # check of the stack's bottom does, with a message.
+    if [[ " ${samples[*]} " == *" Fibers "* ]]; then
+        status=0
+        out=$("${run[@]}" Fibers overflow < /dev/null 2>&1) || status=$?
+        if [ "$status" = 0 ]; then
+            echo "FAIL Fibers overflow: the program wasn't stopped"
+            failures=$((failures + 1))
+        elif { [ "$target" = uefi ] || [ "$target" = dos ]; } && [[ "$out" != *"Fiber 1 overflowed its stack"* ]]; then
+            echo "FAIL Fibers overflow: stopped (exit code $status) without the message"
+            echo "$out" | tail -3 | sed 's/^/       /'
+            failures=$((failures + 1))
+        else
+            echo "ok   Fibers overflow (stopped, as it must be)"
+        fi
+    fi
+
+    # Main returning with a timer still running, never given Fiber.Run, must
+    # stop the program with a message. (A C64 program gets no arguments.)
+    if [[ " ${samples[*]} " == *" Timers "* ]] && [ "$target" != c64 ]; then
+        status=0
+        out=$("${run[@]}" Timers forgotten < /dev/null 2>&1) || status=$?
+        if [ "$status" = 0 ] || [[ "$out" != *"Main returned with a timer still running"* ]]; then
+            echo "FAIL Timers forgotten: not stopped with the message (exit code $status)"
+            echo "$out" | tail -3 | sed 's/^/       /'
+            failures=$((failures + 1))
+        else
+            echo "ok   Timers forgotten (stopped, as it must be)"
+        fi
+    fi
 }
 
 test_native() {
@@ -490,7 +563,7 @@ test_cx16() {
     # The emulator's host folder is forgiving where the SD card's own DOS isn't: the
     # samples that use the disk run on a card image too.
     if [ -n "$card" ]; then
-        for name in DiskFiles DiskList; do
+        for name in DiskFiles DiskList DiskInfo DiskFolders DiskChange; do
             status=0
             out=$(X16_SDCARD=$card ./run.sh --cx16 "$name" < /dev/null 2>&1) || status=$?
             # (the emulator says that it has a card)

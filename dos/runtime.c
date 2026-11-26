@@ -33,6 +33,7 @@ IMPORT u32 WINAPI GetEnvironmentVariableA(const char *name, char *buffer, u32 si
 IMPORT void *WINAPI GetProcessHeap(void);
 IMPORT void *WINAPI HeapAlloc(void *heap, u32 flags, u32 size);
 IMPORT int WINAPI HeapFree(void *heap, u32 flags, void *block);
+IMPORT void *WINAPI HeapReAlloc(void *heap, u32 flags, void *block, u32 size);
 IMPORT char *WINAPI GetCommandLineA(void);
 IMPORT void *WINAPI CreateFileA(const char *path, u32 access, u32 share, void *security, u32 disposition, u32 flags, void *template_file);
 IMPORT int WINAPI ReadFile(void *file, void *buffer, u32 count, u32 *read, void *overlapped);
@@ -102,6 +103,14 @@ void free(void *block)
 {
     if (block)
         HeapFree(GetProcessHeap(), 0, block);
+}
+
+// HeapReAlloc takes no null block, as realloc does.
+void *realloc(void *block, size_t size)
+{
+    if (!block)
+        return malloc(size);
+    return HeapReAlloc(GetProcessHeap(), 0, block, size);
 }
 
 // ---- output and exit ---------------------------------------------------------
@@ -549,6 +558,116 @@ void dos_sleep(u32 milliseconds)
     while (dos_ticks() - start < milliseconds) { }
 }
 
+// ---- fibers (lib/Fibers.cs) ----------------------------------------------------
+//
+// Switching from one stack to another: save the registers a function must
+// keep (ebx, esi, edi, ebp) and the coprocessor's control word, change
+// stacks, restore them.
+//
+// A fiber's memory is [guard][pattern][shadow stack ->   <- stack][record]:
+// managed code keeps its references on a shadow stack (see above), so each
+// fiber needs one of its own, and gets the bottom of its stack. It grows up,
+// the machine stack down. Fibers.cs writes a pattern below both and checks
+// it on every switch back. Nothing stops the shadow stack growing into the
+// machine stack.
+//
+// HX gives a program no way to protect a page, so there's no guard page, and
+// getpagesize reports 2 KB: Fibers.cs reserves that much below each stack,
+// which an overflow lands in before anything else, and sizes stacks for a
+// machine of a few MB (32 KB, at least 4 KB). mprotect does nothing.
+//
+// The frame a switch leaves, from the saved esp up (24 bytes):
+//   0   the coprocessor's control word
+//   4   edi, esi, ebx, ebp
+//   20  where the switch returns to
+
+int getpagesize(void) { return 2048; }
+
+int mprotect(void *address, size_t length, int protection)
+{
+    (void)address; (void)length; (void)protection;
+    return 0;
+}
+
+int usleep(u32 microseconds)
+{
+    dos_sleep((microseconds + 999) / 1000);
+    return 0;
+}
+
+// [esp+4]: where to store this stack's pointer; [esp+8]: the one to resume.
+__attribute__((naked)) void ZeroFiberSwitch(void **save, void *resume)
+{
+    __asm__ volatile(
+        "movl    4(%esp), %eax\n"
+        "movl    8(%esp), %edx\n"
+        "pushl   %ebp\n"
+        "pushl   %ebx\n"
+        "pushl   %esi\n"
+        "pushl   %edi\n"
+        "subl    $4, %esp\n"
+        "fnstcw  (%esp)\n"
+        "movl    %esp, (%eax)\n"
+        "movl    %edx, %esp\n"
+        "fldcw   (%esp)\n"
+        "addl    $4, %esp\n"
+        "popl    %edi\n"
+        "popl    %esi\n"
+        "popl    %ebx\n"
+        "popl    %ebp\n"
+        "ret\n");
+}
+
+// Where a new fiber's first switch returns to: ebx its argument, esi its
+// entry, edi its shadow stack. The entry is an ordinary C# method, which
+// takes its shadow stack as a hidden first argument. It never returns: it
+// switches away for good.
+__attribute__((naked)) static void ZeroFiberStart(void)
+{
+    __asm__ volatile(
+        "pushl   %ebx\n"
+        "pushl   %edi\n"
+        "call    *%esi\n"
+        "int3\n");
+}
+
+// top: the stack's top; bottom: its lowest byte, where Fibers.cs's pattern
+// (64 bytes) starts. Returns the stack pointer to give ZeroFiberSwitch.
+void *ZeroFiberInit(char *top, char *bottom, void (*entry)(void *), void *argument)
+{
+    u32 stack_top = (u32)top & ~(u32)15;
+    u32 *frame = (u32 *)(stack_top - 32);
+    char *shadow = bottom + 64;
+    memset(frame, 0, 32);
+    frame[0] = 0x027F;                  // the control word start() sets
+    frame[1] = (u32)shadow;             // edi
+    frame[2] = (u32)entry;              // esi
+    frame[3] = (u32)argument;           // ebx
+    frame[5] = (u32)ZeroFiberStart;     // the return address
+    return frame;
+}
+
+// A stackalloc whose size isn't a constant calls this, with the size in eax,
+// to move esp down: a page at a time, touching each, as Windows expects.
+__asm__(
+    ".globl  __alloca\n"
+    "__alloca:\n"
+    "        pushl   %ecx\n"
+    "        leal    8(%esp), %ecx\n"
+    "1:      cmpl    $0x1000, %eax\n"
+    "        jb      2f\n"
+    "        subl    $0x1000, %ecx\n"
+    "        orl     $0, (%ecx)\n"
+    "        subl    $0x1000, %eax\n"
+    "        jmp     1b\n"
+    "2:      subl    %eax, %ecx\n"
+    "        orl     $0, (%ecx)\n"
+    "        movl    %esp, %eax\n"
+    "        movl    %ecx, %esp\n"
+    "        movl    (%eax), %ecx\n"
+    "        pushl   4(%eax)\n"
+    "        ret\n");
+
 // Ports, for hardware this file has no function for.
 int dos_in(int port) { return in_byte((unsigned short)port); }
 void dos_out(int port, int value) { out_byte((unsigned short)port, (unsigned char)value); }
@@ -652,10 +771,40 @@ int dos_file_delete(const char *path) { return DeleteFileA(path) != 0; }
 // The C library's file functions, which lib/File.cs calls on every target,
 // over the same kernel32 functions. A FILE * is the kernel32 handle itself:
 // there is no buffering, so each fread or fwrite is one call to DOS.
+//
+// The mode is C's: "r", "w" or "a", then "+" to read and write both, and "x"
+// (with "w") to fail if the file exists. A "b" anywhere changes nothing.
 void *fopen(const char *path, const char *mode)
 {
-    int how = mode[0] == 'r' ? 0 : mode[0] == 'w' ? 1 : mode[0] == 'a' ? 2 : -1;
-    return dos_file_open(path, how);
+    int plus = 0, exclusive = 0;
+    for (const char *m = mode + 1; *m; m++) {
+        plus |= *m == '+';
+        exclusive |= *m == 'x';
+    }
+    u32 access = plus ? 0xC0000000 : mode[0] == 'r' ? 0x80000000 : 0x40000000; // GENERIC_READ, GENERIC_WRITE
+    u32 disposition;
+    switch (mode[0]) {
+    case 'r': disposition = 3; break;                  // OPEN_EXISTING
+    case 'w': disposition = exclusive ? 1 : 2; break;  // CREATE_NEW, CREATE_ALWAYS
+    case 'a': disposition = 4; break;                  // OPEN_ALWAYS
+    default: return 0;
+    }
+    void *file = CreateFileA(path, access, 1, 0, disposition, 0x80, 0);
+    if (file == (void *)-1)
+        return 0;
+    if (mode[0] == 'a')
+        SetFilePointer(file, 0, 0, 2);
+    return file;
+}
+
+// Nothing is buffered here, so there's nothing to write out.
+int fflush(void *file) { (void)file; return 0; }
+
+// FileStream turns the C library's buffering off; there is none here.
+int setvbuf(void *file, char *buffer, int how, size_t size)
+{
+    (void)file; (void)buffer; (void)how; (void)size;
+    return 0;
 }
 
 size_t fread(void *buffer, size_t size, size_t count, void *file)
@@ -928,3 +1077,15 @@ float tanhf(float x)
     double e = exp(2.0 * x);
     return (float)((e - 1) / (e + 1));
 }
+
+// ---- lib/FileSystem.cs ----------------------------------------------------
+
+// Which system this is: 7, DOS.
+int ZeroSystem(void) { return 7; }
+
+// File.Exists calls stat only on Linux, macOS, Windows and WebAssembly; here
+// it opens the file instead. These are there for the link, and always fail.
+static int file_system_errno;
+int *__errno_location(void) { return &file_system_errno; }
+int __xstat64(int version, const char *path, void *out) { (void)version; (void)path; (void)out; file_system_errno = 38; return -1; }
+int __lxstat64(int version, const char *path, void *out) { (void)version; (void)path; (void)out; file_system_errno = 38; return -1; }

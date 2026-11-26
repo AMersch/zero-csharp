@@ -9,7 +9,10 @@
 //   zero-bitcode elf2uf2 IN.elf OUT.uf2         a Pico 2 program as a UF2 file (Uf2.cs)
 //   zero-bitcode ll2air OUT.ll ASSEMBLY IN.ll... an assembly's [RuntimeExport] methods
 //                                               as Metal kernels (Air.cs)
+//   zero-bitcode ll2ptx OUT.ll ASSEMBLY IN.ll... the same as CUDA kernels, LLVM IR
+//                                               for the NVPTX backend (Ptx.cs)
 //   zero-bitcode gpu-bitcode, gpu-kernels       a program's GPU kernels (Gpu.cs)
+//   zero-bitcode cuda-kernels, cuda-clang       the same for NVIDIA GPUs (Cuda.cs)
 //
 // They began as Python scripts (c64/ll2mos.py, c64/wasm2mos.py,
 // dos/wasm2i386.py, removed after the port was checked to write the same
@@ -51,8 +54,11 @@ static class Program
                zero-bitcode arm-link OBJDIR NAME RUNTIMEDIR pico2|r4 QEMU.elf [BOARD.elf BOARD.uf2] [--arm DIR]
                zero-bitcode tools ilc|llvm-mos|arm
                zero-bitcode ll2air OUT.ll ASSEMBLY IN.ll...
+               zero-bitcode ll2ptx OUT.ll ASSEMBLY IN.ll...
                zero-bitcode gpu-bitcode IN.dll OUTDIR CORE.dll [REF.dll...]
                zero-bitcode gpu-kernels BITCODEDIR NAME METAL.m OUTDIR
+               zero-bitcode cuda-kernels BITCODEDIR NAME ARCH OUTDIR [CLANG] [SM]
+               zero-bitcode cuda-clang [CLANG]
         """;
 
     static int Main(string[] args)
@@ -97,11 +103,20 @@ static class Program
                 case "ll2air" when args.Length >= 4:
                     Air.Run(args[1], args[2], args[3..]);
                     return 0;
+                case "ll2ptx" when args.Length >= 4:
+                    Ptx.Run(args[1], args[2], args[3..]);
+                    return 0;
                 case "gpu-bitcode":
                     Gpu.Bitcode(args[1..]);
                     return 0;
                 case "gpu-kernels":
                     Gpu.Kernels(args[1..]);
+                    return 0;
+                case "cuda-kernels":
+                    Cuda.Kernels(args[1..]);
+                    return 0;
+                case "cuda-clang":
+                    Cuda.CheckClang(args[1..]);
                     return 0;
                 default:
                     Console.Error.WriteLine(Usage);

@@ -12,6 +12,10 @@ The program then runs it on thousands of GPU threads at once, each working on it
 `ZeroGpu` and `dotnet new zerogpu` are in the SDK from 0.13.0 on. This is experimental. The kernels are compiled to AIR, the format Apple's Metal compiler reads, which
 Apple doesn't document, so a new version of Xcode can break it.
 
+The same kernels can also run on an NVIDIA GPU on Linux, through CUDA: see
+[NVIDIA GPUs](#nvidia-gpus-cuda). That's newer still, from 0.14.0 on, and hasn't yet run on a real
+NVIDIA GPU.
+
 ## What you need
 
 - **An Apple Silicon Mac with Xcode**, from the App Store, and its Metal Toolchain, which Xcode
@@ -45,7 +49,7 @@ Sum:   4718580 (the CPU says 4718580), 85 us on the GPU
 The project is a program with one more property, `ZeroGpu`:
 
 ```xml
-<Project Sdk="ZeroCSharp.Sdk/0.13.0">
+<Project Sdk="ZeroCSharp.Sdk/0.14.0">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <ZeroGpu>Metal</ZeroGpu>
@@ -219,6 +223,69 @@ Gpu.Run(nameof(Kernels.MatMul), tiledLaunch, a, b, tiled, n);
 On an M2 Max, at 1024 x 1024, the tiled kernel takes about 1.2 ms of GPU time, and the same multiply
 reading straight from the buffers 5.5 to 6 ms.
 
+## Matrices as tensors
+
+`GpuBuffer<T>.AsTensorSpan(rows, columns)` is the buffer as a [tensor](use-tensors.html): a view,
+not a copy, so the [Tensor methods](use-tensors.html) fill and read the very memory the GPU uses.
+Here broadcasting writes two matrices straight into the buffers, the tiled kernel multiplies them,
+and `Tensor.Dot` of a row and a column checks each element of the result:
+
+<!-- sample: samples/Gpu.cs tensors -->
+```csharp
+// Matrices as tensors over GPU buffers: the CPU fills a and b with the
+// Tensor methods, writing straight into the memory the GPU reads (no
+// copies), the tiled kernel multiplies them, and Tensor.Dot checks c.
+static int CheckTensors()
+{
+    const int n = 256;
+    var a = GpuBuffer<float>.Allocate(n * n);
+    var b = GpuBuffer<float>.Allocate(n * n);
+    var c = GpuBuffer<float>.Allocate(n * n);
+    TensorSpan<float> ta = a.AsTensorSpan(n, n), tb = b.AsTensorSpan(n, n);
+
+    // A column [n, 1] and a row [1, n], broadcast into the n x n buffers:
+    // a[i, j] = column[i] + row[j], b[i, j] = column[i] * row[j].
+    Tensor<float> column = Tensor.CreateFromShape<float>([n, 1]);
+    Tensor<float> row = Tensor.CreateFromShape<float>([1, n]);
+    for (int i = 0; i < n; i++)
+    {
+        column[i, 0] = i % 5 - 2;
+        row[0, i] = i % 3 - 1;
+    }
+    Tensor.Add(column, row, ta);
+    Tensor.Multiply(column, row, tb);
+
+    const uint tile = Kernels.Tile;
+    int sharedBytes = 2 * (int)(tile * tile) * sizeof(float);
+    var launch = GpuLaunch.Grid(n, n, tile, tile, sharedBytes);
+    Gpu.Run(nameof(Kernels.MatMul), launch, a, b, c, n);
+
+    // c[i, j] is row i of a times column j of b; a column is a view of b
+    // with stride n.
+    ReadOnlyTensorSpan<float> tc = c.AsReadOnlyTensorSpan(n, n);
+    int failures = 0;
+    for (nint i = 0; i < n; i++)
+    {
+        var rowSlice = ta.Slice([new NRange(i, i + 1), NRange.All]);
+        ReadOnlyTensorSpan<float> ai = Tensor.Reshape(rowSlice, [n]);
+        for (nint j = 0; j < n; j++)
+        {
+            var columnSlice = tb.Slice([NRange.All, new NRange(j, j + 1)]);
+            ReadOnlyTensorSpan<float> bj = Tensor.Reshape(columnSlice, [n]);
+            if (Tensor.Dot(ai, bj) != tc[i, j] && failures++ < 5)
+                Console.WriteLine($"Tensors: c[{i}, {j}] differs");
+        }
+    }
+    Console.WriteLine(
+        $"Tensors: {n} x {n} on the GPU, checked with Tensor.Dot");
+    a.Free(); b.Free(); c.Free();
+    return failures;
+}
+```
+
+A kernel still takes pointers: the tensor is for the CPU side, the lengths and strides are the
+kernel's to know.
+
 ## Atomics
 
 An atomic changes one value in memory without another thread's change getting lost in between. It
@@ -332,6 +399,34 @@ for (uint i = 0; i < N; i++)
 A kernel that needs real threadgroups (barriers, threadgroup memory that threads share) doesn't work
 one thread at a time: check it against plain C# instead, as the template does.
 
+## NVIDIA GPUs (CUDA)
+
+`<ZeroGpu>Cuda</ZeroGpu>` builds the same program for Linux, with its kernels for NVIDIA GPUs. It is
+experimental: the kernels are checked as PTX, the code NVIDIA's driver compiles, but no kernel has yet
+run on an NVIDIA GPU. Reports from someone who has one are welcome.
+
+```xml
+<PropertyGroup>
+  <ZeroGpu>Cuda</ZeroGpu>
+  <ZeroTarget>linux-x64</ZeroTarget>   <!-- or linux-arm64 -->
+</PropertyGroup>
+```
+
+It needs:
+
+- **clang 18 or later with the NVPTX backend**, which compiles the kernels to PTX. Linux
+  distributions' clang has it (Ubuntu 24.04: `apt install clang`), and so do LLVM's own builds and
+  Homebrew's `llvm`; Apple's clang doesn't. The build looks for `clang`, `clang-22` down to `clang-18`
+  and Homebrew's, or takes the one in `<ZeroCudaClang>`.
+- **NativeAOT-LLVM**, as for Metal: downloaded on the first build, and run in Docker on a Mac.
+- Nothing from NVIDIA to build. The program opens the CUDA driver (`libcuda.so.1`) when it starts, so
+  it runs on any Linux machine with NVIDIA's driver; on one without, `Gpu.Open()` returns false and
+  says why. If `ptxas`, from the CUDA toolkit, is on the `PATH`, the build checks the PTX with it.
+
+The kernels are PTX for `sm_70` (Volta, 2017) and later; `<ZeroCudaArch>` picks another. CUDA runs a
+grid in whole blocks, so each kernel starts by ending the threads that fall outside it, as Metal never
+starts them. Buffers are CUDA managed memory, which the CPU and GPU share, as with Metal.
+
 ## In this repository
 
 The repository builds GPU programs without the SDK packages:
@@ -341,10 +436,13 @@ The repository builds GPU programs without the SDK packages:
 ./run.sh --gpu Gpu
 ./test.sh --gpu
 ./test.sh --gpu-air        # any machine: the kernels up to AIR, no Metal
+./build.sh --cuda-ptx Gpu  # the kernels as PTX, checked by ptxas
+./build.sh --cuda Gpu      # bin/cuda/Gpu, for Linux with an NVIDIA GPU
 ```
 
 CI runs `--gpu-air`, since its runners have no Metal: it catches a change that the rewriter to AIR
-doesn't understand, but nothing after it. Run `./test.sh --gpu` on a Mac before merging changes to
+doesn't understand, but nothing after it. It also builds `--cuda`, which checks the PTX with `ptxas`,
+but no runner has an NVIDIA GPU to run it. Run `./test.sh --gpu` on a Mac before merging changes to
 zerocore, `lib/` or the compiler.
 
 `samples/Gpu.cs` has eleven kernels: adding, the Collatz sequence, SAXPY, a reduction, a plain and a

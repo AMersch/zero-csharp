@@ -37,6 +37,7 @@ i32 __managed__Main(i32 argc, char **argv);
 #define EMU_DEBUG1 (*(volatile unsigned char *)0x9FB9)
 
 static char in_emulator;
+static int file_errno;          // what lib/FileSystem.cs reads after a failed call: C's error numbers
 #ifdef CX16_FILES
 static void files_shutdown(void);
 static unsigned char program_device;    // the device the program was loaded from (set in main)
@@ -283,6 +284,7 @@ void *realloc(void *pointer, size_t size)
 void *cs_calloc(u32 count, u32 size) { return (count | size) > 0xFFF0 ? 0 : calloc((size_t)count, (size_t)size); }
 void *cs_malloc(u32 size) { return size > 0xFFF0 ? 0 : malloc((size_t)size); }
 void cs_free(void *pointer) { free(pointer); }
+void *cs_realloc(void *pointer, u32 size) { return size > 0xFFF0 ? 0 : realloc(pointer, (size_t)size); }
 
 void *cs_memset(void *destination, i32 value, u32 count) { return memset(destination, (int)value, (size_t)count); }
 void *cs_memmove(void *destination, const void *source, u32 count) { return memmove(destination, source, (size_t)count); }
@@ -532,7 +534,11 @@ i32 cs_read(i32 file, char *buffer, u32 count)
 //     (a monotonic clock's origin is not defined) taken from the hardware's
 //     random bits, which makes Random.FromClock() differ from run to run even
 //     when the real-time clock isn't set.
-static u32 jiffies(void) { return cx16_k_rdtim(); }
+// In the headless emulator no frames pass, and the clock stands still: what a program
+// sleeps there is added here, so that sleepers wake and timers fire.
+static u32 slept;
+
+static u32 jiffies(void) { return cx16_k_rdtim() + slept; }
 
 static char wall_known;                 // the real-time clock has been read
 static i64 wall_seconds;                // Unix time then
@@ -785,10 +791,12 @@ i32 cs_cx16_bank_count(void);
 
 static struct {
     unsigned long position;
+    unsigned long size;         // of a file that is read and written ('m')
     char path[MAX_NAME];
     unsigned char device;
-    char mode;          // 'r', 'w' or 'a'; 0: the slot is free
+    char mode;          // 'r', 'w', 'a' or 'm' (read and written); 0: the slot is free
     char ended;         // the last byte has been read
+    char moved;         // 'm': the drive's position isn't this one
 } files[MAX_FILES];
 
 static u32 command_channels;            // a bit for each drive whose command channel is open
@@ -810,6 +818,32 @@ static const char *take_device(const char *path, unsigned char *device)
     return p + 1;
 }
 
+// take_device, and the path as a plain one, "folder/name" or "/folder/name". CBM DOS's own
+// forms ("//folder/:name" from the root, "/folder/:name", "0:name") are put that way, since
+// the emulator's host folder takes no folder in them: removing "folder/:name" there would
+// remove the root's "name". Two results can be held at a time. 0 for a path that is too long.
+static const char *take_path(const char *given, unsigned char *device)
+{
+    static char plain[2][MAX_NAME];
+    static unsigned char turn;
+    const char *path = take_device(given, device);
+    if (path == 0 || strlen(path) >= MAX_NAME)
+        return 0;
+    const char *colon = strchr(path, ':');
+    if (colon == 0)
+        return path;
+    char *into = plain[turn ^= 1];
+    const char *folder = path;
+    while (folder < colon && *folder >= '0' && *folder <= '9')
+        folder++;                           // a drive number
+    unsigned length = (unsigned)(colon - folder);
+    if (length && folder[0] == '/')
+        folder++, length--;                 // the slash that starts a folder; a second one is the root
+    memcpy(into, folder, length);
+    strcpy(into + length, colon + 1);
+    return into;
+}
+
 // Opening anything on a device that isn't there leaves the KERNAL unable to open
 // anything, on any device, until it has closed everything. So that is what
 // happens: every open file of the program is closed too.
@@ -827,6 +861,8 @@ static void forget_everything(void)
 
 // Sends a command to the drive (an empty one just asks) and reads its answer: the code,
 // 0 for "OK", 62 for "FILE NOT FOUND", ... -1: no such device.
+static unsigned dos_count;      // the number after the message: how many files a scratch removed
+
 static int dos_command(unsigned char device, const char *command)
 {
     unsigned char lfn = (unsigned char)(90 + device);
@@ -853,7 +889,8 @@ static int dos_command(unsigned char device, const char *command)
         return -1;
     }
     int code = 0;
-    unsigned char digits = 0;
+    unsigned char digits = 0, commas = 0;
+    dos_count = 0;
     for (unsigned char i = 0; i < 64; i++) {            // "62, FILE NOT FOUND,00,00" and a CR
         unsigned char c = cbm_k_chrin();
         unsigned char status = cbm_k_readst();
@@ -867,6 +904,10 @@ static int dos_command(unsigned char device, const char *command)
         } else {
             digits = 2;
         }
+        if (c == ',')
+            commas++;
+        else if (commas == 2 && c >= '0' && c <= '9')
+            dos_count = dos_count * 10 + (c - '0');
         if (c == 13 || status)
             break;
     }
@@ -888,11 +929,39 @@ static char dos_name(char *into, const char *prefix, const char *path, const cha
     return 1;
 }
 
+// A path in the form commands and listings need, appended to `into`: ":name" for the
+// current folder (the emulator's host folder knows no other), else "/folder/:name" from
+// there and "//folder/:name" from the root ("//:name" for the root itself). (To open a
+// file, the drive takes "folder/name" as it is.) 0 if it doesn't fit.
+static char dos_form(char *into, unsigned room, const char *path)
+{
+    const char *slash = strrchr(path, '/');
+    unsigned used = strlen(into);
+    unsigned folder = slash ? (unsigned)(slash - path) : 0;
+    const char *name = slash ? slash + 1 : path;
+    if (used + folder + strlen(name) + 5 >= room || strchr(path, ',') != 0 || strchr(path, ':') != 0)
+        return 0;
+    char *p = into + used;
+    if (slash) {
+        *p++ = '/';
+        if (folder) {                   // "/folder" is from the root: it has its own slash
+            memcpy(p, path, folder);
+            p += folder;
+            *p++ = '/';
+        } else {
+            *p++ = '/';
+        }
+    }
+    *p++ = ':';
+    strcpy(p, name);
+    return 1;
+}
+
 // Opens slot's data channel; 1 if the drive says OK.
 static char open_channel(int slot, unsigned char device, const char *path, char mode)
 {
     char name[MAX_NAME + 8];
-    if (!dos_name(name, "", path, mode == 'r' ? ",S,R" : mode == 'w' ? ",S,W" : ",S,A"))
+    if (!dos_name(name, "", path, mode == 'r' ? ",S,R" : mode == 'w' ? ",S,W" : mode == 'a' ? ",S,A" : ",S,M"))
         return 0;
     unsigned char lfn = (unsigned char)(2 + slot);
     cbm_k_setnam(name);
@@ -906,6 +975,8 @@ static char open_channel(int slot, unsigned char device, const char *path, char 
         return 0;
     if (code >= 20) {
         cbm_k_close(lfn);
+        // CBM DOS's numbers as C's: not found, there already, write protected, disk full.
+        file_errno = code == 62 ? 2 : code == 63 ? 17 : code == 26 ? 30 : code == 72 ? 28 : 5;
         return 0;
     }
     return 1;
@@ -916,27 +987,71 @@ static int file_slot(i32 handle)
     return handle >= 1 && handle <= MAX_FILES && files[handle - 1].mode ? (int)handle - 1 : -1;
 }
 
-static void scratch(unsigned char device, const char *path)
+static char look_up(unsigned char device, const char *given, u32 *size, long long *seconds);
+
+static char kind_of(unsigned char device, const char *path)
+{
+    u32 size;
+    long long seconds;
+    return look_up(device, path, &size, &seconds);
+}
+
+// Sends a command that removes `path`, which was seen to be there; whether it went. The
+// answers alone don't say: the SD card answers "01" with the number that went, also when
+// that is 0; the emulator's host folder says "01" with 0 for what did go.
+static char remove_with(unsigned char device, const char *command, const char *path)
+{
+    int code = dos_command(device, command);
+    return code >= 0 && code <= 1 && (dos_count != 0 || kind_of(device, path) == 0);
+}
+
+// A command with a plain path, which both the SD card and the host folder follow.
+static char path_command(char *into, unsigned room, const char *verb, const char *path)
+{
+    if (strlen(verb) + strlen(path) >= room || strchr(path, ',') != 0)
+        return 0;
+    strcpy(into, verb);
+    strcat(into, path);
+    return 1;
+}
+
+// Removes a file; whether one went.
+static char scratch(unsigned char device, const char *path)
 {
     char command[MAX_NAME + 8];
-    if (dos_name(command, "S", path, ""))       // "S0:name", or "S//folder/:name"
-        dos_command(device, command);
+    return path_command(command, sizeof command, "S0:", path) && kind_of(device, path) == 1 && remove_with(device, command, path);
 }
+
+static long file_size(unsigned char device, const char *path);
 
 i32 cs_fopen(const char *given, const char *mode)
 {
     unsigned char device;
-    const char *path = take_device(given, &device);
+    file_errno = 22;                        // a path or a mode that won't do
+    const char *path = take_path(given, &device);
     if (path == 0 || strlen(path) >= MAX_NAME - 8)
         return 0;
     char how = mode[0];
+    // "r+" and "w+" (what FileStream asks for any file it makes) are CMDR-DOS's ",M":
+    // read and written at will. A drive on the serial bus has no such thing.
+    char both = strchr(mode, '+') != 0 && how != 'a';
     int slot = 0;
     while (slot < MAX_FILES && files[slot].mode)
         slot++;
     if (slot == MAX_FILES || (how != 'r' && how != 'w' && how != 'a'))
         return 0;
+    long size = 0;
     if (how == 'w')
         scratch(device, path);
+    if (both) {
+        // ",M" makes a file that isn't there, which "r+" must not do; "w+" makes it first.
+        if (!open_channel(slot, device, path, how))
+            return 0;
+        cbm_k_close((unsigned char)(2 + slot));
+        if (how == 'r' && (size = file_size(device, path)) < 0)
+            return 0;
+        how = 'm';
+    }
     if (!open_channel(slot, device, path, how)) {
         // Appending to a file that isn't there makes it.
         if (how != 'a' || !open_channel(slot, device, path, 'w'))
@@ -945,15 +1060,59 @@ i32 cs_fopen(const char *given, const char *mode)
     files[slot].device = device;
     files[slot].mode = how;
     files[slot].position = 0;
+    files[slot].size = (unsigned long)size;
     files[slot].ended = 0;
+    files[slot].moved = 0;
     strcpy(files[slot].path, path);
     return slot + 1;
+}
+
+// Before a file that is read and written is used: the drive's position put where ours is.
+// Once its end has been read the channel is dead, so it is opened again. 0 on failure.
+static char settle(int slot)
+{
+    unsigned char lfn = (unsigned char)(2 + slot);
+    if (files[slot].ended) {
+        cbm_k_close(lfn);
+        if (!open_channel(slot, files[slot].device, files[slot].path, 'm')) {
+            files[slot].mode = 0;
+            return 0;
+        }
+        files[slot].ended = 0;
+        files[slot].moved = 1;
+    }
+    if (files[slot].moved) {
+        // "P", the channel (the secondary address), and the position, low byte first.
+        unsigned long at = files[slot].position;
+        if (cbm_k_ckout((unsigned char)(90 + files[slot].device)))
+            return 0;
+        cbm_k_chrout('P');
+        cbm_k_chrout(lfn);
+        for (unsigned char i = 0; i < 4; i++, at >>= 8)
+            cbm_k_chrout((unsigned char)at);
+        cbm_k_clrch();
+        if (dos_command(files[slot].device, "") > 1)
+            return 0;
+        files[slot].moved = 0;
+    }
+    return 1;
 }
 
 // Up to count bytes from slot's file; what was read.
 static unsigned read_bytes(int slot, unsigned char *buffer, unsigned count)
 {
-    if (files[slot].mode != 'r' || files[slot].ended || count == 0 || cbm_k_chkin((unsigned char)(2 + slot)))
+    if (files[slot].mode == 'm') {
+        if (files[slot].position >= files[slot].size)
+            return 0;
+        unsigned long left = files[slot].size - files[slot].position;
+        if (count > left)
+            count = (unsigned)left;
+        if (!settle(slot))
+            return 0;
+    } else if (files[slot].mode != 'r' || files[slot].ended) {
+        return 0;
+    }
+    if (count == 0 || cbm_k_chkin((unsigned char)(2 + slot)))
         return 0;
     unsigned n = 0;
     while (n < count) {
@@ -984,24 +1143,44 @@ u32 cs_fread(void *buffer, u32 size, u32 count, i32 handle)
     return read_bytes(slot, (unsigned char *)buffer, (unsigned)(size * count)) / (unsigned)size;
 }
 
-u32 cs_fwrite(const void *buffer, u32 size, u32 count, i32 handle)
+// count bytes (zeros if bytes is 0) to slot's file at its position; what was written.
+static unsigned write_bytes(int slot, const unsigned char *bytes, unsigned count)
 {
-    int slot = file_slot(handle);
-    if (slot < 0 || files[slot].mode == 'r' || size == 0 || count == 0 || size > 0xFFFF || count > 0xFFFF || size * count > 0xFFFF)
+    if (files[slot].mode == 'm' && !settle(slot))
         return 0;
     if (cbm_k_ckout((unsigned char)(2 + slot)))
         return 0;
-    const unsigned char *bytes = (const unsigned char *)buffer;
-    unsigned total = (unsigned)(size * count), n = 0;
-    while (n < total) {
-        cbm_k_chrout(bytes[n]);
+    unsigned n = 0;
+    while (n < count) {
+        cbm_k_chrout(bytes ? bytes[n] : 0);
         if (cbm_k_readst() & 0x82)
             break;
         n++;
     }
     cbm_k_clrch();
     files[slot].position += n;
-    return n / (unsigned)size;
+    if (files[slot].mode == 'm' && files[slot].position > files[slot].size)
+        files[slot].size = files[slot].position;
+    return n;
+}
+
+u32 cs_fwrite(const void *buffer, u32 size, u32 count, i32 handle)
+{
+    int slot = file_slot(handle);
+    if (slot < 0 || files[slot].mode == 'r' || size == 0 || count == 0 || size > 0xFFFF || count > 0xFFFF || size * count > 0xFFFF)
+        return 0;
+    if (files[slot].mode == 'm' && files[slot].position > files[slot].size) {
+        // Past the end: what is between is zeros, as elsewhere.
+        unsigned long to = files[slot].position;
+        files[slot].position = files[slot].size;
+        files[slot].moved = 1;
+        while (files[slot].position < to) {
+            unsigned long left = to - files[slot].position;
+            if (write_bytes(slot, 0, left < 256 ? (unsigned)left : 256) == 0)
+                return 0;
+        }
+    }
+    return write_bytes(slot, (const unsigned char *)buffer, (unsigned)(size * count)) / (unsigned)size;
 }
 
 i32 cs_fclose(i32 handle)
@@ -1029,6 +1208,16 @@ i32 cs_fseeko(i32 handle, long long offset, i32 origin)
     int slot = file_slot(handle);
     if (slot < 0)
         return -1;
+    if (files[slot].mode == 'm') {
+        long long at = offset + (origin == 1 ? (long long)files[slot].position : origin == 2 ? (long long)files[slot].size : 0);
+        if (at < 0 || at > 0x7FFFFFFFLL)
+            return -1;
+        if ((unsigned long)at != files[slot].position) {
+            files[slot].position = (unsigned long)at;
+            files[slot].moved = 1;
+        }
+        return 0;
+    }
     if (files[slot].mode != 'r')
         return origin == 0 && offset == (long long)files[slot].position ? 0 : -1;
 
@@ -1063,20 +1252,12 @@ long long cs_ftello(i32 handle)
 i32 cs_remove(const char *given)
 {
     unsigned char device;
-    const char *path = take_device(given, &device);
-    char command[MAX_NAME + 8];
-    if (path == 0 || !dos_name(command, "S", path, ""))
-        return -1;
-    // The answer to a scratch is "01, FILES SCRATCHED,nn,00", with a count that is 0 for
-    // a file that isn't there; so look first.
-    int slot = 0;
-    while (slot < MAX_FILES && files[slot].mode)
-        slot++;
-    if (slot == MAX_FILES || !open_channel(slot, device, path, 'r'))
-        return -1;
-    cbm_k_close((unsigned char)(2 + slot));
-    int code = dos_command(device, command);
-    return code == 0 || code == 1 ? 0 : -1;
+    const char *path = take_path(given, &device);
+    file_errno = 22;
+    if (path == 0 || *path == 0 || strchr(path, '*') != 0 || strchr(path, '?') != 0)
+        return -1;                          // (the drive would take those for any name)
+    file_errno = 2;
+    return scratch(device, path) ? 0 : -1;
 }
 
 // A command to the drive, such as "md:folder" or "cd:..": its answer's code (0 and 1 are
@@ -1159,24 +1340,51 @@ static void dir_copy(unsigned at, unsigned char *bytes, unsigned char count, cha
     __asm__ volatile("cli" ::: "memory");
 }
 
-// A line of the listing as an entry in the bank; 0 for the line about free space.
-static char dir_keep(unsigned blocks, char *text)
+// What a line of the listing says about a file or folder.
+typedef struct {
+    char *name;
+    unsigned char length, folder;
+    u32 size;
+    long long seconds;          // since 1970; 0 if the drive doesn't say
+} entry;
+
+// Days from 1970-01-01 to a date of the years 1970 to 2099.
+static long days_before(unsigned year, unsigned month, unsigned day)
+{
+    static const unsigned before[12] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
+    long days = (long)(year - 1970) * 365 + (year - 1969) / 4 + before[(month - 1) % 12] + day - 1;
+    return month > 2 && year % 4 == 0 ? days + 1 : days;
+}
+
+static unsigned digits_at(const char *p, unsigned char n)
+{
+    unsigned value = 0;
+    while (n--)
+        value = value * 10 + (unsigned)(*p++ - '0');
+    return value;
+}
+
+// 0 for a line without a name: the one about free space. text is cut after the name.
+static char parse_line(unsigned blocks, char *text, entry *found)
 {
     char *first = strchr(text, '"');
     char *last = first ? strchr(first + 1, '"') : 0;
     if (last == 0)
-        return 0;                                   // the line about free space
+        return 0;
     *last = 0;
-    const char *name = first + 1;
-    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
-        return 1;
-    unsigned char length = 0;
-    while (name[length] && length < MAX_NAME - 1)
-        length++;
+    found->name = first + 1;
+    found->length = 0;
+    while (found->name[found->length] && found->length < MAX_NAME - 1)
+        found->length++;
     const char *p = last + 1;
     while (*p == ' ')
         p++;
-    unsigned char folder = (p[0] & 0xDF) == 'D' && (p[1] & 0xDF) == 'I' && (p[2] & 0xDF) == 'R';
+    found->folder = (p[0] & 0xDF) == 'D' && (p[1] & 0xDF) == 'I' && (p[2] & 0xDF) == 'R';
+    found->seconds = 0;
+    const char *date = strchr(p, '-');                  // "2026-11-26 07:42:52"
+    if (date && date - p >= 4 && strlen(date) >= 15 && date[-4] >= '1' && date[-4] <= '2')
+        found->seconds = (long long)days_before(digits_at(date - 4, 4), digits_at(date + 1, 2), digits_at(date + 4, 2)) * 86400
+            + digits_at(date + 7, 2) * 3600L + digits_at(date + 10, 2) * 60 + digits_at(date + 13, 2);
     // The exact size: eight hex digits at the end of an "$=L" line. Else the blocks.
     const char *end = p + strlen(p);
     while (end > p && end[-1] == ' ')
@@ -1195,41 +1403,28 @@ static char dir_keep(unsigned blocks, char *text)
             size = size << 4 | value;
         }
     }
-    size = folder ? 0 : digits == 8 ? size : (u32)blocks * 254;
-    if (dir_used + 6u + length > 0x2000u) {
-        dir_complete = 0;                           // the bank is full
-        return 1;
-    }
-    unsigned char head[6] = { length, folder, (unsigned char)size, (unsigned char)(size >> 8), (unsigned char)(size >> 16), (unsigned char)(size >> 24) };
-    dir_copy(dir_used, head, 6, 1);
-    dir_copy(dir_used + 6, (unsigned char *)name, length, 1);
-    dir_used += 6u + length;
+    found->size = found->folder ? 0 : digits == 8 ? size : (u32)blocks * 254;
     return 1;
 }
 
-void cs_cx16_dir_close(void)
+// Starts reading the listing of a folder ("" for the current one), only of `name` if that
+// isn't 0: its channel is then read with dir_line, and ended with end_listing.
+static char start_listing(unsigned char device, const char *folder, const char *name)
 {
-    dir_used = dir_at = 0;
-}
-
-// given: "" for the current folder, "folder", "#9:". 1 if the folder was read.
-i32 cs_cx16_dir_open(const char *given)
-{
-    unsigned char device;
-    const char *path = take_device(given, &device);
-    cs_cx16_dir_close();
-    dir_complete = 1;
-    if (path == 0 || strlen(path) >= MAX_NAME - 12)
-        return 0;
-    char name[MAX_NAME];
-    strcpy(name, device == 8 ? "$=L" : "$");            // the exact sizes, from CMDR-DOS
-    if (path[0]) {
-        strcat(name, "//");
-        strcat(name, path);
-        strcat(name, "/:*");
+    char listing[MAX_NAME + 12];
+    strcpy(listing, device == 8 ? "$=L" : "$");         // the exact sizes, from CMDR-DOS
+    if (folder[0] || name) {
+        char path[MAX_NAME + 4];
+        if (strlen(folder) + (name ? strlen(name) : 1) + 2 >= sizeof path)
+            return 0;
+        strcpy(path, folder);
+        if (folder[0] && folder[strlen(folder) - 1] != '/')
+            strcat(path, "/");
+        strcat(path, name ? name : "*");
+        if (!dos_form(listing, sizeof listing, path))
+            return 0;
     }
-    dir_bank = (unsigned char)(cs_cx16_bank_count() + CODE_BANKS);     // the topmost bank
-    cbm_k_setnam(name);
+    cbm_k_setnam(listing);
     cbm_k_setlfs(DIR_FILE, device, 0);
     if (cbm_k_open() || (cbm_k_readst() & 0x80)) {
         forget_everything();
@@ -1246,17 +1441,70 @@ i32 cs_cx16_dir_open(const char *given)
         forget_everything();
         return 0;
     }
-    char text[MAX_NAME + 48];
+    char volume[8];
     unsigned number;
     int low = dir_byte(), high = dir_byte();            // the load address
-    char ok = low >= 0 && high >= 0 && dir_line(&number, text, sizeof text);       // the volume
-    if (ok) {
-        while (dir_line(&number, text, sizeof text) && dir_keep(number, text)) {
-        }
+    if (low < 0 || high < 0 || !dir_line(&number, volume, sizeof volume)) {
+        cbm_k_clrch();
+        cbm_k_close(DIR_FILE);
+        return 0;
     }
+    return 1;
+}
+
+static void end_listing(void)
+{
     cbm_k_clrch();
     cbm_k_close(DIR_FILE);
-    return ok;
+}
+
+// A line of the listing as an entry in the bank; 0 for the line about free space.
+static char dir_keep(unsigned blocks, char *text)
+{
+    entry found;
+    if (!parse_line(blocks, text, &found))
+        return 0;
+    if (strcmp(found.name, ".") == 0 || strcmp(found.name, "..") == 0)
+        return 1;
+    if (dir_used + 6u + found.length > 0x2000u) {
+        dir_complete = 0;                               // the bank is full
+        return 1;
+    }
+    u32 size = found.size;
+    unsigned char head[6] = { found.length, found.folder, (unsigned char)size, (unsigned char)(size >> 8), (unsigned char)(size >> 16), (unsigned char)(size >> 24) };
+    dir_copy(dir_used, head, 6, 1);
+    dir_copy(dir_used + 6, (unsigned char *)found.name, found.length, 1);
+    dir_used += 6u + found.length;
+    return 1;
+}
+
+// Appends the entries of a folder to the bank. 0 if the folder can't be read.
+static char read_folder(unsigned char device, const char *folder)
+{
+    if (!start_listing(device, folder, 0))
+        return 0;
+    dir_bank = (unsigned char)(cs_cx16_bank_count() + CODE_BANKS);     // the topmost bank
+    char text[MAX_NAME + 48];
+    unsigned number;
+    while (dir_line(&number, text, sizeof text) && dir_keep(number, text)) {
+    }
+    end_listing();
+    return 1;
+}
+
+void cs_cx16_dir_close(void)
+{
+    dir_used = dir_at = 0;
+}
+
+// given: "" for the current folder, "folder", "#9:". 1 if the folder was read.
+i32 cs_cx16_dir_open(const char *given)
+{
+    unsigned char device;
+    const char *path = take_path(given, &device);
+    cs_cx16_dir_close();
+    dir_complete = 1;
+    return path != 0 && strlen(path) < MAX_NAME - 12 && read_folder(device, path);
 }
 
 // Hands out the next file or folder; 0 when there are no more.
@@ -1294,7 +1542,506 @@ static void files_shutdown(void)
         if (command_channels & (1ul << device))
             cbm_k_close((unsigned char)(90 + device));
 }
+
+// ---- what lib/FileSystem.cs calls, with glibc's names and layouts ------------------------
+//
+// The drive has no stat: a file's size and date come from the listing of its folder. The
+// errors are C's numbers.
+
+static char same_name(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++) {                        // FAT32 doesn't tell capitals apart
+        char x = *a >= 'a' && *a <= 'z' ? *a - 32 : *a, y = *b >= 'a' && *b <= 'z' ? *b - 32 : *b;
+        if (x != y)
+            return 0;
+    }
+    return *a == *b;
+}
+
+// What is at a path: 0 nothing, 1 a file, 2 a folder.
+static char look_up(unsigned char device, const char *given, u32 *size, long long *seconds)
+{
+    char path[MAX_NAME];
+    unsigned length = strlen(given);
+    *size = 0;
+    *seconds = 0;
+    if (length == 0 || length >= sizeof path)
+        return 0;
+    strcpy(path, given);
+    while (length > 1 && path[length - 1] == '/')
+        path[--length] = 0;
+    char *slash = strrchr(path, '/');
+    char *name = slash ? slash + 1 : path;
+    if (strcmp(path, "/") == 0 || strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+        return 2;
+    char folder[MAX_NAME] = "";
+    if (slash) {
+        unsigned n = slash == path ? 1 : (unsigned)(slash - path);
+        memcpy(folder, path, n);
+        folder[n] = 0;
+    }
+    if (strchr(name, '*') != 0 || strchr(name, '?') != 0 || !start_listing(device, folder, name))
+        return 0;
+    char text[MAX_NAME + 48];
+    unsigned blocks;
+    char kind = 0;
+    entry found;
+    while (dir_line(&blocks, text, sizeof text) && parse_line(blocks, text, &found)) {
+        found.name[found.length] = 0;
+        if (!kind && same_name(found.name, name)) {
+            kind = found.folder ? 2 : 1;
+            *size = found.size;
+            *seconds = found.seconds;
+        }
+    }
+    end_listing();
+    if (folder[0] && kind != 2) {
+        // The emulator's host folder lists its root for any folder, so what the listing
+        // says of a file in one is checked: it is there if it opens.
+        char open_name[MAX_NAME + 8];
+        char opens = 0;
+        if (dos_name(open_name, "", given, ",S,R")) {
+            cbm_k_setnam(open_name);
+            cbm_k_setlfs(DIR_FILE, device, DIR_FILE);
+            if (!cbm_k_open() && !(cbm_k_readst() & 0x80)) {
+                int code = dos_command(device, "");
+                opens = code >= 0 && code < 20;
+                cbm_k_close(DIR_FILE);
+            }
+        }
+        kind = opens;
+    }
+    return kind;
+}
+
+static long file_size(unsigned char device, const char *path)
+{
+    u32 size;
+    long long seconds;
+    if (look_up(device, path, &size, &seconds) != 1) {
+        file_errno = 2;
+        return -1;
+    }
+    return (long)size;
+}
+
+// As glibc's struct stat on arm64, which lib/FileSystem.cs reads: the mode at 16, the size
+// at 48, the time at 88 (seconds) and 96 (nanoseconds).
+i32 cs___xstat64(i32 version, const char *given, unsigned char *status)
+{
+    (void)version;
+    unsigned char device;
+    const char *path = take_path(given, &device);
+    u32 size;
+    long long seconds;
+    char kind = path == 0 ? 0 : *path == 0 ? 2 : look_up(device, path, &size, &seconds);
+    if (path != 0 && *path == 0)
+        size = 0, seconds = 0;
+    if (!kind) {
+        file_errno = 2;
+        return -1;
+    }
+    memset(status, 0, 112);
+    u32 mode = kind == 2 ? 0x4000 : 0x8000;
+    long long bytes = size;
+    memcpy(status + 16, &mode, 4);
+    memcpy(status + 48, &bytes, 8);
+    memcpy(status + 88, &seconds, 8);
+    return 0;
+}
+
+i32 cs___lxstat64(i32 version, const char *given, unsigned char *status)
+{
+    return cs___xstat64(version, given, status);        // there are no links
+}
+
+// "MD", "RD" or "CD" with a path.
+static int folder_command(const char *verb, const char *given, unsigned char *device, const char **path)
+{
+    *path = take_path(given, device);
+    file_errno = 22;
+    if (*path == 0 || **path == 0 || strlen(*path) >= MAX_NAME - 8)
+        return -1;
+    char command[MAX_NAME + 8];
+    if (!path_command(command, sizeof command, verb, *path))
+        return -1;
+    int code = dos_command(*device, command);
+    file_errno = code == 63 ? 17 : code == 62 || code == 39 ? 2 : code == 26 ? 30 : code == 72 ? 28 : 5;
+    return code;
+}
+
+i32 cs_mkdir(const char *given, u32 mode)
+{
+    (void)mode;
+    unsigned char device;
+    const char *path;
+    int code = folder_command("MD:", given, &device, &path);
+    return code >= 0 && code <= 1 ? 0 : -1;
+}
+
+i32 cs_rmdir(const char *given)
+{
+    unsigned char device;
+    const char *path = take_path(given, &device);
+    char command[MAX_NAME + 8];
+    file_errno = 22;
+    if (path == 0 || *path == 0 || !path_command(command, sizeof command, "RD:", path))
+        return -1;
+    char kind = kind_of(device, path);
+    file_errno = kind == 1 ? 20 : 2;
+    if (kind != 2)
+        return -1;
+    file_errno = 39;                    // it is there and doesn't go: it has something in it
+    return remove_with(device, command, path) ? 0 : -1;
+}
+
+i32 cs_chdir(const char *given)
+{
+    unsigned char device;
+    const char *path;
+    int code = folder_command("CD:", given, &device, &path);
+    return code >= 0 && code <= 1 ? 0 : -1;
+}
+
+// "R0:new=old". As rename(2), it replaces a file that has the new name.
+i32 cs_rename(const char *from_given, const char *to_given)
+{
+    unsigned char device, to_device;
+    const char *from = take_path(from_given, &device), *to = take_path(to_given, &to_device);
+    file_errno = 22;
+    if (from == 0 || to == 0 || device != to_device || strchr(from, ',') != 0 || strchr(to, ',') != 0)
+        return -1;
+    char command[2 * MAX_NAME + 12] = "R0:";
+    if (strlen(from) + strlen(to) + 5 >= sizeof command)
+        return -1;
+    strcat(command, to);
+    strcat(command, "=");
+    strcat(command, from);
+    int code = dos_command(device, command);
+    if (code == 63) {
+        u32 size;
+        long long seconds;
+        if (look_up(device, to, &size, &seconds) == 1 && !same_name(from, to) && scratch(device, to))
+            code = dos_command(device, command);
+    }
+    file_errno = code == 63 ? 17 : code == 62 || code == 39 ? 2 : code == 26 ? 30 : 5;
+    return code >= 0 && code <= 1 ? 0 : -1;
+}
+
+// "$=C" lists the current folder, its parent, and so on up to "/".
+char *cs_getcwd(char *buffer, u32 room)
+{
+    file_errno = 5;
+    cbm_k_setnam("$=C");
+    cbm_k_setlfs(DIR_FILE, program_device, 0);
+    if (cbm_k_open() || (cbm_k_readst() & 0x80)) {
+        forget_everything();
+        return 0;
+    }
+    if (cbm_k_chkin(DIR_FILE)) {
+        cbm_k_close(DIR_FILE);
+        return 0;
+    }
+    char path[MAX_NAME] = "";
+    char text[MAX_NAME + 48];
+    unsigned number;
+    entry found;
+    dir_byte();
+    dir_byte();                                         // the load address
+    if (dir_line(&number, text, sizeof text)) {
+        while (dir_line(&number, text, sizeof text) && parse_line(number, text, &found)) {
+            found.name[found.length] = 0;
+            if (strcmp(found.name, "/") == 0 || strlen(path) + found.length + 2 >= sizeof path)
+                break;
+            memmove(path + found.length + 1, path, strlen(path) + 1);     // the parent goes in front
+            path[0] = '/';
+            memcpy(path + 1, found.name, found.length);
+        }
+    }
+    end_listing();
+    if (path[0] == 0)
+        strcpy(path, "/");
+    if (strlen(path) >= room) {
+        file_errno = 36;
+        return 0;
+    }
+    strcpy(buffer, path);
+    return buffer;
+}
+
+#ifdef CX16_DIR
+// A directory for Directory.Enumerate: its entries in a block of the heap, gathered with
+// the bank that Disk uses (what Disk holds there stays).
+typedef struct {
+    unsigned char *entries;
+    unsigned size, at;
+    unsigned char current[19 + MAX_NAME];       // struct dirent64: the type at 18, the name from 19
+} folder_list;
+
+void *cs_opendir(const char *given)
+{
+    unsigned char device;
+    const char *path = take_path(given, &device);
+    file_errno = 22;
+    if (path == 0 || strlen(path) >= MAX_NAME - 12)
+        return 0;
+    if (strcmp(path, ".") == 0)
+        path = "";
+    if (*path) {
+        u32 size;
+        long long seconds;
+        char kind = look_up(device, path, &size, &seconds);
+        file_errno = kind == 1 ? 20 : 2;
+        if (kind != 2)
+            return 0;
+    }
+    unsigned kept = dir_used, start = dir_used;
+    char complete = dir_complete;
+    char ok = read_folder(device, path);
+    unsigned length = dir_used - start;
+    dir_used = kept;
+    dir_complete = complete;
+    if (!ok)
+        return 0;
+    file_errno = 12;
+    folder_list *list = (folder_list *)malloc(sizeof *list + length);
+    if (list == 0)
+        return 0;
+    list->entries = (unsigned char *)(list + 1);
+    list->size = length;
+    list->at = 0;
+    for (unsigned done = 0; done < length; done += 128)
+        dir_copy(start + done, list->entries + done, (unsigned char)(length - done < 128 ? length - done : 128), 0);
+    return list;
+}
+
+void *cs_readdir64(void *opened)
+{
+    folder_list *list = (folder_list *)opened;
+    if (list->at >= list->size)
+        return 0;
+    const unsigned char *at = list->entries + list->at;
+    unsigned char length = at[0];
+    memset(list->current, 0, sizeof list->current);
+    list->current[18] = at[1] ? 4 : 8;          // DT_DIR, DT_REG
+    memcpy(list->current + 19, at + 6, length);
+    list->at += 6u + length;
+    return list->current;
+}
+
+i32 cs_closedir(void *opened)
+{
+    free(opened);
+    return 0;
+}
+#endif
 #endif // CX16_FILES
+
+// ---- fibers (lib/Fibers.cs) ---------------------------------------------------------
+//
+// As on the C64 (c64/runtime.c), with the RAM bank as well: a fiber may switch away while
+// a bank with code is in the window at $A000. A 6502 program has two stacks. llvm-mos keeps locals on a stack of its own
+// in memory, whose pointer is __rc0/__rc1 in the zero page, and a fiber gets
+// one of those like on any machine: its own memory. But JSR, RTS and the
+// registers functions save go on the processor's stack, which is always page
+// 1 ($0100-$01FF), 256 bytes for everyone. So a switch copies the part of
+// page 1 in use (from the stack pointer S up to $01FF) onto the fiber's own
+// stack, next to the registers a function must keep (__rc20 to __rc31), and
+// copies the next fiber's part back. Interrupts are off while page 1 is
+// being rewritten.
+//
+// The bank register is pushed onto page 1 before it is copied, and pulled after.
+//
+// The X16's imaginary registers aren't in a row: __rc20 to __rc29 are the KERNAL's r6 to
+// r10 at $0E, __rc30 and __rc31 are at $24 (llvm-mos's cx16/imag-regs.ld).
+//
+// The frame a switch leaves, from the saved stack pointer up:
+//   0   __rc20 to __rc31
+//   12  n, the number of bytes of page 1 in use
+//   13  those bytes, from S+1 to $01FF; the first two are where the switch
+//       returns to
+//
+// A fiber's memory is [guard][pattern][shadow stack ->  <- stack][record]:
+// managed code keeps its references on a shadow stack, which grows up from
+// above the pattern Fibers.cs checks; the stack above grows down. Nothing
+// stops either growing into the other.
+//
+// No memory protection, so no guard page: getpagesize reports the 6502's
+// page, 256 bytes, which Fibers.cs reserves below each stack and takes for a
+// small machine (stacks of 2 KB, at least 512 bytes). mprotect does nothing.
+//
+// ZeroFiberSwitch is assembly at the top level of this file, so the link-time
+// optimizer can't look into it. That matters: llvm-mos gives a function that
+// can't be running twice at once static memory for its locals instead of
+// stack. To the optimizer, a function that might reach the switch might call
+// back into any fiber's entry, so its locals stay on the stack, and two
+// fibers waiting inside it each keep their own.
+
+i32 cs_getpagesize(void) { return 256; }
+
+i32 cs_mprotect(void *address, u32 length, i32 protection)
+{
+    (void)address; (void)length; (void)protection;
+    return 0;
+}
+
+i32 cs_usleep(u32 microseconds)
+{
+    u32 start = jiffies(), wait = (microseconds + 16666) / 16667;
+    unsigned spins = 0;
+    while (jiffies() - start < wait) {
+        if (in_emulator && ++spins == 3000) {           // no frames: see above
+            slept += wait - (jiffies() - start);
+            break;
+        }
+    }
+    return 0;
+}
+
+void cs_ZeroFiberSwitch(void **save, void *resume);
+void ZeroFiberStart(void);
+
+// top: the stack's top; bottom: its lowest byte, where Fibers.cs's pattern
+// (64 bytes) starts. Returns the stack pointer to give ZeroFiberSwitch, a
+// frame whose page 1 holds only the return into ZeroFiberStart, with __rc20
+// the entry, __rc22 its argument and __rc24 the shadow stack.
+void *cs_ZeroFiberInit(char *top, char *bottom, void (*entry)(void *), void *argument)
+{
+    unsigned char *frame = (unsigned char *)top - 16;
+    unsigned start = (unsigned)ZeroFiberStart - 1; // RTS adds 1
+    memset(frame, 0, 16);
+    *(void **)&frame[0] = (void *)entry;
+    *(void **)&frame[2] = argument;
+    *(void **)&frame[4] = bottom + 64;
+    frame[12] = 3;
+    frame[13] = RAM_BANK;
+    frame[14] = (unsigned char)start;
+    frame[15] = (unsigned char)(start >> 8);
+    return frame;
+}
+
+__asm__(
+    ".section .text.cs_ZeroFiberSwitch,\"ax\",@progbits\n"
+    ".globl cs_ZeroFiberSwitch\n"
+    "cs_ZeroFiberSwitch:\n"
+    // __rc2/__rc3: where to store this stack's pointer; __rc4/__rc5: the
+    // one to resume. __rc16 to __rc19 are free to use (the caller's).
+    "    php\n"
+    "    pla\n"
+    "    sta __rc16\n"            // the flags, interrupts on or off
+    "    sei\n"
+    "    lda $00\n"
+    "    pha\n"                  // the RAM bank, with page 1
+    "    tsx\n"
+    "    txa\n"
+    "    eor #$ff\n"
+    "    sta __rc18\n"            // n = $FF - S
+    "    sec\n"                   // make room: 13 + n bytes
+    "    lda __rc0\n"
+    "    sbc #13\n"
+    "    sta __rc0\n"
+    "    bcs 1f\n"
+    "    dec __rc1\n"
+    "1:  sec\n"
+    "    lda __rc0\n"
+    "    sbc __rc18\n"
+    "    sta __rc0\n"
+    "    bcs 2f\n"
+    "    dec __rc1\n"
+    "2:  ldy #0\n"
+    "3:  lda mos16(__rc20),y\n"
+    "    sta (__rc0),y\n"
+    "    iny\n"
+    "    cpy #10\n"
+    "    bne 3b\n"
+    "    lda __rc30\n"
+    "    sta (__rc0),y\n"
+    "    iny\n"
+    "    lda __rc31\n"
+    "    sta (__rc0),y\n"
+    "    iny\n"                  // Y = 12
+    "    lda __rc18\n"
+    "    sta (__rc0),y\n"
+    "4:  cpx #$ff\n"              // page 1, from S+1 up
+    "    beq 5f\n"
+    "    inx\n"
+    "    iny\n"
+    "    lda $100,x\n"
+    "    sta (__rc0),y\n"
+    "    jmp 4b\n"
+    "5:  ldy #0\n"                // *save = the stack pointer
+    "    lda __rc0\n"
+    "    sta (__rc2),y\n"
+    "    iny\n"
+    "    lda __rc1\n"
+    "    sta (__rc2),y\n"
+    "    lda __rc4\n"             // the other fiber's stack
+    "    sta __rc0\n"
+    "    lda __rc5\n"
+    "    sta __rc1\n"
+    "    ldy #0\n"
+    "6:  lda (__rc0),y\n"
+    "    sta mos16(__rc20),y\n"
+    "    iny\n"
+    "    cpy #10\n"
+    "    bne 6b\n"
+    "    lda (__rc0),y\n"
+    "    sta __rc30\n"
+    "    iny\n"
+    "    lda (__rc0),y\n"
+    "    sta __rc31\n"
+    "    iny\n"
+    "    lda (__rc0),y\n"
+    "    sta __rc18\n"
+    "    eor #$ff\n"
+    "    tax\n"
+    "    txs\n"                   // S = $FF - n
+    "7:  cpx #$ff\n"
+    "    beq 8f\n"
+    "    inx\n"
+    "    iny\n"
+    "    lda (__rc0),y\n"
+    "    sta $100,x\n"
+    "    jmp 7b\n"
+    "8:  clc\n"                   // drop the frame
+    "    lda __rc0\n"
+    "    adc #13\n"
+    "    sta __rc0\n"
+    "    bcc 9f\n"
+    "    inc __rc1\n"
+    "9:  clc\n"
+    "    lda __rc0\n"
+    "    adc __rc18\n"
+    "    sta __rc0\n"
+    "    bcc 10f\n"
+    "    inc __rc1\n"
+    "10: pla\n"
+    "    sta $00\n"
+    "    lda __rc16\n"
+    "    pha\n"
+    "    plp\n"
+    "    rts\n"
+    // Where a new fiber's first switch returns to: the entry is an ordinary
+    // C# method, which takes its shadow stack as a hidden first argument, and
+    // the argument after it. It never returns: it switches away for good.
+    ".globl ZeroFiberStart\n"
+    "ZeroFiberStart:\n"
+    "    lda __rc24\n"
+    "    sta __rc2\n"
+    "    lda __rc25\n"
+    "    sta __rc3\n"
+    "    lda __rc22\n"
+    "    sta __rc4\n"
+    "    lda __rc23\n"
+    "    sta __rc5\n"
+    "    jmp (__rc20)\n");
+
+// lib/FileSystem.cs asks which system this is: 10, the Commander X16.
+i32 cs_ZeroSystem(void) { return 10; }
+void *cs___errno_location(void) { return &file_errno; }
+// FileStream buffers in C#: nothing to switch off or write out here.
+i32 cs_setvbuf(i32 stream, void *buffer, i32 how, u32 size) { (void)stream; (void)buffer; (void)how; (void)size; return 0; }
+i32 cs_fflush(i32 stream) { (void)stream; return 0; }
 
 // ---- the machine, for lib/CX16.cs ----------------------------------------------------
 

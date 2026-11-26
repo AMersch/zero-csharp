@@ -103,7 +103,7 @@ that needs the runtime: no allocation, strings, `double` or calls into other met
 - Static fields and static constructors, `Main(string[] args)`, top-level statements
 - P/Invoke and `[UnmanagedCallersOnly]` callbacks
 - Files, a monotonic clock and the date, and seeded random numbers, from `lib/`, on every target
-- SIMD intrinsics (NEON, AVX2, FMA), `Interlocked`, `Volatile`, and threads through `Parallel.For`
+- SIMD intrinsics (NEON, AVX2, FMA), `Interlocked`, `Volatile`, threads through `Parallel.For`, and green threads (fibers) with channels
 
 Every `new` is a `calloc` that is never freed. There is no async/await, no LINQ from .NET (`lib/Seq.cs`
 has `Where`, `Select` and friends without allocating), no culture-aware formatting, and casts that need
@@ -137,7 +137,7 @@ was freed. See [Memory without a GC](https://onurgumus.github.io/zero-csharp/con
 | Folder | What |
 |---|---|
 | [`zerocore/`](zerocore/README.md) | The core library: `object`, `string`, casts, allocation. About 2,400 lines of C#, MIT licensed |
-| [`lib/`](lib/) | Arenas, collections, strings, input and output, files, the clock, random numbers, SIMD kernels, `Parallel.For`, DOS and UEFI graphics, the Commodore 64's screen and sprites, a microcontroller board's LED, registers and timer interrupt, GPU buffers and kernel launches ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
+| [`lib/`](lib/) | Arenas, collections, strings, input and output, files, the clock, random numbers, SIMD kernels, `Parallel.For`, fibers (green threads) and channels, timers on fibers (`System.Timers.Timer`, `System.Threading.Timer`, `PeriodicTimer`), DOS and UEFI graphics, the Commodore 64's screen and sprites, a microcontroller board's LED, registers and timer interrupt, GPU buffers and kernel launches ([reference](https://onurgumus.github.io/zero-csharp/reference/index.html)) |
 | [`samples/`](samples/) | The programs below |
 | [`sdk/`](sdk/) | The `ZeroCSharp.*` NuGet packages |
 | [`docs/`](docs/) | The documentation site |
@@ -166,18 +166,22 @@ nothing AGPL is linked into them.
 | `Guards` | One mistake per run that `lib/` stops the program for, such as marks restored out of order | 56 KB |
 | `Queries` | LINQ-style queries with `lib/Seq.cs`, checked to allocate nothing | 44 KB |
 | `Threads` | `Parallel.For` with one arena per thread | 28 KB |
+| `Fibers` | `lib/Fibers.cs`: green threads taking turns, channels, sleeping, 2,000 fibers at once (6 on DOS or a microcontroller), and the cost of a switch | 52 KB |
+| `Timers` | `lib/Timers.cs`: `System.Timers.Timer`, `System.Threading.Timer` and `PeriodicTimer` on fibers, and `TimeSpan`: repeating and one-shot timers, stopping and restarting from a handler, changing the interval | 84 KB |
 | `Files` | `lib/File.cs`: whole files, and an open file read, written and moved through | 31 KB |
 | `Dice` | `lib/Random.cs` and `lib/Clock.cs`: seeded dice rolls that match on every target, durations, the date | 29 KB |
 | `Env` | `System.Environment`: variables, `Exit` from anywhere (writing what `Console` holds), the processor count | 20 KB |
 | `Pipe` | `In.Read`: standard input as bytes, checked byte for byte through a pipe | 19 KB |
 | `Records` | `record struct` and `record class`, `with`, `ToString`, `typeof`, anonymous types | 34 KB |
 | `Refs` | Structs in an arena passed and returned by `ref` | 24 KB |
+| `TensorTypes` | `Tensor<T>` and `TensorSpan<T>` as in .NET: broadcasting, views, a matrix product from `Dot`, SoftMax per row, temporaries freed with an arena | 105 KB |
 | `Llama` | Karpathy's stories260K language model, compiled into the program; it tells the same story on every target, DOS and UEFI included | 1.1 MB |
 | `Vga` | DOS and UEFI only: a small game in 320x200 with 256 colors | 36 KB |
+| `SmallFibers`, `SmallChannels` | Fibers and channels sized for a small machine, the Commodore 64 included: taking turns, sleeping, two fibers waiting inside the same function, a pipeline | 27 KB |
 | `SmallStrings`, `SmallIntegers`, `SmallObjects` and seven more | Tests sized for a small machine: what Strings, Casts, Collections and the others check, in pieces that each fit in a Commodore 64 | 17 to 36 KB |
 | `C64Demo` | Commodore 64 only: text, a sprite and raster bars, with objects, a list and a lambda behind them | 36 KB |
 | `Paddles` | Commodore 64 only: a paddle-and-ball game against the computer, with sprites, SID sound, records and unions | 34 KB |
-| `Gpu` | GPU only (`--gpu`): kernels for adding, Collatz, SAXPY, a reduction, matrix multiply (plain and tiled), histograms and float atomics, each checked against the CPU and timed against a plain C# loop on one core | 118 KB (macOS) |
+| `Gpu` | GPU only (`--gpu`): kernels for adding, Collatz, SAXPY, a reduction, matrix multiply (plain and tiled, and on tensors), histograms and float atomics, each checked against the CPU and timed against a plain C# loop on one core | 118 KB (macOS) |
 | `Blink` | Microcontrollers only: the board's LED, blinked by a C# interrupt handler, and a check that a busy handler leaves the interrupted code's references alone | 18 KB of flash |
 
 Sizes are for Linux arm64. `build.sh` leaves out debug information and the symbol table and turns off
@@ -199,8 +203,9 @@ To build them, clone this repository and build the bflat fork next to it
 ## License
 
 MIT ([`LICENSE`](LICENSE)), including `zerocore/` and the `ZeroCSharp.Sdk` and `ZeroCSharp.Templates`
-packages. zerocore wasn't written in a clean room: read [its README](zerocore/README.md) before
-shipping a commercial product on it.
+packages. zerocore holds code from .NET (MIT) and, in three tensor functions, from AMD (BSD 3-Clause):
+[`zerocore/THIRD-PARTY-NOTICES.txt`](zerocore/THIRD-PARTY-NOTICES.txt). zerocore wasn't written in a clean
+room: read [its README](zerocore/README.md) before shipping a commercial product on it.
 
 bflat and [the fork](https://github.com/OnurGumus/bflat) are AGPL-3.0, and so are the
 `ZeroCSharp.Bflat.*` packages that carry it. They are used as a compiler, and nothing from them is

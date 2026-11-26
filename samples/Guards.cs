@@ -31,6 +31,8 @@ public static class Program
             Console.WriteLine("  builder-grew-in-place  the same for a StrBuilder (DebugChecks)");
             Console.WriteLine("  list-index           a list index out of range");
             Console.WriteLine("  out-of-memory        an allocation the system can't satisfy (stopOnOutOfMemory)");
+            Console.WriteLine("  arena-limit          an allocation past an arena's maxCapacity (stopOnOutOfMemory)");
+            Console.WriteLine("  buffer-full          an allocation that doesn't fit in a FromBuffer arena (stopOnOutOfMemory)");
             Console.WriteLine("  lambda-in-scope      a lambda first run inside AllocateObjectsHere, cached in the arena (DebugChecks)");
             Console.WriteLine("  throw                a throw, inside a try with a matching catch");
             Console.WriteLine("  throw-null           throw null");
@@ -49,6 +51,16 @@ public static class Program
             Console.WriteLine("  pool-moved           a copy of a Pool handle used after Move");
             Console.WriteLine("  scratch-pool-outer   a ScratchPool added to inside a nested Arena.Scratch");
             Console.WriteLine("  pool-other           a Pool handle used with another pool");
+            Console.WriteLine("  scratch-dict-outer   a new key in a ScratchDict inside a nested Arena.Scratch");
+            Console.WriteLine("  scratch-set-outer    a new item in a ScratchHashSet inside a nested Arena.Scratch");
+            Console.WriteLine("  builder-index        a StrBuilder index out of range");
+            Console.WriteLine("  builder-replace-empty  a StrBuilder Replace of an empty string");
+            Console.WriteLine("  scratch-outer-edit   a ScratchText inserted into inside a nested Arena.Scratch");
+            Console.WriteLine("  native-overflow      NativeMemory.Alloc with a count times size past the address space");
+            Console.WriteLine("  native-zeroed-overflow  the same for NativeMemory.AllocZeroed");
+            Console.WriteLine("  native-out-of-memory NativeMemory.Alloc of more than the system can give");
+            Console.WriteLine("  native-bad-alignment NativeMemory.AlignedAlloc with an alignment that isn't a power of two");
+            Console.WriteLine("  native-aligned-overflow  NativeMemory.AlignedAlloc of a size that overflows with the alignment");
             return 0;
         }
 
@@ -63,6 +75,8 @@ public static class Program
             case "builder-grew-in-place": BuilderGrewInPlace(); break;
             case "list-index": ListIndex(); break;
             case "out-of-memory": OutOfMemory(); break;
+            case "arena-limit": ArenaLimit(); break;
+            case "buffer-full": BufferFull(); break;
             case "lambda-in-scope": LambdaInScope(); break;
             case "throw": Throw(); break;
             case "throw-null": ThrowNull(); break;
@@ -83,6 +97,16 @@ public static class Program
             case "pool-moved": PoolMoved(); break;
             case "scratch-pool-outer": ScratchPoolOuter(); break;
             case "pool-other": PoolOther(); break;
+            case "scratch-dict-outer": ScratchDictOuter(); break;
+            case "scratch-set-outer": ScratchSetOuter(); break;
+            case "builder-index": BuilderIndex(); break;
+            case "builder-replace-empty": BuilderReplaceEmpty(); break;
+            case "scratch-outer-edit": ScratchOuterEdit(); break;
+            case "native-overflow": NativeOverflow(); break;
+            case "native-zeroed-overflow": NativeZeroedOverflow(); break;
+            case "native-out-of-memory": NativeOutOfMemory(); break;
+            case "native-bad-alignment": NativeBadAlignment(); break;
+            case "native-aligned-overflow": NativeAlignedOverflow(); break;
             default:
                 Console.WriteLine("Unknown case");
                 return 0;
@@ -215,6 +239,25 @@ public static class Program
         // docs:end
     }
 
+    static void ArenaLimit()
+    {
+        // docs:arena-limit
+        Arena arena = Arena.Create(256, "budget", stopOnOutOfMemory: true,
+            maxCapacity: 1024);
+        arena.Alloc(600);  // fits
+        arena.Alloc(600);  // 1200 bytes in all: past the limit
+        // docs:end
+    }
+
+    static void BufferFull()
+    {
+        Span<byte> memory = stackalloc byte[512];
+        Arena arena;
+        // SAFETY: the arena isn't used after this method returns.
+        unsafe { arena = Arena.FromBuffer(memory, "buffer", stopOnOutOfMemory: true); }
+        arena.Alloc(1000);
+    }
+
     static void LambdaInScope()
     {
         Arena.DebugChecks = true;
@@ -320,6 +363,33 @@ public static class Program
         });
     }
 
+    static void BuilderIndex()
+    {
+        StrBuilder text = StrBuilder.Create(Arena.Create(256));
+        text.Append("abc");
+        text.Insert(4, "d");
+    }
+
+    static void BuilderReplaceEmpty()
+    {
+        StrBuilder text = StrBuilder.Create(Arena.Create(256));
+        text.Append("abc");
+        text.Replace("", "x");
+    }
+
+    static void ScratchOuterEdit()
+    {
+        Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            var outer = new OuterScratch { Text = scratch.Text() };
+            outer.Text.Append("bc");
+            Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref OuterScratch state) =>
+            {
+                state.Text.Insert(0, 'a');
+            });
+        });
+    }
+
     static void PtrNull()
     {
         Ptr<int> nothing = default;
@@ -363,6 +433,62 @@ public static class Program
         second[item] = 2;
     }
 
+    static void ScratchDictOuter()
+    {
+        Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            var outer = new OuterScratch { Dict = scratch.Dict<int, int>() };
+            outer.Dict.Set(1, 1);
+            Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref OuterScratch state) =>
+            {
+                state.Dict.Set(1, 2); // allowed: the key is there
+                state.Dict.Set(2, 2); // a new key: stops
+            });
+        });
+    }
+
+    // Where .NET throws OutOfMemoryException, zero mode stops the program.
+    static void NativeOverflow()
+    {
+        unsafe { System.Runtime.InteropServices.NativeMemory.Alloc(~(nuint)0 / 2, 4); }
+    }
+
+    static void NativeZeroedOverflow()
+    {
+        unsafe { System.Runtime.InteropServices.NativeMemory.AllocZeroed(3, ~(nuint)0 / 2); }
+    }
+
+    static void NativeOutOfMemory()
+    {
+        // More than half the address space: no system has that much to give.
+        unsafe { System.Runtime.InteropServices.NativeMemory.Alloc((nuint)nint.MaxValue + 1); }
+    }
+
+    // .NET throws ArgumentException.
+    static void NativeBadAlignment()
+    {
+        unsafe { System.Runtime.InteropServices.NativeMemory.AlignedAlloc(16, 24); }
+    }
+
+    static void NativeAlignedOverflow()
+    {
+        unsafe { System.Runtime.InteropServices.NativeMemory.AlignedAlloc(~(nuint)0 - 8, 64); }
+    }
+
+    static void ScratchSetOuter()
+    {
+        Arena.Scratch(static (scoped ScratchScope scratch) =>
+        {
+            var outer = new OuterScratch { Set = scratch.HashSet<int>() };
+            outer.Set.Add(1);
+            Arena.Scratch(ref outer, static (scoped ScratchScope inner, scoped ref OuterScratch state) =>
+            {
+                state.Set.Add(1); // allowed: already there
+                state.Set.Add(2); // a new item: stops
+            });
+        });
+    }
+
     static void ScratchPoolOuter()
     {
         Arena.Scratch(static (scoped ScratchScope scratch) =>
@@ -385,6 +511,8 @@ public ref struct OuterScratch
     public ScratchList<int> Items;
     public ScratchText Text;
     public ScratchPool<int> Pool;
+    public ScratchDict<int, int> Dict;
+    public ScratchHashSet<int> Set;
 }
 
 public struct Left { public int Value; }

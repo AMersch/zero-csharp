@@ -25,7 +25,8 @@ namespace Internal.Runtime.CompilerHelpers
         // returns (both or neither must exist): SetLatchedExitCode with Main's
         // int, if it returns one, then Shutdown, whose result is the exit code.
         // Shutdown writes what lib/'s Out still holds, as Environment.Exit does,
-        // so a last Console.Write without a newline isn't lost.
+        // so a last Console.Write without a newline isn't lost, then runs lib/'s
+        // check for work left undone (Environment.s_atMainReturn).
         internal static void SetLatchedExitCode(int exitCode) => s_exitCode = exitCode;
 
         internal static int Shutdown()
@@ -33,6 +34,9 @@ namespace Internal.Runtime.CompilerHelpers
             delegate*<void> beforeExit = Environment.s_beforeExit;
             if (beforeExit != null)
                 beforeExit();
+            delegate*<void> atMainReturn = Environment.s_atMainReturn;
+            if (atMainReturn != null)
+                atMainReturn();
             return s_exitCode;
         }
 

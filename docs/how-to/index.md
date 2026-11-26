@@ -24,6 +24,12 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   enough, and collect such strings in a list or map.
 - [Read and write files](read-and-write-files.html): whole files in one call, an open file read and
   written piece by piece, and what differs on each target.
+- [Work with paths and directories](work-with-paths-and-directories.html): the parts of a path,
+  `Path.Combine` and `Normalize`; creating, listing and deleting directories.
+- [Use streams](use-streams.html): `Stream`, `MemoryStream` and `FileStream`, as in .NET, with
+  buffers of a size you choose, from an arena.
+- [Use the network](use-the-network.html): TCP and UDP sockets, `TcpListener`, `TcpClient` and
+  `Dns`, as in .NET, with a fiber per connection.
 - [Use the clock and random numbers](use-the-clock-and-random-numbers.html): measure a duration, tell
   the date and time, and roll dice with numbers that are the same on every target.
 - [Read environment variables and exit](use-the-environment.html): `Environment.GetEnvironmentVariable`,
@@ -42,6 +48,8 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   `ref` and `in`, return a ref, and keep the ref from outliving a list's buffer or an arena scope.
 - [Catch arena mistakes](catch-arena-mistakes.html): turn on `Arena.DebugChecks`, name your arenas, and
   see what the library stops the program for.
+- [Free memory yourself](free-memory-yourself.html): `NativeMemory.Alloc` and `Free` for a block with
+  its own lifetime, a struct that frees it with `using`, and what nothing checks.
 
 ## Targets
 
@@ -71,6 +79,10 @@ the [tutorial](../tutorial/index.html) builds a quiz step by step.
   and the ready-made kernels in `lib/Kernels.cs`.
 - [Run a loop in parallel](run-in-parallel.html): `Parallel.For` over every processor, sharing a total
   with `Interlocked`, and one arena per thread.
+- [Work with tensors and matrices](use-tensors.html): `Tensor<T>` and `TensorSpan<T>` as in .NET,
+  broadcasting, views that share memory, matrix products, and freeing the temporaries.
+- [Run green threads](use-fibers.html): many fibers on one thread, each on its own stack, taking
+  turns; channels between them, sleeping, and what they share.
 - [Run code on the GPU](run-code-on-the-gpu.html): C# kernels on an Apple Silicon Mac's GPU through
   Metal, threadgroup memory and barriers, 2D grids, atomics, and when a launch is worth it.
 - [Run a language model](run-a-language-model.html): a small Llama-style model, compiled into the

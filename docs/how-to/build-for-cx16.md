@@ -36,9 +36,9 @@ next to it, which belongs with it on the disk. The published packages don't have
 checkout's for your own machine:
 
 ```bash
-sdk/pack-local.sh                  # ZeroCSharp.Sdk and .Templates 0.13.0-local, into sdk/feed/
+sdk/pack-local.sh                  # ZeroCSharp.Sdk and .Templates VERSION-local (it says which), into sdk/feed/
 dotnet new uninstall ZeroCSharp.Templates      # the published ones, if installed: both would clash
-dotnet new install "$PWD/sdk/feed/ZeroCSharp.Templates.0.13.0-local.nupkg"
+dotnet new install "$PWD/sdk/feed/ZeroCSharp.Templates.0.14.0-local.nupkg"
 dotnet new zero -o Hello && cd Hello
 dotnet new nugetconfig && dotnet nuget add source <repository>/sdk/feed -n zero-local --configfile nuget.config
 dotnet build -p:ZeroTarget=cx16
@@ -110,8 +110,9 @@ File.TryReadAllText(arena, "//levels/:one.txt", out string text);    // in a fol
 
 - **Names:** long names and spaces are fine, up to about 70 characters with the folder; a comma isn't (the drive
   takes what follows for the file's type). Upper and lower case find the same file.
-- **Folders:** `"folder/name"` or `"//folder/:name"`, from the current folder, which `Disk.Command("cd:folder")`
-  changes.
+- **Folders:** `"folder/name"` from the current folder, which `Directory.SetCurrentDirectory` (or
+  `Disk.Command("cd:folder")`) changes, and `"/folder/name"` from the root. CBM DOS's own forms work too, where
+  `//folder/:name` is from the root and `/folder/:name` from the current folder.
 - **Device:** a path starting with `#` and a number and a colon is on that device (8 to 30):
   `"#9:data.bin"`. Without it, a file is on the device the program was loaded from, 8 for the SD
   card. A device that isn't there closes all the program's open files, because the KERNAL can't open
@@ -120,8 +121,32 @@ File.TryReadAllText(arena, "//levels/:one.txt", out string text);    // in a fol
 - **Moving about:** a file opened for reading can be moved anywhere with `Seek`, and `Length` and
   `Position` work, but only by reading (forward) or opening it again (backward): `Length` reads a file
   through twice. A file opened for writing, or for appending, can only go on from where it is.
-  `File.OpenAppend` adds to a file; `File.Create` replaces one.
+  `File.OpenAppend` adds to a file; `File.Create` replaces one. A `FileStream` opened to read and write moves
+  anywhere at no cost (below).
 - **Limits:** four files open at once. `File.Delete` says false for a file that isn't there.
+
+### The other file APIs
+
+The rest of `File`, `Directory`, `Path` and `FileStream` work as on the other systems, through
+`cx16/runtime.c`:
+
+```csharp
+File.GetInfo("a.txt", out FileInfo info);            // length, date, folder or not
+File.Move("a.txt", "levels/a.txt", overwrite: true);
+Directory.Create("levels/deep");
+foreach (DirectoryEntry entry in Directory.Enumerate("levels")) { }
+using var save = new FileStream("save.bin", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 64);
+```
+
+- **What it costs:** the drive has no "stat", so `File.Exists`, `GetInfo` and what builds on them read the
+  folder's listing. These APIs are much code: expect banks, and leave out what isn't needed.
+- **Read and write at once** is CMDR-DOS's `,M` mode with its position command; a drive on the serial bus
+  hasn't got it.
+- **Memory:** `FileStream` takes a 4 KB buffer from the heap unless given a smaller size, and
+  `Directory.Enumerate` holds the folder's entries on the heap until the loop ends.
+- **No `catch`:** on the 6502 an exception ends the program. Use the forms that return a `FileError`
+  (`FileStream.TryOpen`).
+- **Names** don't tell capitals apart (FAT32), and can't hold a comma, `*` or `?`.
 
 ### Folders
 
@@ -153,7 +178,9 @@ Disk.Command("md:levels");                      // make a folder; "cd:..", "rd:l
 
 Without a card image the emulator serves a folder of the computer as the disk (`-fsroot`, which `run.sh` points
 at `bin/cx16/`). That is more forgiving than the SD card's own DOS, and different with folders: a listing of a
-named folder shows the root. `X16_SDCARD=sdcard.img.zip ./run.sh --cx16 Name` runs a program with a copy of a card
+named folder shows the root, so `Directory.Enumerate` and `Disk` can't list one there. It also takes no folder in
+CBM DOS's `folder/:name` form: the library sends plain paths, and so should `Disk.Command`
+(`"s:folder/name"`), or a file of the same name in the root is removed, which is a file on your computer. `X16_SDCARD=sdcard.img.zip ./run.sh --cx16 Name` runs a program with a copy of a card
 image instead (the emulator's release has an empty one), and `./test.sh --cx16` runs `samples/DiskFiles.cs` and
 `DiskList.cs` both ways.
 
@@ -499,6 +526,22 @@ structs and a sieve over flags in the banks.
 and capacity are kept in the banks too. It doubles when full, in place while it is the last thing
 `Banks.Alloc` handed out, and otherwise into a new region (the old one stays reserved until
 `Banks.Reset` or `Banks.Release`). `samples/BankedListDemo.cs` grows one to 5,000 structs.
+
+## Fibers and timers
+
+`Fiber`, channels and the timers work as on the C64 (`samples/SmallFibers.cs`, `SmallChannels.cs`): a switch also
+keeps the RAM bank, so fibers may run code that is in banks. A fiber takes 2 KB of the heap for its stack unless
+`Spawn` is given another size (512 bytes at least, which little code gets by with), so a program with fibers
+usually has to ask for more heap (below). In the headless emulator, where the clock stands still, what a program
+sleeps is added to the clock. Sockets aren't there: the X16 has no network.
+
+## More heap
+
+A program with code in banks is given 4 KB of heap if there is enough code to move. One that allocates more asks
+for it, in bytes: `ZERO_CX16_HEAP=9000 ./build.sh --cx16 Name`, or in a project
+`<ZeroCx16Heap>9000</ZeroCx16Heap>`. More functions then go into banks, as far as there are any to move; the
+build says how little it got if that is less than 3 KB or than asked for. `samples/SmallArena.cs` needs it
+(`build.sh` sets it).
 
 ## Build and run
 

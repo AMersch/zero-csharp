@@ -41,6 +41,9 @@
 #
 # Usage:  ./build.sh [--wasm | --dos | --c64 | --cx16 | --pico2 | --r4 | --win | --mac | --gpu | --uefi] [Sample ...]
 #         ./build.sh --gpu-air [Sample ...]  the GPU build up to AIR, without a Mac (no program)     default: all samples
+#         ./build.sh --cuda-ptx [Sample ...] experimental: the kernels as PTX for NVIDIA GPUs, checked by ptxas
+#         ./build.sh --cuda [Sample ...]     experimental: Linux programs that run them through CUDA;
+#                                            not yet run on an NVIDIA GPU (see "CUDA (experimental)")
 #         ./build.sh --sdk-payload <dir>     what the ZeroCSharp.Sdk package carries (sdk/)
 #         ./build.sh --must-not-compile      check that tests/must-not-compile/*.cs are refused
 # Env:    BFLAT_DIR, BFLAT_FORK, BFLAT_ARCH, WASM_TOOLS, DOS_CLANG (see env.sh),
@@ -61,6 +64,7 @@ SMALL_SAMPLES=(
     SmallDoubles
     SmallObjects
     SmallArena
+    SmallNative
     SmallLists
     SmallDicts
     SmallStrDicts
@@ -72,6 +76,8 @@ SMALL_SAMPLES=(
     SmallDoubleFormats
     SmallDecimalFormats
     SmallKeys
+    SmallFibers
+    SmallChannels
 )
 ALL_SAMPLES=(
     Tiny
@@ -84,6 +90,10 @@ ALL_SAMPLES=(
     Core
     Bits
     Files
+    Paths
+    Streams
+    Network
+    Directories
     Dice
     Pipe
     Env
@@ -97,6 +107,8 @@ ALL_SAMPLES=(
     Guards
     Queries
     Threads
+    Fibers
+    Timers
     Records
     Shapes
     Refs
@@ -110,9 +122,13 @@ ALL_SAMPLES=(
     Keys
     Tensors
     TensorsAvx
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
     SmallMath
 )
+# Samples WebAssembly can't run: the fiber samples switch stacks, which a WebAssembly
+# program has no way to do.
+NOT_WASM=" Fibers Timers SmallFibers SmallChannels Network "
 # Programs with kernels for the GPU (Metal): only --gpu builds them.
 GPU_SAMPLES=(Gpu)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
@@ -128,6 +144,8 @@ DOS_SAMPLES=(
     Core
     Bits
     Files
+    Paths
+    Streams
     Dice
     Pipe
     Env
@@ -143,6 +161,8 @@ DOS_SAMPLES=(
     Shapes
     Refs
     Patterns
+    Fibers
+    Timers
     Scratch
     Links
     Llama
@@ -151,6 +171,7 @@ DOS_SAMPLES=(
     Formats
     Keys
     Tensors
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
     Vga
 )
@@ -217,6 +238,11 @@ CX16_SAMPLES=(
     Jameson
     PcmDemo
     DiskList
+    DiskFolders
+    DiskChange
+    DiskInfo
+    SmallFibers
+    SmallChannels
 )
 # A microcontroller has no SIMD to benchmark, and Vga is a PC game. Blink is
 # for microcontrollers only (lib/Board.cs: the LED, registers, a timer). The Uno R4
@@ -232,6 +258,8 @@ ARM_SAMPLES=(
     Core
     Bits
     Files
+    Paths
+    Streams
     Dice
     Pipe
     Env
@@ -243,6 +271,8 @@ ARM_SAMPLES=(
     Guards
     Queries
     Threads
+    Fibers
+    Timers
     Records
     Shapes
     Refs
@@ -255,11 +285,14 @@ ARM_SAMPLES=(
     Formats
     Keys
     Tensors
+    TensorTypes
     "${SMALL_SAMPLES[@]}"
     Blink
 )
-# Arena, Collections, Files, Strings, Queries, Threads, Patterns, Scratch and
-# Unicode need more (Arena, for one, allocates a 16 KB array).
+# Arena, Collections, Files, Strings, Queries, Threads, Fibers, Patterns,
+# Scratch, Links and Unicode need more (Arena, for one, allocates a 16 KB
+# array; Fibers runs three fibers of 5 KB at once). Links passes, but with
+# less than 2 KB to spare, so a small change elsewhere would break it.
 R4_SAMPLES=(
     Tiny
     Minimal
@@ -282,8 +315,14 @@ R4_SAMPLES=(
     "${SMALL_SAMPLES[@]}"
     Blink
 )
-# UEFI gets every sample, and Vga too (lib/Uefi.cs has what it uses of lib/Dos.cs).
-UEFI_SAMPLES=("${ALL_SAMPLES[@]}" Vga)
+# UEFI gets every sample but these, and Vga too (lib/Uefi.cs has what it uses
+# of lib/Dos.cs). Directories needs directories, which lib/ has only on Linux,
+# macOS, Windows and WebAssembly.
+NOT_UEFI=" Directories Network "
+UEFI_SAMPLES=(Vga)
+for name in "${ALL_SAMPLES[@]}"; do
+    [[ "$NOT_UEFI" == *" $name "* ]] || UEFI_SAMPLES+=("$name")
+done
 
 # Language version and memory safety rules for every sample.
 CSHARP_FLAGS=(--langversion preview --compiler-feature updated-memory-safety-rules)
@@ -732,7 +771,11 @@ build_cx16_programs() {
     local name
     for name in "$@"; do
         echo "[cx16]  $name -> bin/cx16/$name.prg"
-        zero_bitcode cx16-link "bin/cx16/obj/$name" "$name" cx16/runtime.c "bin/cx16/$name.prg" --llvm-mos "$LLVM_MOS"
+        # SmallArena keeps an arena of 4 KB while it tries arenas with limits: it wants
+        # more heap than the build leaves by itself (ZERO_CX16_HEAP, sdk/ZeroCSharp.Bitcode/X16.cs).
+        local heap=
+        [ "$name" = SmallArena ] && heap=7168
+        ZERO_CX16_HEAP=${ZERO_CX16_HEAP:-$heap} zero_bitcode cx16-link "bin/cx16/obj/$name" "$name" cx16/runtime.c "bin/cx16/$name.prg" --llvm-mos "$LLVM_MOS"
     done
 }
 
@@ -890,7 +933,7 @@ build_win() {
         # shellcheck disable=SC2046
         "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none \
             "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os windows --arch x64 $(BFLAT_ARCH=x64 bflat_flags "$name") \
-            --ldflags "/entry:zero_start /wrap:getenv /wrap:fopen /wrap:remove $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
+            --ldflags "/entry:zero_start /wrap:getenv /wrap:fopen /wrap:remove /wrap:mkdir /wrap:rmdir /wrap:rename /wrap:getcwd /wrap:chdir /wrap:socket /wrap:bind /wrap:listen /wrap:accept /wrap:connect /wrap:sendto /wrap:recvfrom /wrap:shutdown /wrap:close /wrap:setsockopt /wrap:getsockopt /wrap:getsockname /wrap:getpeername /wrap:getaddrinfo /wrap:freeaddrinfo /wrap:gethostname $WIN_OBJ/start.obj $WIN_OBJ/runtime.obj $WIN_OBJ/zerocore.obj" -o "bin/win/$name.exe"
         rm -f "bin/win/$name.pdb"
     done
 }
@@ -1047,7 +1090,8 @@ build_uefi_objects() {
         "$clang" -target "$triple" "${UEFI_CFLAGS[@]}" -Wall -Wextra -c "efi/$name.c" -o "$UEFI_OBJ/$name.obj"
     done
     "$clang" -target "$triple" -c "efi/$BFLAT_ARCH.S" -o "$UEFI_OBJ/stack.obj"
-    "$clang" -target "$triple" -c "zerocore/native/win-$BFLAT_ARCH.S" -o "$UEFI_OBJ/zerocore.obj"
+    # ZERO_UEFI: no thread information block for the fiber switch to update.
+    "$clang" -target "$triple" -DZERO_UEFI -c "zerocore/native/win-$BFLAT_ARCH.S" -o "$UEFI_OBJ/zerocore.obj"
     echo "[clang] efi/libm/*.c -> $UEFI_OBJ/libm"
     for source in efi/libm/*.c; do
         object=$UEFI_OBJ/libm/$(basename "$source" .c).obj
@@ -1149,6 +1193,83 @@ build_must_not_compile() {
     return "$failures"
 }
 
+# ---- CUDA (experimental) ----------------------------------------------------
+#
+# The GPU kernels again, for NVIDIA's GPUs: the same bitcode as --gpu-air,
+# rewritten for LLVM's NVPTX backend (zero-bitcode ll2ptx, Ptx.cs), compiled
+# to PTX by llc, and checked by NVIDIA's ptxas, which needs no GPU. --cuda then
+# links a Linux program with the PTX in it and gpu/cuda.c, which runs it
+# through the CUDA driver (libcuda, opened at run time).
+#
+# Untested on hardware: CI checks that the PTX assembles and the program
+# links, but no kernel has yet run on an NVIDIA GPU.
+#
+# llc (with the NVPTX target), ptxas and a C compiler come from the PATH when
+# there (CI: apt's llvm-15 and pip's nvidia-cuda-nvcc-cu12), else from the
+# zero-cuda-tools image (docker/cuda.Dockerfile), built on first use.
+CUDA_OBJ=bin/cuda/obj
+CUDA_ARCH=${CUDA_ARCH:-sm_70}
+
+cuda_tools() {
+    if command -v ptxas >/dev/null 2>&1 && command -v llc >/dev/null 2>&1 && llc --version | grep -q nvptx64; then
+        bash -c "$1"
+        return
+    fi
+    if ! docker image inspect zero-cuda-tools >/dev/null 2>&1; then
+        echo "[cuda]  building the zero-cuda-tools image (docker/cuda.Dockerfile)"
+        docker build -q --platform "$DOCKER_PLATFORM" -t zero-cuda-tools -f docker/cuda.Dockerfile docker >/dev/null
+    fi
+    docker run --rm --platform "$DOCKER_PLATFORM" -v "$PWD:/w" -w /w zero-cuda-tools bash -c "$1" 2>&1 \
+        | grep -v -e '^$' -e '^==' -e 'NVIDIA' -e 'CUDA Version' -e 'governed' -e 'license' -e 'Container' \
+            -e 'WARNING: The NVIDIA Driver' -e 'Use the NVIDIA' -e 'docs.nvidia' -e 'is made available' || true
+}
+
+# $@: samples. The kernels as PTX, checked by ptxas: $CUDA_OBJ/<name>/kernels.ptx.
+build_cuda_ptx() {
+    local name dir
+    for name in "$@"; do
+        dir="$CUDA_OBJ/$name"
+        mkdir -p "$dir"
+        zero_bitcode ll2ptx "$dir/kernels.ll" "$name" "$GPU_OBJ/$name"/ll/*.ll
+        cuda_tools "llc -march=nvptx64 -mcpu=$CUDA_ARCH -O3 $dir/kernels.ll -o $dir/kernels.ptx \
+            && ptxas -arch=$CUDA_ARCH $dir/kernels.ptx -o $dir/kernels.cubin"
+        [ -f "$dir/kernels.cubin" ] || { echo "Error: ptxas failed for $name" >&2; exit 1; }
+        echo "[cuda]  $name: $(grep -c '^\.visible \.entry' "$dir/kernels.ptx") kernels -> $dir/kernels.ptx ($CUDA_ARCH, checked by ptxas)"
+    done
+}
+
+# $@: samples. gpu/cuda.c and the PTX (zero-terminated, as cuModuleLoadData
+# wants it) as objects for the program.
+build_cuda_objects() {
+    local name dir
+    for name in "$@"; do
+        dir="$CUDA_OBJ/$name"
+        printf '\t.section .rodata\n\t.globl gpu_ptx\n\t.p2align 4\ngpu_ptx:\n\t.incbin "%s"\n\t.byte 0\n' "$dir/kernels.ptx" > "$dir/kernels.s"
+        # arm64 gcc calls libgcc for atomics unless told to inline them; bflat's
+        # link has no libgcc.
+        local flags=""
+        [ "$BFLAT_ARCH" = arm64 ] && flags=-mno-outline-atomics
+        cuda_tools "cc -O2 -Wall -Wextra $flags -c gpu/cuda.c -o $dir/cuda.o && as $dir/kernels.s -o $dir/kernels.o"
+    done
+}
+
+# $@: samples. Each program, linked with its kernels and gpu/cuda.c (in the container).
+build_cuda_link() {
+    local name
+    check_bflat
+    build_core "$CORE"
+    build_core_native
+    build_lib
+    mkdir -p bin/cuda
+    for name in "$@"; do
+        echo "[bflat] $name -> bin/cuda/$name (experimental: untested on an NVIDIA GPU)"
+        # shellcheck disable=SC2046
+        "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none "${CSHARP_FLAGS[@]}" \
+            "${NATIVE_FLAGS[@]}" --arch "$BFLAT_ARCH" $(bflat_flags "$name") "${LINK_FLAGS[@]}" \
+            --ldflags "$CUDA_OBJ/$name/cuda.o" --ldflags "$CUDA_OBJ/$name/kernels.o" --ldflags -ldl -o "bin/cuda/$name"
+    done
+}
+
 # Internal entry points used inside the container.
 if [ "${1:-}" = "--native-must-not-compile" ]; then
     shift
@@ -1195,6 +1316,11 @@ if [ "${1:-}" = "--native-gpu-bitcode" ]; then
     build_gpu_bitcode "$@"
     exit 0
 fi
+if [ "${1:-}" = "--native-cuda-link" ]; then
+    shift
+    build_cuda_link "$@"
+    exit 0
+fi
 if [ "${1:-}" = "--native-mac-objects" ]; then
     shift
     build_mac_objects "$@"
@@ -1238,6 +1364,8 @@ case "${1:-}" in
     --mac)  TARGET=mac; shift ;;
     --gpu)  TARGET=gpu; shift ;;
     --gpu-air) TARGET=gpu-air; shift ;;
+    --cuda-ptx) TARGET=cuda-ptx; shift ;;
+    --cuda) TARGET=cuda; shift ;;
     --uefi) TARGET=uefi; shift ;;
     --must-not-compile) TARGET=must-not-compile; shift ;;
     --sdk-payload)
@@ -1264,14 +1392,19 @@ if [ $# -eq 0 ]; then
         set -- "${R4_SAMPLES[@]}"
     elif [ "$TARGET" = uefi ]; then
         set -- "${UEFI_SAMPLES[@]}"
-    elif [ "$TARGET" = gpu ] || [ "$TARGET" = gpu-air ]; then
+    elif [[ " gpu gpu-air cuda cuda-ptx " == *" $TARGET "* ]]; then
         set -- "${GPU_SAMPLES[@]}"
+    elif [ "$TARGET" = wasm ]; then
+        set --
+        for name in "${ALL_SAMPLES[@]}"; do
+            [[ "$NOT_WASM" == *" $name "* ]] || set -- "$@" "$name"
+        done
     else
         set -- "${ALL_SAMPLES[@]}"
     fi
 fi
 for name in "$@"; do
-    if [ "$TARGET" = gpu ] || [ "$TARGET" = gpu-air ]; then
+    if [[ " gpu gpu-air cuda cuda-ptx " == *" $TARGET "* ]]; then
         if [[ " ${GPU_SAMPLES[*]} " != *" $name "* ]]; then
             check_sample "$name"
             echo "$name has no GPU kernels; ./build.sh --gpu builds ${GPU_SAMPLES[*]}" >&2
@@ -1279,6 +1412,9 @@ for name in "$@"; do
         fi
     elif [[ " ${GPU_SAMPLES[*]} " == *" $name "* ]]; then
         echo "$name runs kernels on the GPU: ./build.sh --gpu $name" >&2
+        exit 1
+    elif [ "$TARGET" = wasm ] && [[ "$NOT_WASM" == *" $name "* ]]; then
+        echo "$name isn't built for WebAssembly: it switches stacks, which WebAssembly can't do." >&2
         exit 1
     elif [ "$TARGET" = dos ]; then
         if [[ " ${DOS_SAMPLES[*]} " != *" $name "* ]]; then
@@ -1322,6 +1458,8 @@ case "$TARGET" in
     mac)    output() { echo "bin/mac/$1"; } ;;
     gpu)    output() { echo "bin/gpu/$1"; } ;;
     gpu-air) output() { echo "bin/gpu/obj/$1/kernels.ll"; } ;;
+    cuda-ptx) output() { echo "bin/cuda/obj/$1/kernels.ptx"; } ;;
+    cuda)   output() { echo "bin/cuda/$1"; } ;;
     uefi)   output() { echo "bin/uefi/$1.efi"; } ;;
     native) output() { echo "bin/$1"; } ;;
 esac
@@ -1370,6 +1508,12 @@ case "$TARGET" in
         done
         "$WIN_CLANG" -target arm64-apple-macos12 -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/osx-arm64/zerocore.o"
         cp mac/libSystem.tbd "$PAYLOAD_DIR/native/osx-arm64/"
+        # ZeroGpu=Cuda: gpu/cuda.c for each Linux architecture, from the same
+        # clang (it declares the few libc functions it calls, so no headers).
+        # arm64: atomics inline, as bflat's link has no libgcc for the calls.
+        echo "[clang] gpu/cuda.c -> $PAYLOAD_DIR/native/linux-{x64,arm64}/cuda.o"
+        "$WIN_CLANG" -target x86_64-linux-gnu -ffreestanding -O2 -Wall -Wextra -c gpu/cuda.c -o "$PAYLOAD_DIR/native/linux-x64/cuda.o"
+        "$WIN_CLANG" -target aarch64-linux-gnu -ffreestanding -mno-outline-atomics -O2 -Wall -Wextra -c gpu/cuda.c -o "$PAYLOAD_DIR/native/linux-arm64/cuda.o"
         # zero-bitcode, which builds C64 programs from the IL (a .NET program,
         # the same on every host).
         echo "[dotnet] sdk/ZeroCSharp.Bitcode -> $PAYLOAD_DIR/tools/zero-bitcode"
@@ -1427,6 +1571,15 @@ case "$TARGET" in
             zero_bitcode ll2air "$GPU_OBJ/$name/kernels.ll" "$name" "$GPU_OBJ/$name"/ll/*.ll
             echo "[gpu]   $name: $(grep -c '^define void @' "$GPU_OBJ/$name/kernels.ll") kernels -> $GPU_OBJ/$name/kernels.ll"
         done
+        ;;
+    cuda-ptx | cuda)
+        build_bitcode_tool
+        run gpu-ir "$@"
+        build_cuda_ptx "$@"
+        if [ "$TARGET" = cuda ]; then
+            build_cuda_objects "$@"
+            run cuda-link "$@"
+        fi
         ;;
     win)
         if ! WIN_CLANG=$(find_dos_clang); then

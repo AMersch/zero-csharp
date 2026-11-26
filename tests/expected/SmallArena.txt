@@ -1,3 +1,5 @@
 PASS arena and spans (9 checks)
+PASS maxCapacity (6 checks)
+PASS FromBuffer (10 checks)
 
 All checks passed.

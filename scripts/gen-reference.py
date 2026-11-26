@@ -19,7 +19,7 @@ WIDTH = 80
 # Page order: (file, types documented on the page, page name, one-line description for the index).
 PAGES = [
     ('Arena.cs', ['Arena'], 'arena', 'Growable bump allocator: allocation, scopes, reset, debug checks.'),
-    ('Scratch.cs', ['Arena', 'ScratchScope', 'ScratchList', 'ScratchText', 'ScratchPool'], 'scratch', 'Temporary memory whose lifetime the compiler checks: Arena.Scratch, ScratchScope and its lists, text and pools.'),
+    ('Scratch.cs', ['Arena', 'ScratchScope', 'ScratchList', 'ScratchText', 'ScratchDict', 'ScratchHashSet', 'ScratchPool'], 'scratch', 'Temporary memory whose lifetime the compiler checks: Arena.Scratch, ScratchScope and its lists, text, dictionaries, sets and pools.'),
     ('List.cs', ['List'], 'list', 'Growable array of unmanaged items in an arena.'),
     ('Pool.cs', ['Pool', 'Handle'], 'pool', 'Items removed one by one, found by handles that notice when they are out of date: Pool<T> and Handle<T>.'),
     ('LinkedList.cs', ['LinkedList', 'LinkedListNode'], 'linkedlist', 'Doubly linked list in an arena, built on Pool<T>.'),
@@ -37,7 +37,13 @@ PAGES = [
     ('StrBuilder.cs', ['StrBuilder'], 'strbuilder', 'Growable string buffer in an arena.'),
     ('Out.cs', ['Out'], 'out', 'Buffered, UTF-8 standard output with $"..." formatting.'),
     ('In.cs', ['In'], 'in', 'Reading lines from standard input.'),
-    ('File.cs', ['File'], 'file', 'Reading and writing files, whole or piece by piece.'),
+    ('File.cs', ['File', 'FileInfo'], 'file', 'Reading and writing files, whole or piece by piece; copying, moving and looking at them.'),
+    ('FileSystem.cs', ['FileError'], 'file-error', 'Why a file or directory operation failed.'),
+    ('Streams.cs', ['Stream', 'MemoryStream', 'FileStream', 'SeekOrigin', 'FileMode', 'FileAccess', 'FileShare', 'IOException', 'EndOfStreamException'], 'stream', 'System.IO streams: Stream, MemoryStream and FileStream.'),
+    ('Net.cs', ['IPAddress', 'IPEndPoint', 'EndPoint', 'Dns'], 'ipaddress', 'IP addresses, endpoints and name lookup (System.Net).'),
+    ('Sockets.cs', ['Socket', 'TcpListener', 'TcpClient', 'UdpClient', 'NetworkStream', 'SocketError', 'SocketException', 'AddressFamily', 'SocketType', 'ProtocolType', 'SocketFlags', 'SocketShutdown'], 'socket', 'TCP and UDP sockets that work with fibers (System.Net.Sockets).'),
+    ('Path.cs', ['Path'], 'path', 'The parts of a path, joining paths, and tidying them up.'),
+    ('Directory.cs', ['Directory', 'DirectoryEntries', 'DirectoryEntry'], 'directory', 'Creating, listing, moving and deleting directories; the current directory.'),
     ('Clock.cs', ['Clock', 'CalendarTime'], 'clock', 'The monotonic clock for durations, and the date and time of day.'),
     ('Random.cs', ['Random'], 'random', 'Random numbers with .NET\'s method names, the same on every target.'),
     ('Kernels.cs', ['Kernels'], 'kernels', 'SIMD math for inference: dot products, softmax, norms.'),
@@ -47,7 +53,7 @@ PAGES = [
 ]
 # Public nested types that are compiler plumbing: readers never name them.
 PLUMBING = {'Enumerator', 'InterpolatedHandler'}
-TYPE_DECL = re.compile(r'^(\s*)((?:public|internal|private)\s+)?((?:static|readonly|ref|unsafe|sealed|partial)\s+)*'
+TYPE_DECL = re.compile(r'^(\s*)((?:public|internal|private)\s+)?((?:static|readonly|ref|unsafe|sealed|partial|abstract)\s+)*'
                        r'(class|struct|interface|enum|record(?:\s+struct|\s+class)?)\s+(\w+)')
 warnings = []
 

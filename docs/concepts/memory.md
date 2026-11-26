@@ -49,6 +49,10 @@ Two objects allocated once are not a problem. The same two allocated per request
 line of input are: the program grows until memory runs out. The same goes for boxing and for `a + b` on
 strings, which also call `calloc`.
 
+`NativeMemory.Alloc` and `Free` also work, for a block you free yourself, as in C (see
+[Free memory yourself](../how-to/free-memory-yourself.html)). They suit code shared with .NET that already uses them;
+otherwise an arena is the better tool.
+
 ## Arenas free by lifetime
 
 An arena, `lib/Arena.cs`, hands out memory by moving a pointer forward, and frees everything it handed
@@ -134,8 +138,9 @@ grow after it. Its new buffer is then allocated after the mark, so `Restore` fre
 collection still points at it. Later allocations overwrite it, and nothing reports that.
 
 The rule: between `Save()` and `Restore()`, only add to collections created after the mark. When
-temporary work has to add to long-lived collections, give it a separate **scratch arena** instead, and
-copy the result out before freeing the scratch arena. With strings that copy is
+temporary work has to add to long-lived collections, do it in **`Arena.Scratch`** instead (below),
+whose memory is separate from your arenas, or in a separate arena of your own, and copy the result
+out before that memory is freed. With strings that copy is
 `sb.ToArenaString(target)` or `Str.ToArenaString(target, s)`; with collections it is
 `list.Clone(arena)` or `dict.Clone(arena)`. Copies are always explicit: `var b = a` on a `List`, `Dict`
 or `StrBuilder` shares the contents, it doesn't copy them. [Keep a string](../how-to/keep-a-string.html)
@@ -220,6 +225,32 @@ string report = Arena.Scratch(ref keep,
         foreach (int even in evens)
             text.Append($" {even}");
         return text.ToArenaString(target);
+    });
+```
+
+`scratch.Dict<TKey, TValue>()` and `scratch.HashSet<T>()` are the dictionary and set for scratch
+work, compared as `Dict` and `HashSet` are. `Clone(arena)` copies one into an arena of yours, to keep
+after the callback:
+
+<!-- sample: samples/Scratch.cs dict -->
+```csharp
+// Count each roll and keep only the counts: the dictionary and the set
+// go with the scratch memory, the copy stays in an arena of yours.
+int[] rolls = { 3, 6, 3, 1, 6, 3 };
+var dice = new Job { Input = rolls };
+Arena results = Arena.Create(4096);
+int distinct = Arena.Scratch(ref dice,
+    static (scoped ScratchScope scratch, scoped ref Job state) =>
+    {
+        ScratchDict<int, int> counts = scratch.Dict<int, int>();
+        ScratchHashSet<int> seen = scratch.HashSet<int>();
+        foreach (int roll in state.Input)
+        {
+            counts.TryGet(roll, out int count);
+            counts.Set(roll, count + 1);
+            seen.Add(roll);
+        }
+        return seen.Count;
     });
 ```
 
@@ -454,6 +485,77 @@ By default, out of memory is a value you check: null from an allocation, false f
 program couldn't carry on anyway, create the arena with `stopOnOutOfMemory: true`. It then ends the
 program with a message instead, so nothing built on that arena has to check. That matters most on DOS
 and WebAssembly, where memory really does run out.
+
+On Linux and macOS it rarely does: malloc promises memory the system doesn't have, and a runaway loop
+eats RAM until the system kills the program. Give an arena a budget with `maxCapacity`, and it fails
+at that size instead, the same way it fails when memory runs out:
+
+<!-- sample: samples/Arena.cs max-capacity -->
+```csharp
+// A budget: past 64 KB of blocks, allocations fail as if memory had
+// run out, even on systems where malloc never says no.
+Arena request = Arena.Create(4096, "request", maxCapacity: 64 * 1024);
+int* small = request.AllocArray<int>(1000);      // fine
+int* huge = request.AllocArray<int>(100_000);    // null: over budget
+```
+
+The cap counts the bytes of all blocks together. When the next block would cross it, the block shrinks
+to what is left, so an allocation fails only when it can't fit at all. Use it for an arena that holds
+what input you don't control turns into (a parsed request, a decoded file) and to give each part of a
+small machine its share.
+
+### An arena in a buffer of your own
+
+`Arena.FromBuffer` puts the arena in memory you hand it. It never calls malloc or free, keeps its
+bookkeeping at the start of the buffer (about 150 bytes on 64-bit targets, less on
+32-bit ones), and can't
+grow, so a full buffer fails like running out of memory. `Destroy()` only ends the handle, because the
+memory is yours.
+
+For a short-lived arena, the buffer can be on the stack:
+
+<!-- sample: samples/Arena.cs from-buffer -->
+```csharp
+// An arena in memory you provide: here 1 KB of stack. It never calls
+// malloc and never grows; when the buffer is full, allocations fail.
+Span<byte> memory = stackalloc byte[1024];
+Arena local;
+// SAFETY: local isn't used after this method returns.
+unsafe { local = Arena.FromBuffer(memory, "local"); }
+Point* p = local.Alloc<Point>();
+```
+
+For one that lives as long as the program, or one too big for the stack, use a static buffer: a struct
+with a `fixed` array, kept in a static field. It is part of the program's data, like a global array in
+C, so it costs neither heap nor stack. (A static `byte[]` wouldn't do that: `new byte[512]` comes from
+the heap.)
+
+<!-- sample: samples/SmallArena.cs static-buffer -->
+```csharp
+// 512 bytes in the program's data, like a global array in C: not on
+// the heap, not on the stack.
+struct Pool
+{
+    public fixed byte Bytes[512];
+}
+
+static Pool s_pool;
+```
+
+<!-- sample: samples/SmallArena.cs from-static-buffer -->
+```csharp
+Arena arena;
+unsafe
+{
+    // SAFETY: s_pool is static, so it outlives the arena, and
+    // nothing else uses it.
+    fixed (byte* memory = s_pool.Bytes)
+        arena = Arena.FromBuffer(memory, 512, "pool");
+}
+```
+
+`FromBuffer` is unsafe because the arena can't check that the memory outlives it: an arena on the stack
+must not be used after the method that made it returns.
 
 ## Seeing what an arena does
 

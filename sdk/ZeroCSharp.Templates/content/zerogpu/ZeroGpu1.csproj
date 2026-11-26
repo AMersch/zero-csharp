@@ -3,7 +3,10 @@
      builds on an Apple Silicon Mac with Xcode, its Metal Toolchain
      (xcodebuild -downloadComponent MetalToolchain) and Docker, which runs
      NativeAOT-LLVM, the first of the kernels' compilers; the first build
-     downloads NativeAOT-LLVM. -->
+     downloads NativeAOT-LLVM.
+     For an NVIDIA GPU on Linux (experimental), set ZeroGpu to Cuda and
+     ZeroTarget to linux-x64 or linux-arm64; that needs a clang 18 or later
+     with the NVPTX backend (not Apple's), and no CUDA toolkit. -->
 <Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
   <PropertyGroup>
     <OutputType>Exe</OutputType>

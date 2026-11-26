@@ -62,7 +62,10 @@ static partial class C64
     const int X16Slack = 4096;
 
     // What is aimed for: the bytes of heap (with 1 KB for the stack on top of them).
-    const int X16Heap = 4096;
+    // A program that allocates a lot asks for more with ZERO_CX16_HEAP (the SDK:
+    // the property ZeroCx16Heap); more code then goes into banks, if there is more to move.
+    static readonly int X16Wanted = int.TryParse(Environment.GetEnvironmentVariable("ZERO_CX16_HEAP"), out int bytes) && bytes > 0 ? bytes : 0;
+    static int X16Heap => X16Wanted > 0 ? X16Wanted : 4096;
 
     // A program that fits with less than this can't allocate: it gets banks although it fits.
     const int X16NoHeap = 512;
@@ -138,7 +141,7 @@ static partial class C64
         int free = X16HeapLeft(c);
         if (banks == null)
         {
-            if (free < 0 || free >= X16NoHeap)
+            if (free < 0 || free >= Math.Max(X16NoHeap, X16Wanted))
                 return false;
             File.Copy(c.Output, c.Output + ".best", overwrite: true);
             File.Copy(c.Output + ".elf", c.Output + ".best.elf", overwrite: true);
@@ -248,9 +251,9 @@ static partial class C64
     /// </summary>
     static IEnumerable<string> X16Defines(IEnumerable<string> irFiles)
     {
-        if (irFiles.Any(f => Regex.IsMatch(Files.ReadText(f), @"@cell\.(fopen|fread|fwrite|fclose|fseeko|ftello|remove|cx16_dir_open|cx16_dos)\b", RegexOptions.CultureInvariant)))
+        if (irFiles.Any(f => Regex.IsMatch(Files.ReadText(f), @"@cell\.(fopen|fread|fwrite|fclose|fseeko|ftello|remove|cx16_dir_open|cx16_dos|__xstat64|__lxstat64|mkdir|rmdir|rename|opendir|getcwd|chdir)\b", RegexOptions.CultureInvariant)))
             yield return "-DCX16_FILES";
-        if (irFiles.Any(f => Regex.IsMatch(Files.ReadText(f), @"@cell\.cx16_dir_open\b", RegexOptions.CultureInvariant)))
+        if (irFiles.Any(f => Regex.IsMatch(Files.ReadText(f), @"@cell\.(cx16_dir_open|opendir)\b", RegexOptions.CultureInvariant)))
             yield return "-DCX16_DIR";
         if (irFiles.Any(f => Regex.IsMatch(Files.ReadText(f), @"@cell\.(exp|log|log2|log10|sin|cos|tan|pow|atan2|expf|logf|sinf|cosf|tanhf|powf|sqrt|fabs|floor|ceil|trunc|rint|sqrtf|fabsf|floorf|ceilf|truncf|rintf)\b", RegexOptions.CultureInvariant)))
             yield return "-DCX16_MATH";
@@ -305,7 +308,7 @@ static partial class C64
             return;
 
         // What the heap and the stack have is what the code leaves: say if it isn't much.
-        if (banks.BestFree is >= 0 and < 3072)
+        if (banks.BestFree >= 0 && banks.BestFree < Math.Max(3072, X16Wanted))
             Console.Error.WriteLine($"[cx16]   {name}: only {banks.BestFree} bytes are left for the heap; a program that allocates a lot will run out of memory");
     }
 

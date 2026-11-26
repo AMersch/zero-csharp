@@ -265,7 +265,8 @@ static char shadow_stack[SHADOW_STACK_SIZE] __attribute__((aligned(16)));
 static char interrupt_shadow_stack[SHADOW_STACK_SIZE / 4] __attribute__((aligned(16)));
 
 // Where C calls into C#: from main, or from an interrupt (IPSR holds the
-// number of the exception being handled, 0 for none).
+// number of the exception being handled, 0 for none). A fiber starts
+// differently: ZeroFiberStart below passes its entry its shadow stack.
 static void *entry_shadow_stack(void)
 {
     uint32_t exception;
@@ -320,3 +321,124 @@ void RhpHandleUnhandledException(void *a, void *b)
 void RhpAssignRef(void **destination, void *reference) { *destination = reference; }
 void RhpCheckedAssignRef(void **destination, void *reference) { *destination = reference; }
 void RhpInitialDynamicInterfaceDispatch(void) { abort(); }
+
+// ---- fibers (lib/Fibers.cs) ------------------------------------------------------
+//
+// Switching from one stack to another: save the registers a function must
+// keep (r4-r11, s16-s31), change stacks, restore them. On ARMv8-M (the Pico
+// 2's Cortex-M33) the switch also swaps MSPLIM, the lowest address sp may
+// reach, so the hardware stops a fiber that runs past its stack (a UsageFault)
+// as it would the main stack.
+//
+// A fiber's memory is [guard][pattern][shadow stack ->   <- stack][record]:
+// managed code keeps its references on a shadow stack (see above), so each
+// fiber needs one of its own, and gets the bottom quarter of its stack. It
+// grows up, the machine stack down. Fibers.cs writes a pattern below both and
+// checks it on every switch back; MSPLIM stops the machine stack at the top
+// of the shadow stack. Nothing stops the shadow stack growing into the
+// machine stack.
+//
+// There's no memory protection to make a guard page with (an MPU has too few
+// regions for one per fiber), so getpagesize reports 1 KB: Fibers.cs reserves
+// that much below each stack, which an overflow lands in before anything
+// else, and sizes stacks for a small machine. mprotect does nothing.
+//
+// The frame a switch leaves, from the saved sp up (104 bytes):
+//   0   s16-s31
+//   64  the stack limit (MSPLIM; unused on ARMv7-M)
+//   68  r4-r11
+//   100 lr: where the switch returns to
+// An interrupt arriving while a fiber runs uses the fiber's stack for its
+// own frame and its handler's: leave room for that.
+
+#if !defined(__ARM_FP)
+#error "the fiber switch saves s16-s31: build with a hardware FPU"
+#endif
+
+int getpagesize(void) { return 1024; }
+
+int mprotect(void *address, size_t length, int protection)
+{
+    (void)address; (void)length; (void)protection;
+    return 0;
+}
+
+int usleep(unsigned microseconds)
+{
+    struct { int64_t seconds, nanoseconds; } now;
+    extern int clock_gettime(int clock, void *timespec);
+    clock_gettime(1, &now);
+    int64_t until = now.seconds * 1000000 + now.nanoseconds / 1000 + microseconds;
+    do
+        clock_gettime(1, &now);
+    while (now.seconds * 1000000 + now.nanoseconds / 1000 < until);
+    return 0;
+}
+
+// r0: where to store this stack's pointer; r1: the stack pointer to resume.
+__attribute__((naked)) void ZeroFiberSwitch(void **save, void *resume)
+{
+    __asm__ volatile(
+        "push    {r4-r11, lr}\n"
+#if __ARM_ARCH_8M_MAIN__
+        "mrs     r2, msplim\n"
+#endif
+        "push    {r2}\n"
+        "vpush   {s16-s31}\n"
+        "mov     r2, sp\n"
+        "str     r2, [r0]\n"
+#if __ARM_ARCH_8M_MAIN__
+        // No limit while sp moves: the new stack may be below the old one's.
+        "movs    r2, #0\n"
+        "msr     msplim, r2\n"
+#endif
+        "mov     sp, r1\n"
+        "vpop    {s16-s31}\n"
+        "pop     {r2}\n"
+#if __ARM_ARCH_8M_MAIN__
+        "msr     msplim, r2\n"
+#endif
+        "pop     {r4-r11, pc}\n");
+}
+
+// Where a new fiber's first switch returns to: r4 its argument, r5 its entry,
+// r6 its shadow stack. The entry is an ordinary C# method, which takes its
+// shadow stack as a hidden first argument. It never returns: it switches
+// away for good.
+__attribute__((naked)) static void ZeroFiberStart(void)
+{
+    __asm__ volatile(
+        "mov     r0, r6\n"
+        "mov     r1, r4\n"
+        "blx     r5\n"
+        "udf     #0\n");
+}
+
+// top: the stack's top; bottom: its lowest byte, where Fibers.cs's pattern
+// (64 bytes) starts. Returns the stack pointer to give ZeroFiberSwitch.
+void *ZeroFiberInit(char *top, char *bottom, void (*entry)(void *), void *argument)
+{
+    uintptr_t stack_top = (uintptr_t)top & ~(uintptr_t)7;
+    uint32_t *frame = (uint32_t *)(stack_top - 104);
+    char *shadow = bottom + 64;
+    uintptr_t shadow_size = ((stack_top - (uintptr_t)shadow) / 4) & ~(uintptr_t)7;
+    memset(frame, 0, 104);
+    frame[16] = (uint32_t)(uintptr_t)(shadow + shadow_size); // the stack limit
+    frame[17] = (uint32_t)(uintptr_t)argument;               // r4
+    frame[18] = (uint32_t)(uintptr_t)entry;                  // r5
+    frame[19] = (uint32_t)(uintptr_t)shadow;                 // r6
+    frame[25] = (uint32_t)(uintptr_t)ZeroFiberStart;         // lr (a Thumb address)
+    return frame;
+}
+
+// ---- lib/FileSystem.cs ----------------------------------------------------
+
+// Which system this is: 8, a microcontroller.
+int ZeroSystem(void) { return 8; }
+
+// File.Exists calls stat only on Linux, macOS, Windows and WebAssembly; here
+// it opens the file instead. These are there for the link, and always fail.
+static int file_system_errno;
+int *__errno_location(void) { return &file_system_errno; }
+int __xstat64(int version, const char *path, void *out) { (void)version; (void)path; (void)out; file_system_errno = 38; return -1; }
+int __lxstat64(int version, const char *path, void *out) { (void)version; (void)path; (void)out; file_system_errno = 38; return -1; }

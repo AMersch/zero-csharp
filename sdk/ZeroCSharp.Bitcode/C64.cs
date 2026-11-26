@@ -163,6 +163,7 @@ static partial class C64
             ir.Add(ll);
         }
         string[] irFiles = ir.ToArray();
+        CheckFatPointers(name, irFiles);
         Ll2Mos.Run(outDir, irFiles);
         Wasm.Convert(Path.Combine(obj, name + ".bc"), Path.Combine(outDir, "data"), new Mos(irFiles));
         string external = Path.Combine(obj, name + ".external.o");
@@ -188,7 +189,13 @@ static partial class C64
         var extra = Directory.GetFiles(outDir, "*.s").Order(StringComparer.Ordinal)
             .Concat(new[] { "data.c", "external.c" }.Select(f => Path.Combine(outDir, f)).Where(File.Exists))
             .ToList();
-        string[] mos = ["--config", $"mos-{platform}.cfg", "-Os", "-Wall", "-Wno-override-module", "-Wno-unused-command-line-argument"];
+        //
+        // -mlto-zp=0: no zero page for the optimizer's variables and stack
+        // frames. NativeAOT-LLVM checks for null as "address below 1024",
+        // so a C# local the 6502 compiler put in the zero page would be null
+        // to C# as soon as its address was taken (a NullReferenceException
+        // from `&local`, or `fixed`, in a method it proved isn't re-entered).
+        string[] mos = ["--config", $"mos-{platform}.cfg", "-Os", "-mlto-zp=0", "-Wall", "-Wno-override-module", "-Wno-unused-command-line-argument"];
         // save-basic.o: by default an llvm-mos program never returns (it has
         // overwritten memory BASIC uses). This saves that memory at the start
         // and puts it back at the end, so the program ends at BASIC's READY.
@@ -272,6 +279,24 @@ static partial class C64
                 throw Fail($"{method} is too complex for llvm-mos (the 6502 has three registers). Split it into smaller methods.\n{log}");
             throw Fail($"linking {name} failed:\n{log}");
         }
+    }
+
+    // A pointer to a generic method over a class (&Method<SomeClass>) is
+    // "fat": it points at the shared code and which class it's for, and is
+    // told apart from a plain pointer by the top bit of 32, which a C64's
+    // 16-bit pointer can't keep. A call through one jumps into data, so a
+    // program that makes one doesn't build.
+    static void CheckFatPointers(string name, string[] irFiles)
+    {
+        var use = new Regex(@"@""?__fatpointer_([^""\s,)]+)");
+        var found = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (string file in irFiles)
+            foreach (string line in File.ReadLines(file))
+                if (!line.StartsWith(';') && !line.StartsWith("@\"__fatpointer_") && !line.StartsWith("@__fatpointer_"))
+                    foreach (Match m in use.Matches(line))
+                        found.Add(m.Groups[1].Value);
+        if (found.Count > 0)
+            throw Fail($"{name} takes pointers to generic methods over classes (&Method<SomeClass>), which a C64's 16-bit pointers can't hold: call through a generic class's virtual method instead:\n  {string.Join("\n  ", found)}");
     }
 
     public static (int Code, string Log) Capture(string program, IEnumerable<string> arguments)

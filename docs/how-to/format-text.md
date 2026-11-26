@@ -73,6 +73,24 @@ sb.Append($"{count} items, {price:F2} each");
 Read the result with `sb.AsSpan()` (valid until the next `Append`), or copy it into a string with
 `sb.ToArenaString(target)`.
 
+The text can be changed where it is, with `StringBuilder`'s names: `Replace` (of text or of a char,
+optionally within a range), `Insert`, `Remove` and the indexer:
+
+<!-- sample: samples/Strings.cs builder-edit -->
+```csharp
+StrBuilder text = StrBuilder.Create(s_arena);
+text.Append("the cat sat on the mat");
+text.Replace("at", "og");           // "the cog sog on the mog"
+text.Insert(0, "Look: ");           // "Look: the cog sog on the mog"
+text.Remove(10, 4);                 // "Look: the sog on the mog"
+text[6] = 'T';                      // "Look: The sog on the mog"
+```
+
+They give .NET's results. `Replace` replaces left to right, and an index out of range or an empty
+string to replace ends the program, as .NET throws. `Insert`, and a `Replace` that makes the text
+longer, return false if the arena is full, leaving the text as it was. The text may come from the
+builder itself, as in `sb.Insert(0, sb.AsSpan())`. A `ScratchText` has the same methods.
+
 ## Holes: values, alignment and format
 
 A hole takes every number type, `bool`, `char`, strings and spans. After the value comes an optional
@@ -220,8 +238,10 @@ malformed hole such as `"{0:F2"`. `samples/Formats.cs` checks these results on e
 
 ## Watch out for
 
-- **Temporary strings belong in a scratch arena.** Every `Str.Format` takes memory from its arena until
-  that arena is reset. A string you only print needs no arena at all: write it with `Console.WriteLine`.
+- **Temporary strings belong in scratch memory.** Every `Str.Format` takes memory from its arena until
+  that arena is reset. Build text you only need for a while in a `ScratchText` inside `Arena.Scratch`,
+  which frees it when the callback returns. A string you only print needs no arena at all: write it
+  with `Console.WriteLine`.
 - **Output is UTF-8.** `Console` encodes what you write as UTF-8, and an unpaired surrogate becomes U+FFFD.
 
 See also: [Strings without a garbage collector](../concepts/strings.html), and the reference pages for

@@ -49,7 +49,51 @@ IMPORT void *TlsGetValue(u32 index);
 IMPORT int TlsSetValue(u32 index, void *value);
 IMPORT u32 GetActiveProcessorCount(unsigned short group);
 IMPORT int SwitchToThread(void);
+IMPORT int VirtualProtect(void *address, u64 size, u32 protection, u32 *old);
+IMPORT void Sleep(u32 milliseconds);
+IMPORT int *_errno(void);
 
+// Files and directories, for lib/FileSystem.cs.
+typedef struct { u32 low, high; } FileTime;
+typedef struct {
+    u32 attributes;
+    FileTime created, accessed, written;
+    u32 size_high, size_low;
+    u32 reparse_tag, reserved;
+    wchar name[260];
+    wchar short_name[14];
+} FindData; // WIN32_FIND_DATAW
+typedef struct {
+    u32 attributes;
+    FileTime created, accessed, written;
+    u32 size_high, size_low;
+} FileAttributeData; // WIN32_FILE_ATTRIBUTE_DATA
+IMPORT Handle FindFirstFileW(const wchar *pattern, FindData *data);
+IMPORT int FindNextFileW(Handle find, FindData *data);
+IMPORT int FindClose(Handle find);
+IMPORT int GetFileAttributesExW(const wchar *path, int level, FileAttributeData *data);
+IMPORT int CreateDirectoryW(const wchar *path, void *security);
+IMPORT int RemoveDirectoryW(const wchar *path);
+IMPORT int MoveFileExW(const wchar *from, const wchar *to, u32 flags);
+IMPORT u32 GetCurrentDirectoryW(u32 size, wchar *buffer);
+IMPORT int SetCurrentDirectoryW(const wchar *path);
+
+// Winsock, for lib/Sockets.cs. A SOCKET is 64 bits, but the system gives
+// out handles that fit in 32, so lib/ keeps them in an int.
+typedef u64 Socket;
+IMPORT Handle LoadLibraryA(const char *name);
+IMPORT void *GetProcAddress(Handle module, const char *name);
+
+#define FILE_ATTRIBUTE_DIRECTORY 0x10
+#define FILE_ATTRIBUTE_REPARSE_POINT 0x400
+#define IO_REPARSE_TAG_MOUNT_POINT 0xA0000003u
+#define IO_REPARSE_TAG_SYMLINK 0xA000000Cu
+#define MOVEFILE_REPLACE_EXISTING 1
+#define MOVEFILE_COPY_ALLOWED 2
+#define INVALID_HANDLE_VALUE ((Handle)(long long)-1)
+
+#define PAGE_NOACCESS 0x01
+#define PAGE_READWRITE 0x04
 #define CP_UTF8 65001
 #define STD_INPUT_HANDLE ((u32)-10)
 #define STD_OUTPUT_HANDLE ((u32)-11)

@@ -30,11 +30,12 @@ payload=sdk/ZeroCSharp.Sdk/payload
 ./build.sh --sdk-payload "$payload"
 
 # A copy of the two packages' folders with the local version in version.props,
-# which the SDK package carries along.
-stage=sdk/obj-local
+# which the SDK package carries along. The folder is as deep as sdk/, since the
+# projects name files by relative paths (../../zerocore).
+stage=obj-local
 rm -rf "$stage"
 mkdir -p "$stage" sdk/feed
-cp -R sdk/ZeroCSharp.Sdk sdk/ZeroCSharp.Templates sdk/version.props "$stage/"
+cp -R sdk/ZeroCSharp.Sdk sdk/ZeroCSharp.Templates sdk/version.props sdk/Directory.Build.props "$stage/"
 rm -rf "$stage"/ZeroCSharp.*/obj "$stage"/ZeroCSharp.*/bin
 sed "s|<ZeroSdkVersion>.*</ZeroSdkVersion>|<ZeroSdkVersion>$version</ZeroSdkVersion>|" sdk/version.props > "$stage/version.props"
 rm -f sdk/feed/*".$version.nupkg"

@@ -70,14 +70,16 @@ int memcmp(const void *a, const void *b, usize count)
 }
 
 // Pool memory is 8-byte aligned; C's malloc promises 16, which SIMD code may
-// count on. Each block keeps the pool's own pointer just before it.
+// count on. Each block keeps the pool's own pointer just before it, and its
+// size before that, for realloc.
 void *malloc(usize size)
 {
     u8 *pool = 0;
-    if (size > (usize)-32 || EFI_ERROR(efi_system->boot_services->allocate_pool(EfiLoaderData, size + 16, (void **)&pool)))
+    if (size > (usize)-48 || EFI_ERROR(efi_system->boot_services->allocate_pool(EfiLoaderData, size + 24, (void **)&pool)))
         return 0;
-    u8 *block = (u8 *)(((usize)pool + 8 + 15) & ~(usize)15);
+    u8 *block = (u8 *)(((usize)pool + 16 + 15) & ~(usize)15);
     ((void **)block)[-1] = pool;
+    ((usize *)block)[-2] = size;
     return block;
 }
 
@@ -95,6 +97,19 @@ void free(void *block)
 {
     if (block)
         efi_system->boot_services->free_pool(((void **)block)[-1]);
+}
+
+void *realloc(void *block, usize size)
+{
+    if (!block)
+        return malloc(size);
+    usize had = ((usize *)block)[-2];
+    void *moved = malloc(size);
+    if (moved) {
+        memcpy(moved, block, had < size ? had : size);
+        free(block);
+    }
+    return moved;
 }
 
 // ---- standard input and output ----------------------------------------------
@@ -626,3 +641,36 @@ int pthread_setspecific(u64 key, void *value)
     key_values[key] = value;
     return 0;
 }
+
+// ---- fiber stacks -----------------------------------------------------------
+//
+// What lib/Fibers.cs calls. The firmware runs with its memory identity-mapped
+// and no way for a program to protect a page, so a fiber's stack has no guard
+// page here: mprotect succeeds and does nothing.
+
+int getpagesize(void) { return 4096; }
+
+int mprotect(void *address, usize length, int protection)
+{
+    (void)address;
+    (void)length;
+    (void)protection;
+    return 0;
+}
+
+int usleep(u32 microseconds)
+{
+    efi_system->boot_services->stall(microseconds);
+    return 0;
+}
+
+// ---- lib/FileSystem.cs ----------------------------------------------------
+
+// Which system this is: zerocore/native/win-<arch>.S says (5, UEFI).
+
+// File.Exists calls stat only on Linux, macOS, Windows and WebAssembly; here
+// it opens the file instead. These are there for the link, and always fail.
+static int file_system_errno;
+int *__errno_location(void) { return &file_system_errno; }
+int __xstat64(int version, const char *path, void *out) { (void)version; (void)path; (void)out; file_system_errno = 38; return -1; }
+int __lxstat64(int version, const char *path, void *out) { (void)version; (void)path; (void)out; file_system_errno = 38; return -1; }

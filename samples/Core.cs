@@ -1,8 +1,8 @@
 // Example: the smaller parts of the core library (zerocore): Math and MathF,
 // Interlocked, Volatile, interface calls from one call site to many classes,
 // extension members, C# 15 unions (zerocore/System/Exceptions.cs and Unions.cs
-// explain what those two need from the library), caller-info attributes, and
-// indices and ranges.
+// explain what those two need from the library), caller-info attributes,
+// indices and ranges, and NativeMemory.
 // Exit code = number of failed checks.
 // Build: ./build.sh Core
 
@@ -10,6 +10,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Threading;
 
 namespace CoreSample;
@@ -86,6 +88,63 @@ public struct Counter
 {
     int _value;
     [UnscopedRef] public ref int Value => ref _value;
+}
+// docs:end
+
+// docs:native-buffer
+// Owns one block from NativeMemory. Dispose frees it, so don't copy it:
+// two copies would free the same block twice.
+public struct NativeBuffer<T> : IDisposable where T : unmanaged
+{
+    T* _items;
+    int _length;
+
+    public NativeBuffer(int length)
+    {
+        _items = Allocate(length);
+        _length = length;
+    }
+
+    public int Length => _length;
+
+    /// <safety>The span is invalidated by Resize and Dispose.</safety>
+    public unsafe Span<T> AsSpan()
+    {
+        unsafe { return new Span<T>(_items, _length); }
+    }
+
+    // Realloc keeps the items and may move them; what it adds
+    // isn't zeroed, so Resize clears it.
+    public void Resize(int length)
+    {
+        unsafe
+        {
+            // SAFETY: _items came from NativeMemory, and the new block
+            // holds `length` items.
+            _items = (T*)NativeMemory.Realloc(
+                _items, (nuint)length * (nuint)sizeof(T));
+            if (length > _length)
+                new Span<T>(_items + _length, length - _length).Clear();
+        }
+        _length = length;
+    }
+
+    public void Dispose()
+    {
+        // SAFETY: _items is set to null, so a second Dispose frees nothing.
+        unsafe { NativeMemory.Free(_items); }
+        _items = null;
+        _length = 0;
+    }
+
+    static T* Allocate(int length)
+    {
+        unsafe
+        {
+            return (T*)NativeMemory.AllocZeroed(
+                (nuint)length, (nuint)sizeof(T));
+        }
+    }
 }
 // docs:end
 
@@ -247,6 +306,279 @@ public static class Program
     }
 
     static byte ByteOf<T>(ref T value, int index) => Unsafe.Add(ref Unsafe.As<T, byte>(ref value), index);
+
+    // docs:native-buffer-use
+    static bool GrowsAndFrees(int count)
+    {
+        // Dispose runs when the method returns, by any path.
+        using var squares = new NativeBuffer<int>(count);
+        unsafe
+        {
+            // SAFETY: each span is used before the next Resize.
+            Span<int> items = squares.AsSpan();
+            for (int i = 0; i < items.Length; i++)
+                items[i] = i * i;
+
+            squares.Resize(count * 2);
+            items = squares.AsSpan();
+            return items[count - 1] == (count - 1) * (count - 1)
+                && items[count] == 0;
+        }
+    }
+    // docs:end
+
+    // docs:native-memory
+    // The attributes are for .NET's analyzers; zero mode ignores them.
+    [SupportedOSPlatform("linux"), SupportedOSPlatform("windows")]
+    [UnsupportedOSPlatform("browser")]
+    static bool AllocatesAndFrees(int count)
+    {
+        unsafe
+        {
+            // SAFETY: items is freed once, after its last use.
+            int* items =
+                (int*)NativeMemory.Alloc((nuint)count, sizeof(int));
+            for (int i = 0; i < count; i++)
+                items[i] = i * 3;
+            bool kept = true;
+            for (int i = 0; i < count; i++)
+                kept &= items[i] == i * 3;
+            NativeMemory.Free(items);
+            return kept;
+        }
+    }
+    // docs:end
+
+    static bool AllocatesZeroed([ConstantExpected(Min = 1)] int count)
+    {
+        unsafe
+        {
+            long* items = (long*)NativeMemory.AllocZeroed((nuint)count, sizeof(long));
+            bool zero = true;
+            for (int i = 0; i < count; i++)
+                zero &= items[i] == 0;
+            NativeMemory.Free(items);
+            byte* bytes = (byte*)NativeMemory.AllocZeroed((nuint)count);
+            for (int i = 0; i < count; i++)
+                zero &= bytes[i] == 0;
+            NativeMemory.Free(bytes);
+            return zero;
+        }
+    }
+
+    static bool AllocatesNothing()
+    {
+        unsafe
+        {
+            void* empty = NativeMemory.Alloc(0);
+            NativeMemory.Free(empty);
+            NativeMemory.Free(null);
+            return empty != null;
+        }
+    }
+
+    // A zero element count or size is a zero-byte block: still a valid pointer.
+    static bool AllocatesNoElements()
+    {
+        unsafe
+        {
+            void* noElements = NativeMemory.Alloc(0, 8);
+            void* noSize = NativeMemory.AllocZeroed(8, 0);
+            bool valid = noElements != null && noSize != null;
+            NativeMemory.Free(noElements);
+            NativeMemory.Free(noSize);
+            return valid;
+        }
+    }
+
+    // AllocZeroed must zero memory that a freed block left dirty, not only
+    // fresh pages from the system.
+    static bool ZeroesReusedMemory(int count)
+    {
+        unsafe
+        {
+            bool zero = true;
+            for (int round = 0; round < 4; round++)
+            {
+                byte* dirty = (byte*)NativeMemory.Alloc((nuint)count);
+                for (int i = 0; i < count; i++)
+                    dirty[i] = 0xAB;
+                NativeMemory.Free(dirty);
+                byte* clean = (byte*)NativeMemory.AllocZeroed((nuint)count, 1);
+                for (int i = 0; i < count; i++)
+                    zero &= clean[i] == 0;
+                NativeMemory.Free(clean);
+            }
+            return zero;
+        }
+    }
+
+    // Blocks alive at once don't overlap, and freeing one leaves the other.
+    static bool KeepsBlocksApart(int count)
+    {
+        unsafe
+        {
+            int* first = (int*)NativeMemory.Alloc((nuint)count, sizeof(int));
+            int* second = (int*)NativeMemory.AllocZeroed((nuint)count, sizeof(int));
+            for (int i = 0; i < count; i++)
+            {
+                first[i] = i;
+                second[i] = -i - 1;
+            }
+            bool apart = first != second;
+            for (int i = 0; i < count; i++)
+                apart &= first[i] == i;
+            NativeMemory.Free(second);
+            for (int i = 0; i < count; i++)
+                apart &= first[i] == i;
+            NativeMemory.Free(first);
+            return apart;
+        }
+    }
+
+    // Clear, Copy and Fill, as memset and memmove: Copy allows overlap in
+    // either direction.
+    static bool ClearsCopiesFills(int count)
+    {
+        unsafe
+        {
+            byte* bytes = (byte*)NativeMemory.Alloc((nuint)count * 2);
+            NativeMemory.Fill(bytes, (nuint)count * 2, 0xCD);
+            bool ok = bytes[0] == 0xCD && bytes[count * 2 - 1] == 0xCD;
+            NativeMemory.Clear(bytes + 1, (nuint)count - 2);
+            ok &= bytes[0] == 0xCD && bytes[1] == 0 && bytes[count - 2] == 0 && bytes[count - 1] == 0xCD;
+            for (int i = 0; i < count; i++)
+                bytes[i] = (byte)i;
+            NativeMemory.Copy(bytes, bytes + count, (nuint)count);
+            for (int i = 0; i < count; i++)
+                ok &= bytes[count + i] == (byte)i;
+            NativeMemory.Copy(bytes, bytes + 3, (nuint)count); // up, overlapping
+            for (int i = 0; i < count; i++)
+                ok &= bytes[3 + i] == (byte)i;
+            NativeMemory.Copy(bytes + 3, bytes + 1, (nuint)count); // down, overlapping
+            for (int i = 0; i < count; i++)
+                ok &= bytes[1 + i] == (byte)i;
+            NativeMemory.Clear(bytes, 0);
+            NativeMemory.Free(bytes);
+            return ok;
+        }
+    }
+
+    // Realloc keeps what fits as a block grows and shrinks; null is Alloc,
+    // and 0 bytes is still a valid pointer.
+    static bool Reallocates(int count)
+    {
+        unsafe
+        {
+            int* items = (int*)NativeMemory.Realloc(null, (nuint)count * sizeof(int));
+            for (int i = 0; i < count; i++)
+                items[i] = i * 7;
+            items = (int*)NativeMemory.Realloc(items, (nuint)count * 4 * sizeof(int));
+            bool ok = true;
+            for (int i = 0; i < count; i++)
+                ok &= items[i] == i * 7;
+            for (int i = count; i < count * 4; i++)
+                items[i] = -i;
+            items = (int*)NativeMemory.Realloc(items, (nuint)(count / 2) * sizeof(int));
+            for (int i = 0; i < count / 2; i++)
+                ok &= items[i] == i * 7;
+            items = (int*)NativeMemory.Realloc(items, 0);
+            ok &= items != null;
+            NativeMemory.Free(items);
+            return ok;
+        }
+    }
+
+    // AlignedRealloc keeps the bytes and the new alignment, also when the
+    // alignment changes, which moves the data within the block.
+    static bool ReallocatesAligned(int count)
+    {
+        unsafe
+        {
+            bool ok = true;
+            byte* block = (byte*)NativeMemory.AlignedRealloc(null, (nuint)count, 16);
+            for (int i = 0; i < count; i++)
+                block[i] = (byte)(i * 5);
+            int size = count;
+            bool grow = true;
+            // Up to 1 KB: an aligned block takes up to its alignment more,
+            // and realloc may hold the old and the new block at once, in the
+            // Uno R4's 32 KB.
+            for (nuint alignment = 1024; alignment >= 1; alignment /= 2)
+            {
+                // Grows and shrinks in turn, alignment from 1 KB down to 1.
+                int next = grow ? size * 3 : size / 2 + 1;
+                grow = !grow;
+                int kept = Math.Min(size, next);
+                block = (byte*)NativeMemory.AlignedRealloc(block, (nuint)next, alignment);
+                ok &= ((nuint)block & (alignment - 1)) == 0;
+                for (int i = 0; i < kept; i++)
+                    ok &= block[i] == (byte)(i * 5);
+                for (int i = kept; i < next; i++)
+                    block[i] = (byte)(i * 5);
+                size = next;
+            }
+            block = (byte*)NativeMemory.AlignedRealloc(block, (nuint)size, 1024);
+            for (int i = 0; i < size; i++)
+                ok &= block[i] == (byte)(i * 5);
+            ok &= ((nuint)block & 1023) == 0;
+            NativeMemory.AlignedFree(block);
+            return ok;
+        }
+    }
+
+    // Every alignment from 1 to a page gives an aligned, zeroed, writable
+    // block, whose neighbours are left alone; AlignedFree(null) does nothing.
+    static bool AlignsBlocks(int count)
+    {
+        unsafe
+        {
+            bool ok = true;
+            for (nuint alignment = 1; alignment <= 4096; alignment *= 2)
+            {
+                byte* first = (byte*)NativeMemory.AlignedAlloc((nuint)count, alignment);
+                byte* second = (byte*)NativeMemory.AlignedAlloc((nuint)count, alignment);
+                ok &= ((nuint)first & (alignment - 1)) == 0 && ((nuint)second & (alignment - 1)) == 0;
+                for (int i = 0; i < count; i++)
+                {
+                    ok &= first[i] == 0 && second[i] == 0;
+                    first[i] = 0x11;
+                    second[i] = 0x22;
+                }
+                for (int i = 0; i < count; i++)
+                    ok &= first[i] == 0x11 && second[i] == 0x22;
+                NativeMemory.AlignedFree(second);
+                NativeMemory.AlignedFree(first);
+            }
+            void* empty = NativeMemory.AlignedAlloc(0, 64);
+            ok &= empty != null && ((nuint)empty & 63) == 0;
+            NativeMemory.AlignedFree(empty);
+            NativeMemory.AlignedFree(null);
+            return ok;
+        }
+    }
+
+    // Nothing reads these attributes, but code shared with .NET puts them on
+    // every kind of member they allow, and may read their properties.
+    [SupportedOSPlatform("macos")]
+    sealed class PlatformOnly
+    {
+        [UnsupportedOSPlatform("browser")]
+        public int Value { get; set; }
+
+        [SupportedOSPlatform("linux"), UnsupportedOSPlatform("windows")]
+        public static int Twice([ConstantExpected(Min = 0, Max = 8)] int shift) => 2 << shift >> 1;
+    }
+
+    static bool AttributesKeepTheirValues()
+    {
+        var supported = new SupportedOSPlatformAttribute("linux");
+        var unsupported = new UnsupportedOSPlatformAttribute("browser");
+        var expected = new ConstantExpectedAttribute { Min = 1, Max = 16 };
+        return supported.PlatformName == "linux" && unsupported.PlatformName == "browser"
+            && expected.Min is int min && min == 1 && expected.Max is int max && max == 16
+            && PlatformOnly.Twice(Opaque(3)) == 8 && new PlatformOnly { Value = 5 }.Value == 5;
+    }
 
     public static int Main()
     {
@@ -463,6 +795,20 @@ public static class Program
         sevens.Slice(10, 280).Clear();
         Check("big Fill and Clear", allSeven && sevens[9] == 7 && sevens[10] == 0 && sevens[289] == 0 && sevens[290] == 7);
         Section("span copy and fill");
+
+        Check("Alloc, then Free", AllocatesAndFrees(Opaque(1000)));
+        Check("AllocZeroed", AllocatesZeroed(Opaque(256))); // 2 KB of longs: the Uno R4 has 32 KB of RAM
+        Check("Alloc(0) is a valid pointer, Free(null) does nothing", AllocatesNothing());
+        Check("Alloc(0, n) and AllocZeroed(n, 0) are valid pointers", AllocatesNoElements());
+        Check("AllocZeroed zeroes a freed block's memory", ZeroesReusedMemory(Opaque(4096)));
+        Check("blocks alive at once are apart", KeepsBlocksApart(Opaque(256)));
+        Check("platform and ConstantExpected attributes", AttributesKeepTheirValues());
+        Check("a buffer that grows and frees itself", GrowsAndFrees(Opaque(100)));
+        Check("AlignedAlloc, AlignedFree", AlignsBlocks(Opaque(100)));
+        Check("Realloc keeps what fits", Reallocates(Opaque(256)));
+        Check("AlignedRealloc keeps the bytes and the alignment", ReallocatesAligned(Opaque(100)));
+        Check("Clear, Copy, Fill", ClearsCopiesFills(Opaque(200)));
+        Section("NativeMemory");
 
         Console.WriteLine();
         if (s_failures == 0)

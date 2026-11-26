@@ -42,6 +42,9 @@ With zerocore, as `build.sh` builds it:
 - **`TensorPrimitives`** (`System.Numerics.Tensors`): sums, dot products, softmax and the rest on
   whole spans of `float`, on NEON, SSE2 or AVX where the target has them (see
   [below](#tensorprimitives)).
+- **`Tensor<T>` and `TensorSpan<T>`** (`System.Numerics.Tensors`): n-dimensional arrays and
+  matrices with views, broadcasting and the `Tensor` class's math, for `float` (see
+  [Work with tensors and matrices](../how-to/use-tensors.html)).
 - **`Half`, `BitOperations` and `BitArray`**, with .NET's names and results: half-precision
   numbers, bit counts and scans on the processor's own instructions where it has them, and arrays
   of bits.
@@ -51,6 +54,9 @@ With zerocore, as `build.sh` builds it:
   `ref` receivers in `extension(...)` blocks.
 - **Indices and ranges**: `span[^1]`, `span[1..^1]`, and on strings and arrays, where a range
   makes a copy.
+- **`NativeMemory`**: all of it, for memory you free yourself (`Alloc`, `Realloc`, `Free`, the
+  aligned ones, `Clear`, `Copy` and `Fill`), and the `SupportedOSPlatform`, `UnsupportedOSPlatform`
+  and `ConstantExpected` attributes, so code shared with .NET builds compiles (see [below](#nativememory)).
 - **`char`'s methods and `System.Text.Encoding`**, with .NET's results for every character:
   `char.IsLetter`, `IsDigit`, `ToUpper`, `GetUnicodeCategory` and the rest (Unicode 16.0), and UTF-8,
   ASCII, Latin-1, UTF-16 and UTF-32 encodings (see [Strings without a GC](strings.html#characters-and-encodings)).
@@ -362,6 +368,15 @@ Check("SoftMax", Near(p[0], 0.09003057f) && Near(p[2], 0.66524096f)
 
 `scripts/tensor-fuzz` compares all of it with .NET's package, on spans of every length up to 70.
 
+The rest of .NET's float functions are there too, one element at a time with float's own formulas:
+`SinPi`, `CosPi`, `TanPi`, `AcosPi` and the other `Pi` forms, `Exp2`, `Exp10`, `ExpM1`, `LogP1` and
+their variants, `DegreesToRadians`, `Ieee754Remainder`, `ILogB`, `RootN`, `Average`, and
+`MaxNumber`, `MinNumber` and their magnitude forms, which skip NaNs. `ExpM1`, `Exp2M1` and
+`Exp10M1` work in double, so they keep their digits near 0, where `Exp(x) - 1` cancels.
+
+`Tensor<T>`, `TensorSpan<T>` and the `Tensor` class build on these for tensors of any rank: see
+[Work with tensors and matrices](../how-to/use-tensors.html).
+
 ### Binary formats, hex and Base64
 
 `BinaryPrimitives` reads and writes numbers in a byte span in a given byte order, as file formats
@@ -508,6 +523,65 @@ Check("GetOffsetAndLength", middle.GetOffsetAndLength(5) == (1, 3));
 
 `lib/`'s `List<T>` has no indexer, so `list[^1]` doesn't compile; `list.AsSpan()[^1]` does.
 
+### NativeMemory
+
+`NativeMemory.Alloc`, `AllocZeroed` and `Free` work as in .NET, on the target's `calloc` and `free`,
+so they work on every target, the C64 included (where one block can't be larger than 65,520 bytes).
+It is the one way to free memory by hand, for code shared with .NET that already does: a buffer
+handed to C, or one whose size is known only when the program runs. In new code, prefer an
+[arena](memory.html), which frees many blocks at once and catches mistakes with `Arena.DebugChecks`.
+
+<!-- sample: samples/Core.cs native-memory -->
+```csharp
+// The attributes are for .NET's analyzers; zero mode ignores them.
+[SupportedOSPlatform("linux"), SupportedOSPlatform("windows")]
+[UnsupportedOSPlatform("browser")]
+static bool AllocatesAndFrees(int count)
+{
+    unsafe
+    {
+        // SAFETY: items is freed once, after its last use.
+        int* items =
+            (int*)NativeMemory.Alloc((nuint)count, sizeof(int));
+        for (int i = 0; i < count; i++)
+            items[i] = i * 3;
+        bool kept = true;
+        for (int i = 0; i < count; i++)
+            kept &= items[i] == i * 3;
+        NativeMemory.Free(items);
+        return kept;
+    }
+}
+```
+
+`calloc` zeroes what it returns, so `Alloc` hands out zeroed memory too, unlike .NET's. `Alloc(0)`
+returns a valid pointer that `Free` takes, and `Free(null)` does nothing. Where .NET throws
+`OutOfMemoryException`, for a size the system can't give or a count times size that overflows, zero
+mode ends the program:
+
+```text
+NativeMemory: the size overflows
+```
+
+`Realloc` keeps a block's bytes, up to the new size, and may move it. What it adds isn't zeroed, as
+in .NET: `realloc` doesn't say how large the block was.
+
+`AlignedAlloc(size, alignment)` returns a block whose address is a multiple of `alignment`, which
+must be a power of two, for a cache line or a page. Resize it with `AlignedRealloc` and free it
+with `AlignedFree`, not `Realloc` or `Free`. `AlignedAlloc` is built on `calloc` too, so it works
+on every target and zeroes its memory. An alignment that isn't a power of two ends the program, where .NET throws `ArgumentException`:
+
+```text
+NativeMemory: the alignment isn't a power of two
+```
+
+Nothing checks a block after it is freed: using it then, or freeing it twice, is the same mistake
+it is in C. [Free memory yourself](../how-to/free-memory-yourself.html) wraps a block in a struct
+that frees it with `using`.
+
+`[SupportedOSPlatform]`, `[UnsupportedOSPlatform]` and `[ConstantExpected]` are there for code
+shared with .NET builds, whose analyzers read them. In zero mode they compile and do nothing.
+
 ## Choosing how to dispatch
 
 Interfaces and virtual methods both work, but they don't cost the same. An interface call the compiler
@@ -546,7 +620,8 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
 ## What doesn't work
 
 - **Freeing memory.** Nothing allocated with `new`, boxing or `+` is ever freed. Use
-  [arenas](memory.html) for anything short-lived.
+  [arenas](memory.html) for anything short-lived, or [`NativeMemory`](#nativememory) for a
+  block you free yourself.
 - **Catching exceptions.** `throw` is a panic, like Rust's `panic!` built with `panic = "abort"`:
   it prints the exception's message and ends the program. Nothing unwinds, so no `catch` block runs,
   and neither do the `finally` blocks and `using` disposals between the `throw` and `Main`. A failure

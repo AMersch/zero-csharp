@@ -272,6 +272,7 @@ public static class Program
         unsafe { request.Destroy(); } // SAFETY: small isn't used after this.
 
         InBuffer();
+        ObjectScopeEdges();
 
         // docs:debug-checks
         // Debugging aid: arenas created while DebugChecks is on fill freed memory
@@ -296,6 +297,39 @@ public static class Program
         Arena.DebugChecks = false;
         return 0;
     }
+
+    static int[] s_kept;
+
+    // What object scopes must allow: keeping an object in a static from an
+    // arena that is never freed, and disposing a scope twice.
+    static void ObjectScopeEdges()
+    {
+        Arena.DebugChecks = true;
+        Arena forever = Arena.Create(1024, "forever");
+        Arena frame = Arena.Create(1024, "frame");
+        Arena.DebugChecks = false;
+
+        Arena.ObjectScope first;
+        unsafe { first = forever.AllocateObjectsHere(); } // SAFETY: never freed.
+        s_kept = new int[4];
+        first.Dispose();
+
+        Arena.ObjectScope second;
+        unsafe { second = frame.AllocateObjectsHere(); } // SAFETY: freed below.
+        first.Dispose(); // again: must leave the newer scope in place
+        nuint before = frame.Used;
+        Opaque(new int[4]);
+        bool stillInFrame = frame.Used > before;
+        second.Dispose();
+        unsafe { frame.Reset(); } // SAFETY: nothing from frame is kept.
+
+        Console.WriteLine();
+        Console.WriteLine($"Static kept from a scope on a lasting arena: {s_kept.Length == 4}, a second Dispose left the newer scope: {stillInFrame}");
+        unsafe { frame.Destroy(); } // SAFETY: as above.
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static object Opaque(object value) => value;
 
     static void InBuffer()
     {

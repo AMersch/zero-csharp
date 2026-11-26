@@ -33,7 +33,10 @@ public static class Program
             Console.WriteLine("  out-of-memory        an allocation the system can't satisfy (stopOnOutOfMemory)");
             Console.WriteLine("  arena-limit          an allocation past an arena's maxCapacity (stopOnOutOfMemory)");
             Console.WriteLine("  buffer-full          an allocation that doesn't fit in a FromBuffer arena (stopOnOutOfMemory)");
-            Console.WriteLine("  lambda-in-scope      a lambda first run inside AllocateObjectsHere, cached in the arena (DebugChecks)");
+            Console.WriteLine("  lambda-in-scope      a lambda first run inside AllocateObjectsHere, cached in the arena, then Reset (DebugChecks)");
+            Console.WriteLine("  lambda-in-open-scope the same inside OpenObjectScope, which frees it when the block ends (DebugChecks)");
+            Console.WriteLine("  scope-not-created    AllocateObjectsHere on an arena that was never created");
+            Console.WriteLine("  destroy-in-scope     an arena destroyed inside its own object scope");
             Console.WriteLine("  throw                a throw, inside a try with a matching catch");
             Console.WriteLine("  throw-null           throw null");
             Console.WriteLine("  union-no-case        a switch on a union that holds none of its cases");
@@ -80,6 +83,9 @@ public static class Program
             case "arena-limit": ArenaLimit(); break;
             case "buffer-full": BufferFull(); break;
             case "lambda-in-scope": LambdaInScope(); break;
+            case "lambda-in-open-scope": LambdaInOpenScope(); break;
+            case "scope-not-created": ScopeNotCreated(); break;
+            case "destroy-in-scope": DestroyInScope(); break;
             case "throw": Throw(); break;
             case "throw-null": ThrowNull(); break;
             case "union-no-case": UnionNoCase(); break;
@@ -274,6 +280,42 @@ public static class Program
             // caches it in a static field: here, inside the arena.
             System.Func<int, int> twice = static x => x * 2;
             twice(21);
+        }
+        // The check runs here, before the lambda's memory is freed.
+        unsafe { frame.Reset(); }
+    }
+
+    static void LambdaInOpenScope()
+    {
+        Arena.DebugChecks = true;
+        Arena frame = Arena.Create(1024, "frame");
+        Arena.ObjectScope objects;
+        unsafe { objects = frame.OpenObjectScope(); }
+        using (objects)
+        {
+            System.Func<int, int> thrice = static x => x * 3;
+            thrice(7);
+        }   // Restore: the cached lambda is about to be freed
+    }
+
+    static void ScopeNotCreated()
+    {
+        Arena never = default;
+        Arena.ObjectScope objects;
+        unsafe { objects = never.AllocateObjectsHere(); }
+        using (objects)
+            Opaque(new int[4].Length);
+    }
+
+    static void DestroyInScope()
+    {
+        Arena frame = Arena.Create(1024, "frame");
+        Arena.ObjectScope objects;
+        unsafe { objects = frame.AllocateObjectsHere(); }
+        using (objects)
+        {
+            unsafe { frame.Destroy(); }
+            Opaque(new int[4].Length);
         }
     }
 

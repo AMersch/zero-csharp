@@ -10,7 +10,10 @@ Usage: Guards <case>, where the case is one of:
   out-of-memory        an allocation the system can't satisfy (stopOnOutOfMemory)
   arena-limit          an allocation past an arena's maxCapacity (stopOnOutOfMemory)
   buffer-full          an allocation that doesn't fit in a FromBuffer arena (stopOnOutOfMemory)
-  lambda-in-scope      a lambda first run inside AllocateObjectsHere, cached in the arena (DebugChecks)
+  lambda-in-scope      a lambda first run inside AllocateObjectsHere, cached in the arena, then Reset (DebugChecks)
+  lambda-in-open-scope the same inside OpenObjectScope, which frees it when the block ends (DebugChecks)
+  scope-not-created    AllocateObjectsHere on an arena that was never created
+  destroy-in-scope     an arena destroyed inside its own object scope
   throw                a throw, inside a try with a matching catch
   throw-null           throw null
   union-no-case        a switch on a union that holds none of its cases

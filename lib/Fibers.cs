@@ -166,10 +166,27 @@ public static class Fiber
     [ThreadStatic] static Scheduler* t_scheduler;
 
     // The fiber that runs async methods' continuations on this thread
-    // (lib/Tasks.cs), if any. A fiber that waits (Park, Sleep) gives the
-    // role up, keeping the continuation it was running, and Tasks starts
-    // another dispatcher for the continuations that come due meanwhile.
+    // (lib/Tasks.cs), if any. A fiber that waits (Park, Sleep, WaitForIO)
+    // gives the role up, keeping the continuation it was running, and Tasks
+    // starts another dispatcher for the continuations queued or due
+    // meanwhile.
     [ThreadStatic] internal static Record* t_dispatcher;
+
+    // What Tasks does when the dispatcher gives the role up: set by the
+    // dispatcher itself, so programs without async methods link none of it.
+    internal static delegate*<void> s_dispatcherLeft;
+
+    static void LeaveDispatcher(Record* current)
+    {
+        if (current != t_dispatcher)
+            return;
+        t_dispatcher = null;
+        unsafe
+        {
+            // SAFETY: set before t_dispatcher ever was, to a static method.
+            s_dispatcherLeft();
+        }
+    }
 
     static Scheduler* This
     {
@@ -354,6 +371,9 @@ public static class Fiber
             Record* current = s->Current;
             if (current == null)
                 return 0;
+            // A continuation waiting for a socket keeps its fiber; the other
+            // continuations get a new dispatcher (as in Park and Sleep).
+            LeaveDispatcher(current);
             s_pollIO = &PollIO;
             current->Fd = fd;
             current->Events = events;
@@ -493,8 +513,7 @@ public static class Fiber
                 usleep((uint)(milliseconds * 1000));
             return;
         }
-        if (current == t_dispatcher)
-            t_dispatcher = null;
+        LeaveDispatcher(current);
         unsafe
         {
             // SAFETY: the sleepers are live fibers' records.
@@ -580,8 +599,7 @@ public static class Fiber
         unsafe { current = s->Current; } // SAFETY: the thread's scheduler
         if (current == null)
             Environment.FailFast(operation);
-        if (current == t_dispatcher)
-            t_dispatcher = null;
+        LeaveDispatcher(current);
         unsafe
         {
             // SAFETY: the current fiber's record.

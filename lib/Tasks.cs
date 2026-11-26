@@ -1269,6 +1269,14 @@ namespace System.Runtime.CompilerServices
             Fiber.Spawn(0, static _ => Dispatch());
         }
 
+        // The dispatcher gave its role up to wait in a blocking call: the
+        // continuations already queued need another.
+        static void DispatcherLeft()
+        {
+            if (t_readyHead != null || t_yieldedHead != null)
+                EnsureDispatcher();
+        }
+
         // The dispatcher: runs continuations until there are none, then ends
         // (so Fiber.Run can return). One that waits in a blocking call stops
         // being the dispatcher (Fiber.Park and Sleep see to it); once it's
@@ -1281,6 +1289,7 @@ namespace System.Runtime.CompilerServices
                 // the thread's dispatcher.
                 Fiber.Record* me = Fiber.CurrentRecord;
                 t_starting = false;
+                Fiber.s_dispatcherLeft = &DispatcherLeft;
                 Fiber.t_dispatcher = me;
                 while (true)
                 {

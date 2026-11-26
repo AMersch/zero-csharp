@@ -191,6 +191,15 @@ Handle<Job> theirs = jobs.Move(ref mine);
 - **Items don't move.** The pool grows by chunks and never copies items, so a `ref` from
   `pool[handle]` stays good while it grows. After a `Remove`, though, the next `Add` may reuse the
   slot: take the `ref` again rather than keep one across a `Remove`.
+- **Removing while walking is fine.** `foreach` over a pool may `Remove` any item, the current one
+  included; an item added during the walk may or may not be visited.
+
+  <!-- sample: samples/Links.cs remove-while-walking -->
+  ```csharp
+  foreach (Handle<int> number in numbers)
+      if (numbers[number] % 2 == 1)
+          numbers.Remove(number);      // allowed while walking
+  ```
 - **A handle is 12 bytes:** the pool's id, the slot and its generation.
 
 `LinkedList<T>` is built on a pool, with .NET's names. Each `Add` returns the node's handle, so
@@ -320,9 +329,42 @@ map.RemoveTown(ford);
 int after = Distance(map, harbor, lake);    // 560, mill to lake
 ```
 
-The roads left behind still take their slots in the pool. Where towns come and go often, remove
-them too: when a town is removed, follow each of its roads to the town at the other end and take out
-the road back, or now and then sweep for roads whose `To` is gone.
+The roads left behind still take their slots in the pool. Where towns come and go often, sweep them
+out now and then. A dead road is still in its town's chain, so the sweep unlinks it before it
+removes it; `link` is a `ref` to the handle that leads to the road, the town's `FirstRoad` or the
+previous road's `Next`:
+
+<!-- sample: samples/Links.cs map-prune -->
+```csharp
+// Takes out the roads to removed towns, and returns how many. Each is
+// unlinked from its town's chain first, so no chain leads to a road
+// that is gone.
+public int Prune()
+{
+    int pruned = 0;
+    foreach (Handle<Town> town in Towns)
+    {
+        ref Handle<Road> link = ref Towns[town].FirstRoad;
+        while (!link.IsNull)
+        {
+            Handle<Road> road = link;
+            if (Towns.Contains(Roads[road].To))
+            {
+                link = ref Roads[road].Next;
+                continue;
+            }
+            link = Roads[road].Next;    // the chain skips it now
+            Roads.Remove(road);
+            pruned++;
+        }
+    }
+    return pruned;
+}
+```
+
+Removing the road without unlinking it would leave the chain leading to a removed road, and the next
+walk along it would stop the program at `Roads[road]`. With two-way roads, removing the roads back
+when the town goes, by following each of its roads to the other end, saves the sweep.
 
 ## Key by an id, not by an object
 

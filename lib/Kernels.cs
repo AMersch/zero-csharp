@@ -1,8 +1,10 @@
 // SIMD math kernels for LLM inference, in --stdlib:zero.
 //
-// Each kernel has three paths, picked at compile time:
+// Each kernel has four paths, picked at compile time:
 //   arm64: NEON (AdvSimd), 4 floats per vector; DotI8 uses SDOT with -m dotprod
 //   x64:   AVX2 + FMA, 8 floats per vector (needs -m x86-64-v3)
+//   wasm:  simd128, 4 floats per vector, in C (wasm/simd.c): NativeAOT-LLVM
+//          can't compile vector operations for WebAssembly
 //   other: scalar
 // Any length works: vector loops cover the bulk, a scalar loop the tail.
 //
@@ -17,12 +19,23 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
+using System.Runtime.Intrinsics.Wasm;
 using System.Runtime.Intrinsics.X86;
 
 public static class Kernels
 {
     [DllImport("libm.so.6")] static safe extern float expf(float x);
     [DllImport("libm.so.6")] static safe extern float sqrtf(float x);
+
+    // wasm/simd.c, linked only into WebAssembly modules; called only when
+    // PackedSimd.IsSupported, so no other target needs them.
+    [DllImport("*"), SuppressGCTransition] static unsafe extern float ZeroSimdKernelDot(float* a, float* b, int n);
+    [DllImport("*"), SuppressGCTransition] static unsafe extern void ZeroSimdKernelMatVec(float* y, float* w, float* x, int rows, int cols);
+    [DllImport("*"), SuppressGCTransition] static unsafe extern int ZeroSimdKernelDotI8(sbyte* a, sbyte* b, int n);
+    [DllImport("*"), SuppressGCTransition] static unsafe extern void ZeroSimdKernelExp(float* x, float* y, int n);
+    [DllImport("*"), SuppressGCTransition] static unsafe extern void ZeroSimdKernelSoftmax(float* x, int n);
+    [DllImport("*"), SuppressGCTransition] static unsafe extern void ZeroSimdKernelSilu(float* x, int n);
+    [DllImport("*"), SuppressGCTransition] static unsafe extern void ZeroSimdKernelScaleMultiply(float* y, float* x, float* weight, int n, float scale);
 
     const float ExpHi = 88.72283935546875f;
     const float ExpLo = -87.33654022216797f;
@@ -33,7 +46,8 @@ public static class Kernels
     const float P3 = 4.1665795894e-2f, P4 = 1.6666665459e-1f, P5 = 5.0000001201e-1f;
 
     public static string Path =>
-        AdvSimd.Arm64.IsSupported ? "NEON" : Fma.IsSupported && Avx2.IsSupported ? "AVX2+FMA" : "scalar";
+        AdvSimd.Arm64.IsSupported ? "NEON" : Fma.IsSupported && Avx2.IsSupported ? "AVX2+FMA"
+        : PackedSimd.IsSupported ? "wasm simd128" : "scalar";
 
     // ------------------------------------------------------------------ dot
 
@@ -43,6 +57,8 @@ public static class Kernels
     {
         unsafe
         {
+            if (PackedSimd.IsSupported)
+                return ZeroSimdKernelDot(a, b, n);
             int i = 0;
             float sum = 0;
             if (AdvSimd.Arm64.IsSupported)
@@ -81,6 +97,11 @@ public static class Kernels
     {
         unsafe
         {
+            if (PackedSimd.IsSupported)
+            {
+                ZeroSimdKernelMatVec(y, W, x, rows, cols);
+                return;
+            }
             for (int r = 0; r < rows; r++)
                 y[r] = Dot(W + (nint)r * cols, x, cols);
         }
@@ -92,6 +113,8 @@ public static class Kernels
     {
         unsafe
         {
+            if (PackedSimd.IsSupported)
+                return ZeroSimdKernelDotI8(a, b, n);
             int i = 0;
             int sum = 0;
             if (Dp.IsSupported)
@@ -139,6 +162,11 @@ public static class Kernels
     {
         unsafe
         {
+            if (PackedSimd.IsSupported)
+            {
+                ZeroSimdKernelExp(x, y, n);
+                return;
+            }
             int i = 0;
             if (AdvSimd.Arm64.IsSupported)
             {
@@ -161,6 +189,11 @@ public static class Kernels
     {
         unsafe
         {
+            if (PackedSimd.IsSupported)
+            {
+                ZeroSimdKernelSoftmax(x, n);
+                return;
+            }
             float max = Max(x, n);
             int i = 0;
             float sum = 0;
@@ -203,6 +236,11 @@ public static class Kernels
     {
         unsafe
         {
+            if (PackedSimd.IsSupported)
+            {
+                ZeroSimdKernelSilu(x, n);
+                return;
+            }
             int i = 0;
             if (AdvSimd.Arm64.IsSupported)
             {
@@ -238,6 +276,11 @@ public static class Kernels
         unsafe
         {
             float scale = 1.0f / sqrtf(Dot(x, x, n) / n + eps);
+            if (PackedSimd.IsSupported)
+            {
+                ZeroSimdKernelScaleMultiply(y, x, weight, n, scale);
+                return;
+            }
             int i = 0;
             if (AdvSimd.Arm64.IsSupported)
             {

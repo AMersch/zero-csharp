@@ -55,6 +55,12 @@
     <!-- The targets bflat doesn't compile for: it makes IL, NativeAOT-LLVM
          makes LLVM bitcode of that, and zero-bitcode takes it from there. -->
     <_ZeroBitcodeTarget Condition="'$(ZeroTarget)' == 'c64' or '$(ZeroTarget)' == 'cx16' or '$(ZeroTarget)' == 'pico2' or '$(ZeroTarget)' == 'r4'">true</_ZeroBitcodeTarget>
+    <!-- Apple's platforms: bflat compiles a Mach-O object (as macOS), and the
+         package's ld64.lld links it. The iOS simulator runs the same arm64
+         code; its object is marked as built for it first (ZeroNativeBuild). -->
+    <_ZeroApple Condition="'$(ZeroTarget)' == 'osx-arm64' or '$(ZeroTarget)' == 'iossimulator-arm64'">true</_ZeroApple>
+    <!-- The oldest iOS a simulator program starts on. -->
+    <ZeroIosMinimum Condition="'$(ZeroIosMinimum)' == ''">17.0</ZeroIosMinimum>
   </PropertyGroup>
 
   <!--
@@ -82,18 +88,22 @@
     <Message Text="bflat arguments: $(ZeroNativeArgs)" />
     <Exec Command="&quot;$(ZeroBflatExe)&quot; build @&quot;$(ZeroNativeArgsFile)&quot;" />
     <!-- F#: the program bflat wrote under its own name (and Windows' PDB). -->
-    <Copy SourceFiles="$(ZeroBflatOutput)" DestinationFiles="$(ZeroNativeOutput)" Condition="'$(ZeroBflatOutput)' != '$(ZeroNativeOutput)' and '$(ZeroTarget)' != 'osx-arm64'" />
+    <Copy SourceFiles="$(ZeroBflatOutput)" DestinationFiles="$(ZeroNativeOutput)" Condition="'$(ZeroBflatOutput)' != '$(ZeroNativeOutput)' and '$(_ZeroApple)' != 'true'" />
     <Copy SourceFiles="$([System.IO.Path]::ChangeExtension('$(ZeroBflatOutput)', '.pdb'))" DestinationFiles="$([System.IO.Path]::ChangeExtension('$(ZeroNativeOutput)', '.pdb'))"
           Condition="'$(ZeroBflatOutput)' != '$(ZeroNativeOutput)' and '$(ZeroTarget)' == 'win-x64' and Exists('$([System.IO.Path]::ChangeExtension($(ZeroBflatOutput), `.pdb`))')" />
-    <!-- macOS: bflat only compiles (it has no Mach-O linker); the package's
-         lld links, as ld64.lld, against the payload's libSystem.tbd. -->
-    <Message Text="ld64 arguments: $(ZeroLinkArgs)" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+    <!-- macOS and the iOS simulator: bflat only compiles (it has no Mach-O
+         linker); the package's lld links, as ld64.lld, against the payload's
+         libSystem.tbd. bflat's object says it's for macOS, which ld64.lld won't
+         put in a program for the simulator: zero-bitcode marks it as built for
+         the simulator. -->
+    <Exec Command="$(_ZeroBitcode) macho-platform &quot;$(ZeroNativeObject)&quot; ios-simulator $(ZeroIosMinimum)" Condition="'$(ZeroTarget)' == 'iossimulator-arm64'" />
+    <Message Text="ld64 arguments: $(ZeroLinkArgs)" Condition="'$(_ZeroApple)' == 'true'" />
     <!-- lld's errors and warnings as MSBuild's, except "<dylib> has version
          27.2.0, which is newer than target minimum of 12.0": a library on the
          build machine (Homebrew's SDL, say) is built for its own macOS, and
          the program uses whichever one the machine it runs on has. That line
          stays in the log (-v:n), as a message. -->
-    <Exec Command="&quot;$(ZeroLldExe)&quot; -flavor darwin @&quot;$(ZeroLinkArgsFile)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64' and '$(ZeroGpu)' != 'Metal'"
+    <Exec Command="&quot;$(ZeroLldExe)&quot; -flavor darwin @&quot;$(ZeroLinkArgsFile)&quot;" Condition="'$(_ZeroApple)' == 'true' and '$(ZeroGpu)' != 'Metal'"
           IgnoreStandardErrorWarningFormat="true" StandardErrorImportance="normal"
           CustomErrorRegularExpression="^lld: error: "
           CustomWarningRegularExpression="^lld: warning: (?!.*, which is newer than target minimum of )" />
@@ -123,11 +133,6 @@
           DependsOnTargets="ZeroNativeCommand"
           Inputs="@(IntermediateAssembly);@(ZeroLibraryReference);$(ZeroGpuSource)"
           Outputs="$(ZeroGpuObjects)">
-    <PropertyGroup>
-      <_ZeroDotnet>$(DOTNET_HOST_PATH)</_ZeroDotnet>
-      <_ZeroDotnet Condition="'$(_ZeroDotnet)' == ''">dotnet</_ZeroDotnet>
-      <_ZeroBitcode>&quot;$(_ZeroDotnet)&quot; &quot;$(ZeroSdkRoot)payload/tools/zero-bitcode/zero-bitcode.dll&quot;</_ZeroBitcode>
-    </PropertyGroup>
     <MakeDir Directories="$(ZeroGpuDir)" />
     <!-- Cuda: a missing or unfit clang is reported before NativeAOT-LLVM runs. -->
     <Exec Command="$(_ZeroBitcode) cuda-clang &quot;$(ZeroCudaClang)&quot;" Condition="'$(ZeroGpu)' == 'Cuda'" StandardOutputImportance="low" />
@@ -264,8 +269,8 @@
            Text="Zero C# builds on Apple Silicon Macs, not Intel ones; build on an Apple Silicon Mac, Linux (x64 or arm64) or Windows x64." />
     <Error Condition="'$(ZeroHostRid)' == '' and !$([MSBuild]::IsOSPlatform('OSX'))"
            Text="Zero C# can't make native programs on this machine yet; build on Linux (x64 or arm64), Windows x64 or an Apple Silicon Mac." />
-    <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64' and '$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'uefi-x64' and '$(ZeroTarget)' != 'uefi-arm64' and '$(ZeroTarget)' != 'c64' and '$(ZeroTarget)' != 'cx16' and '$(ZeroTarget)' != 'pico2' and '$(ZeroTarget)' != 'r4'"
-           Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64, osx-arm64, uefi-x64, uefi-arm64, c64, cx16, pico2, r4." />
+    <Error Condition="'$(ZeroTarget)' != 'linux-x64' and '$(ZeroTarget)' != 'linux-arm64' and '$(ZeroTarget)' != 'win-x64' and '$(ZeroTarget)' != 'osx-arm64' and '$(ZeroTarget)' != 'iossimulator-arm64' and '$(ZeroTarget)' != 'uefi-x64' and '$(ZeroTarget)' != 'uefi-arm64' and '$(ZeroTarget)' != 'c64' and '$(ZeroTarget)' != 'cx16' and '$(ZeroTarget)' != 'pico2' and '$(ZeroTarget)' != 'r4'"
+           Text="ZeroTarget '$(ZeroTarget)' isn't supported. Use one of: linux-x64, linux-arm64, win-x64, osx-arm64, iossimulator-arm64, uefi-x64, uefi-arm64, c64, cx16, pico2, r4." />
     <Error Condition="('$(ZeroTarget)' == 'c64' or '$(ZeroTarget)' == 'cx16') and '$(ZeroHostRid)' == 'linux-arm64'"
            Text="ZeroTarget $(ZeroTarget) builds on Linux x64, Windows x64 or an Apple Silicon Mac: llvm-mos, the compiler for the 6502, has no build for Linux arm64." />
     <Error Condition="'$(ZeroGpu)' != '' and '$(ZeroGpu)' != 'Metal' and '$(ZeroGpu)' != 'Cuda'"
@@ -357,14 +362,14 @@
     <PropertyGroup>
       <_ZeroLinkNow>%(_ZeroLinkName.Identity)</_ZeroLinkNow>
       <_ZeroLinkFiles>lib$(_ZeroLinkNow).so</_ZeroLinkFiles>
-      <_ZeroLinkFiles Condition="'$(ZeroTarget)' == 'osx-arm64'">lib$(_ZeroLinkNow).tbd or lib$(_ZeroLinkNow).dylib</_ZeroLinkFiles>
+      <_ZeroLinkFiles Condition="'$(_ZeroApple)' == 'true'">lib$(_ZeroLinkNow).tbd or lib$(_ZeroLinkNow).dylib</_ZeroLinkFiles>
       <_ZeroLinkFiles Condition="'$(ZeroTarget)' == 'win-x64' or '$(ZeroTarget)' == 'uefi-x64' or '$(ZeroTarget)' == 'uefi-arm64'">$(_ZeroLinkNow).lib</_ZeroLinkFiles>
     </PropertyGroup>
     <ItemGroup>
       <_ZeroLinkCandidate Remove="@(_ZeroLinkCandidate)" />
-      <_ZeroLinkCandidate Include="@(_ZeroLinkDir->'%(Slashed)$(_ZeroLinkFiles)')" Condition="'$(ZeroTarget)' != 'osx-arm64'" />
-      <_ZeroLinkCandidate Include="@(_ZeroLinkDir->'%(Slashed)lib$(_ZeroLinkNow).tbd')" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
-      <_ZeroLinkCandidate Include="@(_ZeroLinkDir->'%(Slashed)lib$(_ZeroLinkNow).dylib')" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <_ZeroLinkCandidate Include="@(_ZeroLinkDir->'%(Slashed)$(_ZeroLinkFiles)')" Condition="'$(_ZeroApple)' != 'true'" />
+      <_ZeroLinkCandidate Include="@(_ZeroLinkDir->'%(Slashed)lib$(_ZeroLinkNow).tbd')" Condition="'$(_ZeroApple)' == 'true'" />
+      <_ZeroLinkCandidate Include="@(_ZeroLinkDir->'%(Slashed)lib$(_ZeroLinkNow).dylib')" Condition="'$(_ZeroApple)' == 'true'" />
       <_ZeroLinkFound Remove="@(_ZeroLinkFound)" />
       <_ZeroLinkFound Include="@(_ZeroLinkCandidate)" Condition="Exists('%(Identity)')" />
     </ItemGroup>
@@ -405,6 +410,10 @@
 
   <Target Name="ZeroNativeCommand" DependsOnTargets="ZeroNativeFiles;ZeroResolveLinkLibraries;_ZeroGpuMacSdk">
     <PropertyGroup>
+      <!-- The SDK's own tool (sdk/ZeroCSharp.Bitcode), run by this dotnet. -->
+      <_ZeroDotnet>$(DOTNET_HOST_PATH)</_ZeroDotnet>
+      <_ZeroDotnet Condition="'$(_ZeroDotnet)' == ''">dotnet</_ZeroDotnet>
+      <_ZeroBitcode>&quot;$(_ZeroDotnet)&quot; &quot;$(ZeroSdkRoot)payload/tools/zero-bitcode/zero-bitcode.dll&quot;</_ZeroBitcode>
       <!-- NuGetPackageRoot is the folder as configured, maybe without a trailing
            slash; package folders are lower-case. -->
       <ZeroBflatDir>$([MSBuild]::EnsureTrailingSlash('$(NuGetPackageRoot)'))zerocsharp.bflat.$(ZeroHostRid)/$(ZeroSdkVersion.ToLowerInvariant())/tools/bflat/</ZeroBflatDir>
@@ -462,10 +471,10 @@
       <ZeroLinkArgsFile>$(IntermediateOutputPath)zero-link.$(ZeroTarget).args</ZeroLinkArgsFile>
       <!-- The macOS program's debug information stays in bflat's object (the
            program only points at it), so a missing object is a reason to rebuild. -->
-      <ZeroDebugObject Condition="'$(ZeroTarget)' == 'osx-arm64'">$(ZeroNativeObject)</ZeroDebugObject>
+      <ZeroDebugObject Condition="'$(_ZeroApple)' == 'true'">$(ZeroNativeObject)</ZeroDebugObject>
       <!-- ld64.lld's command line is an input too (ZeroStripSymbols changes
            it), on macOS only: elsewhere the file isn't written. -->
-      <ZeroLinkArgsInput Condition="'$(ZeroTarget)' == 'osx-arm64'">$(ZeroLinkArgsFile)</ZeroLinkArgsInput>
+      <ZeroLinkArgsInput Condition="'$(_ZeroApple)' == 'true'">$(ZeroLinkArgsFile)</ZeroLinkArgsInput>
     </PropertyGroup>
     <ItemGroup>
       <!-- Zero libraries: every resolved reference that isn't zerocore or lib/
@@ -498,7 +507,7 @@
       <_ZeroDllImport Include="libc;libm.so.6;$(ZeroDllImports);@(ZeroResolvedLinkLibrary->'%(DllImport)')" KeepDuplicates="false" />
       <_ZeroArg Include="@(_ZeroDllImport->'-i %(Identity)', ' ')" Condition="'$(_ZeroBitcodeTarget)' != 'true'" />
       <!-- C libraries (ZeroLinkLibrary), where bflat links; macOS's go to ld64.lld below. -->
-      <_ZeroArg Include="@(ZeroResolvedLinkLibrary->'--ldflags &quot;%(FullPath)&quot;', ' ')" Condition="'$(ZeroTarget)' != 'osx-arm64' and '$(_ZeroBitcodeTarget)' != 'true' and '@(ZeroResolvedLinkLibrary)' != ''" />
+      <_ZeroArg Include="@(ZeroResolvedLinkLibrary->'--ldflags &quot;%(FullPath)&quot;', ' ')" Condition="'$(_ZeroApple)' != 'true' and '$(_ZeroBitcodeTarget)' != 'true' and '@(ZeroResolvedLinkLibrary)' != ''" />
       <!-- Linux: bflat links against its own C library, older than the one a
            system library was built with (SDL built on Ubuntu 24.04 calls
            pthread_create@GLIBC_2.34). lld would check the library's own
@@ -508,10 +517,10 @@
       <!-- bflat's default operating system is the host's: named, so a Windows
            host builds Linux programs too. -->
       <_ZeroArg Include="--os linux" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'" />
-      <_ZeroArg Include="--os macos -c" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <_ZeroArg Include="--os macos -c" Condition="'$(_ZeroApple)' == 'true'" />
       <_ZeroArg Include="--target Shared" Condition="'$(ZeroTarget)' == 'osx-arm64' and '$(ZeroNativeLibrary)' == 'true'" />
       <_ZeroArg Include="--arch x64" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'win-x64'" />
-      <_ZeroArg Include="--arch arm64" Condition="'$(ZeroTarget)' == 'linux-arm64' or '$(ZeroTarget)' == 'osx-arm64'" />
+      <_ZeroArg Include="--arch arm64" Condition="'$(ZeroTarget)' == 'linux-arm64' or '$(_ZeroApple)' == 'true'" />
       <_ZeroArg Include="--ldflags &quot;$(ZeroNativeDir)zerocore.o&quot; --ldflags &quot;-z nostart-stop-gc&quot;" Condition="'$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64'" />
       <_ZeroArg Include="--ldflags &quot;-z max-page-size=4096&quot;" Condition="'$(ZeroTarget)' == 'linux-arm64'" />
       <!-- ZeroGpu=Cuda: the kernels (PTX, in kernels.o) and CUDA's driver API
@@ -543,17 +552,20 @@
       <!-- ZeroStripSymbols: no debug information (macOS's stays in bflat's
            object, so the linker drops the symbols that point to it), and lld
            leaves the symbol table out of Linux programs. -->
-      <_ZeroArg Include="--no-debug-info" Condition="'$(ZeroStripSymbols)' == 'true' and '$(ZeroTarget)' != 'osx-arm64' and '$(_ZeroBitcodeTarget)' != 'true'" />
+      <_ZeroArg Include="--no-debug-info" Condition="'$(ZeroStripSymbols)' == 'true' and '$(_ZeroApple)' != 'true' and '$(_ZeroBitcodeTarget)' != 'true'" />
       <_ZeroArg Include="--ldflags --strip-all" Condition="'$(ZeroStripSymbols)' == 'true' and ('$(ZeroTarget)' == 'linux-x64' or '$(ZeroTarget)' == 'linux-arm64')" />
       <_ZeroArg Include="-m $(ZeroInstructionSet)" Condition="'$(ZeroInstructionSet)' != '' and '$(_ZeroBitcodeTarget)' != 'true'" />
-      <_ZeroArg Include="-o &quot;$(ZeroBflatOutput)&quot;" Condition="'$(ZeroTarget)' != 'osx-arm64' and '$(_ZeroBitcodeTarget)' != 'true'" />
-      <_ZeroArg Include="-o &quot;$(ZeroNativeObject)&quot;" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <_ZeroArg Include="-o &quot;$(ZeroBflatOutput)&quot;" Condition="'$(_ZeroApple)' != 'true' and '$(_ZeroBitcodeTarget)' != 'true'" />
+      <_ZeroArg Include="-o &quot;$(ZeroNativeObject)&quot;" Condition="'$(_ZeroApple)' == 'true'" />
       <!-- ld64.lld (macOS 12 or newer, arm64: what bflat's objects ask for). zerocore's module list comes
            from the payload's objects (mac/start.c or mac/library.c, mac-arm64.S). Chained
            fixups: the classic lazy binding needs dyld_stub_binder's library.
            lld reads response files the GNU way, where a backslash escapes,
            so paths get forward slashes (which Windows takes too). -->
-      <_ZeroLinkArg Include="-arch arm64 -platform_version macos 12.0 12.0 -fixup_chains -dead_strip" />
+      <_ZeroLinkArg Include="-arch arm64 -platform_version macos 12.0 12.0 -fixup_chains -dead_strip" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <!-- The iOS simulator: the same, for ZeroIosMinimum, with the payload's
+           objects compiled for the simulator. -->
+      <_ZeroLinkArg Include="-arch arm64 -platform_version ios-simulator $(ZeroIosMinimum) $(ZeroIosMinimum) -fixup_chains -dead_strip" Condition="'$(ZeroTarget)' == 'iossimulator-arm64'" />
       <_ZeroLinkArg Include="-x -S" Condition="'$(ZeroStripSymbols)' == 'true'" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$(ZeroNativeObject)'))').Replace('\', '/'))&quot;" />
       <_ZeroLinkArg Include="&quot;$([System.String]::Copy('$(ZeroNativeDir)start.o').Replace('\', '/'))&quot;" Condition="'$(ZeroNativeLibrary)' != 'true'" />
@@ -590,16 +602,16 @@
     <!-- The command line is an input too: changing a flag rebuilds. -->
     <WriteLinesToFile File="$(ZeroNativeArgsFile)" Lines="$(ZeroNativeArgs)" Overwrite="true" WriteOnlyWhenDifferent="true" />
     <WriteLinesToFile File="$(ZeroLinkArgsFile)" Lines="$([MSBuild]::Escape('$(ZeroLinkArgs)'))" Overwrite="true" WriteOnlyWhenDifferent="true"
-                      Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+                      Condition="'$(_ZeroApple)' == 'true'" />
     <!-- This build's program and command line, and the other targets' ones
          already there: IncrementalClean removes what earlier builds wrote and
          this one doesn't list, so programs for several targets stay. -->
     <ItemGroup>
       <FileWrites Include="$(ZeroNativeOutput);$(ZeroNativeArgsFile)" />
       <!-- F#: bflat's own copy of the program, and the C# entry program. -->
-      <FileWrites Include="$(ZeroBflatOutput);$([System.IO.Path]::ChangeExtension('$(ZeroBflatOutput)', '.pdb'))" Condition="'$(ZeroLanguage)' == 'FSharp' and '$(ZeroTarget)' != 'osx-arm64'" />
+      <FileWrites Include="$(ZeroBflatOutput);$([System.IO.Path]::ChangeExtension('$(ZeroBflatOutput)', '.pdb'))" Condition="'$(ZeroLanguage)' == 'FSharp' and '$(_ZeroApple)' != 'true'" />
       <FileWrites Include="$(ZeroFSharpEntrySource)" Condition="'$(ZeroLanguage)' == 'FSharp'" />
-      <FileWrites Include="$(ZeroNativeObject);$(ZeroLinkArgsFile)" Condition="'$(ZeroTarget)' == 'osx-arm64'" />
+      <FileWrites Include="$(ZeroNativeObject);$(ZeroLinkArgsFile)" Condition="'$(_ZeroApple)' == 'true'" />
       <FileWrites Include="$([System.IO.Path]::ChangeExtension('$(ZeroNativeObject)', '.txt'))" Condition="'$(ZeroTarget)' == 'osx-arm64' and '$(ZeroNativeLibrary)' == 'true'" />
       <FileWrites Include="@(ZeroNativeFile)" Condition="Exists('%(FullPath)')" />
     </ItemGroup>
@@ -608,7 +620,7 @@
   <!-- Every target's program and command line that a build may have made. -->
   <Target Name="ZeroNativeFiles">
     <ItemGroup>
-      <_ZeroAnyTarget Include="linux-x64;linux-arm64;win-x64;osx-arm64;uefi-x64;uefi-arm64;c64;cx16;pico2;r4" />
+      <_ZeroAnyTarget Include="linux-x64;linux-arm64;win-x64;osx-arm64;iossimulator-arm64;uefi-x64;uefi-arm64;c64;cx16;pico2;r4" />
       <ZeroNativeFile Include="$(OutDir)$(AssemblyName);$(OutDir)$(AssemblyName).exe" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName)')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/$(AssemblyName).exe')" />
@@ -632,6 +644,8 @@
       <ZeroNativeFile Include="$(OutDir)native/$(AssemblyName).pdb" />
       <_ZeroNativeLibraryFile Include="$(AssemblyName).so;$(AssemblyName).dylib;$(AssemblyName).dll;$(AssemblyName).lib" />
       <ZeroNativeFile Include="@(_ZeroNativeLibraryFile->'$(OutDir)native/%(Identity)')" />
+      <ZeroNativeFile Include="$(ZeroInteropSource)" Condition="'$(ZeroInteropSource)' != ''" />
+      <ZeroNativeFile Include="$(ZeroInteropFSharpSource)" Condition="'$(ZeroInteropFSharpSource)' != ''" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).so')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).dylib')" />
       <ZeroNativeFile Include="@(_ZeroAnyTarget->'$(OutDir)%(Identity)/native/$(AssemblyName).dll')" />
@@ -651,6 +665,42 @@
     <RunArguments>$(StartArguments)</RunArguments>
     <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
   </PropertyGroup>
+
+  <!--
+    dotnet run of an iOS simulator program, on a Mac with Xcode's iOS platform:
+    in a simulator, ZeroIosSimulator (a name or UDID) or one already booted or
+    else the first iPhone, booted (the payload's boot.sh), through `xcrun simctl
+    spawn`, as the repository's run.sh runs them: no app bundle. That
+    starts programs in the simulated device's data directory, so the program
+    starts through the payload's launch.c (linked once, in obj/), which moves
+    to the project's folder first, as dotnet run does for the other targets.
+  -->
+  <Target Name="ZeroIosLauncher" AfterTargets="ZeroNativeBuild" BeforeTargets="IncrementalClean"
+          Condition="'$(ZeroTarget)' == 'iossimulator-arm64' and '$(OutputType)' != 'Library'"
+          DependsOnTargets="ZeroNativeCommand"
+          Inputs="$(ZeroNativeDir)launch.o;$(ZeroNativeDir)libSystem.tbd" Outputs="$(ZeroIosLauncher)">
+    <Exec Command="&quot;$(ZeroLldExe)&quot; -flavor darwin -arch arm64 -platform_version ios-simulator $(ZeroIosMinimum) $(ZeroIosMinimum) -fixup_chains &quot;$([System.String]::Copy('$(ZeroNativeDir)launch.o').Replace('\', '/'))&quot; &quot;$([System.String]::Copy('$(ZeroNativeDir)libSystem.tbd').Replace('\', '/'))&quot; -o &quot;$([System.String]::Copy('$([System.IO.Path]::GetFullPath('$(ZeroIosLauncher)'))').Replace('\', '/'))&quot;" />
+    <ItemGroup>
+      <FileWrites Include="$(ZeroIosLauncher)" />
+    </ItemGroup>
+  </Target>
+  <PropertyGroup>
+    <ZeroIosLauncher>$(IntermediateOutputPath)zero-ios-launch</ZeroIosLauncher>
+  </PropertyGroup>
+  <!-- dotnet run calls ComputeRunArguments before it reads RunCommand. -->
+  <Target Name="ZeroIosRunArguments" BeforeTargets="ComputeRunArguments"
+          Condition="'$(ZeroTarget)' == 'iossimulator-arm64' and '$(OutputType)' != 'Library'">
+    <Error Condition="!$([MSBuild]::IsOSPlatform('OSX'))"
+           Text="An iossimulator-arm64 program runs in the iOS simulator, on a Mac with Xcode: copy $(OutDir)$(ZeroTargetFolder)$(AssemblyName) there and run it with xcrun simctl spawn." />
+    <Exec Command="/bin/sh &quot;$(ZeroSdkRoot)payload/native/iossimulator-arm64/boot.sh&quot; &quot;$(ZeroIosSimulator)&quot;" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_ZeroIosDevice" />
+    </Exec>
+    <PropertyGroup>
+      <RunCommand>xcrun</RunCommand>
+      <RunArguments>simctl spawn $(_ZeroIosDevice) &quot;$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(ZeroIosLauncher)'))&quot; &quot;$(MSBuildProjectDirectory)&quot; &quot;$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(OutDir)$(ZeroTargetFolder)', '$(AssemblyName)'))&quot; $(StartArguments)</RunArguments>
+      <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
+    </PropertyGroup>
+  </Target>
 
   <!-- dotnet run of a microcontroller program: in QEMU (qemu-system-arm), on
        the board that stands in for the real one, as the repository's run.sh
@@ -786,6 +836,57 @@
       <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)ZeroFSharpNative.cs.txt" />
     </Task>
   </UsingTask>
+
+  <!--
+    A native library's bindings for .NET, C# and F# libraries alike: the code
+    that declares its exports with [LibraryImport] (or [DllImport]) and copies the structs and enums
+    they use (Sdk/ZeroFSharpNative.cs.txt, WriteInterop), in C# in
+    bin/<AssemblyName>.Interop.cs and in F# in bin/<AssemblyName>.Interop.fs,
+    one of each for every configuration and target.
+    Written only when it changes, so a program that compiles it in isn't
+    rebuilt for nothing. ZeroInteropClass names the class (Namespace.Class;
+    the assembly's name by default); ZeroInterop=false turns it off.
+  -->
+  <PropertyGroup Condition="'$(ZeroNativeLibrary)' == 'true'">
+    <ZeroInteropSource Condition="'$(ZeroInteropSource)' == ''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(BaseOutputPath)', '$(AssemblyName).Interop.cs'))</ZeroInteropSource>
+    <ZeroInteropFSharpSource Condition="'$(ZeroInteropFSharpSource)' == ''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(BaseOutputPath)', '$(AssemblyName).Interop.fs'))</ZeroInteropFSharpSource>
+  </PropertyGroup>
+  <Target Name="ZeroInterop" AfterTargets="CoreCompile" Condition="'$(ZeroNativeLibrary)' == 'true' and '$(ZeroInterop)' != 'false'">
+    <ZeroFSharpNative Assembly="@(IntermediateAssembly->'%(FullPath)')" Interop="$(ZeroInteropSource)" InteropFSharp="$(ZeroInteropFSharpSource)"
+                      LibraryName="$(AssemblyName)" InteropClass="$(ZeroInteropClass)" />
+  </Target>
+
+  <!--
+    For a .NET program's ProjectReference to a native library, with
+    Targets="ZeroNativeLibraryFiles" OutputItemType="Content": builds the
+    library and gives back the file to copy next to the program (and into its
+    publish folder), which .NET then finds by name.
+  -->
+  <Target Name="ZeroNativeLibraryFiles" DependsOnTargets="Build;_ZeroNativeLibraryForProgram" Returns="@(_ZeroNativeLibraryForProgram)"
+          Condition="'$(ZeroNativeLibrary)' == 'true'" />
+  <Target Name="_ZeroNativeLibraryForProgram" DependsOnTargets="ZeroNativeCommand" Condition="'$(ZeroNativeLibrary)' == 'true'">
+    <ItemGroup>
+      <!-- A full path: the program resolves it from its own folder. -->
+      <_ZeroNativeLibraryForProgram Include="$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(ZeroNativeOutput)'))"
+                                    Link="$([System.IO.Path]::GetFileName('$(ZeroNativeOutput)'))"
+                                    TargetPath="$([System.IO.Path]::GetFileName('$(ZeroNativeOutput)'))"
+                                    CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+  <!--
+    Visual Studio builds the solution's projects itself and asks a reference
+    only for GetTargetPath, ignoring its Targets metadata: the program would
+    get the library's IL .dll as Content, not copied. There the library
+    answers with its native file instead, with the same copy metadata.
+  -->
+  <Target Name="_ZeroNativeLibraryTargetPathInVisualStudio" AfterTargets="GetTargetPathWithTargetPlatformMoniker"
+          DependsOnTargets="_ZeroNativeLibraryForProgram"
+          Condition="'$(ZeroNativeLibrary)' == 'true' and '$(BuildingInsideVisualStudio)' == 'true'">
+    <ItemGroup>
+      <TargetPathWithTargetPlatformMoniker Remove="@(TargetPathWithTargetPlatformMoniker)" />
+      <TargetPathWithTargetPlatformMoniker Include="@(_ZeroNativeLibraryForProgram)" />
+    </ItemGroup>
+  </Target>
 
   <!-- A Windows F# native library: bflat's import library names its own DLL
        (zero-native.dll, see ZeroBflatOutput), so it's made again from the

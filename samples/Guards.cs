@@ -33,7 +33,10 @@ public static class Program
             Console.WriteLine("  out-of-memory        an allocation the system can't satisfy (stopOnOutOfMemory)");
             Console.WriteLine("  arena-limit          an allocation past an arena's maxCapacity (stopOnOutOfMemory)");
             Console.WriteLine("  buffer-full          an allocation that doesn't fit in a FromBuffer arena (stopOnOutOfMemory)");
-            Console.WriteLine("  lambda-in-scope      a lambda first run inside AllocateObjectsHere, cached in the arena (DebugChecks)");
+            Console.WriteLine("  lambda-in-scope      a lambda first run inside AllocateObjectsHere, cached in the arena, then Reset (DebugChecks)");
+            Console.WriteLine("  lambda-in-open-scope the same inside OpenObjectScope, which frees it when the block ends (DebugChecks)");
+            Console.WriteLine("  scope-not-created    AllocateObjectsHere on an arena that was never created");
+            Console.WriteLine("  destroy-in-scope     an arena destroyed inside its own object scope");
             Console.WriteLine("  throw                a throw, inside a try with a matching catch");
             Console.WriteLine("  throw-null           throw null");
             Console.WriteLine("  union-no-case        a switch on a union that holds none of its cases");
@@ -41,6 +44,7 @@ public static class Program
             Console.WriteLine("  debug-fail           a Debug.Fail");
             Console.WriteLine("  range-too-long       an array range that ends past the array");
             Console.WriteLine("  bad-base64           Convert.FromBase64String on text that isn't Base64");
+            Console.WriteLine("  string-builder-range a StringBuilder.Remove past the end");
             Console.WriteLine("  bad-pattern          Regex.Create with a pattern that isn't valid");
             Console.WriteLine("  scratch-outer-scope  an Arena.Scratch scope allocating inside a nested one");
             Console.WriteLine("  scratch-outer-list   a ScratchList added to inside a nested Arena.Scratch");
@@ -79,6 +83,9 @@ public static class Program
             case "arena-limit": ArenaLimit(); break;
             case "buffer-full": BufferFull(); break;
             case "lambda-in-scope": LambdaInScope(); break;
+            case "lambda-in-open-scope": LambdaInOpenScope(); break;
+            case "scope-not-created": ScopeNotCreated(); break;
+            case "destroy-in-scope": DestroyInScope(); break;
             case "throw": Throw(); break;
             case "throw-null": ThrowNull(); break;
             case "union-no-case": UnionNoCase(); break;
@@ -86,6 +93,7 @@ public static class Program
             case "debug-fail": DebugFail(); break;
             case "range-too-long": RangeTooLong(Opaque(10)); break;
             case "bad-base64": System.Convert.FromBase64String("not base64!"); break;
+            case "string-builder-range": new System.Text.StringBuilder("abc").Remove(2, 2); break;
             case "bad-pattern": Regex.Create(Arena.Create(4096), "(abc"); break;
             case "scratch-outer-scope": ScratchOuterScope(); break;
             case "scratch-outer-list": ScratchOuterList(); break;
@@ -272,6 +280,42 @@ public static class Program
             // caches it in a static field: here, inside the arena.
             System.Func<int, int> twice = static x => x * 2;
             twice(21);
+        }
+        // The check runs here, before the lambda's memory is freed.
+        unsafe { frame.Reset(); }
+    }
+
+    static void LambdaInOpenScope()
+    {
+        Arena.DebugChecks = true;
+        Arena frame = Arena.Create(1024, "frame");
+        Arena.ObjectScope objects;
+        unsafe { objects = frame.OpenObjectScope(); }
+        using (objects)
+        {
+            System.Func<int, int> thrice = static x => x * 3;
+            thrice(7);
+        }   // Restore: the cached lambda is about to be freed
+    }
+
+    static void ScopeNotCreated()
+    {
+        Arena never = default;
+        Arena.ObjectScope objects;
+        unsafe { objects = never.AllocateObjectsHere(); }
+        using (objects)
+            Opaque(new int[4].Length);
+    }
+
+    static void DestroyInScope()
+    {
+        Arena frame = Arena.Create(1024, "frame");
+        Arena.ObjectScope objects;
+        unsafe { objects = frame.AllocateObjectsHere(); }
+        using (objects)
+        {
+            unsafe { frame.Destroy(); }
+            Opaque(new int[4].Length);
         }
     }
 

@@ -81,6 +81,40 @@ To make sense of a binary file's bytes, `BinaryPrimitives` reads numbers out of 
 order: `BinaryPrimitives.ReadUInt32LittleEndian(header[4..])` (see
 [Limits](../concepts/limits.html#binary-formats-hex-and-base64)).
 
+## Without blocking
+
+A read from a slow disk or a network drive blocks its thread, and with it every fiber on the thread.
+The async methods don't. They are `File.ReadAllBytesAsync`, `ReadAllTextAsync`, `WriteAllBytesAsync`,
+`WriteAllTextAsync` and `AppendAllTextAsync`, and `FileStream`'s `ReadAsync`, `WriteAsync`,
+`FlushAsync` and `DisposeAsync`. The reads and writes run on an I/O thread, as in .NET on Linux,
+and the fiber or async method that asked lets the others run until it's done:
+
+<!-- sample: samples/Tasks.cs files -->
+```csharp
+// The write and the read run on another thread; this async
+// method waits, and the others run meanwhile.
+await File.WriteAllBytesAsync(name, data);
+byte[] back = await File.ReadAllBytesAsync(name);
+```
+
+A file can't be waited on the way a socket can, because the system calls a file always ready, then
+blocks in the read. Hence the thread. Each thread that uses the async calls gets one I/O thread, started
+by its first call. The I/O thread runs the jobs in order and, when they're done, wakes `Fiber.Run` through
+a pipe that it polls along with the sockets. Handing a job over and back costs some microseconds, more
+than reading a few cached KB. So the async calls pay off for big reads and writes, slow disks and
+network drives, and the blocking calls stay faster for small files on a local disk. A `FileStream`'s
+buffer still gathers small reads and writes, and those need no thread. Where there are no threads
+(DOS, UEFI, microcontrollers), the calls block, as `Read` and `Write` do, and their tasks are done
+when they return.
+
+Some things differ from .NET:
+
+- **One at a time.** A `FileStream` runs one operation at a time. Another call, or `Dispose`, while
+  one runs ends the program.
+- **Tokens.** A token is checked when an operation starts. A read already running can't be stopped.
+- **Failures.** A file that can't be opened ends the program, as .NET's exception would. Open with
+  `FileStream.TryOpen`, or check `File.Exists`, where that can happen.
+
 ## When something goes wrong
 
 Nothing in `File` ends the program. A file that can't be opened gives a handle whose `IsOpen` is false,

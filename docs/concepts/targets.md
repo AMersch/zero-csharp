@@ -69,6 +69,67 @@ zerocore is unchanged. The link maps Apple's names for the module section's boun
 `__start___modules` and `__stop___modules` symbols that GNU ld provides on Linux. Programs start at
 50 KB, because macOS arm64 aligns each of a program's four segments to 16 KB pages.
 
+## iOS simulator
+
+`./build.sh --ios` builds iOS programs and runs them in the iOS simulator, on an Apple Silicon Mac
+with Xcode's iOS platform. They are console programs, started without an app bundle, the way test
+runners start programs there; an app with a window and real devices are still to come.
+
+The program's object is the one `--mac` builds: iOS runs the same arm64 code. But bflat compiles for
+Apple only as macOS, the object's build-version load command says so, and Apple's linker won't put an
+object built for macOS into an iOS program. `zero-bitcode macho-platform` marks a copy as built for the simulator
+(iOS 17 and later; `IOS_MIN` changes it), and clang links it against the simulator's SDK with
+`mac/`'s C files, compiled again for the simulator.
+
+```bash
+./build.sh --ios Core     # bin/ios/Core
+./run.sh --ios Core       # in the booted simulator, or the first iPhone, which it boots
+```
+
+`./run.sh --ios` runs the program with `xcrun simctl spawn`. That starts programs in the simulated
+device's data directory, and the simulator has no shell, so `ios/launch.c`, a small simulator
+program, moves to the caller's directory and then becomes the program: relative paths mean what they
+do on the Mac, which sees the same files. Standard input and output and the exit code pass through.
+`IOS_SIMULATOR` picks a simulator by name or UDID. `./test.sh --ios` runs every sample there.
+
+Passing there shows that the code and iOS's own C library, which the simulator loads, work together.
+It doesn't show that a program will run on an iPhone. A simulator program is a Mac process, on the
+Mac's kernel, with no sandbox and the Mac's stack size. On an iPhone only a signed app runs; it can
+write only inside its own container, it gets a 1 MB main-thread stack, and iOS stops it if it uses
+too much memory.
+
+## Android
+
+`./build.sh --android` builds command-line programs for Android on arm64, the kind `adb shell` runs;
+an app with a window is still to come. An Android program is a Linux program linked against Android's
+C library, Bionic, and started by Android's loader, so bflat builds it as for Linux, with
+`--libc bionic`. Its layout carries what that link needs, so the Android NDK isn't needed. The
+programs are position-independent, as Android requires, and aligned for 16 KB pages, which phones
+with Android 15 and later may have.
+
+lib/ calls the C library by glibc's names. Bionic has them all but three, which `android/runtime.c`
+supplies: `__errno_location`, and `__xstat64` and `__lxstat64`, glibc's old names for `stat` and
+`lstat` (Bionic's `struct stat` has glibc's arm64 layout). Its `ZeroSystem` says Android, because Bionic
+answers `getaddrinfo` the BSD way, as macOS does: `ai_canonname` before `ai_addr`, and other error
+numbers.
+
+```bash
+./build.sh --android Core     # bin/android/Core
+./run.sh --android Core       # on the connected phone or emulator
+```
+
+`./run.sh --android` copies the program to `/data/local/tmp/zero` on the device, through adb, and runs
+it there; standard input and output and the exit code pass through. With no device connected, it
+starts the first virtual device Android Studio made (`ANDROID_AVD` picks another), without a window.
+`ANDROID_SERIAL` picks one of several devices, as it does for adb. `./test.sh --android` runs every
+sample there.
+
+With `ANDROID_RUN=container`, the programs run in an arm64 Linux container instead, with only Android's
+loader and C library, from `android/sysroot/` (copies from Android 15; its README says where they came
+from). That is how CI runs the samples, on its arm64 Linux runner, without an emulator. It shows that
+the programs and Bionic work together on a Linux kernel; the emulator also runs them on Android
+itself, with its security rules.
+
 ## Windows x64
 
 `./build.sh --win` uses the same bflat, with `--os windows --arch x64`, and the same zerocore and
@@ -113,7 +174,11 @@ GC, the transitions between native and managed code have nothing else to do.
 What differs from the native build:
 
 - **32-bit pointers**, so structs that hold pointers are smaller and arena byte counts are lower.
-- **No SIMD.** Simd and Kernels take their scalar paths; `lib/Kernels.cs` has no WebAssembly path yet.
+- **SIMD only from C.** NativeAOT-LLVM can't compile vector operations for WebAssembly (it turns
+  them into a `PlatformNotSupportedException`), so the instruction sets report `IsSupported == false`
+  and Simd takes its scalar path. `TensorPrimitives` and `lib/Kernels.cs` call simd128 kernels in
+  `wasm/simd.c` instead, when `System.Runtime.Intrinsics.Wasm.PackedSimd.IsSupported`, which is true
+  only in this build.
 - **No callbacks from native code into C#** inside a running program.
 - **One exact compiler version.** zerocore and `runtime.c` implement NativeAOT-LLVM's internal runtime
   functions, whose names and signatures aren't documented and were read from the compiler's output. A

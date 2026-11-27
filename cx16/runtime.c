@@ -3161,7 +3161,7 @@ __asm__(
     "    jmp (__rc20)\n");
 
 // lib/FileSystem.cs asks which system this is: 10, the Commander X16.
-i32 cs_ZeroSystem(void) { return 10; }
+i32 cs_ZeroSystem(void) { return 11; }
 void *cs___errno_location(void) { return &file_errno; }
 // FileStream buffers in C#: nothing to switch off or write out here.
 i32 cs_setvbuf(i32 stream, void *buffer, i32 how, u32 size) { (void)stream; (void)buffer; (void)how; (void)size; return 0; }

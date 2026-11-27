@@ -17,6 +17,8 @@ OUT = ROOT / 'docs/reference'
 WIDTH = 80
 
 # Page order: (file, types documented on the page, page name, one-line description for the index).
+# The file can be a tuple of files, for partial classes split across them: the page's header comment
+# is the first file's, and a type's members come from every file, in order.
 PAGES = [
     ('Arena.cs', ['Arena'], 'arena', 'Growable bump allocator: allocation, scopes, reset, debug checks.'),
     ('Scratch.cs', ['Arena', 'ScratchScope', 'ScratchList', 'ScratchText', 'ScratchDict', 'ScratchHashSet', 'ScratchPool'], 'scratch', 'Temporary memory whose lifetime the compiler checks: Arena.Scratch, ScratchScope and its lists, text, dictionaries, sets and pools.'),
@@ -37,14 +39,15 @@ PAGES = [
     ('StrBuilder.cs', ['StrBuilder'], 'strbuilder', 'Growable string buffer in an arena.'),
     ('Out.cs', ['Out'], 'out', 'Buffered, UTF-8 standard output with $"..." formatting.'),
     ('In.cs', ['In'], 'in', 'Reading lines from standard input.'),
-    ('File.cs', ['File', 'FileInfo'], 'file', 'Reading and writing files, whole or piece by piece; copying, moving and looking at them.'),
+    (('File.cs', 'FileAsync.cs'), ['File', 'FileInfo'], 'file', 'Reading and writing files, whole or piece by piece; copying, moving and looking at them.'),
     ('FileSystem.cs', ['FileError'], 'file-error', 'Why a file or directory operation failed.'),
-    ('Streams.cs', ['Stream', 'MemoryStream', 'FileStream', 'SeekOrigin', 'FileMode', 'FileAccess', 'FileShare', 'IOException', 'EndOfStreamException'], 'stream', 'System.IO streams: Stream, MemoryStream and FileStream.'),
+    (('Streams.cs', 'FileAsync.cs'), ['Stream', 'MemoryStream', 'FileStream', 'SeekOrigin', 'FileMode', 'FileAccess', 'FileShare', 'IOException', 'EndOfStreamException'], 'stream', 'System.IO streams: Stream, MemoryStream and FileStream.'),
     ('Net.cs', ['IPAddress', 'IPEndPoint', 'EndPoint', 'Dns'], 'ipaddress', 'IP addresses, endpoints and name lookup (System.Net).'),
-    ('Sockets.cs', ['Socket', 'TcpListener', 'TcpClient', 'UdpClient', 'NetworkStream', 'SocketError', 'SocketException', 'AddressFamily', 'SocketType', 'ProtocolType', 'SocketFlags', 'SocketShutdown'], 'socket', 'TCP and UDP sockets that work with fibers (System.Net.Sockets).'),
+    (('Sockets.cs', 'SocketsAsync.cs'), ['Socket', 'TcpListener', 'TcpClient', 'UdpClient', 'NetworkStream', 'SocketError', 'SocketException', 'AddressFamily', 'SocketType', 'ProtocolType', 'SocketFlags', 'SocketShutdown', 'SocketReceiveFromResult', 'UdpReceiveResult'], 'socket', 'TCP and UDP sockets that work with fibers (System.Net.Sockets).'),
     ('Path.cs', ['Path'], 'path', 'The parts of a path, joining paths, and tidying them up.'),
     ('Directory.cs', ['Directory', 'DirectoryEntries', 'DirectoryEntry'], 'directory', 'Creating, listing, moving and deleting directories; the current directory.'),
     ('Clock.cs', ['Clock', 'CalendarTime'], 'clock', 'The monotonic clock for durations, and the date and time of day.'),
+    ('TimeProvider.cs', ['TimeProvider', 'ITimer'], 'time-provider', 'Where time comes from: the system clock, or a fake one in tests.'),
     ('Random.cs', ['Random'], 'random', 'Random numbers with .NET\'s method names, the same on every target.'),
     ('Kernels.cs', ['Kernels'], 'kernels', 'SIMD math for inference: dot products, softmax, norms.'),
     ('Dos.cs', ['Dos'], 'dos', 'DOS only: VGA graphics, keyboard, mouse, speaker, files, clock.'),
@@ -260,11 +263,23 @@ def collect(path, wanted):
     return lines, found
 
 
-def page(number, filename, types, slug):
-    lines, found = collect(LIB / filename, set(types))
+def page(number, filenames, types, slug):
+    if isinstance(filenames, str):
+        filenames = (filenames,)
+    lines, found = None, {}
+    for filename in filenames:
+        file_lines, file_found = collect(LIB / filename, set(types))
+        lines = lines or file_lines
+        for key, (kind, doc, members) in file_found.items():
+            if key in found:
+                found[key][2].extend(members)  # a partial class's other part
+            else:
+                found[key] = (kind, doc, members)
+    filename = filenames[0]
     title = types[0]
+    sources = ', '.join(f'[`lib/{f}`](https://github.com/OnurGumus/zero-csharp/blob/master/lib/{f})' for f in filenames)
     out = [f'---\ntitle: {title}\nindex: {number + 1}\n---\n', f'# {title}\n',
-           f'Source: [`lib/{filename}`](https://github.com/OnurGumus/zero-csharp/blob/master/lib/{filename})\n',
+           f'Source: {sources}\n',
            'This page is generated from the source by `scripts/gen-reference.py`.\n']
     intro = header_comment(lines)
     if intro:

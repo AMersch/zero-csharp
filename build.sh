@@ -39,7 +39,14 @@
 # bin/mac/obj (from `./build.sh --native-mac-objects <samples>` on Linux), and
 # needs neither bflat nor Docker: that is how CI's macOS job works.
 #
-# Usage:  ./build.sh [--wasm | --dos | --c64 | --cx16 | --pico2 | --r4 | --win | --mac | --gpu | --uefi] [Sample ...]
+# With --ios (on a Mac with Apple Silicon), builds iOS programs for the
+# simulator (bin/ios/*), from the --mac objects; ./run.sh --ios runs them.
+#
+# With --android, builds command-line programs for Android on arm64
+# (bin/android/*), with bflat and Android's C library from its layout, no NDK;
+# ./run.sh --android runs them on a phone or emulator, through adb.
+#
+# Usage:  ./build.sh [--wasm | --dos | --c64 | --cx16 | --pico2 | --r4 | --win | --mac | --ios | --android | --gpu | --uefi] [Sample ...]
 #         ./build.sh --gpu-air [Sample ...]  the GPU build up to AIR, without a Mac (no program)     default: all samples
 #         ./build.sh --cuda-ptx [Sample ...] experimental: the kernels as PTX for NVIDIA GPUs, checked by ptxas
 #         ./build.sh --cuda [Sample ...]     experimental: Linux programs that run them through CUDA;
@@ -110,6 +117,7 @@ ALL_SAMPLES=(
     Threads
     Fibers
     Timers
+    Tasks
     Records
     Shapes
     Refs
@@ -123,13 +131,14 @@ ALL_SAMPLES=(
     Keys
     Tensors
     TensorsAvx
+    Avx2Ops
     TensorTypes
     "${SMALL_SAMPLES[@]}"
     SmallMath
 )
 # Samples WebAssembly can't run: the fiber samples switch stacks, which a WebAssembly
 # program has no way to do.
-NOT_WASM=" Fibers Timers SmallFibers SmallChannels SmallScratch Network "
+NOT_WASM=" Fibers Timers Tasks SmallFibers SmallChannels SmallScratch Network "
 # Programs with kernels for the GPU (Metal): only --gpu builds them.
 GPU_SAMPLES=(Gpu)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
@@ -164,6 +173,7 @@ DOS_SAMPLES=(
     Patterns
     Fibers
     Timers
+    Tasks
     Scratch
     Links
     Llama
@@ -275,6 +285,7 @@ ARM_SAMPLES=(
     Threads
     Fibers
     Timers
+    Tasks
     Records
     Shapes
     Refs
@@ -368,7 +379,7 @@ bflat_flags() {
         # NEON; dotprod (SDOT, for int8) needs ARMv8.2+, e.g. Apple M1 or Cortex-A76.
         # TensorsAvx is Tensors built for AVX, so both of TensorPrimitives' x64
         # paths are tested: SSE2 (Tensors) and AVX (TensorsAvx).
-        Simd | Kernels | Llama | TensorsAvx)
+        Simd | Kernels | Llama | TensorsAvx | Avx2Ops)
             if [ "$BFLAT_ARCH" = x64 ]; then echo -m x86-64-v3; else echo -m dotprod; fi ;;
     esac
 }
@@ -526,15 +537,22 @@ compile_bitcode() {
 }
 
 # Bitcode (against zerocore's WebAssembly build) -> WASM objects (clang) -> one
-# module, linked with wasm/runtime.c (zerocore's native half there) and WASI's
-# C library.
+# module, linked with wasm/runtime.c (zerocore's native half there),
+# wasm/simd.c (SIMD kernels for TensorPrimitives and lib/Kernels.cs) and
+# WASI's C library.
 build_wasm() {
     local name obj bc
     check_bflat
     check_wasm
     build_core "$CORE"
-    build_core "$WASM_CORE" -d WASM
+    # WASM_SIMD: only this build has wasm/simd.c linked in, so only here does
+    # zerocore's PackedSimd.IsSupported say true (DOS, C64 and ARM build
+    # zerocore with -d WASM too).
+    build_core "$WASM_CORE" -d WASM -d WASM_SIMD
     build_lib
+    # simd128 is in every WebAssembly engine since 2021 (Chrome 91, Firefox 89,
+    # Safari 16.4, wasmtime, Node 16.4).
+    "$WASI_SDK/bin/clang" -target wasm32-wasip1 -O2 -msimd128 -Wall -Wextra -c wasm/simd.c -o bin/wasm/simd.o
     for name in "$@"; do
         echo "[wasm]  $name -> bin/wasm/$name.wasm"
         obj=bin/wasm/obj/$name
@@ -552,7 +570,7 @@ build_wasm() {
         # --fatal-warnings: if wasm/runtime.c's signature for a function no longer
         # matches what NativeAOT-LLVM's code calls, wasm-ld only warns and links a
         # trap; this makes it a build error instead.
-        "$WASI_SDK/bin/clang" -target wasm32-wasip1 -Os "$obj"/*.o wasm/runtime.c -lm -o "bin/wasm/$name.wasm" \
+        "$WASI_SDK/bin/clang" -target wasm32-wasip1 -Os "$obj"/*.o bin/wasm/simd.o wasm/runtime.c -lm -o "bin/wasm/$name.wasm" \
             -Wl,--no-stack-first -Wl,--global-base=1024 -Wl,-z,stack-size=1048576 \
             -Wl,--strip-all -Wl,--gc-sections -Wl,--fatal-warnings
     done
@@ -918,7 +936,7 @@ build_win_objects() {
     local name
     echo "[clang] win/{start,runtime,library}.c, zerocore/native/win-x64.S -> $WIN_OBJ"
     for name in start runtime library; do
-        "$clang" "${WIN_TARGET[@]}" -O2 -ffreestanding -fno-builtin -Wall -Wextra -c "win/$name.c" -o "$WIN_OBJ/$name.obj"
+        "$clang" "${WIN_TARGET[@]}" -O2 -ffreestanding -fno-builtin -ffunction-sections -fdata-sections -Wall -Wextra -c "win/$name.c" -o "$WIN_OBJ/$name.obj"
     done
     "$clang" "${WIN_TARGET[@]}" -c zerocore/native/win-x64.S -o "$WIN_OBJ/zerocore.obj"
 }
@@ -984,6 +1002,78 @@ build_mac_link() {
             -Wl,-dead_strip
         # Stripped like the Linux programs, unless KEEP_SYMBOLS is set.
         if [ -z "${KEEP_SYMBOLS:-}" ]; then strip "bin/mac/$name"; fi
+    done
+}
+
+# ---- iOS simulator -------------------------------------------------------------
+#
+# iOS programs, for the simulator on a Mac with Apple Silicon (bin/ios/*). The
+# program's object is the macOS one (build_mac_objects): iOS runs the same
+# arm64 code, but the object says it was built for macOS, and Apple's linker
+# won't put it in an iOS program, so zero-bitcode macho-platform marks a copy
+# as built for the simulator. mac/'s C files compile again, for the simulator.
+# The programs run with ./run.sh --ios, through `xcrun simctl spawn`, without
+# an app bundle (ios/launch.c starts them in the caller's directory).
+IOS_OBJ=bin/ios/obj
+# The oldest iOS the programs start on.
+IOS_MIN=${IOS_MIN:-17.0}
+
+build_ios_link() {
+    local clang=$1 name sdk target
+    shift
+    sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
+    target=arm64-apple-ios$IOS_MIN-simulator
+    mkdir -p "$IOS_OBJ"
+    echo "[clang] mac/start.c, mac/runtime.c, zerocore/native/mac-arm64.S -> $IOS_OBJ (iOS simulator)"
+    "$clang" -target "$target" -isysroot "$sdk" -O2 -Wall -Wextra -c mac/start.c -o "$IOS_OBJ/start.o"
+    "$clang" -target "$target" -isysroot "$sdk" -O2 -Wall -Wextra -c mac/runtime.c -o "$IOS_OBJ/runtime.o"
+    "$clang" -target "$target" -isysroot "$sdk" -c zerocore/native/mac-arm64.S -o "$IOS_OBJ/zerocore.o"
+    # ios/run.sh's launcher, which starts a program in the caller's directory.
+    "$clang" -target "$target" -isysroot "$sdk" -O2 -Wall -Wextra ios/launch.c -o "$IOS_OBJ/launch"
+    for name in "$@"; do
+        cp "$MAC_OBJ/$name.o" "$IOS_OBJ/$name.o"
+        zero_bitcode macho-platform "$IOS_OBJ/$name.o" ios-simulator "$IOS_MIN"
+        echo "[ld]    $name -> bin/ios/$name"
+        "$clang" -target "$target" -isysroot "$sdk" -o "bin/ios/$name" \
+            "$IOS_OBJ/$name.o" "$IOS_OBJ/start.o" "$IOS_OBJ/runtime.o" "$IOS_OBJ/zerocore.o" -Wl,-dead_strip
+        if [ -z "${KEEP_SYMBOLS:-}" ]; then strip "bin/ios/$name"; fi
+    done
+}
+
+# ---- Android -----------------------------------------------------------------
+#
+# Command-line programs for Android on arm64 (bin/android/*), the kind adb
+# shell runs; no app. bflat compiles and links them as for Linux, against
+# Android's C library, Bionic (--libc bionic), which its layout carries, so
+# no Android NDK is needed. android/runtime.c gives lib/ the glibc names
+# Bionic lacks; any clang compiles it (on the host, as win/'s files).
+ANDROID_OBJ=bin/android/obj
+
+# $1: clang
+build_android_objects() {
+    mkdir -p "$ANDROID_OBJ"
+    echo "[clang] android/runtime.c -> $ANDROID_OBJ/runtime.o"
+    "$1" -target aarch64-linux-android21 -O2 -ffreestanding -fPIC -Wall -Wextra -c android/runtime.c -o "$ANDROID_OBJ/runtime.o"
+}
+
+build_android() {
+    local name strip=()
+    check_bflat
+    build_core "$CORE"
+    BFLAT_ARCH=arm64 CORE_NATIVE=$ANDROID_OBJ/zerocore.o build_core_native
+    build_lib
+    # Stripped as the Linux programs are, but position-independent: Android
+    # runs nothing else.
+    [ -z "${KEEP_SYMBOLS:-}" ] && strip=(--no-debug-info --ldflags --strip-all)
+    for name in "$@"; do
+        echo "[bflat] $name -> bin/android/$name"
+        # 16 KB pages: Android 15 and later run on phones with them, and
+        # Google Play asks for it; a 4 KB-page phone loads these too.
+        # shellcheck disable=SC2046
+        "$BFLAT_DIR/bflat" build $(sample_sources "$name") "${LIB_REFS[@]}" -r "$CORE" --stdlib:none \
+            "${CSHARP_FLAGS[@]}" "${NATIVE_FLAGS[@]}" --os linux --arch arm64 --libc bionic \
+            $(BFLAT_ARCH=arm64 bflat_flags "$name") "${strip[@]}" \
+            --ldflags "$ANDROID_OBJ/zerocore.o $ANDROID_OBJ/runtime.o -z max-page-size=16384" -o "bin/android/$name"
     done
 }
 
@@ -1333,6 +1423,11 @@ if [ "${1:-}" = "--native-win" ]; then
     build_win "$@"
     exit 0
 fi
+if [ "${1:-}" = "--native-android" ]; then
+    shift
+    build_android "$@"
+    exit 0
+fi
 if [ "${1:-}" = "--native-uefi" ]; then
     shift
     build_uefi "$@"
@@ -1364,6 +1459,8 @@ case "${1:-}" in
     --r4)   TARGET=r4; shift ;;
     --win)  TARGET=win; shift ;;
     --mac)  TARGET=mac; shift ;;
+    --ios)  TARGET=ios; shift ;;
+    --android) TARGET=android; shift ;;
     --gpu)  TARGET=gpu; shift ;;
     --gpu-air) TARGET=gpu-air; shift ;;
     --cuda-ptx) TARGET=cuda-ptx; shift ;;
@@ -1458,6 +1555,8 @@ case "$TARGET" in
     pico2 | r4) output() { echo "bin/$TARGET/$1.elf"; } ;;
     win)    output() { echo "bin/win/$1.exe"; } ;;
     mac)    output() { echo "bin/mac/$1"; } ;;
+    android) output() { echo "bin/android/$1"; } ;;
+    ios)    output() { echo "bin/ios/$1"; } ;;
     gpu)    output() { echo "bin/gpu/$1"; } ;;
     gpu-air) output() { echo "bin/gpu/obj/$1/kernels.ll"; } ;;
     cuda-ptx) output() { echo "bin/cuda/obj/$1/kernels.ptx"; } ;;
@@ -1477,7 +1576,7 @@ in_container() {
         "$IMAGE" ./build.sh "$@"
 }
 
-if [ "$TARGET" = mac ] && [ -n "${MAC_OBJECTS_PREBUILT:-}" ]; then
+if { [ "$TARGET" = mac ] || [ "$TARGET" = ios ]; } && [ -n "${MAC_OBJECTS_PREBUILT:-}" ]; then
     run() { :; } # the objects are in bin/mac/obj already
 elif [ "$(uname -s)" = Darwin ]; then
     check_bflat
@@ -1510,6 +1609,17 @@ case "$TARGET" in
         done
         "$WIN_CLANG" -target arm64-apple-macos12 -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/osx-arm64/zerocore.o"
         cp mac/libSystem.tbd "$PAYLOAD_DIR/native/osx-arm64/"
+        # The iOS simulator: the same C files and stub (which names both
+        # platforms) for ld64.lld, and ios/launch.c, which dotnet run starts
+        # the program through, as ./run.sh --ios does.
+        mkdir -p "$PAYLOAD_DIR/native/iossimulator-arm64"
+        echo "[clang] mac/{start,runtime}.c, ios/launch.c, zerocore/native/mac-arm64.S -> $PAYLOAD_DIR/native/iossimulator-arm64"
+        for name in start runtime; do
+            "$WIN_CLANG" -target "arm64-apple-ios$IOS_MIN-simulator" -O2 -Wall -Wextra -c "mac/$name.c" -o "$PAYLOAD_DIR/native/iossimulator-arm64/$name.o"
+        done
+        "$WIN_CLANG" -target "arm64-apple-ios$IOS_MIN-simulator" -O2 -Wall -Wextra -c ios/launch.c -o "$PAYLOAD_DIR/native/iossimulator-arm64/launch.o"
+        "$WIN_CLANG" -target "arm64-apple-ios$IOS_MIN-simulator" -c zerocore/native/mac-arm64.S -o "$PAYLOAD_DIR/native/iossimulator-arm64/zerocore.o"
+        cp mac/libSystem.tbd ios/boot.sh "$PAYLOAD_DIR/native/iossimulator-arm64/"
         # ZeroGpu=Cuda: gpu/cuda.c for each Linux architecture, from the same
         # clang (it declares the few libc functions it calls, so no headers).
         # arm64: atomics inline, as bflat's link has no libgcc for the calls.
@@ -1552,6 +1662,19 @@ case "$TARGET" in
         run mac-objects "$@"
         build_mac_link "${MAC_CC:-clang}" "$@"
         ;;
+    ios)
+        if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
+            echo "Error: --ios builds on a Mac with Apple Silicon: it links with Apple's linker, for the iOS simulator." >&2
+            exit 1
+        fi
+        if ! xcrun --sdk iphonesimulator --show-sdk-path > /dev/null 2>&1; then
+            echo "Error: no iOS simulator SDK. Install Xcode with the iOS platform (Xcode > Settings > Components)." >&2
+            exit 1
+        fi
+        build_bitcode_tool
+        run mac-objects "$@"
+        build_ios_link "${MAC_CC:-clang}" "$@"
+        ;;
     gpu)
         if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
             echo "Error: --gpu builds on a Mac with Apple Silicon: the kernels run on its GPU, through Metal." >&2
@@ -1590,6 +1713,15 @@ case "$TARGET" in
         fi
         build_win_objects "$WIN_CLANG"
         run win "$@"
+        ;;
+    android)
+        if ! ANDROID_CLANG=$(find_dos_clang); then
+            echo "Error: no clang that can compile for arm64 Android. Install clang (Xcode's works)." >&2
+            exit 1
+        fi
+        build_android_objects "$ANDROID_CLANG"
+        # The container (on macOS) builds for arm64 whatever the host is.
+        BFLAT_ARCH=arm64 run android "$@"
         ;;
     uefi)
         if ! UEFI_CLANG=$(find_dos_clang); then

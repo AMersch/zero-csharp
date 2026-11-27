@@ -326,8 +326,9 @@ Check("in place", v[0] == 10 && v[4] == 50);
 
 Element-wise arithmetic, the sums and the functions neural networks spend their time in (`Exp`,
 `Sigmoid`, `Tanh` and `SoftMax`) work on 4 or 8 values at once: with NEON on arm64, and on x64 with
-SSE2, which every x64 processor has, or AVX in a program built for it; WebAssembly, DOS and the
-microcontrollers run a scalar loop. Run on 1M floats, the four functions take 1.0–1.5× the time of
+SSE2, which every x64 processor has, or AVX in a program built for it. On WebAssembly they run
+simd128 code from `wasm/simd.c` that does what the SSE2 code does, so the results have the same bits
+as an x64 build without `-m`. DOS and the microcontrollers run a scalar loop. Run on 1M floats, the four functions take 1.0–1.5× the time of
 .NET's on arm64, and 1.2–1.7× with SSE2 (an x64 build under Rosetta, against .NET's own SSE code).
 
 **On x64, AVX doubles the width.** Zero mode doesn't check the processor at run time, so it uses AVX
@@ -668,13 +669,15 @@ These are the issues you may hit with zerocore, as `build.sh` builds:
 | Casts and interface calls that need variance abort at run time | Not supported |
 | Windows: x64 only, built from Linux or macOS | `./build.sh --win`; building on Windows (`build.ps1`) is untested |
 | macOS: Apple Silicon only, built on a Mac | `./build.sh --mac` |
+| iOS: the simulator only, as console programs (no app bundle, no device) | `./build.sh --ios`, `./run.sh --ios` |
+| Android: arm64 command-line programs, run through adb (no app yet) | `./build.sh --android`, `./run.sh --android` |
 
 Two of these come from the core library having to be named `System.Private.CoreLib`. bflat assumes a
 library with that name is .NET's and looks for its reflection support, hence `--no-reflection`. And
 without `-i`, bflat binds a `[DllImport]` function when it is first called, which needs runtime support
 zerocore doesn't have; with `-i`, it is bound at link time.
 
-The other targets add limits of their own: no SIMD and no callbacks from native code on WebAssembly,
+The other targets add limits of their own: no SIMD in C# and no callbacks from native code on WebAssembly,
 one thread and a 387 for floating point on DOS, one thread and no C library on UEFI.
 [Targets](targets.html) covers them.
 

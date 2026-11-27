@@ -52,8 +52,10 @@ prints, and the program's source is below it. Change the arguments or the input 
 ## What the page does
 
 The page gives each program what a terminal would: its arguments, standard input from the box, and
-standard output and error printed below, with the exit code. That is all of WASI these programs use,
-so the page implements it itself, in `docs/content/run-wasm.js`, instead of loading a library.
+standard output and error printed below, with the exit code. It implements that much of WASI itself,
+in `docs/content/run-wasm.js`, instead of loading a library. It has no files, directories or
+environment variables, so `File.Exists` says no and opening a file fails, as it would on a system
+without them; the samples that write files don't run here.
 
 The programs run as they do under wasmtime, on one thread: WebAssembly here has no threads, so
 `Parallel.For` runs its loop on the calling thread. [Run it on WebAssembly](webassembly.html) shows how

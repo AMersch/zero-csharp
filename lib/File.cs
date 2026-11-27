@@ -37,7 +37,7 @@ using System.Runtime.InteropServices;
 /// An open file, or a file that couldn't be opened (IsOpen is false). A handle: copies
 /// share the file. Also the functions that read or write a whole file at once.
 /// </summary>
-public struct File
+public partial struct File
 {
     [DllImport("libc")] static unsafe extern nint fopen(byte* path, byte* mode);
     [DllImport("libc")] static unsafe extern nuint fread(void* buffer, nuint size, nuint count, nint stream);
@@ -53,6 +53,9 @@ public struct File
     const int MaxPath = 1024;
 
     nint _stream;
+
+    // The C library's FILE*, for lib/FileAsync.cs's threads.
+    internal nint Handle => _stream;
 
     /// <summary>Opens an existing file for reading. IsOpen is false if it can't be opened.</summary>
     public static File OpenRead(ReadOnlySpan<char> path) => Open(path, 'r');
@@ -80,7 +83,7 @@ public struct File
 
     static File Open(ReadOnlySpan<char> path, char how)
     {
-        Span<byte> name = stackalloc byte[MaxPath];
+        Span<byte> name = stackalloc byte[FileSystem.PathRoom(path, MaxPath)];
         if (!ToCPath(path, name))
             return default;
         return OpenC(name, how, false);
@@ -113,7 +116,7 @@ public struct File
     // refused.
     internal static File Open(ReadOnlySpan<char> path, char how, bool exclusive, out FileError error, bool plus = false)
     {
-        Span<byte> name = stackalloc byte[FileSystem.PathBytes];
+        Span<byte> name = stackalloc byte[FileSystem.PathRoom(path)];
         if (FileSystem.ToC(path, name) < 0)
         {
             error = FileError.InvalidPath;
@@ -379,7 +382,7 @@ public struct File
     /// <summary>Deletes a file, saying why it couldn't: NotFound, AccessDenied, IsADirectory...</summary>
     public static FileError Remove(ReadOnlySpan<char> path)
     {
-        Span<byte> name = stackalloc byte[FileSystem.PathBytes];
+        Span<byte> name = stackalloc byte[FileSystem.PathRoom(path)];
         if (FileSystem.ToC(path, name) < 0)
             return FileError.InvalidPath;
         unsafe
@@ -401,8 +404,8 @@ public struct File
     internal static FileError Rename(ReadOnlySpan<char> from, ReadOnlySpan<char> to, out bool crossDevice)
     {
         crossDevice = false;
-        Span<byte> source = stackalloc byte[FileSystem.PathBytes];
-        Span<byte> target = stackalloc byte[FileSystem.PathBytes];
+        Span<byte> source = stackalloc byte[FileSystem.PathRoom(from)];
+        Span<byte> target = stackalloc byte[FileSystem.PathRoom(to)];
         if (FileSystem.ToC(from, source) < 0 || FileSystem.ToC(to, target) < 0)
             return FileError.InvalidPath;
         unsafe
@@ -423,7 +426,7 @@ public struct File
     /// <summary>Deletes a file. Returns false if it couldn't, for example because it doesn't exist.</summary>
     public static bool Delete(ReadOnlySpan<char> path)
     {
-        Span<byte> name = stackalloc byte[MaxPath];
+        Span<byte> name = stackalloc byte[FileSystem.PathRoom(path, MaxPath)];
         if (!ToCPath(path, name))
             return false;
         unsafe

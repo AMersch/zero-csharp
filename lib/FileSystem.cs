@@ -6,11 +6,11 @@
 // lstat), opendir, readdir64 and closedir, mkdir, rmdir, rename, getcwd,
 // chdir and __errno_location. Linux has them all. The others supply what
 // their C library lacks or lays out differently, in their runtime files
-// (mac/runtime.c, win/runtime.c, wasm/runtime.c). On Windows the ones the
+// (mac/runtime.c, win/runtime.c, wasm/runtime.c, android/runtime.c). On Windows the ones the
 // Universal CRT also has are linked with /wrap:, as fopen is, and take UTF-8.
 //
 // Directories, file information, moving and copying work on Linux, macOS,
-// Windows and WebAssembly (under wasmtime, inside the directories given with
+// Windows, Android and WebAssembly (under wasmtime, inside the directories given with
 // --dir). Path's functions work everywhere: they only look at text.
 // ZeroSystem(), in each target's assembly or runtime file, says which system
 // this is.
@@ -55,7 +55,8 @@ enum SystemKind
     Dos = 7,
     Microcontroller = 8,
     C64 = 9,
-    CX16 = 10,
+    Android = 10,
+    CX16 = 11,
 }
 
 static class FileSystem
@@ -86,6 +87,17 @@ static class FileSystem
 
     internal static int ChunkBytes => Small ? 256 : 4096;
 
+    // Room for a path as a C string: its UTF-8 (at most 3 bytes a char) and
+    // the 0, up to `max`; a longer one doesn't fit, and ToC says so. A fiber
+    // on a microcontroller has 4 KB of stack in all, so a stackalloc of
+    // MaxPath there would overflow it.
+    internal static int PathRoom(ReadOnlySpan<char> path, int max = MaxPath)
+    {
+        if (max > PathBytes)
+            max = PathBytes;
+        return path.Length < max / 3 ? path.Length * 3 + 1 : max;
+    }
+
     static int s_system;
 
     internal static SystemKind System
@@ -109,14 +121,15 @@ static class FileSystem
     }
 
     // Whether the system has stat, directories and rename: Linux, macOS,
-    // Windows, WebAssembly, the Commander X16. Elsewhere those imports are
-    // placeholders that fail.
+    // Windows, WebAssembly, Android, the Commander X16. Elsewhere those imports
+    // are placeholders that fail.
     internal static bool HasCalls
     {
         get
         {
             SystemKind system = System;
-            return system <= SystemKind.Windows || system == SystemKind.Wasi || system == SystemKind.CX16;
+            return system <= SystemKind.Windows || system == SystemKind.Wasi || system == SystemKind.Android
+                || system == SystemKind.CX16;
         }
     }
 
@@ -301,7 +314,7 @@ static class FileSystem
 
     internal static FileError Stat(ReadOnlySpan<char> path, bool follow, out Status status)
     {
-        Span<byte> name = stackalloc byte[PathBytes];
+        Span<byte> name = stackalloc byte[PathRoom(path)];
         if (ToC(path, name) < 0)
         {
             status = default;

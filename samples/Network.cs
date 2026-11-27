@@ -8,6 +8,8 @@
 using System;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace NetworkSample;
 
@@ -49,6 +51,32 @@ public sealed class Lookup
 {
     public bool Found;
     public int OthersRan;
+}
+
+// Two async methods on one connection (see Main's "Async" section).
+public sealed class AsyncPair
+{
+    public NetworkStream Reader, Writer;
+    public byte[] Buffer = new byte[16];
+    public int Read;
+    public bool WriterRan;
+}
+
+// The timeouts section: a fiber that times out while another runs.
+public sealed class Patience
+{
+    public Socket Socket;
+    public SocketError Error;
+    public int OthersRan;
+}
+
+// An async echo server and its clients (the "Async server" section).
+public sealed class AsyncEcho
+{
+    public TcpListener Listener;
+    public int Port;
+    public int Clients;
+    public int Correct;
 }
 
 public static class Program
@@ -116,6 +144,169 @@ public static class Program
             stream.Write(buffer.Slice(0, n));
     }
     // docs:end
+
+    static async Task ReadAsync(AsyncPair p)
+    {
+        await Task.Yield(); // from here on, in the async methods' fiber
+        p.Read = p.Reader.Read(p.Buffer);
+    }
+
+    static async Task WriteAsync(AsyncPair p)
+    {
+        await Task.Yield();
+        p.WriterRan = true;
+        p.Writer.Write("hello"u8);
+    }
+
+    // docs:async-serve
+    // The async way: each connection is an async method rather than a
+    // fiber. A wait costs no fiber, so thousands of connections can wait
+    // at once.
+    static async Task ServeAsync(TcpClient client)
+    {
+        using NetworkStream stream = client.GetStream();
+        byte[] buffer = new byte[512];
+        int n;
+        while ((n = await stream.ReadAsync(buffer)) > 0)
+            await stream.WriteAsync(buffer.AsMemory(0, n));
+    }
+    // docs:end
+
+    static async Task AcceptAsync(AsyncEcho e)
+    {
+        for (int i = 0; i < e.Clients; i++)
+        {
+            TcpClient client = await e.Listener.AcceptTcpClientAsync();
+            _ = ServeAsync(client);
+        }
+    }
+
+    static async Task ClientAsync(AsyncEcho e, int id)
+    {
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, e.Port);
+        NetworkStream stream = client.GetStream();
+        byte[] message = new byte[100];
+        message.AsSpan().Fill((byte)id);
+        await stream.WriteAsync(message);
+        client.Client.Shutdown(SocketShutdown.Send);
+        byte[] back = new byte[100];
+        await stream.ReadExactlyAsync(back);
+        if (Same(back, message) && await stream.ReadAsync(back) == 0)
+            e.Correct++;
+    }
+
+    // Round trips of one byte over a connection: what the loop allocates
+    // once it's going.
+    static async Task<long> PingPongAsync(NetworkStream a, NetworkStream b, int rounds)
+    {
+        byte[] ping = [1], pong = new byte[1];
+        long before = 0;
+        for (int i = 0; i < rounds + 10; i++)
+        {
+            if (i == 10)
+                before = GC.GetTotalAllocatedBytes(); // after warming up
+            ValueTask<int> reading = b.ReadAsync(pong); // waits
+            await a.WriteAsync(ping);
+            if (await reading != 1)
+                return -1;
+        }
+        return GC.GetTotalAllocatedBytes() - before;
+    }
+
+    static async Task AsyncChecksAsync()
+    {
+        // An echo server and clients, all async methods.
+        var echo = new AsyncEcho { Listener = new TcpListener(IPAddress.Loopback, 0), Clients = 50 };
+        echo.Listener.Start();
+        echo.Port = ((IPEndPoint)echo.Listener.LocalEndpoint).Port;
+        Task server = AcceptAsync(echo);
+        var clients = new Task[echo.Clients];
+        for (int id = 0; id < clients.Length; id++)
+            clients[id] = ClientAsync(echo, id);
+        await Task.WhenAll(clients);
+        await server;
+        Check("every echo came back", echo.Correct == echo.Clients);
+
+        var pair = new TcpListener(IPAddress.Loopback, 0);
+        pair.Start();
+        using var near = new TcpClient();
+        Task connecting = near.ConnectAsync(IPAddress.Loopback, ((IPEndPoint)pair.LocalEndpoint).Port);
+        using TcpClient far = await pair.AcceptTcpClientAsync();
+        await connecting;
+        NetworkStream a = near.GetStream(), b = far.GetStream();
+        long allocated = await PingPongAsync(a, b, 100);
+        Check($"a round trip allocates nothing ({allocated} bytes)", allocated == 0);
+
+        IPAddress[] local = await Dns.GetHostAddressesAsync("localhost");
+        Check("name looked up", local.Length > 0);
+        using (var named = new TcpClient())
+        {
+            await named.ConnectAsync("localhost", ((IPEndPoint)pair.LocalEndpoint).Port);
+            Check("connected by name", named.Connected);
+            using TcpClient answer = await pair.AcceptTcpClientAsync();
+        }
+        Section("Async server");
+
+        // docs:cancel
+        // Canceled or timed out, NetworkStream's ReadAsync returns 0, and
+        // Error says why; the stream stays usable. So a timeout doesn't
+        // need an await of a canceled task, which would end the program.
+        byte[] buffer = new byte[16];
+        using (var cts = new CancellationTokenSource(30))
+        {
+            int n = await a.ReadAsync(buffer, cts.Token);
+            // n is 0, and a.Error is SocketError.OperationAborted
+            Check("canceled read", n == 0 && a.Error == SocketError.OperationAborted);
+        }
+        a.ReadTimeout = 30; // milliseconds, for ReadAsync too
+        int timedOut = await a.ReadAsync(buffer);
+        // timedOut is 0, and a.Error is SocketError.TimedOut
+        // docs:end
+        Check("timed out read", timedOut == 0 && a.Error == SocketError.TimedOut);
+        a.ReadTimeout = Timeout.Infinite;
+        await b.WriteAsync("z"u8.ToArray());
+        Check("read after", await a.ReadAsync(buffer) == 1 && buffer[0] == 'z' && a.Error == SocketError.Success);
+
+        // Socket's own methods cancel their task, as in .NET.
+        var source = new CancellationTokenSource();
+        Task<int> receiving = near.Client.ReceiveAsync(buffer, source.Token).AsTask();
+        Task<Socket> accepting = pair.AcceptSocketAsync(source.Token).AsTask();
+        source.Cancel();
+        Check("receive canceled", receiving.IsCanceled);
+        Check("accept canceled", accepting.IsCanceled);
+        await b.WriteAsync("w"u8.ToArray());
+        Check("socket receive after", await near.Client.ReceiveAsync(buffer) == 1 && buffer[0] == 'w');
+
+        // Closing the socket wakes a read waiting on it.
+        ValueTask<int> orphan = b.ReadAsync(buffer);
+        far.Client.Close();
+        Check("closed under a read", await orphan == 0 && b.Error == SocketError.OperationAborted);
+        Check("stays closed", await b.ReadAsync(buffer) == 0 && b.Error == SocketError.OperationAborted);
+
+        // UDP.
+        using var udpServer = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        using var udpClient = new UdpClient();
+        var to = new IPEndPoint(IPAddress.Loopback, ((IPEndPoint)udpServer.Client.LocalEndPoint).Port);
+        Task<UdpReceiveResult> datagram = udpServer.ReceiveAsync();
+        await udpClient.SendAsync("ping"u8.ToArray(), to);
+        UdpReceiveResult got = await datagram;
+        Check("datagram", Same(got.Buffer, "ping"u8) && got.RemoteEndPoint.Port == ((IPEndPoint)udpClient.Client.LocalEndPoint).Port);
+        echo.Listener.Stop();
+
+        // docs:stop
+        // Stopping the listener cancels the accept that waits on it. Awaited
+        // as a plain Task with SuppressThrowing, a canceled task doesn't end
+        // the program: the loop looks at IsCanceled instead.
+        Task<TcpClient> next = pair.AcceptTcpClientAsync();
+        pair.Stop();
+        await ((Task)next).ConfigureAwait(
+            ConfigureAwaitOptions.SuppressThrowing);
+        bool stopped = next.IsCanceled; // true
+        // docs:end
+        Check("accept loop stopped", stopped);
+        Section("Async errors");
+    }
 
     public static int Main()
     {
@@ -373,6 +564,80 @@ public static class Program
         Check("an address is its own answer", Dns.GetHostAddresses("10.1.2.3")[0].ToString() == "10.1.2.3");
         Check("host name", Dns.GetHostName().Length > 0);
         Section("Names");
+
+        // Async methods: after an await they go on in a fiber shared by all
+        // of them (lib/Tasks.cs). One that waits for a socket keeps that
+        // fiber, and another takes over for the rest: here the writer, which
+        // is queued behind the reader and is the only one that can wake it.
+        var asyncListener = new TcpListener(IPAddress.Loopback, 0);
+        asyncListener.Start();
+        var dialer = new TcpClient();
+        dialer.Connect(IPAddress.Loopback, ((IPEndPoint)asyncListener.LocalEndpoint).Port);
+        TcpClient answered = asyncListener.AcceptTcpClient();
+        var pair = new AsyncPair { Reader = answered.GetStream(), Writer = dialer.GetStream() };
+        Task reading = ReadAsync(pair);
+        Task writing = WriteAsync(pair);
+        Fiber.Run();
+        Check("both done", reading.IsCompleted && writing.IsCompleted);
+        Check("the writer ran", pair.WriterRan);
+        Check("read what was written", pair.Read == 5 && pair.Buffer[4] == (byte)'o');
+        dialer.Dispose();
+        answered.Dispose();
+        asyncListener.Stop();
+        Section("Async");
+
+        // docs:timeouts
+        // A read that waits longer than ReadTimeout returns 0, with Error
+        // TimedOut. The connection stays open, and the next read goes on.
+        var timed = new TcpListener(IPAddress.Loopback, 0);
+        timed.Start();
+        using var silent = new TcpClient();
+        silent.Connect(IPAddress.Loopback, ((IPEndPoint)timed.LocalEndpoint).Port);
+        using TcpClient other = timed.AcceptTcpClient();
+        NetworkStream patient = silent.GetStream();
+        patient.ReadTimeout = 50; // milliseconds
+        Span<byte> one = stackalloc byte[1];
+        int got = patient.Read(one);
+        // got is 0, and patient.Error is SocketError.TimedOut
+        // docs:end
+        Check("timed out", got == 0 && patient.Error == SocketError.TimedOut);
+        other.GetStream().Write("y"u8);
+        Check("read after", patient.Read(one) == 1 && one[0] == 'y' && patient.Error == SocketError.Success);
+
+        silent.Client.ReceiveTimeout = 20;
+        long start = Clock.Monotonic;
+        silent.Client.Receive(one, SocketFlags.None, out SocketError receiveError);
+        long waited = (Clock.Monotonic - start) / 1_000_000;
+        Check($"socket receive timed out ({waited} ms)", receiveError == SocketError.TimedOut && waited >= 19 && silent.Connected);
+
+        // In a fiber, the others run while one waits for its timeout.
+        var patience = new Patience { Socket = silent.Client };
+        Fiber.Spawn(patience, static p =>
+        {
+            Span<byte> b = stackalloc byte[1];
+            p.Socket.Receive(b, SocketFlags.None, out p.Error);
+        });
+        Fiber.Spawn(patience, static p =>
+        {
+            for (int i = 0; i < 5; i++, p.OthersRan++)
+                Fiber.Sleep(1);
+        });
+        Fiber.Run();
+        Check("fiber timed out", patience.Error == SocketError.TimedOut && patience.OthersRan == 5);
+
+        // A send into a full buffer gives up after SendTimeout, saying how
+        // much went.
+        other.Client.SendTimeout = 50;
+        byte[] chunk = new byte[1 << 20];
+        long sent = 0;
+        SocketError sendError = SocketError.Success;
+        for (int i = 0; i < 256 && sendError == SocketError.Success; i++)
+            sent += other.Client.Send(chunk, SocketFlags.None, out sendError);
+        Check("send timed out", sendError == SocketError.TimedOut && sent > 0 && other.Connected);
+        timed.Stop();
+        Section("Timeouts");
+
+        AsyncChecksAsync().Wait();
 
         return s_failures;
     }

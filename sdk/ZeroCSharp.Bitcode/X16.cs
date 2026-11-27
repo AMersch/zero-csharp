@@ -46,6 +46,7 @@ static partial class C64
         public List<(string Name, int Size)> All = [];          // every function, largest first
         public List<(string Name, int Size)> Candidates = [];   // the ones worth moving, and in the order to move them
         public int Next, Saved, Goal, Count;
+        public Dictionary<string, int> Assignment = [];     // function to bank, in the last try
         public int Headroom = 512;      // left empty in each bank: the sizes measured aren't quite the final ones
         public string Plain = "";
 
@@ -56,6 +57,10 @@ static partial class C64
     /// <summary>What Link has, for the X16 code to link again with.</summary>
     sealed record X16Context(string Clang, string[] Mos, List<string> Whole, List<string> Separate, List<string> Extra,
         string Runtime, string SaveBasic, string Output, string OutDir, string Name, string LlvmMos);
+
+    // The largest function that is moved into a bank: a bank less some room, as the
+    // measured sizes aren't quite the final ones.
+    const int X16Largest = Banking.BankSize - 1024;
 
     // Beyond what is over: the heap and the stack have what the code leaves, and
     // SmallBuilders and SmallDoubleFormats failed (out of memory) with 2 KB.
@@ -93,7 +98,7 @@ static partial class C64
         {
             Plain = plain,
             All = all,
-            Candidates = all.Where(f => f.Size >= 150 && f.Size <= Banking.BankSize - 1024).ToList(),
+            Candidates = all.Where(f => f.Size >= 150 && f.Size <= X16Largest).ToList(),
         };
     }
 
@@ -197,20 +202,24 @@ static partial class C64
         string script = Path.Combine(c.OutDir, "banked.ld");
         File.WriteAllText(script, Banking.Script(count));
         banks.Count = count;
+        banks.Assignment = assignment;
         options.Clear();
-        options.AddRange(["-T", script, $"-DCX16_CODE_BANKS={count}", $"-DCX16_BANK_FILE=\"{Banking.FileName(c.Name)}\""]);
+        options.AddRange(["-T", script]);
+        if (count > 0)      // none is left when what was chosen turned out too large for a bank
+            options.AddRange([$"-DCX16_CODE_BANKS={count}", $"-DCX16_BANK_FILE=\"{Banking.FileName(c.Name)}\""]);
         options.AddRange(X16Defines(c.Whole));
     }
 
     /// <summary>
-    /// The program is too big (lld's message says by how much, and where):
+    /// The program is too big (lld's log says by how much, and where):
     /// moves more of its largest functions into banks, and sets the options
-    /// for the next try. False if there is nothing more to move.
+    /// for the next try. False if there is nothing more to move. Every try
+    /// differs from the one before, so that the retries end.
     /// </summary>
-    static bool X16MoveToBanks(ref X16Banks? banks, X16Context c, string message, List<string> options)
+    static bool X16MoveToBanks(ref X16Banks? banks, X16Context c, string log, List<string> options)
     {
         // lld's "section '.text' will not fit in region 'ram': overflowed by 766 bytes".
-        Match found = Regex.Match(message, @"region '(\w+)': overflowed by (\d+)");
+        Match found = Regex.Match(log, @"region '(\w+)': overflowed by (\d+)");
         int excess = int.Parse(found.Groups[2].Value);
         bool bankFull = found.Groups[1].Value == "win";
         if (banks == null)
@@ -222,8 +231,24 @@ static partial class C64
         }
         else if (bankFull)
         {
-            // A bank came out bigger than the sizes said: the same functions, more room.
-            banks.Headroom += excess + 256;
+            Match section = Regex.Match(log, @"section '\.bank(\d+)' will not fit in region 'win'");
+            int full = section.Success ? int.Parse(section.Groups[1].Value) : 0;
+            var inIt = banks.Assignment.Where(f => f.Value == full).Select(f => f.Key).ToList();
+            if (inIt.Count == 1)
+            {
+                // Alone in its bank and still too large for it: more room can't help. It
+                // stays in fixed RAM, and if the program doesn't fit then, the next link says so.
+                int at = banks.Candidates.FindIndex(f => f.Name == inIt[0]);
+                banks.Saved -= banks.Candidates[at].Size - Banking.ThunkSize;
+                banks.Candidates.RemoveAt(at);
+                banks.Next--;
+                Console.Error.WriteLine($"[cx16]   {c.Name}: {inIt[0]} is too large for a bank; it stays in fixed RAM");
+            }
+            else
+            {
+                // A bank came out bigger than the sizes said: the same functions, more room.
+                banks.Headroom += excess + 256;
+            }
         }
         else
         {
@@ -292,9 +317,21 @@ static partial class C64
         X16Apply(banks, c, options, "ZERO_CX16_BANK");
     }
 
+    /// <summary>
+    /// What to say about the functions that are too large to go into a bank, one line
+    /// each: they take fixed RAM for good, and nothing else would tell. Nothing before
+    /// the functions were measured, that is for a program that fits as it is.
+    /// </summary>
+    static IEnumerable<string> X16TooLarge(X16Banks? banks) => banks == null ? [] : banks.All
+        .Where(f => f.Size > X16Largest)
+        .Select(f => $"{f.Name} is {f.Size} bytes, too large for a bank ({X16Largest} at most): it stays in fixed RAM. "
+            + "Split it, with [MethodImpl(MethodImplOptions.NoInlining)] on the parts, and they can move.");
+
     /// <summary>The link worked: writes the banks' file next to the program, or removes a stale one if there are none.</summary>
     static void X16Finish(X16Banks? banks, string llvmMos, string outDir, string output, string name)
     {
+        foreach (string line in X16TooLarge(banks))
+            Console.Error.WriteLine($"[cx16]   {name}: {line}");
         string file = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, Banking.FileName(name));
         if (banks == null || banks.Count == 0)
         {

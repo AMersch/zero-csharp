@@ -551,6 +551,57 @@ keeps the RAM bank, so fibers may run code that is in banks. A fiber takes 2 KB 
 usually has to ask for more heap (below). In the headless emulator, where the clock stands still, what a program
 sleeps is added to the clock. Sockets aren't there: the X16 has no network.
 
+## Large methods
+
+Only a whole method moves into a bank, and one over 7 KB (7168 bytes) doesn't: it takes fixed RAM for good,
+however many banks are free. `Main` gets there easily. 6502 code is long (50 lines can come to 13 KB), and
+the compiler builds the methods a method calls into it, above all those called once.
+
+A build that needs banks, or doesn't fit, names such methods:
+
+```text
+[cx16]   Game: Game_Program__Main is 13168 bytes, too large for a bank (7168 at most): it stays in fixed
+RAM. Split it, with [MethodImpl(MethodImplOptions.NoInlining)] on the parts, and they can move.
+```
+
+The name is the program's, the type's and the method's; the size is what was measured before anything moved.
+A program that fits as it is gets no such line.
+
+Split the method, and **mark each part** so that it stays a method of its own:
+
+```csharp no-sample
+using System.Runtime.CompilerServices;
+
+[MethodImpl(MethodImplOptions.NoInlining)]
+static void LoadLevel() { /* ... */ }
+
+[MethodImpl(MethodImplOptions.NoInlining)]
+static void DrawLevel() { /* ... */ }
+
+public static int Main()
+{
+    LoadLevel();
+    DrawLevel();
+    return 0;
+}
+```
+
+**Without the attribute, splitting doesn't help:** the parts are put together again. Tried on
+`samples/BankedListDemo.cs`, whose `Main` is 13 KB:
+
+| `Main` | Largest method | Heap left |
+|---|---|---|
+| as it is | 13,168 bytes | 4,876 bytes |
+| in three parts, not marked | 12,994 bytes | 548 bytes |
+| in three parts, marked | 6,940 bytes, in a bank | 6,828 bytes |
+
+- **Where to cut:** by what runs when (setting up, one level, the end), not through a loop that runs often: a
+  call into a bank costs about 33 cycles more (see Code in banks, below), which a part called once a frame doesn't notice
+  and one called for every pixel does.
+- **Data between the parts** goes in parameters and return values, or in `static` fields.
+- **A part that is still too large** is named again: split it further.
+- Marking the library's own methods wouldn't do this for you: it made one sample smaller and another larger.
+
 ## More heap
 
 A program with code in banks is given 4 KB of heap if there is enough code to move. One that allocates more asks

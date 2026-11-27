@@ -626,8 +626,9 @@ test_cx16() {
     unset X16_SDCARD        # the samples run on the host folder; those with files on the card too, below
     run_all "Commander X16 (x16emu)" cx16 check
     # Once more with all of their own code in banks: a runtime function that switches banks
-    # must not have been built into it (FIXED_RAM in cx16/runtime.c).
-    for name in BankLoad DiskFiles; do
+    # must not have been built into it (FIXED_RAM in cx16/runtime.c). BankedDemo's Main is
+    # larger than a bank, so the build has to leave it where it is (it once retried for ever).
+    for name in BankLoad DiskFiles BankedDemo; do
         ZERO_CX16_BANK=Program ./build.sh --cx16 "$name" > /dev/null
         status=0
         out=$(X16_TIMEOUT=60 ./run.sh --cx16 "$name" < /dev/null 2>&1) || status=$?
@@ -640,6 +641,15 @@ test_cx16() {
         fi
         ./build.sh --cx16 "$name" > /dev/null
     done
+    # A method too large for a bank is named: BankedListDemo needs banks, and its Main is.
+    # (The output is read whole first: grep -q would leave the build writing into a closed pipe.)
+    out=$(./build.sh --cx16 BankedListDemo 2>&1) || true
+    if grep -q "Program__Main is [0-9]* bytes, too large for a bank" <<< "$out"; then
+        echo "ok   a method too large for a bank is named"
+    else
+        echo "FAIL the build doesn't name BankedListDemo's Main as too large for a bank"
+        failures=$((failures + 1))
+    fi
     # The emulator's host folder is forgiving where the SD card's own DOS isn't: the
     # samples that use the disk run on a card image too.
     if [ -n "$card" ]; then

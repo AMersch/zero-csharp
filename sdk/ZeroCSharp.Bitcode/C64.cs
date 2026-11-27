@@ -263,14 +263,14 @@ static partial class C64
             Match tooBig = Regex.Match(log, @"will not fit in region.*?overflowed by (.*)");
             if (tooBig.Success)
             {
-                if (platform == "cx16" && X16MoveToBanks(ref banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos), tooBig.Value, options))
+                if (platform == "cx16" && X16MoveToBanks(ref banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos), log, options))
                     continue;
                 if (platform == "cx16" && X16KeepBest(banks, new(clang, mos, whole, separate, extra, runtime, saveBasic, output, outDir, name, llvmMos)))
                 {
                     X16Finish(banks, llvmMos, outDir, output, name);
                     return;
                 }
-                throw Fail($"{name} doesn't fit in {(platform == "c64" ? "a C64's" : "the " + platform + "'s")} memory:\n  too big by {tooBig.Groups[1].Value.Trim()}");
+                throw Fail($"{name} doesn't fit in {(platform == "c64" ? "a C64's" : "the " + platform + "'s")} memory:\n  too big by {tooBig.Groups[1].Value.Trim()}{string.Concat(X16TooLarge(banks).Select(l => "\n  " + l))}");
             }
             var missing = Regex.Matches(log, @"undefined symbol: cs_([A-Za-z0-9_]*)").Select(m => m.Groups[1].Value).Distinct().Order(StringComparer.Ordinal).ToList();
             if (missing.Count > 0)

@@ -202,11 +202,11 @@ public static class Program
         e = Catch.Run(() =>
         {
             writing = new FileStream("catches-async.tmp", FileMode.Create, FileAccess.Write, FileShare.Read, 0);
-            pending = writing.WriteAsync(new byte[200_000]).AsTask();
+            pending = writing.WriteAsync(new byte[AsyncWriteSize]).AsTask();
             throw new IOException("while writing");
         });
         pending.Wait();
-        Check(e is IOException && pending.IsCompletedSuccessfully && !writing.CanWrite && Length("catches-async.tmp") == 200_000,
+        Check(e is IOException && pending.IsCompletedSuccessfully && !writing.CanWrite && Length("catches-async.tmp") == AsyncWriteSize,
             "a file in use on the I/O thread is closed once its write is done");
         File.Delete("catches-async.tmp");
 
@@ -386,6 +386,11 @@ public static class Program
         Console.WriteLine(s_failed == 0 ? "All checks passed." : s_failed + " checks failed.");
         return s_failed;
     }
+
+    // Big enough to be still running on the I/O thread when the throw comes;
+    // where there are no threads the write runs at once, and a small one
+    // leaves a microcontroller's heap for the tests after it.
+    static int AsyncWriteSize => Parallel.ProcessorCount > 1 ? 200_000 : 2_000;
 
     static long Length(string path)
     {

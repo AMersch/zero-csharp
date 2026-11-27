@@ -45,6 +45,8 @@
     <LangVersion Condition="'$(ZeroLanguage)' == 'CSharp'">preview</LangVersion>
     <Features Condition="'$(ZeroLanguage)' == 'CSharp'">$(Features);updated-memory-safety-rules</Features>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The [LibraryImport] generator's file, for bflat, which runs no generators. -->
+    <EmitCompilerGeneratedFiles Condition="'$(ZeroLanguage)' == 'CSharp'">true</EmitCompilerGeneratedFiles>
 
     <!-- F#: the payload's FSharp.Core (ref/fsharp/, see fsharp/build-core.sh),
          not the NuGet one, which needs .NET. No reflection, so records and
@@ -126,4 +128,8 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <NoWarn>$(NoWarn);NU5103;NU5128</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(ZeroLanguage)' == 'CSharp'">
+    <Analyzer Include="$(ZeroSdkRoot)payload/analyzers/ZeroCSharp.LibraryImport.dll" />
+  </ItemGroup>
 </Project>

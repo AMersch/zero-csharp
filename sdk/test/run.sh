@@ -268,7 +268,8 @@ test_payload_complete() {
              native/arm/System.Private.CoreLib.dll native/arm/{runtime,semihost,rp2350}.c native/arm/rp2350.S \
              native/arm/{an505,an386,rp2350}.ld.in \
              tools/zero-bitcode/zero-bitcode.dll tools/zero-bitcode/zero-bitcode.runtimeconfig.json \
-             tools/zero-bitcode/SharpCompress.dll tools/zero-bitcode/THIRD-PARTY-NOTICES.txt; do
+             tools/zero-bitcode/SharpCompress.dll tools/zero-bitcode/THIRD-PARTY-NOTICES.txt \
+             analyzers/ZeroCSharp.LibraryImport.dll; do
         if [ ! -s "$payload/$f" ]; then fail "payload complete" "missing $f"; return; fi
     done
     if ! is_elf "$payload/native/linux-x64/zerocore.o" x86-64; then fail "payload complete" "linux-x64 object isn't x86-64"; return; fi
@@ -862,6 +863,49 @@ test_extra_dll_imports() {
     if ! grep -q 'bflat arguments:.* -i libc .*-i libdl.so.2' "$LOG" && ! grep -q 'bflat arguments:.* -i libdl.so.2 .*-i libc ' "$LOG"; then
         fail "$name" "libc and libdl.so.2 weren't both passed"; return
     fi
+    pass "$name"
+}
+
+# [LibraryImport]s become [DllImport]s that bflat compiles, under both memory
+# safety rules; what zero mode can't pass is an error naming it.
+test_library_import() {
+    local name="library import" dir out generated expect
+    can_build "$name" || return
+    dir=$(fixture libraryimport)
+    if ! run_in "$dir" libraryimport build -v:n; then fail "$name" "dotnet build failed"; return; fi
+    generated=$(find "$dir/obj" -name LibraryImports.g.cs | head -1)
+    if [ -z "$generated" ] || ! grep -q 'DllImport("libc", EntryPoint = "qsort"' "$generated"; then fail "$name" "the generator wrote no [DllImport] for qsort"; return; fi
+    if ! grep -q "bflat arguments:.*LibraryImports.g.cs" "$LOG"; then fail "$name" "bflat didn't get the generated file"; return; fi
+    out=$("$(exe "$dir/bin/Debug/$TFM/libraryimport")" | tr -d '\r')
+    if [ "$out" != "$(printf 'abs 5 7\ndiv 3 2\nstrlen 4\nqsort 1 2 3 4')" ]; then fail "$name" "printed '$out'"; return; fi
+    if ! run_in "$dir" libraryimport-2 build -v:n || ran_bflat; then fail "$name" "an unchanged project ran bflat again"; return; fi
+    if ! run_in "$dir" libraryimport-release build -c Release; then fail "$name" "the Release build failed"; return; fi
+    out=$("$(exe "$dir/bin/Release/$TFM/libraryimport")" | tr -d '\r')
+    if [ "$out" != "$(printf 'abs 5 7\ndiv 3 2\nstrlen 4\nqsort 1 2 3 4')" ]; then fail "$name" "Release printed '$out'"; return; fi
+
+    dir=$(fixture libraryimport-classic)
+    if ! run_in "$dir" libraryimport-classic build; then fail "$name" "the build under C#'s earlier rules failed"; return; fi
+    out=$("$(exe "$dir/bin/Debug/$TFM/libraryimport-classic")" | tr -d '\r')
+    if [ "$out" != "abs 5 strlen 4" ]; then fail "$name" "under C#'s earlier rules, printed '$out'"; return; fi
+
+    dir=$(fixture libraryimport-errors)
+    if run_in "$dir" libraryimport-errors build; then fail "$name" "the build with unsupported imports succeeded"; return; fi
+    for expect in "ZERO013: 'Bad.puts(string)': parameter 'text' is string" \
+                  "ZERO013: 'Bad.isatty(int)': it returns bool" \
+                  "ZERO013: 'Bad.frexp_ref(double, ref int)': parameter 'exponent' is ref" \
+                  "ZERO013: 'Bad.close(int)': SetLastError isn't supported" \
+                  "ZERO013: 'Bad.getpid()': strings aren't marshalled" \
+                  "ZERO013: 'Bad.getppid()': .MarshalAs. isn't supported" \
+                  "ZERO013: 'Bad.flags(Flags)': parameter 'value' is Flags, whose field 'On' is bool" \
+                  "ZERO013: 'Bad.money(decimal)': parameter 'value' is decimal" \
+                  "ZERO013: 'Bad.toggle(Switch)': parameter 'value' is Switch, whose field 'Up' is bool" \
+                  "ZERO013: 'Bad.call(delegate\*<int, void>)': parameter 'callback' is delegate\*<int, void>, a managed function pointer" \
+                  "ZERO012: 'Bad.generic<T>(int)': a .LibraryImport. method can't be generic" \
+                  "ZERO012: 'NotPartial.Inner.abs(int)': its type 'NotPartial' must be partial"; do
+        if ! grep -q "$expect" "$LOG"; then fail "$name" "no error: $expect"; return; fi
+    done
+    # A method ZERO013 refuses still gets a body, so it isn't also CS8795 (no implementation).
+    if grep -q "CS8795: Partial method 'Bad.puts" "$LOG"; then fail "$name" "a refused import was also CS8795"; return; fi
     pass "$name"
 }
 
@@ -2165,7 +2209,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     native_hello_runs cross_targets c64_target arm_target gpu_template gpu_errors cuda_build cuda_errors bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size strip_symbols debug_unoptimized mac_debug_object_kept windows_debugger macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates
-    custom_packages_folder dotnet_run publish extra_dll_imports inherited_settings clean_and_rebuild
+    custom_packages_folder dotnet_run publish extra_dll_imports library_import inherited_settings clean_and_rebuild
     targets_side_by_side language_settings_forwarded target_framework_is_an_error read_only_packages_folder
     release_tag_check payload_folder_guard target_from_directory_targets upgrade_from_0_1_0
     long_command_line windows_builds_linux unusual_packages_folder crlf_input

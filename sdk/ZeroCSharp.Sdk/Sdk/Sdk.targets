@@ -484,6 +484,12 @@
       <_ZeroBitcodeReference Include="@(Reference->'%(FullPath)')" Condition="'$(ZeroLanguage)' == 'FSharp' and '%(Reference.ZeroFramework)' == 'true' and '%(Reference.ZeroNative)' != 'false' and '%(Reference.Filename)' != 'BflatLib'" />
       <ZeroNativeInput Include="$(ZeroRefDir)*.dll;$(ZeroNativeDir)*" />
       <_ZeroArg Include="@(Compile->'&quot;%(FullPath)&quot;')" Condition="'$(ZeroLanguage)' == 'CSharp'" />
+      <!-- The [LibraryImport] methods as [DllImport]s, from the SDK's generator (Sdk.props). -->
+      <_ZeroLibraryImports Include="$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(CompilerGeneratedFilesOutputPath)', 'ZeroCSharp.LibraryImport', 'ZeroCSharp.LibraryImport.LibraryImportGenerator', 'LibraryImports.g.cs'))"
+                           Condition="'$(ZeroLanguage)' == 'CSharp' and '$(CompilerGeneratedFilesOutputPath)' != ''" />
+      <_ZeroLibraryImports Remove="@(_ZeroLibraryImports)" Condition="!Exists('%(FullPath)')" />
+      <ZeroNativeInput Include="@(_ZeroLibraryImports)" />
+      <_ZeroArg Include="@(_ZeroLibraryImports->'&quot;%(FullPath)&quot;')" />
       <!-- F#: the C# entry program, the F# IL, and zerocore under its own name. -->
       <_ZeroArg Include="&quot;$([System.IO.Path]::GetFullPath('$(ZeroFSharpEntrySource)'))&quot;" Condition="'$(ZeroLanguage)' == 'FSharp'" />
       <_ZeroArg Include="@(IntermediateAssembly->'-r &quot;%(FullPath)&quot;')" Condition="'$(ZeroLanguage)' == 'FSharp'" />

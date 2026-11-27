@@ -35,7 +35,7 @@ instead, and lists what compiles as usual but behaves differently.
 | `Environment.Exit`, `GetEnvironmentVariable`, `ProcessorCount`, `TickCount64`, `NewLine` | The same, in zerocore; `NewLine` is `"\n"` on every target | [Read environment variables and exit](../how-to/use-the-environment.html) |
 | `Vector128.IsHardwareAccelerated`, `Avx2.IsSupported` at run time | Decided when building, by `ZeroInstructionSet` (`-m`) | [Use SIMD](../how-to/use-simd.html) |
 | NuGet packages | Zero libraries, packed for `zero03`; ordinary .NET packages are refused | [Create a library](../how-to/create-a-library.html) |
-| `[DllImport]` | Works, bound when linking; `ZeroDllImports` names libraries besides `libc` and `libm.so.6` | [Install with dotnet](install-with-dotnet.html) |
+| `[DllImport]`, `[LibraryImport]` | Work, bound when linking; `ZeroDllImports` names libraries besides `libc` and `libm.so.6`. No marshalling: numbers, pointers, enums and structs of them | [Install with dotnet](install-with-dotnet.html#call-c-functions) |
 | `[UnmanagedCallersOnly]` exports, NativeAOT's `NativeLib=Shared` | The same | [Build a native library](../how-to/build-a-native-library.html) |
 
 There is no `System.IO` beyond what `File` does (no directories, streams or paths), no `DateTime`

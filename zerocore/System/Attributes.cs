@@ -342,6 +342,33 @@ namespace System.Runtime.InteropServices
 
     public sealed class SuppressGCTransitionAttribute : Attribute { }
 
+    public enum StringMarshalling
+    {
+        Custom = 0,
+        Utf8 = 1,
+        Utf16 = 2,
+    }
+
+    // The SDK's source generator implements each [LibraryImport] method as a
+    // [DllImport] of the same function (sdk/ZeroCSharp.LibraryImport).
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
+    public sealed class LibraryImportAttribute : Attribute
+    {
+        public LibraryImportAttribute(string libraryName) { LibraryName = libraryName; }
+        public string LibraryName { get; }
+        public string EntryPoint { get; set; }
+        public StringMarshalling StringMarshalling { get; set; }
+        public Type StringMarshallingCustomType { get; set; }
+        public bool SetLastError { get; set; }
+    }
+
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
+    public sealed class UnmanagedCallConvAttribute : Attribute
+    {
+        public UnmanagedCallConvAttribute() { }
+        public Type[] CallConvs;
+    }
+
     public sealed class MarshalAsAttribute : Attribute
     {
         public MarshalAsAttribute(UnmanagedType unmanagedType) { }

@@ -87,6 +87,13 @@ public static class Program
     }
     // docs:end
 
+    // When a delay was over, by the clock.
+    static async Task<long> DoneAt(int delay)
+    {
+        await Task.Delay(delay);
+        return Clock.Monotonic;
+    }
+
     static async Task<int> NoWait(int value)
     {
 
@@ -280,11 +287,22 @@ public static class Program
         // docs:end
         long ms = Milliseconds(start);
         Check("WhenAll results in order", all.Length == 3 && all[0] == 2 && all[1] == 4 && all[2] == 6);
-        Check($"WhenAll took {ms} ms, under 140", ms >= 49 && ms < 140);
+        Check($"WhenAll took {ms} ms, at least 50", ms >= 49);
+        // Side by side, not one after another: the three are done at the
+        // same moment. (Not "in under 140 ms": a busy machine can deliver a
+        // timer 100 ms late, as macOS does to a throttled process, and all
+        // three are then late together.)
+        long[] done = await Task.WhenAll(DoneAt(50), DoneAt(50), DoneAt(50));
+        long spread = (Math.Max(done[0], Math.Max(done[1], done[2]))
+            - Math.Min(done[0], Math.Min(done[1], done[2]))) / 1_000_000;
+        Check($"side by side: done within {spread} ms of each other, under 40", spread < 40);
         Task first = await Task.WhenAny(Task.Delay(200), Task.Delay(20));
         Check("WhenAny", first.IsCompleted);
         Task<int> slow = Twice("s", 1, 200), fast = Twice("f", 5, 10);
         Check("WhenAny<T> gives the first", await await Task.WhenAny(slow, fast) == 10);
+        // The slower one goes on, and writes to the log when it's done: wait
+        // for it, so that doesn't land in the next section's log.
+        Check("the slower one finishes too", await slow == 2);
         await Task.WhenAll(Task.Delay(1), Task.CompletedTask);
         Check("WhenAll()", (await Task.WhenAll(new Task<int>[0])).Length == 0);
         End("WhenAll and WhenAny");

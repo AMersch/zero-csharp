@@ -20,8 +20,8 @@ built:
 
 <!-- sample: samples/QuizStep2.cs ask -->
 ```csharp
-// Console.Write holds the prompt in a buffer; In.ReadLine writes it
-// out first, so it shows before the program waits for the answer.
+// Console.Write shows the prompt at once, before the program
+// waits for the answer.
 Console.Write($"Q{i}: {a} + {b} = ");
 int length = In.ReadLine(buffer);
 if (length < 0)
@@ -33,10 +33,11 @@ if (length < 0)
 asked++;
 ```
 
-`Console.Write` leaves the line open, as for a prompt. `Console.WriteLine` writes the buffer out after
-the newline; output without a newline waits until the buffer is full, until `In.ReadLine` or
-`Console.ReadKey` writes it out before reading, or until the program ends. `Out.Flush()`, from the
-`Out` class `Console` writes through, writes it out at once.
+`Console.Write` leaves the line open, as for a prompt, and shows its text at once, as in .NET.
+`Console.WriteLine` writes the whole line in one go. `Out`, the class `Console` writes through, is the
+faster one for a lot of output: `Out.Write` keeps text without a newline until the buffer is full, until
+`In.ReadLine` or `Console.ReadKey` writes it out before reading, until `Out.Flush()`, or until the
+program ends or fails.
 
 `Console.Write(x)` and `Console.WriteLine(x)` without `$"..."` take a string, a span, a `char`, a
 `bool`, any number, or an `object`, whose `ToString()` allocates. `Console.WriteLine("{0,8:F2}", x)`

@@ -58,8 +58,8 @@ public static class Program
         Console.WriteLine("checked Environment");
 
         // docs:exit
-        // No newline: Exit writes what Console still holds before it ends.
-        Console.Write(s_failures == 0 ? "PASS" : "FAIL");
+        // No newline: Out holds the text, and Exit writes it before it ends.
+        Out.Write(s_failures == 0 ? "PASS" : "FAIL");
         Environment.Exit(s_failures);
         // docs:end
         return 99; // not reached

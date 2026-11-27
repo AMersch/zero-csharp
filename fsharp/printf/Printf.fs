@@ -229,9 +229,12 @@ namespace Microsoft.FSharp.Core
         let inline kprintf (continuation: string -> 'Result) (format: PrintfFormat< ^T, unit, string, 'Result, ^U>) : ^T =
             ksprintf continuation format
 
-        /// Standard output, through lib/'s Out (buffered, so it keeps its order
-        /// with Out's own writes).
-        let writeOut (text: string) = Out.Write(text)
+        /// Standard output, through lib/'s Out (so it keeps its order with
+        /// Out's own writes), shown at once as in .NET: printf "Working... "
+        /// is on the screen before the work starts.
+        let writeOut (text: string) =
+            Out.Write(text)
+            Out.Flush()
         let writeOutLine (text: string) = Out.Line(text)
 
         [<System.Runtime.InteropServices.DllImport("libc")>]

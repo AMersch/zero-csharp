@@ -37,7 +37,8 @@ namespace System
         }
 
         // Set by lib/'s Out once it holds output that isn't written yet, so Exit,
-        // and returning from Main (StartupCodeHelpers.Shutdown), write it first.
+        // returning from Main (StartupCodeHelpers.Shutdown) and FailFast write it
+        // first.
         internal static delegate*<void> s_beforeExit;
 
         // Set by lib/ to check, once Main has returned, for work a program
@@ -161,10 +162,17 @@ namespace System
         }
 
         // Zero mode has no exceptions: anything that would throw ends the
-        // process here, after printing the reason to stderr.
+        // process here, after printing the reason to stderr. What the program
+        // printed before it (Console.Write without a newline holds it back)
+        // comes first: that is often where it got to. The hook is taken once,
+        // so a failure while writing it doesn't come back here.
         [DoesNotReturn]
         public static void FailFast(string message)
         {
+            delegate*<void> beforeExit = s_beforeExit;
+            s_beforeExit = null;
+            if (beforeExit != null)
+                beforeExit();
             if (message != null)
             {
                 byte* buffer = stackalloc byte[256];

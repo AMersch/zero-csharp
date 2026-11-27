@@ -65,7 +65,8 @@ else
 ## Console: formatting straight to stdout
 
 `Console.Write` and `Console.WriteLine` write through `lib/Out.cs`, a buffered writer that encodes text
-as UTF-8 and hands each line to `write()` in one call. `Console.WriteLine($"...")` uses a custom
+as UTF-8 and hands each line to `write()` in one call (`Console.Write` shows what it has at once, as in
+.NET). `Console.WriteLine($"...")` uses a custom
 interpolated string handler, so every hole is formatted straight into the output buffer and no string
 is built:
 

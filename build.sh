@@ -1519,6 +1519,10 @@ case "$TARGET" in
         echo "[dotnet] sdk/ZeroCSharp.Bitcode -> $PAYLOAD_DIR/tools/zero-bitcode"
         dotnet publish sdk/ZeroCSharp.Bitcode -c Release -o "$PAYLOAD_DIR/tools/zero-bitcode" -v q -nologo
         rm -f "$PAYLOAD_DIR/tools/zero-bitcode/"*.pdb
+        # The [LibraryImport] generator, which the C# compiler loads.
+        echo "[dotnet] sdk/ZeroCSharp.LibraryImport -> $PAYLOAD_DIR/analyzers"
+        dotnet build sdk/ZeroCSharp.LibraryImport -c Release -o "$PAYLOAD_DIR/analyzers" -v q -nologo
+        rm -f "$PAYLOAD_DIR/analyzers/"*.pdb "$PAYLOAD_DIR/analyzers/"*.deps.json
         # UEFI: efi/'s objects for each architecture, and libm as one library.
         for arch in x64 arm64; do
             BFLAT_ARCH=$arch UEFI_OBJ=$PAYLOAD_DIR/native/uefi-$arch.obj build_uefi_objects "$WIN_CLANG"

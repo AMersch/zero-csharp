@@ -168,6 +168,28 @@ to time and ship. `dotnet publish` builds Release, and copies the program to the
 needs nothing next to it, unless a C library it links with has a file for run time, like SDL's
 `SDL3.dll` on Windows: that's copied too.
 
+## Call C functions
+
+`[DllImport]` and `[LibraryImport]` both call C functions, bound when the program links. A
+`[LibraryImport]` method is `static partial`, as in .NET, and the SDK's source generator writes it as
+a `[DllImport]` of the same function:
+
+<!-- sample: sdk/test/fixtures/libraryimport/Program.cs imports -->
+```csharp
+[LibraryImport("libc", EntryPoint = "abs")]
+[UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+public static partial int Abs(int value);
+
+[LibraryImport("libc")]
+internal static safe partial nuint strlen(byte* s);
+```
+
+There is no marshalling: what the method takes and returns is what C sees. That's numbers other than
+`bool` and `char`, pointers, function pointers, enums, and structs of these. A
+`string`, `bool` or `ref` parameter, `SetLastError` or `[MarshalAs]` is an error, `ZERO013`; a generic
+method, or one in a type that isn't `partial`, is `ZERO012`. A method marked neither `safe` nor
+`unsafe` is safe to call, as in .NET.
+
 ## The iOS simulator
 
 An `iossimulator-arm64` program is built the same way as a macOS one, on any machine: iOS runs the

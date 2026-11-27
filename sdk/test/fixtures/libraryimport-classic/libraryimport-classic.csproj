@@ -1,0 +1,7 @@
+<Project Sdk="ZeroCSharp.Sdk/@ZERO_SDK_VERSION@">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- C#'s memory safety rules before 15. -->
+    <Features></Features>
+  </PropertyGroup>
+</Project>

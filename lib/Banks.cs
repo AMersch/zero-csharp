@@ -36,6 +36,7 @@ public static class Banks
     [DllImport("libc")] static unsafe extern void cx16_bank_read(int bank, int offset, byte* destination, int count);
     [DllImport("libc")] static unsafe extern void cx16_bank_write(int bank, int offset, byte* source, int count);
     [DllImport("libc")] static safe extern void cx16_bank_fill(int bank, int offset, int value, int count);
+    [DllImport("libc")] static unsafe extern int cx16_bank_load(int bank, int offset, char* name, int length);
 
     /// <summary>The banks a program can use: 63 with the emulator's 512 KB, up to 255 with 2 MB. The KERNAL's bank 0 isn't counted.</summary>
     public static int Count => cx16_bank_count() - 1;
@@ -134,6 +135,27 @@ public static class Banks
             done += n;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Reads a whole file into the banks, from address on, and returns how many bytes
+    /// it was; -1 if it couldn't. It is much smaller than File, for a program that only
+    /// loads: pictures, levels, tables. The name is ASCII, in the current folder of the
+    /// drive the program came from ("level1.bin", "data/level1.bin").
+    /// The caller has to leave room: how long the file is isn't known before it is
+    /// read, and a file longer than the banks from address on overwrites what is there.
+    /// </summary>
+    public static int Load(int address, string name)
+    {
+        if (address < 0 || address >= Size || name == null)
+            return -1;
+        unsafe
+        {
+            // SAFETY: the runtime reads name.Length chars of the string, and
+            // the bank and offset are inside the banks.
+            fixed (char* p = name)
+                return cx16_bank_load(address / BankSize + 1, address % BankSize, p, name.Length);
+        }
     }
 
     /// <summary>Copies count bytes from one address in the banks to another, front to back, so a copy to a lower address may overlap the bytes it comes from. Returns false, and copies nothing, if either end isn't in the banks.</summary>

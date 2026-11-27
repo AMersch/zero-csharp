@@ -223,6 +223,7 @@ CX16_SAMPLES=(
     BanksDemo
     BankedDemo
     BankedListDemo
+    BankLoad
     BanksWithCode
     Mouse
     DiskFiles
@@ -626,7 +627,7 @@ test_cx16() {
     run_all "Commander X16 (x16emu)" cx16 check
     # Once more with all of their own code in banks: a runtime function that switches banks
     # must not have been built into it (FIXED_RAM in cx16/runtime.c).
-    for name in DiskFiles; do
+    for name in BankLoad DiskFiles; do
         ZERO_CX16_BANK=Program ./build.sh --cx16 "$name" > /dev/null
         status=0
         out=$(X16_TIMEOUT=60 ./run.sh --cx16 "$name" < /dev/null 2>&1) || status=$?
@@ -642,7 +643,7 @@ test_cx16() {
     # The emulator's host folder is forgiving where the SD card's own DOS isn't: the
     # samples that use the disk run on a card image too.
     if [ -n "$card" ]; then
-        for name in DiskFiles DiskList DiskInfo DiskFolders DiskChange; do
+        for name in DiskFiles DiskList DiskInfo DiskFolders DiskChange BankLoad; do
             status=0
             out=$(X16_SDCARD=$card ./run.sh --cx16 "$name" < /dev/null 2>&1) || status=$?
             # (the emulator says that it has a card)

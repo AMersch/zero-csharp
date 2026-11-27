@@ -235,6 +235,7 @@ CX16_SAMPLES=(
     BanksDemo
     BankedDemo
     BankedListDemo
+    BankLoad
     BanksWithCode
     Mouse
     DiskFiles

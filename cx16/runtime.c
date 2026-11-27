@@ -44,9 +44,9 @@ i32 __managed__Main(i32 argc, char **argv);
 
 static char in_emulator;
 static int file_errno;          // what lib/FileSystem.cs reads after a failed call: C's error numbers
+static unsigned char program_device;    // the device the program was loaded from (set in main)
 #ifdef CX16_FILES
 static void files_shutdown(void);
-static unsigned char program_device;    // the device the program was loaded from (set in main)
 #endif
 
 // Leaves the program: back to BASIC's READY (the build links llvm-mos's
@@ -100,9 +100,7 @@ static void load_code_banks(void)
 int main(void)
 {
     in_emulator = EMU_ID_1 == 0x31 && EMU_ID_2 == 0x36;
-#ifdef CX16_FILES
     program_device = *(volatile unsigned char *)0x00BA ? *(volatile unsigned char *)0x00BA : 8;   // before anything else opens
-#endif
 #ifdef CX16_CODE_BANKS
     load_code_banks();
 #endif
@@ -4595,4 +4593,38 @@ FIXED_RAM void cs_cx16_bank_write(i32 bank, i32 offset, const void *source, i32 
 FIXED_RAM void cs_cx16_bank_fill(i32 bank, i32 offset, i32 value, i32 count)
 {
     WITH_BANK(bank, memset((void *)(0xA000u + (unsigned)offset), (int)value, (size_t)count));
+}
+
+// A file straight into the banks, for Banks.Load: the KERNAL's headerless LOAD
+// (secondary address 2: every byte of the file counts), which carries on into
+// the next bank when one is full. None of the file functions further down are
+// needed for it, so a program that only loads stays small. The number of bytes
+// read, or -1.
+FIXED_RAM i32 cs_cx16_bank_load(i32 bank, i32 offset, const unsigned short *name, i32 length)
+{
+    char text[80];
+    if (length <= 0 || length >= (i32)sizeof text)
+        return -1;
+    unsigned char count = (unsigned char)length;
+    for (unsigned char i = 0; i < count; i++) {
+        unsigned short c = name[i];
+        if (c < ' ' || c > '~')
+            return -1;                  // the card's names are ASCII
+        text[i] = (char)c;
+    }
+    text[count] = 0;
+    unsigned char saved = RAM_BANK;
+    unsigned char first = (unsigned char)(bank + CODE_BANKS);
+    unsigned start = 0xA000u + (unsigned)offset;
+    RAM_BANK = first;
+    cbm_k_setnam(text);
+    cbm_k_setlfs(0, program_device, 2);
+    unsigned end = (unsigned)cbm_k_load(0, (void *)start);
+    unsigned char status = cbm_k_readst();
+    unsigned char last = RAM_BANK;
+    RAM_BANK = saved;                   // R47 comes back with bank 0 from a device that isn't there
+    // A load that failed returns the KERNAL's error number, which is no address.
+    if (end < 0xA000u || (status & 0xBF) != 0)
+        return -1;
+    return (i32)(unsigned char)(last - first) * 0x2000 + (i32)end - (i32)start;
 }

@@ -505,6 +505,20 @@ $00), copies, and switches back, with interrupts off. Addresses run over the ban
 copy can cross from one into the next. A copy that doesn't fit in the banks returns false and does
 nothing. The banks hold whatever was in them at startup. `samples/BanksDemo.cs` checks all of it.
 
+### Loading a file into the banks
+
+`Banks.Load` reads a whole file from the card straight into the banks and returns how many bytes it was,
+or -1:
+
+```csharp
+int length = Banks.Load(0, "level1.bin");     // or "data/level1.bin"
+```
+
+It is one KERNAL `LOAD`, without the code behind `File`: a program that only loads a file came out at
+13 KB where one that opens and reads it was 27 KB. The name is ASCII, in the current folder of the drive
+the program came from. Leave room: the length isn't known before the file is read, and a file longer than
+the banks from that address on overwrites what is there. `samples/BankLoad.cs` checks it.
+
 ### Arrays in the banks
 
 `BankedArray<T>` (`lib/BankedArray.cs`) is an array whose elements are in the banks, for data that

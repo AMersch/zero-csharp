@@ -29,8 +29,8 @@ quiz takes numbers, so 32 is plenty.
 
 <!-- sample: samples/QuizStep2.cs ask -->
 ```csharp
-// Console.Write holds the prompt in a buffer; In.ReadLine writes it
-// out first, so it shows before the program waits for the answer.
+// Console.Write shows the prompt at once, before the program
+// waits for the answer.
 Console.Write($"Q{i}: {a} + {b} = ");
 int length = In.ReadLine(buffer);
 if (length < 0)
@@ -42,10 +42,9 @@ if (length < 0)
 asked++;
 ```
 
-`Console.Write` puts the prompt in the output buffer without a newline. The buffer is written out
-only when `Console.WriteLine` ends a line, when the buffer is full, or on `Out.Flush()`. `In.ReadLine`
-writes it out before it reads, so the prompt is on the screen before the program waits. You don't
-have to flush yourself.
+`Console.Write` shows the prompt at once, as in .NET. `Out.Write`, the faster one for output in bulk,
+keeps text in a buffer until a newline, a full buffer or `Out.Flush()`; `In.ReadLine` writes that out
+before it reads too, so a prompt is on the screen before the program waits either way.
 
 `In.ReadLine(buffer)` returns one of three things:
 

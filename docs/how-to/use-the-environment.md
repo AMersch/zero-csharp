@@ -39,14 +39,15 @@ What a program sees on each target:
 
 <!-- sample: samples/Env.cs exit -->
 ```csharp
-// No newline: Exit writes what Console still holds before it ends.
-Console.Write(s_failures == 0 ? "PASS" : "FAIL");
+// No newline: Out holds the text, and Exit writes it before it ends.
+Out.Write(s_failures == 0 ? "PASS" : "FAIL");
 Environment.Exit(s_failures);
 ```
 
 `Environment.Exit(code)` ends the program as returning `code` from `Main` would, from any depth. What
-`Console` holds that isn't written yet (a last `Console.Write` without a newline) is written first, and so are
-files the C library buffers. Nothing else runs: arenas aren't freed and `using` blocks don't end, which
+`Out` holds that isn't written yet (a last `Out.Write` without a newline) is written first, and so are
+files the C library buffers. A program that fails (an index out of range, `Environment.FailFast`)
+writes it too, before the failure's message. Nothing else runs: arenas aren't freed and `using` blocks don't end, which
 is fine when the process is about to end anyway. Exit codes are 0 to 255 everywhere, as on Linux.
 
 ## The rest

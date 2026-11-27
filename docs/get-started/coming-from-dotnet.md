@@ -50,8 +50,8 @@ the end of input:
 
 <!-- sample: samples/QuizStep2.cs ask -->
 ```csharp
-// Console.Write holds the prompt in a buffer; In.ReadLine writes it
-// out first, so it shows before the program waits for the answer.
+// Console.Write shows the prompt at once, before the program
+// waits for the answer.
 Console.Write($"Q{i}: {a} + {b} = ");
 int length = In.ReadLine(buffer);
 if (length < 0)

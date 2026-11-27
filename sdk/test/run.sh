@@ -1172,6 +1172,21 @@ test_static_constructor_threads() {
     pass "$name"
 }
 
+# Console.Write shows its text at once, as in .NET, and a program that fails
+# prints what Out still holds (part of a line) before the failure's message.
+test_failure_keeps_output() {
+    local name="console write and failure output" dir out status
+    can_build "$name" || return
+    dir=$(fixture failfast)
+    if ! run_in "$dir" failfast build; then fail "$name" "dotnet build failed"; return; fi
+    run_limited 30 "$WORK/failfast.out" "$(exe "$dir/bin/Debug/$TFM/failfast")"
+    status=$?
+    out=$(tr -d '\r' < "$WORK/failfast.out")
+    if [ "$status" -eq 0 ]; then fail "$name" "exit 0: $out"; return; fi
+    if [ "$out" != "a b c IndexOutOfRangeException" ]; then fail "$name" "printed '$out'"; return; fi
+    pass "$name"
+}
+
 # ---- Native libraries (NativeLib=Shared) --------------------------------------
 
 # call_native <call-native-lib.sh args>: the .NET caller (a fresh copy of its
@@ -2218,7 +2233,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     mac_target mac_target_links_libm_and_threads mac_target_path_with_spaces mac_target_undefined_import
     ios_simulator_target ios_simulator_errors
     trim_macos_layout mac_host_builds_all_targets mac_target_common_libc mac_target_user_tbd mac_target_newer_dylib
-    tutorial_steps simd_instruction_set static_constructor_threads
+    tutorial_steps simd_instruction_set static_constructor_threads failure_keeps_output
     native_library_dotnet native_library_exports native_library_two native_library_errors
     native_library_not_packable native_library_publish native_library_incremental native_library_clean
     native_library_path_with_spaces native_library_with_zero_reference native_library_dotted_name

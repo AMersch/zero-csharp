@@ -36,13 +36,29 @@ namespace System
             }
         }
 
-        // Set by lib/'s Out once it holds output that isn't written yet, so Exit,
-        // and returning from Main (StartupCodeHelpers.Shutdown), write it first.
-        internal static delegate*<void> s_beforeExit;
+        // Set by lib/'s Out to its buffer and to its count of bytes not written
+        // yet, so Exit, returning from Main (StartupCodeHelpers.Shutdown) and
+        // FailFast write them first. Data rather than a function to call: a
+        // managed call through a pointer makes FailFast take the shadow stack
+        // compiled C# passes as a hidden argument, and then every call to it
+        // and to the throw helpers passes one too (1.3 KB on a Commodore 64).
+        internal static byte* s_outBuffer;
+        internal static int* s_outLength;
+
+        // Writes what Out holds, once.
+        internal static void WritePendingOutput()
+        {
+            int* length = s_outLength;
+            if (length == null || *length <= 0)
+                return;
+            int count = *length;
+            *length = 0;
+            Platform.write(1, s_outBuffer, (nuint)count);
+        }
 
         // Set by lib/ to check, once Main has returned, for work a program
         // started and never let run (lib/Timers.cs: a timer started without
-        // Fiber.Run). Called after s_beforeExit, so output comes first, and
+        // Fiber.Run). Called after WritePendingOutput, so output comes first, and
         // not by Exit, which ends the program on purpose.
         internal static delegate*<void> s_atMainReturn;
 
@@ -53,9 +69,7 @@ namespace System
         [DoesNotReturn]
         public static void Exit(int exitCode)
         {
-            delegate*<void> beforeExit = s_beforeExit;
-            if (beforeExit != null)
-                beforeExit();
+            WritePendingOutput();
             Platform.exit(exitCode);
             while (true) { }
         }
@@ -161,22 +175,28 @@ namespace System
         }
 
         // Zero mode has no exceptions: anything that would throw ends the
-        // process here, after printing the reason to stderr.
+        // process here, after printing the reason to stderr. What the program
+        // printed before it (Out.Write without a newline holds it back)
+        // comes first: that is often where it got to. The message is encoded
+        // before that call, so no object reference is live across it, which
+        // would also make FailFast take the shadow stack (see s_outBuffer).
         [DoesNotReturn]
         public static void FailFast(string message)
         {
+            byte* buffer = stackalloc byte[256];
+            int length = 0;
             if (message != null)
             {
-                byte* buffer = stackalloc byte[256];
-                int length = 0;
                 for (int i = 0; i < message.Length && length < 255; i++)
                 {
                     char c = message[i];
                     buffer[length++] = c < 0x80 ? (byte)c : (byte)'?';
                 }
                 buffer[length++] = (byte)'\n';
-                Platform.write(2, buffer, (nuint)length);
             }
+            WritePendingOutput();
+            if (length > 0)
+                Platform.write(2, buffer, (nuint)length);
             Platform.abort();
             while (true) { }
         }

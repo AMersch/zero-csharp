@@ -29,8 +29,8 @@ public static class Program
         {
             int a = Next(50), b = Next(50);
             // docs:ask
-            // Console.Write holds the prompt in a buffer; In.ReadLine writes it
-            // out first, so it shows before the program waits for the answer.
+            // Console.Write shows the prompt at once, before the program
+            // waits for the answer.
             Console.Write($"Q{i}: {a} + {b} = ");
             int length = In.ReadLine(buffer);
             if (length < 0)

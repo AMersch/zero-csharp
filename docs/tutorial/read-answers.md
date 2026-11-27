@@ -21,8 +21,8 @@ int right = 0, asked = 0;
 
 <!-- sample: samples/QuizStep2.cs ask -->
 ```csharp
-// Console.Write holds the prompt in a buffer; In.ReadLine writes it
-// out first, so it shows before the program waits for the answer.
+// Console.Write shows the prompt at once, before the program
+// waits for the answer.
 Console.Write($"Q{i}: {a} + {b} = ");
 int length = In.ReadLine(buffer);
 if (length < 0)
@@ -34,9 +34,8 @@ if (length < 0)
 asked++;
 ```
 
-`Console.Write` writes the prompt without ending the line. `Console` sends its buffer to the terminal
-only when a line ends, so a prompt would normally sit in the buffer while the program waits.
-`In.ReadLine` writes the buffer out before it reads, so the prompt shows.
+`Console.Write` writes the prompt without ending the line, and it shows at once, as in .NET, so it is
+on the screen while the program waits.
 
 `In.ReadLine(buffer)` reads one line into the buffer and returns its length. The line ending (`\n` or
 `\r\n`) isn't included, and the input is decoded as UTF-8. At the end of input it returns -1: when a

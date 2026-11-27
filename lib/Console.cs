@@ -1,5 +1,6 @@
-// System.Console for zero mode: Write and WriteLine through Out (buffered,
-// UTF-8), ReadLine, Read and ReadKey through In. Static methods only, with
+// System.Console for zero mode: Write and WriteLine through Out (UTF-8;
+// Write shows its text at once, as in .NET), ReadLine, Read and ReadKey
+// through In. Static methods only, with
 // no TextWriter behind them, so each overload a program doesn't call is
 // trimmed away, which matters on a Commodore 64.
 //
@@ -21,26 +22,36 @@ namespace System
 {
     public static class Console
     {
-        public static void Write(string value) => global::Out.Write(value);
-        public static void Write(ReadOnlySpan<char> value) => global::Out.Write(value);
-        public static void Write(char value) => global::Out.Write(value);
-        public static void Write(bool value) => global::Out.Write(value);
-        public static void Write(int value) => global::Out.Write(value);
-        public static void Write(uint value) => global::Out.Write((long)value);
-        public static void Write(long value) => global::Out.Write(value);
-        public static void Write(ulong value) => Formatted(value);
-        public static void Write(float value) => Formatted(value);
-        public static void Write(double value) => global::Out.Write(value);
-        public static void Write(decimal value) => Formatted(value);
+        // Write shows its text at once, as .NET's Console does: a program that
+        // prints "Working... " and then works shouldn't sit silent. That is a
+        // write() per call; Out.Write is the buffered one, for output in bulk.
+        // WriteLine writes its line in one go, as Out.Line does.
+        public static void Write(string value) { global::Out.Write(value); global::Out.Flush(); }
+        public static void Write(ReadOnlySpan<char> value) { global::Out.Write(value); global::Out.Flush(); }
+        public static void Write(char value) { global::Out.Write(value); global::Out.Flush(); }
+        public static void Write(bool value) { global::Out.Write(value); global::Out.Flush(); }
+        public static void Write(int value) { global::Out.Write(value); global::Out.Flush(); }
+        public static void Write(uint value) { global::Out.Write((long)value); global::Out.Flush(); }
+        public static void Write(long value) { global::Out.Write(value); global::Out.Flush(); }
+        public static void Write(ulong value) { Formatted(value); global::Out.Flush(); }
+        public static void Write(float value) { Formatted(value); global::Out.Flush(); }
+        public static void Write(double value) { global::Out.Write(value); global::Out.Flush(); }
+        public static void Write(decimal value) { Formatted(value); global::Out.Flush(); }
         public static void Write(object value)
         {
             if (value != null)
                 global::Out.Write(value.ToString());
+            global::Out.Flush();
         }
 
-        public static void Write(string format, params object[] args) => global::Out.Write(string.Format(format, args));
+        public static void Write(string format, params object[] args)
+        {
+            global::Out.Write(string.Format(format, args));
+            global::Out.Flush();
+        }
 
-        public static void Write(ref global::Out.InterpolatedHandler handler) { }
+        // The handler has written the text into Out's buffer by now.
+        public static void Write(ref global::Out.InterpolatedHandler handler) => global::Out.Flush();
 
         public static void WriteLine() => global::Out.Line();
         public static void WriteLine(string value) => global::Out.Line(value);
@@ -48,62 +59,63 @@ namespace System
 
         public static void WriteLine(char value)
         {
-            Write(value);
-            WriteLine();
+            global::Out.Write(value);
+            global::Out.Line();
         }
 
         public static void WriteLine(bool value)
         {
-            Write(value);
-            WriteLine();
+            global::Out.Write(value);
+            global::Out.Line();
         }
 
         public static void WriteLine(int value)
         {
-            Write(value);
-            WriteLine();
+            global::Out.Write(value);
+            global::Out.Line();
         }
 
         public static void WriteLine(uint value)
         {
-            Write(value);
-            WriteLine();
+            global::Out.Write((long)value);
+            global::Out.Line();
         }
 
         public static void WriteLine(long value)
         {
-            Write(value);
-            WriteLine();
+            global::Out.Write(value);
+            global::Out.Line();
         }
 
         public static void WriteLine(ulong value)
         {
-            Write(value);
-            WriteLine();
+            Formatted(value);
+            global::Out.Line();
         }
 
         public static void WriteLine(float value)
         {
-            Write(value);
-            WriteLine();
+            Formatted(value);
+            global::Out.Line();
         }
 
         public static void WriteLine(double value)
         {
-            Write(value);
-            WriteLine();
+            global::Out.Write(value);
+            global::Out.Line();
         }
 
         public static void WriteLine(decimal value)
         {
-            Write(value);
-            WriteLine();
+            Formatted(value);
+            global::Out.Line();
         }
 
         public static void WriteLine(object value)
         {
-            Write(value);
-            WriteLine();
+            if (value != null)
+                global::Out.Write(value.ToString());
+            global::Out.Line();
         }
 
         public static void WriteLine(string format, params object[] args) => global::Out.Line(string.Format(format, args));

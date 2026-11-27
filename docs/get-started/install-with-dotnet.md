@@ -13,7 +13,15 @@ the code.
 
 ## What you need
 
-- **The .NET 10 SDK.** Nothing else: the packages bring the compiler and the linker.
+- **The .NET 10 SDK, 10.0.400 or newer** (`dotnet --version`). Nothing else: the packages bring the
+  compiler and the linker. Linux distributions' own `dotnet` packages (`apt install dotnet-sdk-10.0`
+  on Ubuntu, Fedora's and RHEL's) are the older 10.0.1xx line, and the build stops with error
+  `ZERO014`. Install Microsoft's SDK beside it and put it first on `PATH`:
+
+  ```bash
+  curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0
+  export PATH="$HOME/.dotnet:$PATH"
+  ```
 - **Linux (x64 or arm64), Windows (x64) or a Mac with Apple Silicon to build programs.** Each builds
   for all four targets: Linux x64, Linux arm64, Windows x64 and macOS on Apple Silicon. The packages are
   tested on GitHub's Windows and macOS runners, and on Ubuntu 22.04 and 24.04, Debian 12 and Fedora 41

@@ -42,7 +42,7 @@ public static class Program
     // holds it.
     static void FillYieldCheck(scoped ScratchScope scratch, Turn t)
     {
-        Span<byte> mine = scratch.AllocSpan<byte>(200);
+        Span<byte> mine = scratch.AllocSpan<byte>(100);
         mine.Fill((byte)t.Id);
         Fiber.Yield();
         bool intact = true;
@@ -55,14 +55,17 @@ public static class Program
     public static int Main()
     {
         // Each thread and fiber that calls Arena.Scratch keeps a scratch
-        // arena of its own: 256 bytes here instead of 2 KB, fixed at that
-        // (with 512, a C64 runs out of heap for the fibers' arenas).
-        Arena.ScratchSize = 256;
-        Arena.ScratchMaxCapacity = 256;
+        // arena of its own: 128 bytes here instead of 2 KB, fixed at that.
+        // On a C64 the three arenas come out of the few hundred bytes of
+        // heap this program leaves: with 256 they fit by under 100 bytes,
+        // and any change that grew a fiber program by that much failed the
+        // test with "Arena: out of memory". 128 leaves some 400 spare.
+        Arena.ScratchSize = 128;
+        Arena.ScratchMaxCapacity = 128;
 
         int sum = Arena.Scratch(static (scoped ScratchScope scratch) =>
         {
-            Span<byte> bytes = scratch.AllocSpan<byte>(200);
+            Span<byte> bytes = scratch.AllocSpan<byte>(100);
             for (int i = 0; i < bytes.Length; i++)
                 bytes[i] = (byte)i;
             int total = 0;
@@ -70,7 +73,7 @@ public static class Program
                 total += b;
             return total;
         });
-        Check("scratch memory", sum == 199 * 200 / 2);
+        Check("scratch memory", sum == 99 * 100 / 2);
 
         var log = new Log();
         Turn[] turns = [new Turn(log, 1), new Turn(log, 2)];

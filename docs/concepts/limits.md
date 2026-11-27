@@ -5,7 +5,7 @@ index: 6
 
 # Limits
 
-Zero mode has no garbage collector, no `catch` blocks, no async/await, no .NET LINQ, and almost no base class
+Zero mode has no garbage collector, no `catch` blocks, no .NET LINQ, and almost no base class
 library. A good deal of ordinary C# still works, because zerocore provides the parts the compiler
 needs. This page lists both sides and the known issues, so you can tell early whether a design fits.
 
@@ -35,6 +35,10 @@ With zerocore, as `build.sh` builds it:
 - **Threads**: [`Parallel.For`](../how-to/run-in-parallel.html) runs a loop on every processor, with
   `Interlocked` and `Volatile` for shared state, and `[ThreadStatic]` fields for per-thread state.
   There is no `Thread` class or `lock`.
+- **`async` and `await`**, with `Task`, `ValueTask`, `CancellationToken` and `TimeProvider`, on
+  [fibers](../how-to/use-fibers.html#use-async-and-await) rather than a thread pool. Sockets and files
+  have their async methods. Awaiting a canceled task ends the program, as an uncaught
+  `OperationCanceledException` would, and no task ever faults.
 - **`Math` and `MathF`**, and `Main(string[] args)` and top-level statements.
 - **`System.Numerics`**: `Complex`, `Vector2`, `Vector3`, `Vector4`, `Matrix3x2`, `Matrix4x4`,
   `Quaternion` and `Plane`, with .NET's members, on every target (see
@@ -637,9 +641,11 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
   `string[]` as `object[]`) aborts with a message saying so, instead of answering wrongly.
 - **Most of the base class library.** No .NET collections (use
   [`lib/`'s](../how-to/choose-a-collection.html)), no LINQ (use [`lib/Seq.cs`](../how-to/query-data.html)),
-  no `System.IO` (use [`File`](../how-to/read-and-write-files.html)), `DateTime`, `Stopwatch` or
-  `Random` (use [`Clock` and `Random`](../how-to/use-the-clock-and-random-numbers.html)), no
-  reflection (a `Type` only compares), async, `Thread`, or boxing of `Nullable<T>`.
+  of `System.IO` only [`File`](../how-to/read-and-write-files.html),
+  [`Path`, `Directory`](../how-to/work-with-paths-and-directories.html) and
+  [the streams](../how-to/use-streams.html), no `DateTime`, `Stopwatch` or `Random` (use
+  [`Clock` and `Random`](../how-to/use-the-clock-and-random-numbers.html)), no reflection (a `Type`
+  only compares), no `Thread`, and no boxing of `Nullable<T>`.
 - **A struct's default `Equals` compares bytes.** A reference field compares by reference, where .NET
   would call its `Equals`. Records and `IEquatable<T>` compare field by field. `EqualityComparer<T>`,
   and so `Dict` and `HashSet` keys, compare such a struct by its bytes even if it overrides

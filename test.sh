@@ -624,6 +624,21 @@ test_cx16() {
     card=$(find_x16_sdcard) || card=
     unset X16_SDCARD        # the samples run on the host folder; those with files on the card too, below
     run_all "Commander X16 (x16emu)" cx16 check
+    # Once more with all of their own code in banks: a runtime function that switches banks
+    # must not have been built into it (FIXED_RAM in cx16/runtime.c).
+    for name in DiskFiles; do
+        ZERO_CX16_BANK=Program ./build.sh --cx16 "$name" > /dev/null
+        status=0
+        out=$(X16_TIMEOUT=60 ./run.sh --cx16 "$name" < /dev/null 2>&1) || status=$?
+        if [ "$status" = 0 ] && [ "$out" = "$(cat "$EXPECTED/$name.txt")" ]; then
+            echo "ok   $name (its code in banks)"
+        else
+            echo "FAIL $name with its code in banks: exit code $status"
+            echo "$out" | tail -5 | sed 's/^/       /'
+            failures=$((failures + 1))
+        fi
+        ./build.sh --cx16 "$name" > /dev/null
+    done
     # The emulator's host folder is forgiving where the SD card's own DOS isn't: the
     # samples that use the disk run on a card image too.
     if [ -n "$card" ]; then

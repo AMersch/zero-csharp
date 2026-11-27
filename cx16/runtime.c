@@ -36,6 +36,12 @@ i32 __managed__Main(i32 argc, char **argv);
 #define EMU_STDOUT (*(volatile unsigned char *)0x9FBB)
 #define EMU_DEBUG1 (*(volatile unsigned char *)0x9FB9)
 
+// For every function here that switches the RAM bank, or puts it back after the KERNAL: it
+// must stay in fixed RAM. The link optimizes the program and this file as one, and would
+// otherwise build such a function into a caller in a code bank, which then switches away the
+// very code that is running. (Seen with constant arguments: Banks.Fill(0, 400, 1) hung.)
+#define FIXED_RAM __attribute__((noinline))
+
 static char in_emulator;
 static int file_errno;          // what lib/FileSystem.cs reads after a failed call: C's error numbers
 #ifdef CX16_FILES
@@ -2133,7 +2139,7 @@ static char scratch(unsigned char device, const char *path)
 
 static long file_size(unsigned char device, const char *path);
 
-i32 cs_fopen(const char *given, const char *mode)
+FIXED_RAM i32 cs_fopen(const char *given, const char *mode)
 {
     KEEP_RAM_BANK;
     unsigned char device;
@@ -2245,7 +2251,7 @@ static unsigned read_bytes(int slot, unsigned char *buffer, unsigned count)
     return n;
 }
 
-u32 cs_fread(void *buffer, u32 size, u32 count, i32 handle)
+FIXED_RAM u32 cs_fread(void *buffer, u32 size, u32 count, i32 handle)
 {
     KEEP_RAM_BANK;
     int slot = file_slot(handle);
@@ -2275,7 +2281,7 @@ static unsigned write_bytes(int slot, const unsigned char *bytes, unsigned count
     return n;
 }
 
-u32 cs_fwrite(const void *buffer, u32 size, u32 count, i32 handle)
+FIXED_RAM u32 cs_fwrite(const void *buffer, u32 size, u32 count, i32 handle)
 {
     KEEP_RAM_BANK;
     int slot = file_slot(handle);
@@ -2295,7 +2301,7 @@ u32 cs_fwrite(const void *buffer, u32 size, u32 count, i32 handle)
     return write_bytes(slot, (const unsigned char *)buffer, (unsigned)(size * count)) / (unsigned)size;
 }
 
-i32 cs_fclose(i32 handle)
+FIXED_RAM i32 cs_fclose(i32 handle)
 {
     KEEP_RAM_BANK;
     int slot = file_slot(handle);
@@ -2316,7 +2322,7 @@ static void skip_to(int slot, unsigned long target)
     }
 }
 
-i32 cs_fseeko(i32 handle, long long offset, i32 origin)
+FIXED_RAM i32 cs_fseeko(i32 handle, long long offset, i32 origin)
 {
     KEEP_RAM_BANK;
     int slot = file_slot(handle);
@@ -2363,7 +2369,7 @@ long long cs_ftello(i32 handle)
     return slot < 0 ? -1 : (long long)files[slot].position;
 }
 
-i32 cs_remove(const char *given)
+FIXED_RAM i32 cs_remove(const char *given)
 {
     KEEP_RAM_BANK;
     unsigned char device;
@@ -2377,7 +2383,7 @@ i32 cs_remove(const char *given)
 
 // A command to the drive, such as "md:folder" or "cd:..": its answer's code (0 and 1 are
 // fine), or -1 if there is no such drive. The word before the colon is made capitals.
-i32 cs_cx16_dos(const char *given)
+FIXED_RAM i32 cs_cx16_dos(const char *given)
 {
     KEEP_RAM_BANK;
     unsigned char device;
@@ -2440,7 +2446,7 @@ static char dir_line(unsigned *number, char *text, unsigned char room)
 
 // Copies to or from the bank of entries, with interrupts off: a handler must find the
 // bank it left.
-static void dir_copy(unsigned at, unsigned char *bytes, unsigned char count, char store)
+FIXED_RAM static void dir_copy(unsigned at, unsigned char *bytes, unsigned char count, char store)
 {
     unsigned char saved = RAM_BANK;
     volatile unsigned char *window = (volatile unsigned char *)(0xA000u + at);
@@ -2614,7 +2620,7 @@ void cs_cx16_dir_close(void)
 }
 
 // given: "" for the current folder, "folder", "#9:". 1 if the folder was read.
-i32 cs_cx16_dir_open(const char *given)
+FIXED_RAM i32 cs_cx16_dir_open(const char *given)
 {
     KEEP_RAM_BANK;
     unsigned char device;
@@ -2744,7 +2750,7 @@ static long file_size(unsigned char device, const char *path)
 
 // As glibc's struct stat on arm64, which lib/FileSystem.cs reads: the mode at 16, the size
 // at 48, the time at 88 (seconds) and 96 (nanoseconds).
-i32 cs___xstat64(i32 version, const char *given, unsigned char *status)
+FIXED_RAM i32 cs___xstat64(i32 version, const char *given, unsigned char *status)
 {
     KEEP_RAM_BANK;
     (void)version;
@@ -2788,7 +2794,7 @@ static int folder_command(const char *verb, const char *given, unsigned char *de
     return code;
 }
 
-i32 cs_mkdir(const char *given, u32 mode)
+FIXED_RAM i32 cs_mkdir(const char *given, u32 mode)
 {
     KEEP_RAM_BANK;
     (void)mode;
@@ -2798,7 +2804,7 @@ i32 cs_mkdir(const char *given, u32 mode)
     return code >= 0 && code <= 1 ? 0 : -1;
 }
 
-i32 cs_rmdir(const char *given)
+FIXED_RAM i32 cs_rmdir(const char *given)
 {
     KEEP_RAM_BANK;
     unsigned char device;
@@ -2815,7 +2821,7 @@ i32 cs_rmdir(const char *given)
     return remove_with(device, command, path) ? 0 : -1;
 }
 
-i32 cs_chdir(const char *given)
+FIXED_RAM i32 cs_chdir(const char *given)
 {
     KEEP_RAM_BANK;
     unsigned char device;
@@ -2825,7 +2831,7 @@ i32 cs_chdir(const char *given)
 }
 
 // "R0:new=old". As rename(2), it replaces a file that has the new name.
-i32 cs_rename(const char *from_given, const char *to_given)
+FIXED_RAM i32 cs_rename(const char *from_given, const char *to_given)
 {
     KEEP_RAM_BANK;
     unsigned char device, to_device;
@@ -2851,7 +2857,7 @@ i32 cs_rename(const char *from_given, const char *to_given)
 }
 
 // "$=C" lists the current folder, its parent, and so on up to "/".
-char *cs_getcwd(char *buffer, u32 room)
+FIXED_RAM char *cs_getcwd(char *buffer, u32 room)
 {
     KEEP_RAM_BANK;
     file_errno = 5;
@@ -2901,7 +2907,7 @@ typedef struct {
     unsigned char current[19 + MAX_NAME];       // struct dirent64: the type at 18, the name from 19
 } folder_list;
 
-void *cs_opendir(const char *given)
+FIXED_RAM void *cs_opendir(const char *given)
 {
     KEEP_RAM_BANK;
     unsigned char device;
@@ -4576,17 +4582,17 @@ i32 cs_cx16_bank_count(void)
     __asm__ volatile("cli" ::: "memory"); \
 } while (0)
 
-void cs_cx16_bank_read(i32 bank, i32 offset, void *destination, i32 count)
+FIXED_RAM void cs_cx16_bank_read(i32 bank, i32 offset, void *destination, i32 count)
 {
     WITH_BANK(bank, memcpy(destination, (const void *)(0xA000u + (unsigned)offset), (size_t)count));
 }
 
-void cs_cx16_bank_write(i32 bank, i32 offset, const void *source, i32 count)
+FIXED_RAM void cs_cx16_bank_write(i32 bank, i32 offset, const void *source, i32 count)
 {
     WITH_BANK(bank, memcpy((void *)(0xA000u + (unsigned)offset), source, (size_t)count));
 }
 
-void cs_cx16_bank_fill(i32 bank, i32 offset, i32 value, i32 count)
+FIXED_RAM void cs_cx16_bank_fill(i32 bank, i32 offset, i32 value, i32 count)
 {
     WITH_BANK(bank, memset((void *)(0xA000u + (unsigned)offset), (int)value, (size_t)count));
 }

@@ -1,0 +1,7 @@
+PASS a throw comes back
+PASS and nothing after it ran
+PASS an inner one keeps its exception
+PASS thrown again, it goes out
+PASS throw null
+PASS 200 in a row
+PASS each fiber's own

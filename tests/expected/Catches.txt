@@ -1,0 +1,34 @@
+ok   a callback that returns gives null
+ok   a throw three calls down comes back, skipping the rest of each call
+ok   rethrown, an exception goes to the Catch.Run around
+ok   an inner Catch.Run keeps its exception from the outer
+ok   throw null throws a NullReferenceException
+ok   a function's result comes back
+ok   a function that throws gives default
+ok   a Lazy whose factory threw has no value
+ok   and its next read runs the factory again
+ok   changes to a ref state before the throw stay
+ok   10000 throws in a row, each caught
+ok   opening a missing file throws an IOException
+ok   a file opened inside is closed after a throw
+ok   what was flushed is in it; what was still buffered isn't
+ok   using the stream afterwards throws, as for a disposed one
+ok   and disposing it then does nothing
+ok   a kept file stays open after a throw, buffer and all
+ok   a file in use on the I/O thread is closed once its write is done
+ok   a File opened inside is closed after a throw, for every copy
+ok   and what the C library held for it is written
+ok   a kept File stays open after a throw
+ok   and takes what is written to it afterwards
+ok   files closed by other threads, and the rest by Run, are each closed once
+ok   a stream whose arena was reset is closed too, by its file alone
+ok   a file closed before the throw is left alone
+ok   a file a callback returns stays open
+ok   Copy reports a missing source
+ok   Copy copies
+ok   scratch memory from the calls jumped out of is freed
+ok   objects go where they went before the scope, not to its arena
+ok   a Reset after Catch.Run frees what the callback allocated
+ok   1000 failed attempts in an arena leave nothing behind
+ok   each fiber's throw comes back to its own Catch.Run
+All checks passed.

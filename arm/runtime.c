@@ -383,6 +383,51 @@ int usleep(unsigned microseconds)
     return 0;
 }
 
+// Catch.Run (zerocore/Runtime/Catch.cs): a throw inside body jumps back
+// here through ZeroCatchJump, and ZeroCatchCall returns as if body had.
+// picolibc's setjmp saves what a function must keep for its caller. Managed
+// code passes its shadow stack first (see wasm/runtime.c); body gets the
+// caller's.
+//
+// An interrupt handler written in C# runs on top of the code it interrupted
+// and finds that code's marks. A throw in the handler mustn't jump to one:
+// the processor would be left inside the interrupt, with later ones never
+// served. So a mark remembers which interrupt it was made in (IPSR: 0 for
+// none), and ZeroCatchJump returns when it's called from another: the throw
+// then ends the program with its message, as it does with no Catch.Run. A
+// handler's own Catch.Run works.
+#include <setjmp.h>
+
+struct catch_mark
+{
+    jmp_buf buffer;
+    uint32_t exception;
+};
+
+static uint32_t current_exception(void)
+{
+    uint32_t exception;
+    __asm__ volatile("mrs %0, ipsr" : "=r"(exception));
+    return exception;
+}
+
+void ZeroCatchCall(void *shadowStack, void **saved, void (*body)(void *, void *), void *argument)
+{
+    struct catch_mark mark;
+    mark.exception = current_exception();
+    *saved = &mark;
+    if (setjmp(mark.buffer) == 0)
+        body(shadowStack, argument);
+}
+
+void ZeroCatchJump(void *shadowStack, void *saved)
+{
+    struct catch_mark *mark = saved;
+    (void)shadowStack;
+    if (mark->exception == current_exception())
+        longjmp(mark->buffer, 1);
+}
+
 // r0: where to store this stack's pointer; r1: the stack pointer to resume.
 __attribute__((naked)) void ZeroFiberSwitch(void **save, void *resume)
 {

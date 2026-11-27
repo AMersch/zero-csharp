@@ -227,6 +227,69 @@ ZeroFiberStart:
     call    r13
     int3
 
+// Catch.Run (../Runtime/Catch.cs): ZeroCatchCall saves what ZeroFiberSwitch
+// does, except the stack bounds (the stack stays the same one), stores its
+// stack pointer in *rcx and calls rdx(r8). When the callback returns, or a
+// throw inside it calls ZeroCatchJump with that stack pointer, the frame comes
+// back and ZeroCatchCall returns.
+// rcx: where to store the frame's stack pointer; rdx: callback; r8: argument
+    .globl ZeroCatchCall
+ZeroCatchCall:
+    push    rbp
+    push    rbx
+    push    rdi
+    push    rsi
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 168
+    movaps  [rsp], xmm6
+    movaps  [rsp + 16], xmm7
+    movaps  [rsp + 32], xmm8
+    movaps  [rsp + 48], xmm9
+    movaps  [rsp + 64], xmm10
+    movaps  [rsp + 80], xmm11
+    movaps  [rsp + 96], xmm12
+    movaps  [rsp + 112], xmm13
+    movaps  [rsp + 128], xmm14
+    movaps  [rsp + 144], xmm15
+    stmxcsr [rsp + 160]
+    fnstcw  [rsp + 164]
+    mov     [rcx], rsp
+    mov     rcx, r8
+    sub     rsp, 32                 # the callee's home space
+    call    rdx
+    add     rsp, 32
+    mov     rcx, rsp
+
+# rcx: the stack pointer ZeroCatchCall stored
+    .globl ZeroCatchJump
+ZeroCatchJump:
+    mov     rsp, rcx
+    ldmxcsr [rsp + 160]
+    fldcw   [rsp + 164]
+    movaps  xmm6, [rsp]
+    movaps  xmm7, [rsp + 16]
+    movaps  xmm8, [rsp + 32]
+    movaps  xmm9, [rsp + 48]
+    movaps  xmm10, [rsp + 64]
+    movaps  xmm11, [rsp + 80]
+    movaps  xmm12, [rsp + 96]
+    movaps  xmm13, [rsp + 112]
+    movaps  xmm14, [rsp + 128]
+    movaps  xmm15, [rsp + 144]
+    add     rsp, 168
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rsi
+    pop     rdi
+    pop     rbx
+    pop     rbp
+    ret
+
 // Which system this is, for lib/FileSystem.cs: 4 on Windows and 5 on UEFI, with efi/'s build defining ZERO_UEFI. (1 Linux x64,
 // 2 Linux arm64, 3 macOS, 4 Windows, 5 UEFI, 6 WebAssembly, 7 DOS,
 // 8 a microcontroller, 9 the Commodore 64.)

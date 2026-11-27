@@ -1760,6 +1760,24 @@ test_fsharp_builders() {
     pass "$name"
 }
 
+# Catch.result and Catch.Run: a raise comes back, a file opened with use is
+# closed after it; optimized and not.
+test_fsharp_catch() {
+    local name="F# Catch" dir exe opt
+    can_build "$name" || return
+    dir=$(fixture fscatch)
+    for opt in true false; do
+        rm -rf "$dir/bin" "$dir/obj"
+        if ! run_in "$dir" fscatch build -p:Optimize=$opt; then fail "$name" "dotnet build failed (Optimize=$opt)"; return; fi
+        exe=$(exe "$dir/bin/Debug/$TFM/fscatch")
+        (cd "$WORK" && "$exe") > "$WORK/fscatch.out" 2>&1
+        if ! same_output "$WORK/fscatch.out" "$dir/expected.txt" "$WORK/fscatch.diff"; then
+            fail "$name" "printed (Optimize=$opt): $(head -c 300 "$WORK/fscatch.diff")"; return
+        fi
+    done
+    pass "$name"
+}
+
 # decimal (zerocore's, against .NET's results) and the math functions.
 test_fsharp_decimal() {
     local name="F# decimal" dir exe
@@ -2164,7 +2182,7 @@ ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error uni
     link_library link_library_passed_on link_library_newer_glibc sdl3 sdl3_windows
     native_library_name_with_spaces native_library_reference_kinds native_library_app_recipe native_library_bindings
     native_library_visual_studio
-    fsharp_program fsharp_printf fsharp_collections fsharp_builders fsharp_memory fsharp_must_not_compile fsharp_scratch_ref_struct_state fsharp_unsafe_calls fsharp_unsafe_calls_libraries fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
+    fsharp_program fsharp_printf fsharp_collections fsharp_builders fsharp_catch fsharp_memory fsharp_must_not_compile fsharp_scratch_ref_struct_state fsharp_unsafe_calls fsharp_unsafe_calls_libraries fsharp_decimal fsharp_top_level fsharp_libraries fsharp_cross_targets fsharp_incremental fsharp_publish fsharp_c64
     fsharp_native_library fsharp_native_library_cross fsharp_native_library_errors
     fsharp_native_library_bindings fsharp_program_calls_native_library fsharp_native_library_bindings_all_types)
 

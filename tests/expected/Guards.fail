@@ -15,6 +15,8 @@ scope-not-created|Arena.AllocateObjectsHere: the arena was not created
 destroy-in-scope|Arena "frame":|Arena.Destroy: the arena is in use by an object scope that is still open on this thread
 throw|Unhandled exception: the queue is empty
 throw-null|Unhandled exception: NullReferenceException
+throw-in-static-constructor|Unhandled exception: the settings are missing
+throw-in-parallel-for|Unhandled exception: thrown in a Parallel.For
 union-no-case|Unhandled exception: InvalidOperationException
 debug-assert|Debug.Assert failed: count > 0: the queue is empty|  in DebugAssert at Guards.cs:
 debug-fail|Debug.Fail: unreachable state|  in DebugFail at Guards.cs:

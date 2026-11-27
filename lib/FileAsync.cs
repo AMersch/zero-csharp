@@ -351,19 +351,25 @@ namespace System.IO
             if (_writeLen > 0)
             {
                 await FlushWritesAsync();
-                await FileThread.RunAsync(FileThread.Flush, _file.Handle, 0, 0); // C's rule: a write, a flush, then a read
+                nint stream1 = _file.BeginIo("FileStream");
+                await FileThread.RunAsync(FileThread.Flush, stream1, 0, 0); // C's rule: a write, a flush, then a read
+                _file.EndIo();
             }
             _read = true;
             int n;
             if (_buffer == null || buffer.Length >= _buffer.Length)
             {
                 // A big read goes straight to the file.
-                n = await FileThread.RunAsync(FileThread.Read, _file.Handle, FileThread.Address(buffer), buffer.Length);
+                nint stream2 = _file.BeginIo("FileStream");
+                n = await FileThread.RunAsync(FileThread.Read, stream2, FileThread.Address(buffer), buffer.Length);
+                _file.EndIo();
             }
             else
             {
                 _readPos = 0;
-                _readLen = await FileThread.RunAsync(FileThread.Read, _file.Handle, FileThread.Address(_buffer), _buffer.Length);
+                nint stream3 = _file.BeginIo("FileStream");
+                _readLen = await FileThread.RunAsync(FileThread.Read, stream3, FileThread.Address(_buffer), _buffer.Length);
+                _file.EndIo();
                 n = TakeReadAhead(buffer.Span);
             }
             _busy = false;
@@ -423,7 +429,9 @@ namespace System.IO
         {
             _busy = true;
             await FlushWritesAsync();
-            await FileThread.RunAsync(FileThread.Flush, _file.Handle, 0, 0);
+            nint stream4 = _file.BeginIo("FileStream");
+            await FileThread.RunAsync(FileThread.Flush, stream4, 0, 0);
+            _file.EndIo();
             _busy = false;
         }
 
@@ -450,7 +458,9 @@ namespace System.IO
 
         async ValueTask WriteOutAsync(ReadOnlyMemory<byte> bytes)
         {
-            int written = await FileThread.RunAsync(FileThread.Write, _file.Handle, FileThread.Address(bytes), bytes.Length);
+            nint stream5 = _file.BeginIo("FileStream");
+            int written = await FileThread.RunAsync(FileThread.Write, stream5, FileThread.Address(bytes), bytes.Length);
+            _file.EndIo();
             if (written != bytes.Length)
                 throw new IOException(string.Concat("FileStream: couldn't write to '", Name, "'"));
         }

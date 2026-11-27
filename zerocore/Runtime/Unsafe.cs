@@ -23,10 +23,10 @@ namespace System.Runtime.CompilerServices
         public static ref T AddByteOffset<T>(ref T source, nint byteOffset) => ref AddByteOffset(ref source, byteOffset);
 
         [Intrinsic]
-        public static void* AsPointer<T>(ref T value) => AsPointer(ref value);
+        public static void* AsPointer<T>(ref T value) where T : allows ref struct => AsPointer(ref value);
 
         [Intrinsic]
-        public static ref T AsRef<T>(void* source) => ref AsRef<T>(source);
+        public static ref T AsRef<T>(void* source) where T : allows ref struct => ref AsRef<T>(source);
 
         [Intrinsic]
         public static ref T AsRef<T>(scoped ref readonly T source)

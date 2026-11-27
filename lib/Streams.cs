@@ -8,10 +8,12 @@
 //   file.CopyTo(memory);
 //
 // What differs from .NET:
-// - A throw ends the program (as everywhere in zero mode), so what .NET would
-//   throw for (reading a stream that can't read, a failed write, a file that
-//   won't open) stops the program with the message. To open a file that may
-//   not be there, use FileStream.TryOpen, which returns a FileError instead.
+// - A throw ends the program (as everywhere in zero mode) unless a Catch.Run
+//   is waiting for it (Catch.cs), so what .NET would throw for (reading a
+//   stream that can't read, a failed write, a file that won't open) stops
+//   the program with the message, or comes back to that Catch.Run. To open
+//   a file that may not be there, FileStream.TryOpen returns a FileError
+//   instead.
 // - The async methods (ReadAsync, WriteAsync, CopyToAsync...) of Stream
 //   itself call the blocking ones, so a MemoryStream's finish at once, and in
 //   a fiber Pipe.AsStream's (lib/Fibers.cs) let the other fibers run while
@@ -90,7 +92,7 @@ public enum FileShare
     Delete = 4,
 }
 
-/// <summary>An input or output failure. Thrown, it ends the program with its message.</summary>
+/// <summary>An input or output failure. Thrown, it ends the program with its message, unless a Catch.Run is waiting for it.</summary>
 public class IOException : Exception
 {
     /// <summary>An IOException with the default message.</summary>
@@ -662,13 +664,16 @@ public class MemoryStream : Stream
 /// <summary>
 /// A stream over a file, with a buffer of a size you choose (4096 bytes by
 /// default; 0 or 1 for none). Dispose it: what's still in the buffer is
-/// written out then, and not otherwise.
+/// written out then, and not otherwise (nor when a Catch.Run closes the
+/// file after a throw).
 /// </summary>
 // The buffer is this stream's own, and the C library's buffering is turned
 // off: no C code ever points into memory that may be an arena's, so freeing
 // the arena before disposing the stream loses the unwritten bytes but
 // corrupts nothing (the C library flushes open files at exit, and would
-// otherwise write from freed memory).
+// otherwise write from freed memory). Catch.Run keeps to that too: after a
+// throw it closes the file, not this object (see Catch.cs), and the File
+// handle in here, and so IsOpen below, finds out.
 public partial class FileStream : Stream
 {
     File _file;
@@ -682,11 +687,11 @@ public partial class FileStream : Stream
     /// <summary>The path the file was opened with.</summary>
     public virtual string Name { get; }
 
-    /// <summary>Opens the file; read and write, or write only with FileMode.Append. A failure ends the program.</summary>
+    /// <summary>Opens the file; read and write, or write only with FileMode.Append. A failure throws an IOException.</summary>
     public FileStream(string path, FileMode mode)
         : this(path, mode, mode == FileMode.Append ? FileAccess.Write : FileAccess.ReadWrite) { }
 
-    /// <summary>Opens the file. A failure ends the program; TryOpen returns it instead.</summary>
+    /// <summary>Opens the file. A failure throws an IOException; TryOpen returns it instead.</summary>
     public FileStream(string path, FileMode mode, FileAccess access) : this(path, mode, access, FileShare.Read, 4096) { }
 
     /// <summary>Opens the file. <paramref name="share"/> isn't enforced.</summary>
@@ -694,7 +699,7 @@ public partial class FileStream : Stream
 
     /// <summary>
     /// Opens the file with a buffer of <paramref name="bufferSize"/> bytes
-    /// (0 or 1 for none). A failure ends the program.
+    /// (0 or 1 for none). A failure throws an IOException.
     /// </summary>
     public FileStream(string path, FileMode mode, FileAccess access, FileShare share, int bufferSize)
         : this(path, mode, access, bufferSize, out FileError error)
@@ -780,11 +785,11 @@ public partial class FileStream : Stream
     }
 
     /// <inheritdoc/>
-    public override bool CanRead => _canRead && _file.IsOpen;
+    public override bool CanRead => _canRead && IsOpen;
     /// <inheritdoc/>
-    public override bool CanWrite => _canWrite && _file.IsOpen;
+    public override bool CanWrite => _canWrite && IsOpen;
     /// <inheritdoc/>
-    public override bool CanSeek => _canSeek && _file.IsOpen;
+    public override bool CanSeek => _canSeek && IsOpen;
 
     /// <inheritdoc/>
     public override long Length
@@ -862,7 +867,7 @@ public partial class FileStream : Stream
     /// <inheritdoc/>
     public override int ReadByte()
     {
-        if (_readPos < _readLen && _file.IsOpen && !_busy)
+        if (_readPos < _readLen && IsOpen && !_busy)
             return _buffer[_readPos++];
         return base.ReadByte();
     }
@@ -901,7 +906,7 @@ public partial class FileStream : Stream
     /// <inheritdoc/>
     public override void WriteByte(byte value)
     {
-        if (_buffer != null && !_read && _writeLen < _buffer.Length && _canWrite && _file.IsOpen && !_busy)
+        if (_buffer != null && !_read && _writeLen < _buffer.Length && _canWrite && IsOpen && !_busy)
         {
             _buffer[_writeLen++] = value;
             return;
@@ -945,12 +950,18 @@ public partial class FileStream : Stream
     /// <inheritdoc/>
     protected override void Dispose(bool disposing)
     {
-        if (!_file.IsOpen)
+        if (!IsOpen)
             return;
         EnsureOpen(); // not while an async operation runs on the file
-        FlushWrites();
+        // Closed even if the write fails: the exception may come back to
+        // a Catch.Run, and the program go on.
+        int length = _writeLen;
+        _writeLen = 0;
+        bool written = length == 0 || _file.Write(new ReadOnlySpan<byte>(_buffer, 0, length)) == length;
         unsafe { _file.Close(); } // SAFETY: _file is this stream's only handle, and is forgotten here
         _file = default;
+        if (!written)
+            throw new IOException(string.Concat("FileStream: couldn't write to '", Name, "'"));
     }
 
     void FlushWrites()
@@ -968,9 +979,27 @@ public partial class FileStream : Stream
             throw new IOException(string.Concat("FileStream: couldn't write to '", Name, "'"));
     }
 
+    // Whether the file is open: not disposed, and not closed by a Catch.Run
+    // after a throw, which the File handle keeps track of (File.cs) and the
+    // stream learns here, at its next use. What it had buffered went with
+    // the file.
+    bool IsOpen
+    {
+        get
+        {
+            if (_file.IsOpen)
+                return true;
+            _writeLen = _readPos = _readLen = 0;
+            return false;
+        }
+    }
+
+    // Catch.Keep: no Catch.Run closes the file from here on.
+    internal void KeepOpen() => Catch.Kept(_file.Ticket);
+
     void EnsureOpen()
     {
-        if (!_file.IsOpen)
+        if (!IsOpen)
             throw new ObjectDisposedException("FileStream");
         if (_busy)
             throw new InvalidOperationException("FileStream: an async operation on it is still running (await it first)");

@@ -16,6 +16,8 @@ Usage: Guards <case>, where the case is one of:
   destroy-in-scope     an arena destroyed inside its own object scope
   throw                a throw, inside a try with a matching catch
   throw-null           throw null
+  throw-in-static-constructor  a throw out of a static constructor, inside Catch.Run
+  throw-in-parallel-for  a throw in a Parallel.For iteration, inside Catch.Run
   union-no-case        a switch on a union that holds none of its cases
   debug-assert         a Debug.Assert whose condition is false
   debug-fail           a Debug.Fail

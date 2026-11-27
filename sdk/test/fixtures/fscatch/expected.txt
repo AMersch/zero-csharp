@@ -1,0 +1,9 @@
+ok   Catch.result: Ok with the result
+ok   Catch.result: Error with what failwith raised
+ok   Catch.Run: the exception
+ok   Catch.Run: null when nothing is raised
+ok   a file opened with use is closed after a raise
+2 bytes
+couldn't: FileStream: couldn't open 'no-such-file': not found
+ok   raised again, it goes to the outer one
+All checks passed.

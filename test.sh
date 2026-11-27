@@ -330,6 +330,10 @@ run_all() {
 
         if [ "$status" != 0 ]; then
             echo "FAIL $name: exit code $status"
+            # The checks that failed, wherever in the output they are (the
+            # test samples print "failed: <check>" and "FAIL <section>"),
+            # then how the output ended.
+            echo "$out" | grep -E '^ *(failed:|FAIL )' | head -10 | sed 's/^/       /' || true
             echo "$out" | tail -5 | sed 's/^/       /'
             failures=$((failures + 1))
         elif [[ "$TIMED" == *" $name "* ]] || { { [ "$target" = wasm ] || [ "$target" = page ] || [ "$target" = dos ] || [ "$target" = pico2 ] || [ "$target" = r4 ]; } && [[ "$POINTER_SIZED" == *" $name "* ]]; }; then

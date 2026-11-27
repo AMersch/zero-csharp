@@ -31,9 +31,7 @@ namespace Internal.Runtime.CompilerHelpers
 
         internal static int Shutdown()
         {
-            delegate*<void> beforeExit = Environment.s_beforeExit;
-            if (beforeExit != null)
-                beforeExit();
+            Environment.WritePendingOutput();
             delegate*<void> atMainReturn = Environment.s_atMainReturn;
             if (atMainReturn != null)
                 atMainReturn();

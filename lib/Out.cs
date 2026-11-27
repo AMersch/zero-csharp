@@ -168,7 +168,13 @@ public static class Out
         if (s_length == Capacity)
             Flush();
         else if (s_length == 0)
-            unsafe { Environment.s_beforeExit = &Flush; } // written at the program's end
+            unsafe
+            {
+                // SAFETY: statics never move (there is no GC), so both pointers stay
+                // valid for the whole program. Written at its end, or before a failure.
+                Environment.s_outBuffer = (byte*)Unsafe.AsPointer(ref s_buffer);
+                Environment.s_outLength = (int*)Unsafe.AsPointer(ref s_length);
+            }
 
         unsafe
         {

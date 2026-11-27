@@ -118,7 +118,8 @@ public static class Fiber
         public ulong* Bottom;       // the stack's lowest bytes, just above the guard page: the pattern
         public nuint GuardSize;
         public Record* Next;        // in the run queue, the sleepers or a channel's waiters
-        public long WakeAt;         // Clock.Monotonic, while sleeping
+        public long WakeAt;         // Clock.Monotonic, while sleeping; while waiting on input or
+                                    // output, when that times out (0: never)
         public Runner Run;          // Runner<TState>.Instance
         public object Body;         // the Action<TState>
         public void* State;         // where the TState is
@@ -132,7 +133,6 @@ public static class Fiber
         public int Fd;              // while waiting on input or output (WaitForIO): what for,
         public short Events;        // as poll(2) takes it,
         public short Revents;       // and what poll said
-        public long IoDeadline;     // Clock.Monotonic when the wait times out; 0: never
     }
 
     // Someone waiting on input or output without a fiber: an async socket
@@ -160,7 +160,7 @@ public static class Fiber
         public int IoWaiting;
         public void* PollFds;       // the array PollIO hands poll(2), from malloc
         public int PollCapacity;    // in entries
-        public int IoDeadlines;     // waiters with an IoDeadline
+        public int AsyncWaiting;    // async operations among the IoWaiters, counted in Live too
     }
 
     // poll(2), set by the code that first waits on input or output (the
@@ -292,7 +292,9 @@ public static class Fiber
     }
 
     /// <summary>Fibers spawned on this thread that haven't ended yet.</summary>
-    public static int Count { get { unsafe { return This->Live; } } } // SAFETY: the thread's scheduler
+    // Live also counts the async operations waiting on input or output
+    // (WaitForIOAsync), which aren't fibers.
+    public static int Count { get { unsafe { return This->Live - This->AsyncWaiting; } } } // SAFETY: the thread's scheduler
 
     /// <summary>How many times this thread has switched to a fiber: for measuring.</summary>
     public static long Switches { get { unsafe { return This->Switches; } } } // SAFETY: the thread's scheduler
@@ -315,8 +317,7 @@ public static class Fiber
                 Environment.FailFast("Fiber.Run: called from a fiber");
             // SAFETY: every record in the queues is a live fiber's; a fiber's
             // memory is freed here, on Run's own stack, after it has ended.
-            // Async socket operations waiting keep Run going without a fiber.
-            while ((s->Live > 0 || s->IoWaiters != null) && (until == null || !until.IsCompleted))
+            while (s->Live > 0 && (until == null || !until.IsCompleted))
             {
                 Record* f = Dequeue(s);
                 if (f == null)
@@ -403,9 +404,7 @@ public static class Fiber
             r->Fd = fd;
             r->Events = events;
             r->Revents = 0;
-            r->IoDeadline = deadline;
-            if (deadline != 0)
-                s->IoDeadlines++;
+            r->WakeAt = deadline;
             r->Next = s->IoWaiters;
             s->IoWaiters = r;
             s->IoWaiting++;
@@ -423,8 +422,11 @@ public static class Fiber
             *link = r->Next;
             r->Next = null;
             s->IoWaiting--;
-            if (r->IoDeadline != 0)
-                s->IoDeadlines--;
+            if (r->Run == null)
+            {
+                s->Live--; // an async operation: see WaitForIOAsync
+                s->AsyncWaiting--;
+            }
         }
     }
 
@@ -442,9 +444,13 @@ public static class Fiber
         unsafe
         {
             s_pollIO = &PollIO;
-            // SAFETY: the operation's record, from malloc, kept until it ends.
+            // SAFETY: the operation's record, kept until it ends.
             r->Run = null;
             AddIoWaiter(s, r, fd, events, deadline);
+            // Counted as live while it waits, so Run goes on without a
+            // fiber, and a program with no sockets pays nothing for it.
+            s->Live++;
+            s->AsyncWaiting++;
         }
     }
 
@@ -565,19 +571,24 @@ public static class Fiber
             }
             byte* fds = (byte*)s->PollFds;
             int i = 0;
+            bool deadlines = false;
             for (Record* f = s->IoWaiters; f != null; f = f->Next, i++)
             {
                 *(int*)(fds + i * 8) = f->Fd;
                 *(short*)(fds + i * 8 + 4) = f->Events;
                 *(short*)(fds + i * 8 + 6) = 0;
-                if (f->IoDeadline != 0 && f->IoDeadline < until)
-                    until = f->IoDeadline;
+                if (f->WakeAt != 0)
+                {
+                    deadlines = true;
+                    if (f->WakeAt < until)
+                        until = f->WakeAt;
+                }
             }
             int timeout = until == long.MaxValue ? -1 : until == 0 ? 0 : MillisecondsUntil(until);
             int ready = Poll(fds, (nuint)n, timeout);
-            if (ready == 0 && s->IoDeadlines == 0)
+            if (ready == 0 && !deadlines)
                 return;
-            long now = s->IoDeadlines == 0 ? 0 : Clock.Monotonic;
+            long now = deadlines ? Clock.Monotonic : 0;
             Record* done = null;
             Record** link = &s->IoWaiters;
             i = 0;
@@ -586,7 +597,7 @@ public static class Fiber
                 Record* f = *link;
                 short revents = ready < 0 ? (short)1 : ready == 0 ? (short)0 : *(short*)(fds + i * 8 + 6);
                 i++;
-                if (revents == 0 && f->IoDeadline != 0 && f->IoDeadline <= now)
+                if (revents == 0 && f->WakeAt != 0 && f->WakeAt <= now)
                     revents = TimedOut;
                 if (revents == 0)
                 {

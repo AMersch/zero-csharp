@@ -58,9 +58,10 @@ built for another target fails at the link. Linux arm64 can't build for the X16 
 `lib/CX16.cs` is the X16's own side, for programs built with `--cx16` (a program for another target that
 calls it won't link):
 
-```csharp
+```csharp no-sample
 CX16.Clear(CX16.Black);
-CX16.Print(4, 2, "Hello from C#", CX16.Yellow);   // column, row, on the 80x60 screen
+// column, row, on the 80x60 screen
+CX16.Print(4, 2, "Hello from C#", CX16.Yellow);
 CX16.Sprite(0, 0, shape);                         // 16x16 pixels, 4 bits each
 while (CX16.ReadKey() == 0)
 {
@@ -103,11 +104,12 @@ back, and leave those two to a run in a window.
 KERNAL's file calls for it, not llvm-mos's stdio, which is made for the old Commodore drives: it can't open a
 file on the SD card for reading, and allows only 16 characters of a name.
 
-```csharp
+```csharp no-sample
 File.WriteAllText("notes.txt", "hello\n");
 File.AppendAllText("notes.txt", "more\n");
 File.WriteAllBytes("#9:data.bin", bytes);       // on device 9
-File.TryReadAllText(arena, "//levels/:one.txt", out string text);    // in a folder
+// in a folder
+File.TryReadAllText(arena, "//levels/:one.txt", out string text);
 ```
 
 - **Names:** long names and spaces are fine, up to about 70 characters with the folder; a comma isn't (the drive
@@ -132,12 +134,13 @@ File.TryReadAllText(arena, "//levels/:one.txt", out string text);    // in a fol
 The rest of `File`, `Directory`, `Path` and `FileStream` work as on the other systems, through
 `cx16/runtime.c`:
 
-```csharp
-File.GetInfo("a.txt", out FileInfo info);            // length, date, folder or not
+```csharp no-sample
+File.GetInfo("a.txt", out FileInfo info);  // length, date, folder or not
 File.Move("a.txt", "levels/a.txt", overwrite: true);
 Directory.Create("levels/deep");
 foreach (DirectoryEntry entry in Directory.Enumerate("levels")) { }
-using var save = new FileStream("save.bin", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 64);
+using var save = new FileStream("save.bin", FileMode.OpenOrCreate,
+    FileAccess.ReadWrite, FileShare.None, 64);
 ```
 
 - **What it costs:** the drive has no "stat", so `File.Exists`, `GetInfo` and what builds on them read the
@@ -154,17 +157,17 @@ using var save = new FileStream("save.bin", FileMode.OpenOrCreate, FileAccess.Re
 
 `Disk` (`lib/Disk.cs`) lists a folder and sends commands to the drive:
 
-```csharp
+```csharp no-sample
 char[] name = new char[80];
-if (Disk.OpenDirectory())                       // the current folder; or Disk.OpenDirectory("levels")
+if (Disk.OpenDirectory())  // the current folder; or OpenDirectory("levels")
 {
     while (Disk.Next())
     {
-        int length = Disk.CopyName(name);       // and Disk.Size in bytes, Disk.IsFolder
+        int length = Disk.CopyName(name);       // and Disk.Size, Disk.IsFolder
         Out.Line(new ReadOnlySpan<char>(name, 0, length));
     }
 }
-Disk.Command("md:levels");                      // make a folder; "cd:..", "rd:levels", "r:new=old"
+Disk.Command("md:levels");  // make a folder; "cd:..", "rd:levels", "r:new=old"
 ```
 
 - `OpenDirectory` reads the whole folder at once into the topmost bank of the banked RAM (a program that uses it
@@ -219,16 +222,19 @@ follow it. The modes (the KERNAL's, as BASIC's `SCREEN` has them):
 `Bitmap.Enable()` switches to the mode with a bitmap (`Graphics320x240`): 320 by 240 pixels of 256 colors,
 a byte a pixel, with the 40x30 text screen in front (text color 0 is see-through there). `lib/Bitmap.cs`:
 
-```csharp
+```csharp no-sample
 Bitmap.Enable();
 Bitmap.Clear(0);
-CX16.SetColor(40, 15, 8, 0);                  // palette color 40 is orange: red, green, blue, 0-15
+// palette color 40 is orange: red, green, blue, 0-15
+CX16.SetColor(40, 15, 8, 0);
 Bitmap.Line(10, 10, 300, 200, 40);            // the colors of the palette
 Bitmap.Fill(100, 50, 40, 30, 8);              // x, y, width, height
 Bitmap.Rectangle(0, 0, Bitmap.Width, Bitmap.Height, 15);
 Bitmap.Circle(160, 120, 50, 5);
-Bitmap.FillTriangle(20, 100, 120, 90, 70, 180, 12);        // a filled triangle, corners in any order
-Bitmap.Text(8, 8, "drawn", 1);                // or with a background color: Text(8, 8, "x", 1, 0)
+// a filled triangle, corners in any order
+Bitmap.FillTriangle(20, 100, 120, 90, 70, 180, 12);
+// or with a background color: Text(8, 8, "x", 1, 0)
+Bitmap.Text(8, 8, "drawn", 1);
 ```
 
 `Plot`, `Get`, `Fill`, `Rectangle`, `Line`, `Triangle`, `FillTriangle`, `Circle` and `Text` cut off what is outside the picture, and do
@@ -312,16 +318,18 @@ in software.
 `Affine` (`lib/Affine.cs`) draws a rectangle of the bitmap from a picture made of tiles, rotated, scaled, sheared or
 mirrored:
 
-```csharp
-Affine.Source(8);                             // a map of 8 by 8 tiles
-Affine.SetTile(1, pixels);                    // 64 bytes: 8x8, a color each
-Affine.SetMap(0, 0, 1);                       // column, row, tile
+```csharp no-sample
+Affine.Source(8);                   // a map of 8 by 8 tiles
+Affine.SetTile(1, pixels);          // 64 bytes: 8x8, a color each
+Affine.SetMap(0, 0, 1);             // column, row, tile
 Bitmap.Enable();
-int cos = CX16.Cos(angle) >> 7, sin = CX16.Sin(angle) >> 7;     // 256 is 1
-Affine.Draw(128, 88, 64, 64,                  // where, and how big
-    32 * 256 - 32 * cos + 32 * sin, 32 * 256 - 32 * sin - 32 * cos,    // the source position of the top left corner
-    cos, sin,                                 // its step for each pixel to the right
-    -sin, cos);                               // and for each row down
+int cos = CX16.Cos(angle) >> 7, sin = CX16.Sin(angle) >> 7;  // 256 is 1
+Affine.Draw(128, 88, 64, 64,        // where, and how big
+    // the source position of the top left corner,
+    32 * 256 - 32 * cos + 32 * sin,
+    32 * 256 - 32 * sin - 32 * cos,
+    cos, sin,                       // its step for each pixel to the right
+    -sin, cos);                     // and for each row down
 ```
 
 - The map is 2, 8, 32 or 128 tiles each way, with up to 256 tiles of 8 bits a pixel. Outside it the picture repeats,
@@ -345,11 +353,13 @@ second: `./run.sh --cx16 --window Jameson`. With no room for a second picture, i
 of most games. It is behind the text and the sprites, and it is the layer the bitmap uses, so each takes it from
 the other; a screen mode change switches it off (`Enable` again after one).
 
-```csharp
-Tiles.Enable(64, 64, 8, 4);          // 64 by 64 tiles of 8x8 pixels, 4 bits a pixel
-Tiles.SetTile(1, brick);             // tile 1's picture: 32 bytes, two pixels a byte, the left one in the high bits
+```csharp no-sample
+Tiles.Enable(64, 64, 8, 4);  // 64 by 64 tiles of 8x8 pixels, 4 bits a pixel
+// tile 1's picture: 32 bytes, two pixels a byte, the left one in the high bits
+Tiles.SetTile(1, brick);
 Tiles.Fill(1);
-Tiles.Set(5, 3, 2, paletteOffset: 1, flipHorizontally: true);     // column, row, tile
+// column, row, tile
+Tiles.Set(5, 3, 2, paletteOffset: 1, flipHorizontally: true);
 Tiles.Scroll(frame, 0);              // the picture moves left
 ```
 
@@ -382,13 +392,14 @@ The X16 makes sound in three ways, all reached from C#.
   triangle or noise waves, `CX16.Silence(voice)`. The frequency is rounded to the chip's steps of 0.37 Hz.
 - **The FM chip (YM2151)**, `Fm` (`lib/Fm.cs`): 8 channels of 4 operators that modulate each other.
 
-```csharp
-Fm.Reset();                       // silences everything, sets every channel to a sine
+```csharp no-sample
+Fm.Reset();  // silences everything, sets every channel to a sine
 Fm.SetPatch(0, Fm.Organ);         // an instrument on channel 0
-Fm.NoteOn(0, 69);                 // a note: MIDI 69 is the A of 440 Hz (13 to 108 are in the chip's range)
+// a note: MIDI 69 is the A of 440 Hz (13 to 108 are in the chip's range)
+Fm.NoteOn(0, 69);
 Fm.SetVolume(0, 100);             // 0 to 127, 127 the instrument's own level
 Fm.SetPan(0, left: true, right: false);
-Fm.NoteOff(0);                    // it dies away as the instrument's release says
+Fm.NoteOff(0);  // it dies away as the instrument's release says
 ```
 
 - **Instruments:** `Fm.Sine` (one pure tone, to hear a pitch with) and `Fm.Organ` (four operators an octave apart) are
@@ -408,11 +419,12 @@ Fm.NoteOff(0);                    // it dies away as the instrument's release sa
 
 `Pcm` (`lib/Pcm.cs`) plays samples on the video chip's PCM channel, in the background:
 
-```csharp
-Pcm.Play(samples, 8000);                          // a byte[] of signed 8-bit samples; returns at once
+```csharp no-sample
+// a byte[] of signed 8-bit samples; returns at once
+Pcm.Play(samples, 8000);
 Pcm.Play(music, 22050, sixteenBit: true, stereo: true, loop: true);
-Pcm.PlayBanked(address, count, 16000);            // from the banked RAM, as Banks counts it
-Pcm.Volume = 10;                                  // 0 to 15
+Pcm.PlayBanked(address, count, 16000);  // from the banked RAM, as Banks counts
+Pcm.Volume = 10;                            // 0 to 15
 if (!Pcm.IsPlaying) Pcm.Stop();
 ```
 
@@ -492,11 +504,11 @@ one gets all of them, and nothing is in a program that doesn't.
 `lib/Banks.cs` copies bytes to and from the banked RAM, which is 63 banks of 8 KB in the emulator
 (512 KB; the KERNAL keeps bank 0) and up to 255 on a machine with 2 MB:
 
-```csharp
-Banks.Write(100000, tile);         // an address in all the banks, one after another
+```csharp no-sample
+Banks.Write(100000, tile);  // an address in all the banks, one after another
 Banks.Read(100000, tile);
 Banks.Fill(0, Banks.Size, 0);
-int b = Banks.Peek(5);             // -1 outside the banks
+int b = Banks.Peek(5);          // -1 outside the banks
 ```
 
 A program's pointers are 16 bits, so nothing it uses, not an object or an array, can be in a bank; the
@@ -510,7 +522,7 @@ nothing. The banks hold whatever was in them at startup. `samples/BanksDemo.cs` 
 `Banks.Load` reads a whole file from the card straight into the banks and returns how many bytes it was,
 or -1:
 
-```csharp
+```csharp no-sample
 int length = Banks.Load(0, "level1.bin");     // or "data/level1.bin"
 ```
 
@@ -525,10 +537,10 @@ the banks from that address on overwrites what is there. `samples/BankLoad.cs` c
 doesn't fit in the 38 KB: `Banks.Alloc` reserves the room (a pointer that moves forward;
 `Banks.Reset` or `Banks.Release(mark)` takes it back), and the array copies each element in and out.
 
-```csharp
+```csharp no-sample
 BankedArray<int> counts = BankedArray<int>.Create(100000);   // 400 KB, zeroed
 counts[5]++;
-counts.Read(0, span);                                        // many at once is faster
+counts.Read(0, span);                                  // many at once is faster
 ```
 
 `T` is any unmanaged type, including structs that lie across the border between two banks. Every

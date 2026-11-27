@@ -40,6 +40,7 @@ public static class Bitmap
     [DllImport("libc")] static safe extern void cx16_bitmap_plot(int x, int y, int color);
     [DllImport("libc")] static safe extern int cx16_bitmap_get(int x, int y);
     [DllImport("libc")] static safe extern void cx16_bitmap_fill(int x, int y, int width, int height, int color);
+    [DllImport("libc")] static unsafe extern void cx16_bitmap_columns(int x, int height, byte* first, byte* second, byte* middle, int count, int above, int below);
     [DllImport("libc")] static safe extern void cx16_bitmap_triangle(int x0, int y0, int x1, int y1, int x2, int y2, int color);
     [DllImport("libc")] static safe extern void cx16_bitmap_circle(int centerX, int centerY, int radius, int color);
     [DllImport("libc")] static safe extern void cx16_bitmap_line(int x0, int y0, int x1, int y1, int color);
@@ -62,6 +63,26 @@ public static class Bitmap
 
     /// <summary>Fills a rectangle with its top left corner at x, y.</summary>
     public static void Fill(int x, int y, int width, int height, int color) => cx16_bitmap_fill(x, y, width, height, color);
+
+    /// <summary>
+    /// Draws a picture made of columns, as a raycaster's is (samples/Maze.cs). Column x + i, from the top
+    /// of the screen down to height: the color above down to the row first[i], middle[i] from there to
+    /// the row second[i], and the color below from there on. As many columns as the shortest of the three
+    /// spans. One call for them all is far faster than one for each. What is outside the screen is cut off.
+    /// </summary>
+    public static void Columns(int x, int height, ReadOnlySpan<byte> first, ReadOnlySpan<byte> second,
+        ReadOnlySpan<byte> middle, int above, int below)
+    {
+        int count = Math.Min(first.Length, Math.Min(second.Length, middle.Length));
+        unsafe
+        {
+            // SAFETY: the runtime reads count bytes of each span, none of which is shorter.
+            fixed (byte* f = first)
+            fixed (byte* s = second)
+            fixed (byte* m = middle)
+                cx16_bitmap_columns(x, height, f, s, m, count, above, below);
+        }
+    }
 
     /// <summary>Draws the outline of a rectangle, a pixel thick, in the same place as Fill's.</summary>
     public static void Rectangle(int x, int y, int width, int height, int color)

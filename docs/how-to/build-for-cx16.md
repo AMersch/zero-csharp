@@ -241,6 +241,18 @@ Bitmap.Text(8, 8, "drawn", 1);
 nothing in another screen mode. The palette is `CX16.SetColor` and `GetColor`: 12 bits a color, and
 colors 0 to 15 start as the C64's (`CX16.Black` ... `LightGray`).
 
+`Columns` draws a picture made of columns, each of them in three colors one below the other, as a
+raycaster's are (ceiling, wall, floor). It takes the whole picture in one call: for each column the row
+where the middle color starts, the row where it ends, and that color.
+
+```csharp no-sample
+// column 0 + i: ceiling to top[i], wall[i] to bottom[i], floor to row 120
+Bitmap.Columns(0, 120, top, bottom, wall, ceilingColor, floorColor);
+```
+
+Each pixel is written once, so nothing flickers, and a call for each column would cost more than the
+drawing itself. As many columns are drawn as the shortest of the three spans has.
+
 **Where things are in the video memory** (the KERNAL's own layout, which the VERA leaves to the program:
 anything from $00000 to $1F9BF is free):
 
@@ -273,6 +285,7 @@ them:
 | `CX16.Dot` of 100 pairs (a C# loop: 167,000) | 15,000 | 170,000 |
 | `Text`, a character | 12,000 | 12,000 |
 | `Plot` | 1,500 | 1,500 |
+| `Columns`, 160 columns of 120 pixels | 213,000 | 213,000 |
 
 `Plot` is mostly the call from C#: a lot of pixels want `Fill`, `Line` or `Text`. With FX a frame holds a whole
 picture's fill or a few dozen lines. `samples/BitmapDemo.cs` draws a picture and checks every function against the
@@ -346,6 +359,23 @@ Affine.Draw(128, 88, 64, 64,        // where, and how big
 `samples/Jameson.cs` puts several of these together: a ship that grows out of a point and turns about three axes,
 hidden lines left out, with `CX16.Multiply` for the rotation and `Bitmap.Line` for the picture, about 27 pictures a
 second: `./run.sh --cx16 --window Jameson`. With no room for a second picture, it replaces one line at a time.
+
+### A walk through a maze
+
+`samples/Maze.cs` is a raycaster: a walk through a maze of 16 by 16 squares, seen in 3D, that finds its
+own way (at random at each junction, round in a dead end) until a key is pressed:
+`./run.sh --cx16 --window Maze`.
+
+- **The picture** is 160 by 120 pixels of the bitmap, which the video chip shows over the whole screen:
+  its scale registers ($9F2A, $9F2B) are set to 32, and the text's layer is switched off. A mode change
+  puts the scale back but not the layer, so the sample restores that itself.
+- **Speed:** about 8.5 pictures a second at 8 MHz in the emulator, while walking. Of a picture's time a
+  good part is `Columns`, the rest one ray a column in C#.
+- **What makes the C# fast enough:** the ray's loop counts in `byte` and `ushort` (`int` is 32 bits, slow
+  on this processor), the map is 16 wide so that a square is one byte, the tables are made once, and the
+  multiplications are the video chip's (`CX16.Multiply`).
+- **One buffer:** the picture on show is drawn over, left to right, so that during a turn its left part
+  can be newer than its right.
 
 ## Tiles
 

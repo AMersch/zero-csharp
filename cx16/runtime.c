@@ -3455,6 +3455,48 @@ i32 cs_cx16_bitmap_get(i32 x, i32 y)
     return VERA.data0;
 }
 
+// A picture made of columns, a raycaster's: column x + i is `above` down to the
+// row first[i], middle[i] from there to the row second[i], and `below` from
+// there to `height`. One call for the whole picture, as a call from C# for each
+// column cost more than drawing it. Each pixel is written once, the video
+// chip's address going on by a row by itself.
+void cs_cx16_bitmap_columns(i32 x, i32 height, const unsigned char *first, const unsigned char *second,
+    const unsigned char *middle, i32 count, i32 above, i32 below)
+{
+    if (!in_bitmap() || count <= 0 || height <= 0 || x >= BITMAP_WIDTH || x <= -count)
+        return;
+    if (x < 0) {
+        first -= x;
+        second -= x;
+        middle -= x;
+        count += x;
+        x = 0;
+    }
+    unsigned left = count > BITMAP_WIDTH - x ? (unsigned)(BITMAP_WIDTH - x) : (unsigned)count;
+    // A row of the picture is a number up to 240, which a byte holds.
+    unsigned char end = height > BITMAP_HEIGHT ? BITMAP_HEIGHT : (unsigned char)height;
+    unsigned char color_above = (unsigned char)above, color_below = (unsigned char)below;
+    VERA.control &= ~1;                 // data port 0
+    VERA.address_hi = 14 << 4;          // 14: the address goes up by 320, a row
+    for (unsigned column = (unsigned)x; left; column++, left--) {
+        unsigned char top = *first++, bottom = *second++, color = *middle++;
+        if (top > end)
+            top = end;
+        if (bottom > end)
+            bottom = end;
+        if (bottom < top)
+            bottom = top;
+        VERA.address = column;
+        unsigned char y = 0;
+        for (; y < top; y++)
+            VERA.data0 = color_above;
+        for (; y < bottom; y++)
+            VERA.data0 = color;
+        for (; y < end; y++)
+            VERA.data0 = color_below;
+    }
+}
+
 // Writes `count` bytes of one value to the video memory from the address the data port is
 // at (it goes up by one each time): eight at a time, then the rest.
 static void run_of(unsigned char value, unsigned count)

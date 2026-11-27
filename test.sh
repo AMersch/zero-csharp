@@ -236,6 +236,7 @@ CX16_SAMPLES=(
     SoundDemo
     VeraFxDemo
     Jameson
+    Maze
     PcmDemo
     DiskList
     DiskFolders

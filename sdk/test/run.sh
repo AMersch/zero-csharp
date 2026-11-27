@@ -985,6 +985,20 @@ test_target_framework_is_an_error() {
     pass "$name"
 }
 
+# An older .NET SDK (Linux distributions package 10.0.1xx) fails at restore
+# with ZERO014, not later with NETSDK1005. The version is passed as a global
+# property: CI has only the newest SDK installed.
+test_old_dotnet_sdk_refused() {
+    local name="old .NET SDK refused" dir v
+    dir=$(fixture native oldsdk)
+    for v in 10.0.115 10.0.302 10.0.100-rc.2.25502.107; do
+        if run_in "$dir" oldsdk build -p:NETCoreSdkVersion=$v; then fail "$name" "the build with $v succeeded"; return; fi
+        if ! grep -q "ZERO014" "$LOG" || ! grep -q "10.0.400 or newer" "$LOG"; then fail "$name" "no ZERO014 for $v"; return; fi
+    done
+    if ! run_in "$dir" oldsdk restore -p:NETCoreSdkVersion=10.0.400; then fail "$name" "restore with 10.0.400 failed"; return; fi
+    pass "$name"
+}
+
 # bflat already executable in a read-only packages folder (a shared or mounted
 # cache): the build mustn't try to change it. As root, permissions don't stop
 # chmod, so this can only fail when run as another user (as CI's runners are).
@@ -2220,7 +2234,7 @@ test_fsharp_native_library_errors() {
     pass "$name"
 }
 
-ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error unions_compile plain_packages_refused
+ALL_TESTS=(host_packages payload_complete hello_compiles console_is_an_error old_dotnet_sdk_refused unions_compile plain_packages_refused
     native_hello_runs cross_targets c64_target arm_target gpu_template gpu_errors cuda_build cuda_errors bad_target path_with_spaces compile_items incremental
     bflat_failure_fails_the_build size strip_symbols debug_unoptimized mac_debug_object_kept windows_debugger macos_error
     project_reference library_change_rebuilds pack_and_package_reference version_mismatch templates

@@ -224,6 +224,19 @@
            Text="A zero project's target framework is the SDK's ($(ZeroSdkTfm)); remove TargetFramework and TargetFrameworks from the project (TargetFramework is '$(TargetFramework)', TargetFrameworks '$(TargetFrameworks)')." />
   </Target>
 
+  <!-- The .NET SDK: 10.0.400 or newer. Older ones fail later with errors that
+       don't say why: 10.0.1xx and 10.0.2xx (the 1xx line is what Linux
+       distributions package) can't find the zero03 target NuGet restored
+       (NETSDK1005), and before 10.0.400 MSBuild can't run the C# compiler
+       the project uses (Microsoft.Net.Compilers.Toolset). Before restore, so
+       nothing is downloaded first; and before a build, for dotnet build
+       no-restore. A preview's suffix (10.0.100-rc.2) is dropped for the compare. -->
+  <Target Name="ZeroCheckDotnetSdk" BeforeTargets="Restore;_CheckForInvalidConfigurationAndPlatform"
+          Condition="'$(NETCoreSdkVersion)' != '' and $([MSBuild]::VersionLessThan($([System.Text.RegularExpressions.Regex]::Replace('$(NETCoreSdkVersion)', '-.*', '')), '10.0.400'))">
+    <Error Code="ZERO014"
+           Text="ZeroCSharp.Sdk needs the .NET SDK 10.0.400 or newer; this build uses $(NETCoreSdkVersion) ($(DOTNET_HOST_PATH)). Linux distributions' dotnet packages are the older 10.0.1xx line: install Microsoft's .NET SDK beside it (https://dot.net/v1/dotnet-install.sh --channel 10.0) and put it first on PATH. Guide: https://onurgumus.github.io/zero-csharp/get-started/install-with-dotnet.html" />
+  </Target>
+
   <!-- NativeLib: what it builds, and for which targets. Before the compile,
        so a mistake doesn't wait for it. -->
   <Target Name="ZeroCheckNativeLib" BeforeTargets="CoreCompile" Condition="'$(NativeLib)' != ''">

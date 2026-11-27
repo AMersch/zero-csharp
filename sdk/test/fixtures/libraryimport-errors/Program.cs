@@ -7,6 +7,8 @@ public struct Flags
     public bool On;
 }
 
+public record struct Switch(bool Up);
+
 public static partial class Bad
 {
     [LibraryImport("libc")]
@@ -33,6 +35,12 @@ public static partial class Bad
 
     [LibraryImport("libc")]
     public static partial void money(decimal value);
+
+    [LibraryImport("libc")]
+    public static partial void toggle(Switch value);
+
+    [LibraryImport("libc")]
+    public static unsafe partial void call(delegate*<int, void> callback);
 
     [LibraryImport("libc")]
     public static partial int generic<T>(int value);

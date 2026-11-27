@@ -43,10 +43,14 @@ namespace ZeroCSharp.LibraryImport
         static Import Read(IMethodSymbol method, MethodDeclarationSyntax syntax, AttributeData attribute)
         {
             string? error = Check(method, syntax, attribute, out DiagnosticDescriptor descriptor);
+            Diagnostic? diagnostic = null;
             if (error != null)
             {
                 string name = method.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat);
-                return new Import("", "", Diagnostic.Create(descriptor, syntax.Identifier.GetLocation(), name, error));
+                diagnostic = Diagnostic.Create(descriptor, syntax.Identifier.GetLocation(), name, error);
+                // A method of the wrong shape can't be implemented at all.
+                if (descriptor == Shape)
+                    return new Import("", "", diagnostic);
             }
 
             var scope = new List<string>();
@@ -74,21 +78,37 @@ namespace ZeroCSharp.LibraryImport
                 + $"EntryPoint = {Literal(entryPoint)}, ExactSpelling = true{callingConvention})]";
 
             string modifiersOfMethod = string.Concat(syntax.Modifiers.Where(m => !m.IsKind(SyntaxKind.PartialKeyword)).Select(m => m.Text + " "));
-            string returnType = method.ReturnsVoid ? "void" : method.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            string returnType = (method.ReturnsByRefReadonly ? "ref readonly " : method.ReturnsByRef ? "ref " : "")
+                + (method.ReturnsVoid ? "void" : method.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
             string[] names = method.Parameters.Select(p => SyntaxFacts.GetKeywordKind(p.Name) != SyntaxKind.None ? "@" + p.Name : p.Name).ToArray();
-            string parameters = string.Join(", ", method.Parameters.Select((p, i) => $"{p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)} {names[i]}"));
+            string parameters = string.Join(", ", method.Parameters.Select((p, i) => $"{RefKindText(p.RefKind)}{p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)} {names[i]}"));
 
             // C# 15's memory safety rules want an extern marked safe or unsafe, the
             // same on both parts. Unmarked, the method calls an extern of its own.
             bool unmarked = syntax.SyntaxTree.Options.Features.ContainsKey("updated-memory-safety-rules")
                 && !syntax.Modifiers.Any(m => m.IsKind(SyntaxKind.UnsafeKeyword) || m.Text == "safe");
-            string member = unmarked
+            string member = diagnostic != null
+                // Refused: a body that keeps the compiler from also reporting a
+                // partial method with no implementation. The build fails anyway.
+                ? (unmarked
+                    ? $"{modifiersOfMethod}partial {returnType} {syntax.Identifier.Text}({parameters}) => throw null;"
+                    : $"{modifiersOfMethod}extern partial {returnType} {syntax.Identifier.Text}({parameters});")
+                : unmarked
                 ? $"{modifiersOfMethod}partial {returnType} {syntax.Identifier.Text}({parameters})\n{{\n"
                     + $"    unsafe {{ {(method.ReturnsVoid ? "" : "return ")}__PInvoke({string.Join(", ", names)}); }}\n\n"
                     + $"    {dllImport}\n    static extern unsafe {returnType} __PInvoke({parameters});\n}}"
                 : $"{dllImport}\n{modifiersOfMethod}extern partial {returnType} {syntax.Identifier.Text}({parameters});";
-            return new Import(string.Join("\n", scope), member, null);
+            return new Import(string.Join("\n", scope), member, diagnostic);
         }
+
+        static string RefKindText(RefKind kind) => kind switch
+        {
+            RefKind.Ref => "ref ",
+            RefKind.Out => "out ",
+            RefKind.In => "in ",
+            RefKind.RefReadOnlyParameter => "ref readonly ",
+            _ => "",
+        };
 
         static string? Check(IMethodSymbol method, MethodDeclarationSyntax syntax, AttributeData attribute, out DiagnosticDescriptor descriptor)
         {
@@ -148,6 +168,8 @@ namespace ZeroCSharp.LibraryImport
         {
             switch (type)
             {
+                case IFunctionPointerTypeSymbol { Signature.CallingConvention: System.Reflection.Metadata.SignatureCallingConvention.Default }:
+                    return $"{type.ToDisplayString()}, a managed function pointer: use delegate* unmanaged";
                 case IPointerTypeSymbol or IFunctionPointerTypeSymbol:
                     return null;
                 case { SpecialType: SpecialType.System_Boolean }:
@@ -169,7 +191,8 @@ namespace ZeroCSharp.LibraryImport
                     {
                         ITypeSymbol fieldType = field.IsFixedSizeBuffer ? ((IPointerTypeSymbol)field.Type).PointedAtType : field.Type;
                         if (Unsupported(fieldType) is string inner)
-                            return $"{structure.Name}, whose field '{field.Name}' is {inner}";
+                            // An auto-property's field is named after the property.
+                            return $"{structure.Name}, whose field '{field.AssociatedSymbol?.Name ?? field.Name}' is {inner}";
                     }
                     return null;
                 default:
@@ -184,7 +207,7 @@ namespace ZeroCSharp.LibraryImport
             var text = new StringBuilder("// <auto-generated/>\n");
             foreach (Import import in imports.Where(i => i.Error != null))
                 context.ReportDiagnostic(import.Error!);
-            foreach (IGrouping<string, Import> group in imports.Where(i => i.Error == null).GroupBy(i => i.Scope))
+            foreach (IGrouping<string, Import> group in imports.Where(i => i.Member.Length > 0).GroupBy(i => i.Scope))
             {
                 string[] scope = group.Key.Split('\n');
                 string indent = new(' ', 4 * scope.Length);

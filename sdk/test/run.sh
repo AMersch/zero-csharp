@@ -898,10 +898,14 @@ test_library_import() {
                   "ZERO013: 'Bad.getppid()': .MarshalAs. isn't supported" \
                   "ZERO013: 'Bad.flags(Flags)': parameter 'value' is Flags, whose field 'On' is bool" \
                   "ZERO013: 'Bad.money(decimal)': parameter 'value' is decimal" \
+                  "ZERO013: 'Bad.toggle(Switch)': parameter 'value' is Switch, whose field 'Up' is bool" \
+                  "ZERO013: 'Bad.call(delegate\*<int, void>)': parameter 'callback' is delegate\*<int, void>, a managed function pointer" \
                   "ZERO012: 'Bad.generic<T>(int)': a .LibraryImport. method can't be generic" \
                   "ZERO012: 'NotPartial.Inner.abs(int)': its type 'NotPartial' must be partial"; do
         if ! grep -q "$expect" "$LOG"; then fail "$name" "no error: $expect"; return; fi
     done
+    # A method ZERO013 refuses still gets a body, so it isn't also CS8795 (no implementation).
+    if grep -q "CS8795: Partial method 'Bad.puts" "$LOG"; then fail "$name" "a refused import was also CS8795"; return; fi
     pass "$name"
 }
 

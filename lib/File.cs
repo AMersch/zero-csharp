@@ -52,6 +52,20 @@ public partial struct File
     const int MaxPath = 1024;
 
     nint _stream;
+    Catch.Ticket _ticket; // opened inside a Catch.Run: its record there (Catch.cs)
+
+    // The C library's FILE*, or 0 once the file is closed: by Close, or by
+    // a Catch.Run after a throw in the code that opened it, which each copy
+    // of the handle learns here, at its next use.
+    nint Stream
+    {
+        get
+        {
+            if (_stream != 0 && Catch.ClosedByThrow(_ticket))
+                _stream = 0;
+            return _stream;
+        }
+    }
 
     // The C library's FILE*, for lib/FileAsync.cs's threads.
     internal nint Handle => _stream;
@@ -104,9 +118,15 @@ public partial struct File
         unsafe
         {
             // SAFETY: both are null-terminated; fopen only reads them.
+            // CloseHandle closes what fopen gave.
             fixed (byte* n = name)
             fixed (byte* m = mode)
-                return new File { _stream = fopen(n, m) };
+            {
+                File file = new File { _stream = fopen(n, m) };
+                if (file._stream != 0)
+                    file._ticket = Catch.Opened(file._stream, &CloseHandle);
+                return file;
+            }
         }
     }
 
@@ -152,7 +172,31 @@ public partial struct File
     }
 
     /// <summary>Whether the file was opened.</summary>
-    public bool IsOpen => _stream != 0;
+    public bool IsOpen => Stream != 0;
+
+    // How a Catch.Run closes the file after a throw (Catch.cs). fclose
+    // writes out what the C library has buffered, as Close does.
+    internal static void CloseHandle(nint stream)
+    {
+        unsafe { fclose(stream); } // SAFETY: an open FILE*, closed once (Catch.CloseAll)
+    }
+
+    // For Catch.Keep.
+    internal Catch.Ticket Ticket => _ticket;
+
+    // For FileStream's async calls (FileAsync.cs), around each operation on
+    // the I/O thread: the FILE* to hand it, counted as in use until EndIo,
+    // so that a Catch.Run closing the file after a throw meanwhile leaves the
+    // closing to EndIo instead of pulling it from under the I/O thread.
+    internal nint BeginIo(string owner)
+    {
+        nint stream = Stream;
+        if (stream == 0 || !Catch.Using(_ticket))
+            throw new ObjectDisposedException(owner);
+        return stream;
+    }
+
+    internal void EndIo() => Catch.DoneUsing(_ticket);
 
     // Turns the C library's buffering off for this file: FileStream buffers
     // in C# instead, so no C code keeps a pointer into memory that may be an
@@ -164,7 +208,7 @@ public partial struct File
         unsafe
         {
             // SAFETY: the stream is open; with _IONBF the C library takes no buffer.
-            if (_stream != 0)
+            if (Stream != 0)
                 setvbuf(_stream, null, how, 0);
         }
     }
@@ -173,7 +217,7 @@ public partial struct File
     // read on the same file, C requires this or a seek.
     internal bool Flush()
     {
-        unsafe { return _stream != 0 && fflush(_stream) == 0; } // SAFETY: the stream is open
+        unsafe { return Stream != 0 && fflush(_stream) == 0; } // SAFETY: the stream is open
     }
 
     /// <summary>
@@ -182,7 +226,7 @@ public partial struct File
     /// </summary>
     public int Read(Span<byte> buffer)
     {
-        if (_stream == 0 || buffer.Length == 0)
+        if (Stream == 0 || buffer.Length == 0)
             return 0;
         unsafe
         {
@@ -195,7 +239,7 @@ public partial struct File
     /// <summary>Writes bytes as they are and returns how many were written.</summary>
     public int Write(ReadOnlySpan<byte> bytes)
     {
-        if (_stream == 0 || bytes.Length == 0)
+        if (Stream == 0 || bytes.Length == 0)
             return 0;
         unsafe
         {
@@ -208,7 +252,7 @@ public partial struct File
     /// <summary>Writes text as UTF-8. Returns false if not all of it was written.</summary>
     public bool Write(ReadOnlySpan<char> text)
     {
-        if (_stream == 0)
+        if (Stream == 0)
             return false;
         Span<byte> chunk = stackalloc byte[512];
         int next = 0;
@@ -229,7 +273,7 @@ public partial struct File
     {
         get
         {
-            if (_stream == 0)
+            if (Stream == 0)
                 return -1;
             unsafe { return ftello(_stream); } // SAFETY: the stream is open.
         }
@@ -238,7 +282,7 @@ public partial struct File
     /// <summary>Moves to <paramref name="position"/> bytes from the start. Returns false if it can't.</summary>
     public bool Seek(long position)
     {
-        if (_stream == 0 || position < 0)
+        if (Stream == 0 || position < 0)
             return false;
         unsafe { return fseeko(_stream, position, 0) == 0; } // SAFETY: the stream is open.
     }
@@ -248,7 +292,7 @@ public partial struct File
     {
         get
         {
-            if (_stream == 0)
+            if (Stream == 0)
                 return -1;
             unsafe
             {
@@ -268,14 +312,20 @@ public partial struct File
     /// </summary>
     /// <safety>
     /// Copies of this handle still point at the closed file. Don't use any of them
-    /// after this, and don't close the file twice.
+    /// after this, and don't close the file twice. (Copies of a file opened
+    /// inside a Catch.Run do find out, as they do when Catch.Run closes it.)
     /// </safety>
     public unsafe void Close()
     {
-        if (_stream == 0)
+        if (Stream == 0)
             return;
-        unsafe { fclose(_stream); } // SAFETY: the caller's contract.
+        nint stream = _stream;
         _stream = 0;
+        // Not if a Catch.Run on another thread has just taken it to close.
+        bool mine = Catch.Closing(_ticket);
+        _ticket = default;
+        if (mine)
+            unsafe { fclose(stream); } // SAFETY: the caller's contract.
     }
 
     // ---- whole files ----------------------------------------------------------
@@ -372,7 +422,7 @@ public partial struct File
             // what's buffered, and can fail doing it.
             source.Close();
             FileSystem.ClearError();
-            if (fclose(target._stream) != 0 && error == FileError.None)
+            if (Catch.Closing(target._ticket) && fclose(target._stream) != 0 && error == FileError.None)
                 error = FileSystem.LastError();
         }
         return error;

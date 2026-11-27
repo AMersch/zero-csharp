@@ -688,6 +688,8 @@ public partial struct Arena
                     maxCapacity: ScratchMaxCapacity);
                 thread = arena.Alloc<ScratchThread>();
                 thread->Arena = arena;
+                // For Catch.Run: see ScratchForCatch.
+                ScratchForCatch.s_instance = ArenaScratchForCatch.Instance;
                 if (Platform.pthread_setspecific(s_scratchKey, thread) != 0)
                     Environment.FailFast("Arena.Scratch: can't keep the thread's scratch arena");
             }
@@ -701,6 +703,7 @@ public partial struct Arena
     {
         if (Interlocked.CompareExchange(ref s_scratchKeyState, 1, 0) == 0)
         {
+
             nuint key = 0;
             unsafe
             {
@@ -770,6 +773,56 @@ public partial struct Arena
         }
     }
 
+    // Catch.Run (Catch.cs) notes where the thread's Scratch calls are when it
+    // starts, and after a throw jumps past some of them, frees what they
+    // allocated, as their return would have. null and 0 when there's no
+    // scratch arena yet. It calls the two through ScratchForCatch, at the end
+    // of this file.
+    internal static void* ScratchBeforeCatch(out Mark mark, out int depth)
+    {
+        mark = default;
+        depth = 0;
+        if (Volatile.Read(ref s_scratchKeyState) != 2)
+            return null;
+        unsafe
+        {
+            // SAFETY: the key holds null or this thread's live ScratchThread.
+            ScratchThread* thread = (ScratchThread*)Platform.pthread_getspecific(s_scratchKey);
+            if (thread != null)
+            {
+                mark = thread->Arena.Save();
+                depth = thread->Depth;
+            }
+            return thread;
+        }
+    }
+
+    internal static void ScratchAfterCatch(void* before, Mark mark, int depth)
+    {
+        if (Volatile.Read(ref s_scratchKeyState) != 2)
+            return;
+        unsafe
+        {
+            // SAFETY: as above. The callbacks the throw jumped out of are
+            // gone, and with them everything that could point into what
+            // this frees (the compiler kept it inside them).
+            ScratchThread* thread = (ScratchThread*)Platform.pthread_getspecific(s_scratchKey);
+            if (thread == null || thread->Depth <= depth)
+                return;
+            if (thread == before)
+            {
+                thread->Arena.Restore(mark);
+                thread->Depth = depth;
+                return;
+            }
+            // Made inside the Catch.Run, with no mark from before: the next
+            // Scratch call makes a new one.
+            if (Platform.pthread_setspecific(s_scratchKey, null) != 0)
+                Environment.FailFast("Arena.Scratch: can't keep the thread's scratch arena");
+            DestroyArenaOf(thread);
+        }
+    }
+
     static void LeaveScratch(ScratchThread* thread, Mark mark)
     {
         // SAFETY: only the scope and its lists and text allocate from the
@@ -781,5 +834,39 @@ public partial struct Arena
             thread->Depth--;
             thread->Arena.Restore(mark);
         }
+    }
+}
+
+// What Catch.Run (Catch.cs) asks of Arena.Scratch, as virtual methods of an
+// object that exists once a thread has called Scratch. Virtual on purpose:
+// the compiler leaves a virtual method out of a program unless something
+// creates its class and something calls it, so Arena.ScratchBeforeCatch and
+// ScratchAfterCatch (5 KB on a C64) are only in programs that use both
+// Catch.Run and Arena.Scratch. A direct call from Catch.Run would bring them
+// into every program that catches, and a pointer to them set here, into
+// every program that uses Scratch.
+internal abstract class ScratchForCatch
+{
+    // Null until a thread calls Arena.Scratch.
+    internal static ScratchForCatch s_instance;
+
+    internal abstract unsafe void* Before(out Arena.Mark mark, out int depth);
+    internal abstract unsafe void After(void* before, Arena.Mark mark, int depth);
+}
+
+internal sealed class ArenaScratchForCatch : ScratchForCatch
+{
+    // Made by the static constructor, so with calloc, whatever arena objects
+    // are going to at the time.
+    internal static readonly ArenaScratchForCatch Instance = new ArenaScratchForCatch();
+
+    internal override unsafe void* Before(out Arena.Mark mark, out int depth)
+    {
+        unsafe { return Arena.ScratchBeforeCatch(out mark, out depth); } // SAFETY: this thread's own scratch state
+    }
+
+    internal override unsafe void After(void* before, Arena.Mark mark, int depth)
+    {
+        unsafe { Arena.ScratchAfterCatch(before, mark, depth); } // SAFETY: before, mark and depth are Before's
     }
 }

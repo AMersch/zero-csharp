@@ -113,12 +113,17 @@ namespace System.Runtime
         [RuntimeExport("RhpGcPoll")]
         internal static void RhpGcPoll() { }
 
-        // `throw`: a panic. Print the message and end the program; nothing
-        // unwinds (see System/Exceptions.cs). `throw null` throws a
+        // `throw`: back to the innermost Catch.Run (Runtime/Catch.cs), or with
+        // none, a panic: print the message and end the program. Nothing
+        // unwinds either way (see System/Exceptions.cs). The pointer is null
+        // in a program that never calls Catch.Run. `throw null` throws a
         // NullReferenceException in .NET, so it reports that.
         [RuntimeExport("RhpThrowEx")]
         internal static void RhpThrowEx(object exception)
         {
+            delegate*<object, void> toCatch = CatchFrames.s_throw;
+            if (toCatch != null)
+                toCatch(exception); // returns only if no Catch.Run is waiting
             Exception e = exception as Exception;
             if (e == null)
                 Environment.FailFast("Unhandled exception: NullReferenceException");

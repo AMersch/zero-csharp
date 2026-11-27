@@ -604,6 +604,27 @@ int usleep(u32 microseconds)
     return 0;
 }
 
+// Catch.Run (zerocore/Runtime/Catch.cs): a throw inside body jumps back
+// here through ZeroCatchJump, and ZeroCatchCall returns as if body had.
+// There's no C library, so it's the compiler's own setjmp, which saves only
+// the frame and stack pointers and the place to come back to; the compiler
+// makes the function that calls it save every other register itself. Managed
+// code passes its shadow stack first (see wasm/runtime.c); body gets the
+// caller's.
+void ZeroCatchCall(void *shadowStack, void **saved, void (*body)(void *, void *), void *argument)
+{
+    void *buffer[5];
+    *saved = buffer;
+    if (__builtin_setjmp(buffer) == 0)
+        body(shadowStack, argument);
+}
+
+void ZeroCatchJump(void *shadowStack, void *saved)
+{
+    (void)shadowStack;
+    __builtin_longjmp((void **)saved, 1);
+}
+
 // [esp+4]: where to store this stack's pointer; [esp+8]: the one to resume.
 __attribute__((naked)) void ZeroFiberSwitch(void **save, void *resume)
 {

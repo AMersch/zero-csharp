@@ -154,6 +154,10 @@ and ends the program, like Rust's `panic!`. No `catch` block ever runs, and neit
 blocks between the `throw` and `Main`. A failed cast, an index out of range or an overflow in `checked`
 code ends the program the same way; a null dereference is a segmentation fault.
 
+To get past a failure that comes as an exception, such as an `IOException` from a file or a socket,
+run the code in [`Catch.Run`](../how-to/recover-from-errors.html): the `throw` comes back there as a
+value, and the files and sockets opened inside are closed.
+
 So an error the caller should handle is a return value. A C# 15 union says which outcomes there are,
 and a `switch` on it must handle each:
 
@@ -210,7 +214,8 @@ Arenas and `lib/`'s collections aren't thread-safe, so give each thread its own;
 
 ## What compiles but behaves differently
 
-- **A `catch` block never runs**, and a `throw` skips the `finally` blocks on its way out (above).
+- **A `catch` block never runs**, and a `throw` skips the `finally` blocks on its way out (above);
+  `Catch.Run` is how to get it back.
 - **Nothing you `new` is freed**, nor boxed values, concatenated strings or closures, unless an object
   scope is open.
 - **A struct's default `Equals` compares bytes.** A reference field compares by reference, where .NET

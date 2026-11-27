@@ -100,19 +100,30 @@ namespace System.Runtime
         // for the rest of the program, so it mustn't land in an arena an
         // AllocateObjectsHere scope will free: F# caches every lambda that
         // captures nothing, and each union case without fields, this way.
+        //
+        // And with no Catch.Run to come back to (Runtime/Catch.cs): a throw
+        // out of a static constructor ends the program, wherever it runs. A
+        // jump out of one would leave its type half made for good, and other
+        // threads waiting for it for ever.
         internal static void RunStaticConstructor(nint constructor)
         {
+            delegate*<void*, void*> swapMarks = CatchFrames.s_swap;
+            void* marks = swapMarks != null ? swapMarks(null) : null;
             Setting* setting = (Setting*)CurrentSetting();
             if (setting == null || setting->Allocate == null)
             {
                 ((delegate*<void>)constructor)();
-                return;
             }
-            delegate*<void*, nuint, void*> allocate = setting->Allocate;
-            void* context = setting->Context;
-            Set(null, null);
-            ((delegate*<void>)constructor)();
-            Set(allocate, context);
+            else
+            {
+                delegate*<void*, nuint, void*> allocate = setting->Allocate;
+                void* context = setting->Context;
+                Set(null, null);
+                ((delegate*<void>)constructor)();
+                Set(allocate, context);
+            }
+            if (swapMarks != null)
+                swapMarks(marks);
         }
 
         /// <summary>

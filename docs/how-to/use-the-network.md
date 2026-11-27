@@ -115,9 +115,9 @@ the same connection.
 
 ## When something goes wrong
 
-A `throw` ends the program, so code here can't catch a failure the way a .NET server catches an
-`IOException` per connection. Instead, failures that are part of normal network life come back as
-values, and nothing a client does can end a server:
+A `throw` ends the program unless a [`Catch.Run`](recover-from-errors.html) is waiting for it on
+the same fiber. So failures that are part of normal network life come back as values, and nothing a
+client does can end a server:
 
 - A broken connection ends only its own stream. When the other end resets the connection, or its
   socket is closed under it, `NetworkStream.Read` returns 0, as at the end of the stream, and `Write`
@@ -144,9 +144,10 @@ rude.Client.LingerState = new LingerOption(true, 0);
 rude.Dispose();
 ```
 
-The methods without a `Try` or `out SocketError` form end the program on failure, as an uncaught
-`SocketException` would. That covers `Connect`, `AcceptTcpClient`, `Dns.GetHostAddresses` and
-`IPAddress.Parse`, so use them where a failure is a bug rather than a network event:
+The methods without a `Try` or `out SocketError` form throw on failure, a `SocketException` as in
+.NET, which ends the program if nothing catches it. That covers `Connect`, `AcceptTcpClient`,
+`Dns.GetHostAddresses` and `IPAddress.Parse`, so use them where a failure is a bug rather than a
+network event, or inside a `Catch.Run`:
 
 <!-- sample: samples/Network.cs refused -->
 ```csharp
@@ -164,14 +165,61 @@ bool connected = socket.TryConnect(
 // connected is false, and error is SocketError.ConnectionRefused
 ```
 
+Inside a [`Catch.Run`](recover-from-errors.html), the forms that throw come back as an exception, and
+the socket the callback opened and left open is closed:
+
+<!-- sample: samples/Network.cs catch -->
+```csharp
+// Connect throws a SocketException where TryConnect returns false.
+// Catch.Run gets it back, and closes the socket the callback opened
+// and left open.
+Socket attempt = null;
+Exception thrown = Catch.Run(() =>
+{
+    attempt = new Socket(AddressFamily.InterNetwork,
+        SocketType.Stream, ProtocolType.Tcp);
+    attempt.Connect(new IPEndPoint(IPAddress.Loopback, closedPort));
+});
+// thrown is a SocketException, and attempt.Handle is -1
+```
+
+Code of your own that serves a connection may throw too, on a request it can't make sense of. Give
+each connection's fiber a `Catch.Run` of its own: a throw comes back only on its own fiber, so one
+around `Fiber.Run()` would catch nothing thrown inside the fibers.
+
+<!-- sample: samples/Network.cs serve-catch -->
+```csharp
+// The same with a Catch.Run of its own, which every fiber that should
+// survive a throw needs: a throw while serving (here, for a message
+// that starts with '!') ends this connection, not the program.
+static bool ServeGuarded(TcpClient client)
+{
+    Exception error = Catch.Run(ref client, static (ref TcpClient c) =>
+    {
+        using NetworkStream stream = c.GetStream();
+        Span<byte> buffer = stackalloc byte[512];
+        int n;
+        while ((n = stream.Read(buffer)) > 0)
+        {
+            if (buffer[0] == (byte)'!')
+                throw new IOException("a bad request");
+            stream.Write(buffer.Slice(0, n));
+        }
+    });
+    client.Dispose(); // runs either way: Catch.Run always returns
+    return error == null;
+}
+```
+
 Writing to a connection the other end has closed returns an error, not the SIGPIPE signal that would
 otherwise end a Unix program.
 
 Closing a socket from another fiber also gives up on it: the waiting call wakes up and fails with
 `OperationAborted`, or its stream's `Read` returns 0. Closing wakes the waiter before the system can give
 the socket's number to a new socket, so the waiter never sees another connection's data. A `throw`
-anywhere still ends the whole program, every fiber included. To survive that, run the program under
-something that restarts it, such as systemd or a container's restart policy.
+outside any `Catch.Run` still ends the whole program, every fiber included, and so does a bug such
+as an index out of range. To survive that, run the program under something that restarts it, such
+as systemd or a container's restart policy.
 
 ## Timeouts
 
@@ -197,8 +245,8 @@ int got = patient.Read(one);
 
 As with a broken connection, a timed-out `Read` returns 0 and sets `Error`. Unlike one, it leaves the
 connection as it was, so the next `Read` waits again. A timed-out `Send` returns how many bytes went
-before it gave up. `Receive` and `Send` with `out SocketError` give `TimedOut`, and those without end the
-program, as .NET's `SocketException` would. In a fiber the other fibers run during the wait, and outside
+before it gave up. `Receive` and `Send` with `out SocketError` give `TimedOut`, and those without throw a
+`SocketException`, as in .NET. In a fiber the other fibers run during the wait, and outside
 one the thread waits.
 
 Connecting has no timeout of its own, as in .NET: give `ConnectAsync` a `CancellationToken`.

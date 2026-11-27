@@ -61,6 +61,7 @@ SMALL_SAMPLES=(
     SmallFibers
     SmallChannels
     SmallScratch
+    SmallCatches
 )
 SAMPLES=(
     Tiny
@@ -75,6 +76,7 @@ SAMPLES=(
     Files
     Paths
     Streams
+    Catches
     Network
     Directories
     Dice
@@ -112,7 +114,7 @@ SAMPLES=(
 )
 
 # Samples WebAssembly can't run (as in build.sh): the fiber samples switch stacks.
-NOT_WASM=" Fibers Timers Tasks SmallFibers SmallChannels SmallScratch Network "
+NOT_WASM=" Fibers Timers Tasks SmallFibers SmallChannels SmallScratch SmallCatches Network Catches "
 # Samples UEFI can't run (as in build.sh): lib/ has directories only on Linux,
 # macOS, Windows and WebAssembly.
 NOT_UEFI=" Directories Network "
@@ -140,6 +142,7 @@ DOS_SAMPLES=(
     Files
     Paths
     Streams
+    Catches
     Dice
     Pipe
     Env
@@ -201,6 +204,7 @@ ARM_SAMPLES=(
     Files
     Paths
     Streams
+    Catches
     Dice
     Pipe
     Env
@@ -418,6 +422,21 @@ run_all() {
             failures=$((failures + 1))
         else
             echo "ok   Fibers overflow (stopped, as it must be)"
+        fi
+    fi
+
+    # A throw in an interrupt handler must stop the program, also when the
+    # code it interrupted is inside a Catch.Run (microcontrollers only: the
+    # other targets have no handlers written in C#).
+    if [[ " ${samples[*]} " == *" Blink "* ]]; then
+        status=0
+        out=$("${run[@]}" Blink throw < /dev/null 2>&1) || status=$?
+        if [ "$status" = 0 ] || [[ "$out" != *"Unhandled exception: thrown in an interrupt handler"* ]]; then
+            echo "FAIL Blink throw: not stopped with the message (exit code $status)"
+            echo "$out" | tail -3 | sed 's/^/       /'
+            failures=$((failures + 1))
+        else
+            echo "ok   Blink throw (stopped, as it must be)"
         fi
     fi
 

@@ -5,7 +5,7 @@ index: 6
 
 # Limits
 
-Zero mode has no garbage collector, no exceptions you can catch, no .NET LINQ, and almost no base class
+Zero mode has no garbage collector, no `catch` blocks, no .NET LINQ, and almost no base class
 library. A good deal of ordinary C# still works, because zerocore provides the parts the compiler
 needs. This page lists both sides and the known issues, so you can tell early whether a design fits.
 
@@ -628,12 +628,15 @@ static void PrintArea<T>(in T shape) where T : struct, IArea<T>
   [arenas](memory.html) for anything short-lived, or [`NativeMemory`](#nativememory) for a
   block you free yourself.
 - **Catching exceptions.** `throw` is a panic, like Rust's `panic!` built with `panic = "abort"`:
-  it prints the exception's message and ends the program. Nothing unwinds, so no `catch` block runs,
-  and neither do the `finally` blocks and `using` disposals between the `throw` and `Main`. A failure
-  that would throw in .NET, such as a failed cast, an index out of range or an overflow in `checked`
-  code, ends the program the same way. A null dereference is a plain segmentation fault. `lib/`
-  follows the same rule: when it catches a mistake, it can only end the program with a message.
-  Return errors as values instead, for example with a union (see above).
+  it prints the exception's message and ends the program, unless a
+  [`Catch.Run`](../how-to/recover-from-errors.html) is waiting for it, in which case it jumps back
+  there. Nothing unwinds either way, so no `catch` block runs, and neither do the `finally` blocks
+  and `using` disposals between the `throw` and `Main` (or `Catch.Run`). A failure that would throw
+  in .NET, such as a failed cast, an index out of range or an overflow in `checked` code, ends the
+  program at once, even inside `Catch.Run`. A null dereference is a plain segmentation fault. `lib/`
+  follows the same rule: a mistake ends the program with a message, and a failure of the outside
+  world (a missing file, a dropped connection) throws. Return errors you expect as values, for
+  example with a union (see above).
 - **Variance.** Casting or dispatching through it (`IEnumerable<string>` as `IEnumerable<object>`,
   `string[]` as `object[]`) aborts with a message saying so, instead of answering wrongly.
 - **Most of the base class library.** No .NET collections (use

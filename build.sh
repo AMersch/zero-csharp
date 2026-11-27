@@ -83,6 +83,7 @@ SMALL_SAMPLES=(
     SmallFibers
     SmallChannels
     SmallScratch
+    SmallCatches
 )
 ALL_SAMPLES=(
     Tiny
@@ -97,6 +98,7 @@ ALL_SAMPLES=(
     Files
     Paths
     Streams
+    Catches
     Network
     Directories
     Dice
@@ -134,7 +136,7 @@ ALL_SAMPLES=(
 )
 # Samples WebAssembly can't run: the fiber samples switch stacks, which a WebAssembly
 # program has no way to do.
-NOT_WASM=" Fibers Timers Tasks SmallFibers SmallChannels SmallScratch Network "
+NOT_WASM=" Fibers Timers Tasks SmallFibers SmallChannels SmallScratch SmallCatches Network Catches "
 # Programs with kernels for the GPU (Metal): only --gpu builds them.
 GPU_SAMPLES=(Gpu)
 # Simd and Kernels benchmark SIMD instructions, which a 386 doesn't have.
@@ -152,6 +154,7 @@ DOS_SAMPLES=(
     Files
     Paths
     Streams
+    Catches
     Dice
     Pipe
     Env
@@ -214,6 +217,7 @@ ARM_SAMPLES=(
     Files
     Paths
     Streams
+    Catches
     Dice
     Pipe
     Env

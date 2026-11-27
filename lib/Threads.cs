@@ -4,6 +4,8 @@
 //   Parallel.For(0, rows, matrix, static (m, row) => m.ScaleRow(row));
 //
 // The calling thread works too, and For returns when every iteration is done.
+// A throw in an iteration ends the program, whichever thread it's on and
+// even inside a Catch.Run; a Catch.Run inside the iteration catches as usual.
 // Iterations are handed out in chunks from a shared counter, so a thread that
 // finishes early takes more. Starting the workers allocates nothing: the job
 // lives on the caller's stack, which outlives them because For waits.
@@ -65,7 +67,9 @@ public static class Parallel
     /// <paramref name="from"/> up to but not including <paramref name="to"/>,
     /// on up to ProcessorCount threads, and returns when all have run. Pass
     /// what the iterations need as <paramref name="state"/> and use a static
-    /// lambda, so nothing is captured or allocated.
+    /// lambda, so nothing is captured or allocated. A throw in an iteration
+    /// ends the program, also inside a Catch.Run; a Catch.Run inside the
+    /// iteration works.
     /// </summary>
     public static void For<TState>(int from, int to, TState state, Action<TState, int> body)
     {
@@ -99,10 +103,20 @@ public static class Parallel
                 started++;
             }
 
+            // A throw in an iteration ends the program, also on this thread
+            // and also inside a Catch.Run (Catch.cs), whose marks are put
+            // away while the loop runs: a jump out of here would leave the
+            // workers with a job and a state on a stack that has moved on.
+            // (The pointer is null in a program that never calls Catch.Run.)
+            delegate*<void*, void*> swapMarks = System.Runtime.CatchFrames.s_swap;
+            void* marks = swapMarks != null ? swapMarks(null) : null;
+
             Work(shared);
 
             for (int i = 0; i < started; i++)
                 pthread_join(workers[i], null);
+            if (swapMarks != null)
+                swapMarks(marks);
         }
     }
 

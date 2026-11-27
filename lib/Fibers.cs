@@ -126,6 +126,7 @@ public static class Fiber
         public delegate*<void*, nuint, void*> Allocate; // its ObjectAllocator setting
         public void* AllocateContext;
         public void* Scratch;       // its Arena.Scratch state, while switched out
+        public void* Catch;         // its innermost Catch.Run, while switched out
         public int Id;
         public bool Done;
         public bool Woken;          // by a channel, as opposed to closed
@@ -343,6 +344,9 @@ public static class Fiber
                 if (f->Allocate != mainAllocate || f->AllocateContext != mainContext)
                     System.Runtime.ObjectAllocator.Set(f->Allocate, f->AllocateContext);
                 void* mainScratch = Arena.SwapScratch(f->Scratch);
+                // Null in a program that never calls Catch.Run (Catch.cs).
+                delegate*<void*, void*> swapCatch = System.Runtime.CatchFrames.s_swap;
+                void* mainCatch = swapCatch != null ? swapCatch(f->Catch) : null;
                 s->Current = f;
                 s->Switches++;
                 ZeroFiberSwitch(&s->MainStack, f->StackPointer);
@@ -351,6 +355,11 @@ public static class Fiber
                     if (f->Bottom[i] != Canary)
                         StackOverflowed(f);
                 f->Scratch = Arena.SwapScratch(mainScratch);
+                // The fiber may have been the first to call Catch.Run.
+                if (swapCatch == null && (swapCatch = System.Runtime.CatchFrames.s_swap) != null)
+                    mainCatch = null;
+                if (swapCatch != null)
+                    f->Catch = swapCatch(mainCatch);
                 System.Runtime.ObjectAllocator.Get(out f->Allocate, out f->AllocateContext);
                 if (f->Allocate != mainAllocate || f->AllocateContext != mainContext)
                     System.Runtime.ObjectAllocator.Set(mainAllocate, mainContext);

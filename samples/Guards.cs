@@ -39,6 +39,8 @@ public static class Program
             Console.WriteLine("  destroy-in-scope     an arena destroyed inside its own object scope");
             Console.WriteLine("  throw                a throw, inside a try with a matching catch");
             Console.WriteLine("  throw-null           throw null");
+            Console.WriteLine("  throw-in-static-constructor  a throw out of a static constructor, inside Catch.Run");
+            Console.WriteLine("  throw-in-parallel-for  a throw in a Parallel.For iteration, inside Catch.Run");
             Console.WriteLine("  union-no-case        a switch on a union that holds none of its cases");
             Console.WriteLine("  debug-assert         a Debug.Assert whose condition is false");
             Console.WriteLine("  debug-fail           a Debug.Fail");
@@ -88,6 +90,8 @@ public static class Program
             case "destroy-in-scope": DestroyInScope(); break;
             case "throw": Throw(); break;
             case "throw-null": ThrowNull(); break;
+            case "throw-in-static-constructor": ThrowInStaticConstructor(); break;
+            case "throw-in-parallel-for": ThrowInParallelFor(); break;
             case "union-no-case": UnionNoCase(); break;
             case "debug-assert": DebugAssert(Opaque(0)); break;
             case "debug-fail": DebugFail(); break;
@@ -337,6 +341,32 @@ public static class Program
     static void ThrowNull()
     {
         throw null;
+    }
+
+    // A type whose static constructor throws.
+    static class Settings
+    {
+        public static readonly int Port = Load();
+
+        static int Load() => throw new System.InvalidOperationException("the settings are missing");
+    }
+
+    // Catch.Run gets a throw back, but not one out of a static constructor:
+    // jumping out of it would leave the type half made for good.
+    static void ThrowInStaticConstructor()
+    {
+        Exception error = Catch.Run(static () => Console.WriteLine(Settings.Port));
+        Console.WriteLine(error == null ? "returned" : "caught");
+    }
+
+    // Nor one out of a Parallel.For iteration: the loop's other threads
+    // would go on working for a loop that is gone. (One iteration, so that
+    // it's the calling thread's, the one with the Catch.Run.)
+    static void ThrowInParallelFor()
+    {
+        Exception error = Catch.Run(static () => Parallel.For(0, 1, 0,
+            static (_, i) => throw new System.InvalidOperationException("thrown in a Parallel.For")));
+        Console.WriteLine(error == null ? "returned" : "caught");
     }
 
     static int UnionNoCase()

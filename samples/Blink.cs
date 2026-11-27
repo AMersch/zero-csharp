@@ -5,6 +5,8 @@
 //
 // It also checks itself, as the tests do: that the handler ran as often as
 // asked, that the LED followed, and that a hardware register reads back.
+// "Blink throw" throws from the handler while Main is inside a Catch.Run,
+// which must stop the program (test.sh checks that it does).
 
 using System;
 using System.Runtime.InteropServices;
@@ -81,8 +83,28 @@ public static class Program
         }
     }
 
-    public static int Main()
+    [UnmanagedCallersOnly]
+    static void OnThrowingTick() => throw new InvalidOperationException("thrown in an interrupt handler");
+
+    // A throw in an interrupt handler ends the program, also when the code
+    // it interrupted is inside a Catch.Run: jumping from the handler into
+    // that code would leave the processor in the interrupt for good.
+    static int ThrowInHandler()
     {
+        Exception caught = Catch.Run(static () =>
+        {
+            unsafe { Board.StartTicks(20, &OnThrowingTick); }
+            while (true)
+                Board.WaitForInterrupt();
+        });
+        Console.WriteLine(caught == null ? "returned" : "caught, which must not happen");
+        return 0;
+    }
+
+    public static int Main(string[] args)
+    {
+        if (args.Length > 0 && args[0] == "throw")
+            return ThrowInHandler();
         Console.WriteLine("Blinking for 2.5 seconds...");
         Board.Led(false);
 

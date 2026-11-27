@@ -196,6 +196,44 @@ ZeroFiberStart:
     call    r13
     ud2
 
+// Catch.Run (../Runtime/Catch.cs): ZeroCatchCall saves the same frame as
+// ZeroFiberSwitch, stores its stack pointer in *rdi and calls rsi(rdx). When
+// the callback returns, or a throw inside it calls ZeroCatchJump with that
+// stack pointer, the frame comes back and ZeroCatchCall returns.
+// rdi: where to store the frame's stack pointer; rsi: callback; rdx: argument
+    .global ZeroCatchCall
+    .type ZeroCatchCall, @function
+ZeroCatchCall:
+    push    rbp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 8
+    stmxcsr [rsp]
+    fnstcw  [rsp + 4]
+    mov     [rdi], rsp
+    mov     rdi, rdx
+    call    rsi
+    mov     rdi, rsp
+
+# rdi: the stack pointer ZeroCatchCall stored
+    .global ZeroCatchJump
+    .type ZeroCatchJump, @function
+ZeroCatchJump:
+    mov     rsp, rdi
+    ldmxcsr [rsp]
+    fldcw   [rsp + 4]
+    add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
 
 // Which system this is, for lib/FileSystem.cs: 1, Linux on x64. (1 Linux x64,
 // 2 Linux arm64, 3 macOS, 4 Windows, 5 UEFI, 6 WebAssembly, 7 DOS,

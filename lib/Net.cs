@@ -8,8 +8,8 @@
 //
 // What differs from .NET: Parse takes the usual forms only (four decimal
 // numbers for IPv4; hexadecimal groups, "::" and a trailing IPv4 part for
-// IPv6, with an optional numeric %scope), and a throw ends the program, so
-// TryParse and Dns.TryGetHostAddresses are the ones to use on input that may
+// IPv6, with an optional numeric %scope), and a throw ends the program
+// unless a Catch.Run is waiting for it, so TryParse and Dns.TryGetHostAddresses are the ones to use on input that may
 // be wrong. Dns asks the system (getaddrinfo), on a thread of its own when
 // called from a fiber or async, so the other fibers and tasks run meanwhile.
 

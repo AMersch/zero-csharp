@@ -1831,6 +1831,28 @@ u32 cs_c64_ticks(void) { return jiffies(); }
 // back into any fiber's entry, so its locals stay on the stack, and two
 // fibers waiting inside it each keep their own.
 
+// Catch.Run (zerocore/Runtime/Catch.cs): a throw inside body jumps back
+// here through ZeroCatchJump, and ZeroCatchCall returns as if body had.
+// llvm-mos's setjmp saves the hardware and soft stack pointers and the
+// registers a function must keep. Runtime imports keep their names (no cs_)
+// and take the shadow stack first (see wasm/runtime.c); body gets the
+// caller's.
+#include <setjmp.h>
+
+void ZeroCatchCall(void *shadowStack, void **saved, void (*body)(void *, void *), void *argument)
+{
+    jmp_buf buffer;
+    *saved = buffer;
+    if (setjmp(buffer) == 0)
+        body(shadowStack, argument);
+}
+
+void ZeroCatchJump(void *shadowStack, void *saved)
+{
+    (void)shadowStack;
+    longjmp(*(jmp_buf *)saved, 1);
+}
+
 i32 cs_getpagesize(void) { return 256; }
 
 i32 cs_mprotect(void *address, u32 length, i32 protection)

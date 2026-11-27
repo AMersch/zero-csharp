@@ -1,7 +1,9 @@
 // Exceptions in zero mode are panics, like Rust's panic = "abort": `throw`
-// prints the exception's message to stderr and ends the program. Nothing
-// unwinds, so on that path no `catch` block runs and neither do `finally`
-// blocks or `using` disposals. RhpThrowEx (Runtime/RuntimeExports.cs) does it.
+// prints the exception's message to stderr and ends the program, unless a
+// Catch.Run (lib/Catch.cs) is running on the thread, in which case it returns
+// there with the exception. Nothing unwinds, so on either path no `catch`
+// block runs and neither do `finally` blocks or `using` disposals.
+// RhpThrowEx (Runtime/RuntimeExports.cs) does it, with Runtime/Catch.cs.
 //
 // The C# compiler also needs these types for code it generates:
 // - each C# 14 `extension(...)` block gets a hidden type whose method bodies
@@ -101,6 +103,13 @@ namespace System
         {
             if (value < other) throw new ArgumentOutOfRangeException(paramName, paramName + " ('" + value.ToString() + "') must be greater than or equal to '" + other.ToString() + "'.");
         }
+    }
+
+    // What `throw null` throws. A null dereference itself is still a crash.
+    public class NullReferenceException : Exception
+    {
+        public NullReferenceException() : base("NullReferenceException") { }
+        public NullReferenceException(string message) : base(message) { }
     }
 
     public class IndexOutOfRangeException : Exception

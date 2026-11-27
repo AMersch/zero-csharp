@@ -194,6 +194,22 @@ public static class Program
         Check(e is IOException && Length("catches.log") == 2, "a kept file stays open after a throw, buffer and all");
         File.Delete("catches.log");
 
+        // A throw while a write still runs on the I/O thread (lib/FileAsync.cs):
+        // Catch.Run leaves the closing to the write, which closes the file
+        // when it's done, rather than pull it from under that thread.
+        FileStream writing = null;
+        System.Threading.Tasks.Task pending = null;
+        e = Catch.Run(() =>
+        {
+            writing = new FileStream("catches-async.tmp", FileMode.Create, FileAccess.Write, FileShare.Read, 0);
+            pending = writing.WriteAsync(new byte[200_000]).AsTask();
+            throw new IOException("while writing");
+        });
+        pending.Wait();
+        Check(e is IOException && pending.IsCompletedSuccessfully && !writing.CanWrite && Length("catches-async.tmp") == 200_000,
+            "a file in use on the I/O thread is closed once its write is done");
+        File.Delete("catches-async.tmp");
+
         // A plain File handle is closed too, and every copy of it knows.
         // (The C library holds its buffer, and writes it out on closing.)
         File plain = default;

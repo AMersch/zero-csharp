@@ -118,7 +118,8 @@ public static class Fiber
         public ulong* Bottom;       // the stack's lowest bytes, just above the guard page: the pattern
         public nuint GuardSize;
         public Record* Next;        // in the run queue, the sleepers or a channel's waiters
-        public long WakeAt;         // Clock.Monotonic, while sleeping
+        public long WakeAt;         // Clock.Monotonic, while sleeping; while waiting on input or
+                                    // output, when that times out (0: never)
         public Runner Run;          // Runner<TState>.Instance
         public object Body;         // the Action<TState>
         public void* State;         // where the TState is
@@ -133,6 +134,16 @@ public static class Fiber
         public int Fd;              // while waiting on input or output (WaitForIO): what for,
         public short Events;        // as poll(2) takes it,
         public short Revents;       // and what poll said
+    }
+
+    // Someone waiting on input or output without a fiber: an async socket
+    // operation (lib/Sockets.cs). Its record (from malloc, not a fiber's)
+    // goes on the same list as the fibers waiting in WaitForIO, with Body
+    // this object and Run null; when poll says the socket is ready, PollIO
+    // calls Ready instead of waking a fiber.
+    internal abstract class IoWaiter
+    {
+        internal abstract void Ready(short revents);
     }
 
     // One per system thread that runs fibers.
@@ -150,6 +161,7 @@ public static class Fiber
         public int IoWaiting;
         public void* PollFds;       // the array PollIO hands poll(2), from malloc
         public int PollCapacity;    // in entries
+        public int AsyncWaiting;    // async operations among the IoWaiters, counted in Live too
     }
 
     // poll(2), set by the code that first waits on input or output (the
@@ -281,7 +293,9 @@ public static class Fiber
     }
 
     /// <summary>Fibers spawned on this thread that haven't ended yet.</summary>
-    public static int Count { get { unsafe { return This->Live; } } } // SAFETY: the thread's scheduler
+    // Live also counts the async operations waiting on input or output
+    // (WaitForIOAsync), which aren't fibers.
+    public static int Count { get { unsafe { return This->Live - This->AsyncWaiting; } } } // SAFETY: the thread's scheduler
 
     /// <summary>How many times this thread has switched to a fiber: for measuring.</summary>
     public static long Switches { get { unsafe { return This->Switches; } } } // SAFETY: the thread's scheduler
@@ -370,8 +384,9 @@ public static class Fiber
 
     // Blocks the current fiber until fd is ready for `events` (poll(2)'s
     // POLLIN, POLLOUT...), letting the others run. Returns what poll said,
-    // or 0 outside a fiber, where the caller waits by itself.
-    internal static short WaitForIO(int fd, short events)
+    // or 0 outside a fiber, where the caller waits by itself. With a
+    // deadline (Clock.Monotonic; 0: none), TimedOut once it has passed.
+    internal static short WaitForIO(int fd, short events, long deadline = 0)
     {
         Scheduler* s = This;
         unsafe
@@ -384,14 +399,130 @@ public static class Fiber
             // continuations get a new dispatcher (as in Park and Sleep).
             LeaveDispatcher(current);
             s_pollIO = &PollIO;
-            current->Fd = fd;
-            current->Events = events;
-            current->Revents = 0;
-            current->Next = s->IoWaiters;
-            s->IoWaiters = current;
-            s->IoWaiting++;
+            AddIoWaiter(s, current, fd, events, deadline);
             SwitchToScheduler(s, current);
             return current->Revents;
+        }
+    }
+
+    static void AddIoWaiter(Scheduler* s, Record* r, int fd, short events, long deadline)
+    {
+        unsafe
+        {
+            // SAFETY: a parked fiber's record, or an IoWaiter's from malloc.
+            r->Fd = fd;
+            r->Events = events;
+            r->Revents = 0;
+            r->WakeAt = deadline;
+            r->Next = s->IoWaiters;
+            s->IoWaiters = r;
+            s->IoWaiting++;
+        }
+    }
+
+    // Takes a waiter off the list (it was found ready, timed out, or is
+    // being cancelled).
+    static void RemoveIoWaiter(Scheduler* s, Record** link)
+    {
+        unsafe
+        {
+            // SAFETY: *link is on the list.
+            Record* r = *link;
+            *link = r->Next;
+            r->Next = null;
+            s->IoWaiting--;
+            if (r->Run == null)
+            {
+                s->Live--; // an async operation: see WaitForIOAsync
+                s->AsyncWaiting--;
+            }
+        }
+    }
+
+    // What WaitForIO returns, and Ready gets, when the deadline passed
+    // first: not one of poll's bits.
+    internal const short TimedOut = 0x2000;
+
+    // An async operation's record (r->Body its IoWaiter) waits for fd to be
+    // ready for events, without a fiber: Ready is called, from Fiber.Run,
+    // when it is, or with TimedOut at the deadline, or Cancelled. The record
+    // goes off the list before Ready is called, so Ready can wait again.
+    internal static void WaitForIOAsync(Record* r, int fd, short events, long deadline = 0)
+    {
+        Scheduler* s = This;
+        unsafe
+        {
+            s_pollIO = &PollIO;
+            // SAFETY: the operation's record, kept until it ends.
+            r->Run = null;
+            AddIoWaiter(s, r, fd, events, deadline);
+            // Counted as live while it waits, so Run goes on without a
+            // fiber, and a program with no sockets pays nothing for it.
+            s->Live++;
+            s->AsyncWaiting++;
+        }
+    }
+
+    // Takes an async operation's record off the list (its token was
+    // canceled): false if it wasn't on it.
+    internal static bool StopWaitingForIO(Record* r)
+    {
+        Scheduler* s = This;
+        unsafe
+        {
+            // SAFETY: the waiters' records.
+            Record** link = &s->IoWaiters;
+            while (*link != null && *link != r)
+                link = &(*link)->Next;
+            if (*link == null)
+                return false;
+            RemoveIoWaiter(s, link);
+            return true;
+        }
+    }
+
+    // A waiter is done waiting: a fiber goes back in the run queue, an async
+    // operation goes on `ready`, for its Ready once the list is consistent.
+    static void Finish(Scheduler* s, Record* r, short revents, ref Record* ready)
+    {
+        unsafe
+        {
+            // SAFETY: a record just taken off the list.
+            r->Revents = revents;
+            if (r->Run == null)
+            {
+                r->Next = ready;
+                ready = r;
+            }
+            else
+            {
+                Enqueue(s, r);
+            }
+        }
+    }
+
+    // Calls Ready for the async operations PollIO or CancelIO took off the
+    // list, in the order they were found.
+    static void CallReady(Record* ready)
+    {
+        unsafe
+        {
+            // SAFETY: async operations' records, off every list.
+            Record* reversed = null;
+            while (ready != null)
+            {
+                Record* next = ready->Next;
+                ready->Next = reversed;
+                reversed = ready;
+                ready = next;
+            }
+            while (reversed != null)
+            {
+                Record* r = reversed;
+                reversed = r->Next;
+                r->Next = null;
+                ((IoWaiter)r->Body).Ready(r->Revents);
+            }
         }
     }
 
@@ -407,7 +538,9 @@ public static class Fiber
         Scheduler* s = This;
         unsafe
         {
-            // SAFETY: the waiters are parked fibers' records.
+            // SAFETY: the waiters are parked fibers' records, or async
+            // operations' records.
+            Record* ready = null;
             Record** link = &s->IoWaiters;
             while (*link != null)
             {
@@ -417,11 +550,10 @@ public static class Fiber
                     link = &f->Next;
                     continue;
                 }
-                *link = f->Next;
-                f->Revents = Cancelled;
-                s->IoWaiting--;
-                Enqueue(s, f);
+                RemoveIoWaiter(s, link);
+                Finish(s, f, Cancelled, ref ready);
             }
+            CallReady(ready);
         }
     }
 
@@ -433,7 +565,7 @@ public static class Fiber
     {
         unsafe
         {
-            int timeout = !wait ? 0 : s->Sleepers == null ? -1 : MillisecondsUntil(s->Sleepers->WakeAt);
+            long until = !wait ? 0 : s->Sleepers == null ? long.MaxValue : s->Sleepers->WakeAt;
             // SAFETY: the waiters are parked fibers' records; PollFds has
             // room for PollCapacity entries of 8 bytes.
             int n = s->IoWaiting;
@@ -448,32 +580,43 @@ public static class Fiber
             }
             byte* fds = (byte*)s->PollFds;
             int i = 0;
+            bool deadlines = false;
             for (Record* f = s->IoWaiters; f != null; f = f->Next, i++)
             {
                 *(int*)(fds + i * 8) = f->Fd;
                 *(short*)(fds + i * 8 + 4) = f->Events;
                 *(short*)(fds + i * 8 + 6) = 0;
+                if (f->WakeAt != 0)
+                {
+                    deadlines = true;
+                    if (f->WakeAt < until)
+                        until = f->WakeAt;
+                }
             }
+            int timeout = until == long.MaxValue ? -1 : until == 0 ? 0 : MillisecondsUntil(until);
             int ready = Poll(fds, (nuint)n, timeout);
-            if (ready == 0)
+            if (ready == 0 && !deadlines)
                 return;
+            long now = deadlines ? Clock.Monotonic : 0;
+            Record* done = null;
             Record** link = &s->IoWaiters;
             i = 0;
             while (*link != null)
             {
                 Record* f = *link;
-                short revents = ready < 0 ? (short)1 : *(short*)(fds + i * 8 + 6);
+                short revents = ready < 0 ? (short)1 : ready == 0 ? (short)0 : *(short*)(fds + i * 8 + 6);
                 i++;
+                if (revents == 0 && f->WakeAt != 0 && f->WakeAt <= now)
+                    revents = TimedOut;
                 if (revents == 0)
                 {
                     link = &f->Next;
                     continue;
                 }
-                *link = f->Next;
-                f->Revents = revents;
-                s->IoWaiting--;
-                Enqueue(s, f);
+                RemoveIoWaiter(s, link);
+                Finish(s, f, revents, ref done);
             }
+            CallReady(done);
         }
     }
 
@@ -481,7 +624,7 @@ public static class Fiber
     // * 1074 / 2^30 is a hair more than / 1000000, without the code for
     // 64-bit division (as in WakeSleepers). At most 1000 s at a time; Run's
     // loop comes back.
-    static int MillisecondsUntil(long time)
+    internal static int MillisecondsUntil(long time)
     {
         long nanos = Math.Min(time - Clock.Monotonic, 1_000_000_000_000L);
         if (nanos <= 0)

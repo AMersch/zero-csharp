@@ -18,10 +18,14 @@ permissions:
   contents: read
   packages: read # the fork's build restores packages from GitHub Packages
 
-# One deployment at a time; a newer push waits rather than cancelling one in progress.
+# Pushes to master deploy one at a time: a newer push waits rather than cancelling
+# one in progress. A group holds one waiting run, and a newer one replaces it, so
+# runs that don't deploy (pull requests, manual runs) get a group per branch:
+# sharing "pages" with them let a pull request's build cancel master's deploy. A
+# newer push to the same pull request cancels its older build.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'push' && 'pages' || format('docs-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   build:

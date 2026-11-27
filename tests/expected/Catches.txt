@@ -15,6 +15,7 @@ ok   what was flushed is in it; what was still buffered isn't
 ok   using the stream afterwards throws, as for a disposed one
 ok   and disposing it then does nothing
 ok   a kept file stays open after a throw, buffer and all
+ok   a file in use on the I/O thread is closed once its write is done
 ok   a File opened inside is closed after a throw, for every copy
 ok   and what the C library held for it is written
 ok   a kept File stays open after a throw

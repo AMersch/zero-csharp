@@ -29,7 +29,7 @@ public static class Directory
     /// </summary>
     public static FileError Create(ReadOnlySpan<char> path)
     {
-        Span<byte> name = stackalloc byte[FileSystem.MaxPath];
+        Span<byte> name = stackalloc byte[FileSystem.PathRoom(path)];
         int length = FileSystem.ToC(path, name);
         if (length < 0)
             return FileError.InvalidPath;
@@ -113,7 +113,7 @@ public static class Directory
     /// <summary>Makes the path the current directory.</summary>
     public static FileError SetCurrentDirectory(ReadOnlySpan<char> path)
     {
-        Span<byte> name = stackalloc byte[FileSystem.MaxPath];
+        Span<byte> name = stackalloc byte[FileSystem.PathRoom(path)];
         if (FileSystem.ToC(path, name) < 0)
             return FileError.InvalidPath;
         FileSystem.ClearError();

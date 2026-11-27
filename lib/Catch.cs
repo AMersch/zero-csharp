@@ -329,6 +329,8 @@ public static class Catch
         public unsafe delegate*<nint, void> Close;  // closes Value
         public nint Value;                   // the FILE*, or the socket's number
         public uint Uses;                    // goes up each time the record is given up
+        public int Busy;                     // operations on another thread using Value (FileAsync.cs)
+        public bool CloseLater;              // a Catch.Run took it while Busy: the last of them closes it
     }
 
     /// <summary>What a File or Socket keeps of its record, from Opened.</summary>
@@ -474,6 +476,7 @@ public static class Catch
             {
                 Unlink(handle);
                 handle->Uses++;
+                handle->Busy = 0;
                 handle->Next = s_spare;
                 s_spare = handle;
             }
@@ -506,6 +509,55 @@ public static class Catch
             Lock();
             if (handle->Uses == ticket.Uses)
                 Unlink(handle);
+            Unlock();
+        }
+    }
+
+    /// <summary>
+    /// For an operation that hands the handle to another thread (FileAsync.cs):
+    /// counts it as in use, so that a Catch.Run closing it after a throw
+    /// meanwhile leaves the closing to DoneUsing. False if a Catch.Run has
+    /// closed it already.
+    /// </summary>
+    internal static bool Using(Ticket ticket)
+    {
+        unsafe
+        {
+            // SAFETY: a record is never freed; changed under the lock.
+            OpenHandle* handle = ticket.Handle;
+            if (handle == null)
+                return true;
+            Lock();
+            bool open = handle->Uses == ticket.Uses;
+            if (open)
+                handle->Busy++;
+            Unlock();
+            return open;
+        }
+    }
+
+    /// <summary>The operation is over: closes the handle if a Catch.Run took it meanwhile.</summary>
+    internal static void DoneUsing(Ticket ticket)
+    {
+        unsafe
+        {
+            // SAFETY: as in Using. A record taken while busy stays out of the
+            // spare list until this closes it, so the pointer is still its.
+            OpenHandle* handle = ticket.Handle;
+            if (handle == null)
+                return;
+            Lock();
+            handle->Busy--;
+            bool closeNow = handle->CloseLater && handle->Busy == 0;
+            if (closeNow)
+                handle->CloseLater = false;
+            Unlock();
+            if (!closeNow)
+                return;
+            handle->Close(handle->Value);
+            Lock();
+            handle->Next = s_spare;
+            s_spare = handle;
             Unlock();
         }
     }
@@ -611,11 +663,20 @@ public static class Catch
             while (taken != null)
             {
                 OpenHandle* next = taken->Next;
-                taken->Close(taken->Value);
                 Lock();
-                taken->Next = s_spare;
-                s_spare = taken;
+                // In use on another thread: the last operation closes it.
+                bool busy = taken->Busy > 0;
+                if (busy)
+                    taken->CloseLater = true;
                 Unlock();
+                if (!busy)
+                {
+                    taken->Close(taken->Value);
+                    Lock();
+                    taken->Next = s_spare;
+                    s_spare = taken;
+                    Unlock();
+                }
                 taken = next;
             }
         }

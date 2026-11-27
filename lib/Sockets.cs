@@ -26,7 +26,11 @@
 //   closes the sockets opened inside it. The forms that return a
 //   SocketError don't throw: Receive and Send with `out SocketError`, and
 //   TryConnect and TryAccept, which .NET doesn't have.
-// - No async methods, timeouts or Select: fibers do the waiting.
+// - ReceiveTimeout and SendTimeout are kept here, not by the system (every
+//   socket is non-blocking underneath): a call that times out fails with
+//   TimedOut, as in .NET, and the socket stays usable.
+// - The async methods are in lib/SocketsAsync.cs. No Select or
+//   SocketAsyncEventArgs.
 // - Linux, macOS and Windows. WebAssembly (WASI preview 1), DOS, UEFI and
 //   microcontrollers have no sockets: a program that uses them there fails to
 //   link.
@@ -234,11 +238,12 @@ public class LingerOption
 /// A network endpoint to send and receive through: TCP or UDP, IPv4 or IPv6.
 /// Calls that would wait let other fibers run (see the file's comment).
 /// </summary>
-public class Socket : IDisposable
+public partial class Socket : IDisposable
 {
     int _fd;
     bool _connected;
     Catch.Ticket _ticket;  // for a Catch.Run to close the socket after a throw
+    int _receiveTimeout, _sendTimeout; // milliseconds; 0: none
 
     /// <summary>A socket for the family, type and protocol. Failing throws a SocketException.</summary>
     public Socket(AddressFamily addressFamily, SocketType socketType, ProtocolType protocolType)
@@ -259,7 +264,7 @@ public class Socket : IDisposable
         : this(AddressFamily.InterNetworkV6, socketType, protocolType)
         => DualMode = true;
 
-    Socket(int fd, AddressFamily family, SocketType type, ProtocolType protocol)
+    internal Socket(int fd, AddressFamily family, SocketType type, ProtocolType protocol)
     {
         _fd = fd;
         _connected = true;
@@ -331,6 +336,46 @@ public class Socket : IDisposable
         get => SocketNative.GetOption(Fd, SocketNative.Option.Broadcast) != 0;
         set => SocketNative.SetOption(Fd, SocketNative.Option.Broadcast, value ? 1 : 0);
     }
+
+    /// <summary>
+    /// How long, in milliseconds, Receive and ReceiveFrom wait before failing
+    /// with TimedOut: 0 (the default) or -1 waits for ever. The socket stays
+    /// usable after a timeout. The async methods don't use it, as in .NET:
+    /// give them a CancellationToken.
+    /// </summary>
+    public int ReceiveTimeout
+    {
+        get => _receiveTimeout;
+        set => _receiveTimeout = CheckTimeout(value);
+    }
+
+    /// <summary>
+    /// How long, in milliseconds, Send and SendTo wait for room before failing
+    /// with TimedOut: 0 (the default) or -1 waits for ever. Send then returns
+    /// how many bytes went before the timeout.
+    /// </summary>
+    public int SendTimeout
+    {
+        get => _sendTimeout;
+        set => _sendTimeout = CheckTimeout(value);
+    }
+
+    static int CheckTimeout(int milliseconds)
+    {
+        if (milliseconds < -1)
+            throw new ArgumentOutOfRangeException(nameof(milliseconds));
+        return milliseconds == -1 ? 0 : milliseconds;
+    }
+
+    // An operation failed with this: is the connection gone? Not after a
+    // timeout, as in .NET.
+    internal void Failed(SocketError error)
+    {
+        if (error != SocketError.Success && error != SocketError.TimedOut && error != SocketError.WouldBlock)
+            _connected = false;
+    }
+
+    internal void SetConnected(bool connected) => _connected = connected;
 
     /// <summary>Gives the socket an address and port of this machine. Failing throws a SocketException.</summary>
     public void Bind(EndPoint localEP)
@@ -445,9 +490,8 @@ public class Socket : IDisposable
             errorCode = SocketError.OperationAborted;
             return 0;
         }
-        errorCode = SocketNative.Send(_fd, buffer, socketFlags, null, out int sent);
-        if (errorCode != SocketError.Success)
-            _connected = false;
+        errorCode = SocketNative.Send(_fd, buffer, socketFlags, null, out int sent, SocketNative.Deadline(_sendTimeout));
+        Failed(errorCode);
         return sent;
     }
 
@@ -485,9 +529,8 @@ public class Socket : IDisposable
             errorCode = SocketError.OperationAborted;
             return 0;
         }
-        errorCode = SocketNative.Receive(_fd, buffer, socketFlags, out int received, null);
-        if (errorCode != SocketError.Success)
-            _connected = false;
+        errorCode = SocketNative.Receive(_fd, buffer, socketFlags, out int received, null, SocketNative.Deadline(_receiveTimeout));
+        Failed(errorCode);
         return received;
     }
 
@@ -504,7 +547,7 @@ public class Socket : IDisposable
     /// <summary>Sends a datagram to the endpoint (UDP). Failing throws a SocketException.</summary>
     public int SendTo(ReadOnlySpan<byte> buffer, EndPoint remoteEP)
     {
-        SocketError error = SocketNative.Send(Fd, buffer, SocketFlags.None, ToIP(remoteEP), out int sent);
+        SocketError error = SocketNative.Send(Fd, buffer, SocketFlags.None, ToIP(remoteEP), out int sent, SocketNative.Deadline(_sendTimeout));
         if (error != SocketError.Success)
             throw new SocketException((int)error);
         return sent;
@@ -520,7 +563,7 @@ public class Socket : IDisposable
     public int ReceiveFrom(Span<byte> buffer, ref EndPoint remoteEP)
     {
         IPEndPoint from = new IPEndPoint(IPAddress.Any, 0);
-        SocketError error = SocketNative.Receive(Fd, buffer, SocketFlags.None, out int received, from);
+        SocketError error = SocketNative.Receive(Fd, buffer, SocketFlags.None, out int received, from, SocketNative.Deadline(_receiveTimeout));
         if (error != SocketError.Success)
             throw new SocketException((int)error);
         remoteEP = from;
@@ -561,7 +604,7 @@ public class Socket : IDisposable
     /// <summary>Closes the socket.</summary>
     public void Dispose() => Close();
 
-    int Fd => Number >= 0 ? _fd : throw new ObjectDisposedException("Socket");
+    internal int Fd => Number >= 0 ? _fd : throw new ObjectDisposedException("Socket");
 
     // Catch.Keep: no Catch.Run closes the socket from here on.
     internal void KeepOpen() => Catch.Kept(_ticket);
@@ -582,7 +625,7 @@ public class Socket : IDisposable
         }
     }
 
-    IPEndPoint ToIP(EndPoint endPoint)
+    internal IPEndPoint ToIP(EndPoint endPoint)
     {
         if (endPoint is not IPEndPoint ip)
             throw new ArgumentException("Socket: only IPEndPoint addresses");
@@ -614,7 +657,7 @@ public class Socket : IDisposable
 // throw ends the program unless the connection's fiber runs under a
 // Catch.Run, so one client resetting its connection could end a server: a
 // broken connection ends its own stream instead.
-public class NetworkStream : Stream
+public partial class NetworkStream : Stream
 {
     readonly bool _ownsSocket;
     bool _open = true;
@@ -637,9 +680,59 @@ public class NetworkStream : Stream
     /// <summary>
     /// Why the connection broke (ConnectionReset, ConnectionAborted,
     /// OperationAborted when the socket was closed under it...), or Success.
-    /// The first failure stays.
+    /// The first such failure stays. TimedOut (a ReadTimeout or WriteTimeout
+    /// ran out), or OperationAborted from a canceled ReadAsync or WriteAsync,
+    /// says why the last call returned early; the next call tries again.
     /// </summary>
-    public SocketError Error { get; private set; }
+    public SocketError Error { get; internal set; }
+
+    // Whether the next call may go ahead: not on a broken connection. A
+    // timeout or a canceled async call leaves the connection as it was.
+    internal bool Usable()
+    {
+        if (Error == SocketError.Success)
+            return true;
+        if (Error == SocketError.TimedOut || (Error == SocketError.OperationAborted && Socket.Handle >= 0))
+        {
+            Error = SocketError.Success;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>True: a network stream's Read and Write can time out.</summary>
+    public override bool CanTimeout => true;
+
+    /// <summary>
+    /// How long, in milliseconds, Read and ReadAsync wait for data before
+    /// returning 0 with Error TimedOut: Timeout.Infinite (-1, the default)
+    /// waits for ever. The socket's ReceiveTimeout. Unlike .NET, ReadAsync
+    /// uses it too, so an async server can drop a silent client without a
+    /// canceled task (whose await would end the program).
+    /// </summary>
+    public override int ReadTimeout
+    {
+        get => Socket.ReceiveTimeout == 0 ? System.Threading.Timeout.Infinite : Socket.ReceiveTimeout;
+        set => Socket.ReceiveTimeout = StreamTimeout(value);
+    }
+
+    /// <summary>
+    /// How long, in milliseconds, Write and WriteAsync wait for room before
+    /// giving up with Error TimedOut: Timeout.Infinite (-1, the default)
+    /// waits for ever. The socket's SendTimeout.
+    /// </summary>
+    public override int WriteTimeout
+    {
+        get => Socket.SendTimeout == 0 ? System.Threading.Timeout.Infinite : Socket.SendTimeout;
+        set => Socket.SendTimeout = StreamTimeout(value);
+    }
+
+    static int StreamTimeout(int milliseconds)
+    {
+        if (milliseconds <= 0 && milliseconds != System.Threading.Timeout.Infinite)
+            throw new ArgumentOutOfRangeException(nameof(milliseconds));
+        return milliseconds;
+    }
 
     /// <inheritdoc/>
     public override bool CanRead => _open;
@@ -670,7 +763,7 @@ public class NetworkStream : Stream
     public override int Read(Span<byte> buffer)
     {
         EnsureOpen();
-        if (Error != SocketError.Success)
+        if (!Usable())
             return 0;
         int n = Socket.Receive(buffer, SocketFlags.None, out SocketError error);
         if (error != SocketError.Success)
@@ -692,7 +785,7 @@ public class NetworkStream : Stream
     public override void Write(ReadOnlySpan<byte> buffer)
     {
         EnsureOpen();
-        if (Error != SocketError.Success)
+        if (!Usable())
             return;
         Socket.Send(buffer, SocketFlags.None, out SocketError error);
         if (error != SocketError.Success)
@@ -716,7 +809,7 @@ public class NetworkStream : Stream
             Socket.Close();
     }
 
-    void EnsureOpen()
+    internal void EnsureOpen()
     {
         if (!_open)
             throw new ObjectDisposedException("NetworkStream");
@@ -724,7 +817,7 @@ public class NetworkStream : Stream
 }
 
 /// <summary>Listens for TCP connections on an address and port.</summary>
-public class TcpListener
+public partial class TcpListener
 {
     readonly IPEndPoint _endpoint;
     Socket _server;
@@ -781,11 +874,11 @@ public class TcpListener
         return client != null;
     }
 
-    Socket Started => _server ?? throw new InvalidOperationException("TcpListener: call Start first");
+    internal Socket Started => _server ?? throw new InvalidOperationException("TcpListener: call Start first");
 }
 
 /// <summary>A TCP connection, and a stream over it.</summary>
-public class TcpClient : IDisposable
+public partial class TcpClient : IDisposable
 {
     Socket _socket;
     NetworkStream _stream;
@@ -829,6 +922,20 @@ public class TcpClient : IDisposable
         set => _socket.NoDelay = value;
     }
 
+    /// <summary>The socket's ReceiveTimeout, in milliseconds: 0 waits for ever.</summary>
+    public int ReceiveTimeout
+    {
+        get => _socket.ReceiveTimeout;
+        set => _socket.ReceiveTimeout = value;
+    }
+
+    /// <summary>The socket's SendTimeout, in milliseconds: 0 waits for ever.</summary>
+    public int SendTimeout
+    {
+        get => _socket.SendTimeout;
+        set => _socket.SendTimeout = value;
+    }
+
     /// <summary>Connects to a host name's port. Failing throws a SocketException.</summary>
     public void Connect(string hostname, int port) => _socket.Connect(hostname, port);
 
@@ -861,7 +968,7 @@ public class TcpClient : IDisposable
 }
 
 /// <summary>Sends and receives UDP datagrams.</summary>
-public class UdpClient : IDisposable
+public partial class UdpClient : IDisposable
 {
     Socket _socket;
 
@@ -996,7 +1103,7 @@ static class SocketNative
     static int MSG_NOSIGNAL => Mac ? 0 : 0x4000; // macOS: SO_NOSIGPIPE on the socket instead
     const int AF_INET = 2, SOCK_STREAM = 1, SOCK_DGRAM = 2, IPPROTO_TCP = 6, IPPROTO_IPV6 = 41, TCP_NODELAY = 1;
     const int F_GETFL = 3, F_SETFL = 4, SO_NOSIGPIPE = 0x1022;
-    const short POLLIN = 1, POLLOUT = 4;
+    internal const short POLLIN = 1, POLLOUT = 4;
     const int SockaddrSize = 28; // sockaddr_in6, the bigger
 
     internal enum Option { NoDelay, V6Only, Broadcast }
@@ -1103,26 +1210,52 @@ static class SocketNative
     }
 
     // Waits until fd is ready for events: in a fiber, the others run
-    // meanwhile; outside one, poll waits here. False if the socket was closed
-    // while a fiber waited (Close cancels its waiters).
-    static bool Wait(int fd, short events)
+    // meanwhile; outside one, poll waits here. Success, TimedOut once the
+    // deadline (Clock.Monotonic; 0: none) has passed, or OperationAborted if
+    // the socket was closed while a fiber waited (Close cancels its waiters).
+    static SocketError Wait(int fd, short events, long deadline)
     {
         unsafe
         {
             // SAFETY: the C calls get memory on this stack (or from calloc), of
             // the sizes they are told, and keep none of it past the call.
-            if (Fiber.Poll == null)
-                Fiber.Poll = &PollAll;
-            short revents = Fiber.WaitForIO(fd, events);
+            UsePoll();
+            short revents = Fiber.WaitForIO(fd, events, deadline);
+            if (revents == Fiber.Cancelled)
+                return SocketError.OperationAborted;
+            if (revents == Fiber.TimedOut)
+                return SocketError.TimedOut;
             if (revents != 0)
-                return revents != Fiber.Cancelled;
+                return SocketError.Success;
             long one = 0;
             *(int*)&one = fd;
             *((short*)&one + 2) = events;
-            poll(&one, 1, -1);
-            return true;
+            int timeout = -1;
+            if (deadline != 0)
+            {
+                timeout = Fiber.MillisecondsUntil(deadline);
+                if (timeout == 0)
+                    return SocketError.TimedOut;
+            }
+            return poll(&one, 1, timeout) == 0 ? SocketError.TimedOut : SocketError.Success;
         }
     }
+
+    // Fiber.Run polls through Fiber.Poll: set it before anything waits.
+    internal static void UsePoll()
+    {
+        unsafe
+        {
+            // SAFETY: a static method.
+            if (Fiber.Poll == null)
+                Fiber.Poll = &PollAll;
+        }
+    }
+
+    // When a timeout of `milliseconds` (0 or less: none) runs out, for Wait.
+    internal static long Deadline(int milliseconds)
+        => milliseconds <= 0 ? 0 : Clock.Monotonic + milliseconds * 1_000_000L;
+
 
     // ---- operations -----------------------------------------------------------
 
@@ -1183,25 +1316,34 @@ static class SocketNative
 
     internal static SocketError Accept(int fd, out int accepted)
     {
+        SocketError error;
+        while ((error = AcceptOnce(fd, out accepted)) == SocketError.WouldBlock)
+            if ((error = Wait(fd, POLLIN, 0)) != SocketError.Success)
+                return error;
+        return error;
+    }
+
+    // One try, without waiting: WouldBlock if no connection is waiting.
+    internal static SocketError AcceptOnce(int fd, out int accepted)
+    {
         unsafe
         {
-            // SAFETY: the C calls get memory on this stack (or from calloc), of
-            // the sizes they are told, and keep none of it past the call.
-            while (true)
+            // SAFETY: no pointers but nulls.
+            accepted = accept(fd, null, null);
+            if (accepted >= 0)
             {
-                accepted = accept(fd, null, null);
-                if (accepted >= 0)
-                {
-                    Prepare(accepted);
-                    return SocketError.Success;
-                }
-                int e = Errno;
-                if (!WouldBlock(e) && !Interrupted(e))
-                    return LastError();
-                if (!Wait(fd, POLLIN))
-                    return SocketError.OperationAborted;
+                Prepare(accepted);
+                return SocketError.Success;
             }
+            return Failed();
         }
+    }
+
+    // A call failed: WouldBlock if it only would have waited (EAGAIN, EINTR).
+    static SocketError Failed()
+    {
+        int e = Errno;
+        return WouldBlock(e) || Interrupted(e) ? SocketError.WouldBlock : LastError();
     }
 
     internal static SocketError Connect(int fd, IPEndPoint endpoint)
@@ -1210,6 +1352,22 @@ static class SocketNative
         {
             // SAFETY: the C calls get memory on this stack (or from calloc), of
             // the sizes they are told, and keep none of it past the call.
+            SocketError started = ConnectStart(fd, endpoint);
+            if (started != SocketError.InProgress)
+                return started;
+            // Under way: done when the socket can be written.
+            SocketError waited = Wait(fd, POLLOUT, 0);
+            return waited != SocketError.Success ? waited : ConnectResult(fd);
+        }
+    }
+
+    // Starts connecting: Success, InProgress (wait until the socket can be
+    // written, then ask ConnectResult), or why it failed.
+    internal static SocketError ConnectStart(int fd, IPEndPoint endpoint)
+    {
+        unsafe
+        {
+            // SAFETY: the address is on this stack, of the size connect is told.
             byte* address = stackalloc byte[SockaddrSize];
             uint length = Write(endpoint, address);
             if (connect(fd, address, length) == 0)
@@ -1217,9 +1375,16 @@ static class SocketNative
             int e = Errno;
             if (!InProgress(e) && !WouldBlock(e) && !Interrupted(e))
                 return LastError();
-            // Under way: done when the socket can be written, and SO_ERROR says how.
-            if (!Wait(fd, POLLOUT))
-                return SocketError.OperationAborted;
+            return SocketError.InProgress;
+        }
+    }
+
+    // How a connection under way turned out: SO_ERROR.
+    internal static SocketError ConnectResult(int fd)
+    {
+        unsafe
+        {
+            // SAFETY: getsockopt writes 4 bytes into error.
             int error = 0;
             uint size = 4;
             if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) != 0)
@@ -1231,14 +1396,30 @@ static class SocketNative
         }
     }
 
-    // Sends all of it, to `to` if given (UDP), waiting while the buffer is full.
-    internal static SocketError Send(int fd, ReadOnlySpan<byte> bytes, SocketFlags flags, IPEndPoint to, out int sent)
+    // Sends all of it, to `to` if given (UDP), waiting while the buffer is
+    // full, until the deadline (0: none).
+    internal static SocketError Send(int fd, ReadOnlySpan<byte> bytes, SocketFlags flags, IPEndPoint to, out int sent, long deadline = 0)
+    {
+        sent = 0;
+        while (true)
+        {
+            SocketError error = SendSome(fd, bytes, flags, to, ref sent);
+            if (error != SocketError.WouldBlock)
+                return error;
+            if ((error = Wait(fd, POLLOUT, deadline)) != SocketError.Success)
+                return error;
+        }
+    }
+
+    // Sends from bytes[sent..] until all of it has gone (Success), the
+    // buffer is full (WouldBlock), or it fails; `sent` counts what went.
+    // A datagram (to given) goes in one sendto, even an empty one.
+    internal static SocketError SendSome(int fd, ReadOnlySpan<byte> bytes, SocketFlags flags, IPEndPoint to, ref int sent)
     {
         unsafe
         {
-            // SAFETY: the C calls get memory on this stack (or from calloc), of
-            // the sizes they are told, and keep none of it past the call.
-            sent = 0;
+            // SAFETY: the address is on this stack and the bytes are fixed, of
+            // the sizes sendto is told.
             byte* address = stackalloc byte[SockaddrSize];
             uint length = to == null ? 0 : Write(to, address);
             fixed (byte* p = bytes)
@@ -1246,59 +1427,54 @@ static class SocketNative
                 while (sent < bytes.Length || (bytes.IsEmpty && to != null && sent == 0))
                 {
                     nint n = sendto(fd, p + sent, (nuint)(bytes.Length - sent), (int)flags | MSG_NOSIGNAL, to == null ? null : address, length);
-                    if (n >= 0)
-                    {
-                        sent += (int)n;
-                        if (bytes.IsEmpty)
-                            break;
-                        continue;
-                    }
-                    int e = Errno;
-                    if (!WouldBlock(e) && !Interrupted(e))
-                        return LastError();
-                    if (!Wait(fd, POLLOUT))
-                        return SocketError.OperationAborted;
+                    if (n < 0)
+                        return Failed();
+                    sent += (int)n;
+                    if (bytes.IsEmpty)
+                        break;
                 }
             }
             return SocketError.Success;
         }
     }
 
-    // Receives what has arrived, waiting for something; fills `from` (UDP).
-    internal static SocketError Receive(int fd, Span<byte> buffer, SocketFlags flags, out int received, IPEndPoint from)
+    // Receives what has arrived, waiting for something until the deadline
+    // (0: none); fills `from` (UDP).
+    internal static SocketError Receive(int fd, Span<byte> buffer, SocketFlags flags, out int received, IPEndPoint from, long deadline = 0)
+    {
+        SocketError error;
+        while ((error = ReceiveOnce(fd, buffer, flags, out received, from)) == SocketError.WouldBlock)
+            if ((error = Wait(fd, POLLIN, deadline)) != SocketError.Success)
+                return error;
+        return error;
+    }
+
+    // One recvfrom, without waiting: WouldBlock if nothing has arrived.
+    internal static SocketError ReceiveOnce(int fd, Span<byte> buffer, SocketFlags flags, out int received, IPEndPoint from)
     {
         unsafe
         {
-            // SAFETY: the C calls get memory on this stack (or from calloc), of
-            // the sizes they are told, and keep none of it past the call.
+            // SAFETY: the address is on this stack and the buffer is fixed, of
+            // the sizes recvfrom is told.
             byte* address = stackalloc byte[SockaddrSize];
+            received = 0;
             fixed (byte* p = buffer)
             {
-                while (true)
+                uint length = SockaddrSize;
+                nint n = recvfrom(fd, p, (nuint)buffer.Length, (int)flags, from == null ? null : address, from == null ? null : &length);
+                if (n < 0)
+                    return Failed();
+                received = (int)n;
+                if (from != null)
                 {
-                    uint length = SockaddrSize;
-                    nint n = recvfrom(fd, p, (nuint)buffer.Length, (int)flags, from == null ? null : address, from == null ? null : &length);
-                    if (n >= 0)
+                    IPEndPoint source = Read(address);
+                    if (source != null)
                     {
-                        received = (int)n;
-                        if (from != null)
-                        {
-                            IPEndPoint source = Read(address);
-                            if (source != null)
-                            {
-                                from.Address = source.Address;
-                                from.Port = source.Port;
-                            }
-                        }
-                        return SocketError.Success;
+                        from.Address = source.Address;
+                        from.Port = source.Port;
                     }
-                    int e = Errno;
-                    received = 0;
-                    if (!WouldBlock(e) && !Interrupted(e))
-                        return LastError();
-                    if (!Wait(fd, POLLIN))
-                        return SocketError.OperationAborted;
                 }
+                return SocketError.Success;
             }
         }
     }
@@ -1501,16 +1677,45 @@ static class SocketNative
     // run: getaddrinfo can take seconds, and can't let them run itself.
     internal static bool Resolve(string host, out IPAddress[] addresses, out SocketError error)
     {
+        addresses = null;
+        nint lookup = BeginLookup(host, Fiber.Id != 0, out nint thread, out error);
+        if (lookup == 0)
+            return false;
+        while (!LookupDone(lookup))
+            Fiber.Sleep(1);
+        return EndLookup(lookup, thread, out addresses, out error);
+    }
+
+    // Resolve for Dns.GetHostAddressesAsync: the lookup's thread runs while
+    // this waits on Task.Delay, which takes no fiber. Failing ends the program.
+    internal static async System.Threading.Tasks.Task<IPAddress[]> ResolveAsync(string host)
+    {
+        nint lookup = BeginLookup(host, true, out nint thread, out SocketError error);
+        if (lookup == 0)
+            throw new SocketException((int)error);
+        while (!LookupDone(lookup))
+            await System.Threading.Tasks.Task.Delay(1);
+        if (!EndLookup(lookup, thread, out IPAddress[] addresses, out error))
+            throw new SocketException((int)error);
+        return addresses;
+    }
+
+    // Starts looking the name up: on a thread of its own if `threaded` (and
+    // one can be started), else here and now. The lookup (a Lookup*), or 0
+    // with the error.
+    static nint BeginLookup(string host, bool threaded, out nint thread, out SocketError error)
+    {
         unsafe
         {
-            // SAFETY: the C calls get memory on this stack (or from calloc), of
-            // the sizes they are told, and keep none of it past the call.
-            addresses = null;
+            // SAFETY: the lookup has room for the hints and the name after
+            // it; the thread gets it and returns before EndLookup frees it.
+            thread = 0;
+            error = SocketError.Success;
             Lookup* lookup = (Lookup*)calloc(1, (nuint)(sizeof(Lookup) + HintsSize + NameRoom));
             if (lookup == null)
             {
                 error = SocketError.NoBufferSpaceAvailable;
-                return false;
+                return 0;
             }
             byte* hints = &lookup->Hints0;
             byte* name = hints + HintsSize;
@@ -1518,21 +1723,33 @@ static class SocketNative
             {
                 free(lookup);
                 error = SocketError.HostNotFound;
-                return false;
+                return 0;
             }
             // ai_socktype (offset 8): stream, so each address comes once.
             *(int*)(hints + 8) = SOCK_STREAM;
-            nint thread = 0;
-            if (Fiber.Id != 0 && pthread_create(&thread, null, &LookUp, lookup) == 0)
-            {
-                while (Volatile.Read(ref lookup->Done) == 0)
-                    Fiber.Sleep(1);
-                pthread_join(thread, null);
-            }
-            else
-            {
+            nint started = 0;
+            if (!threaded || pthread_create(&started, null, &LookUp, lookup) != 0)
                 RunLookup(lookup);
-            }
+            thread = started;
+            return (nint)lookup;
+        }
+    }
+
+    static bool LookupDone(nint lookup)
+    {
+        unsafe { return Volatile.Read(ref ((Lookup*)lookup)->Done) != 0; } // SAFETY: BeginLookup's, not yet freed
+    }
+
+    // The answer, once LookupDone; frees the lookup and joins its thread.
+    static bool EndLookup(nint handle, nint thread, out IPAddress[] addresses, out SocketError error)
+    {
+        unsafe
+        {
+            // SAFETY: BeginLookup's lookup, done; its thread has finished with it.
+            Lookup* lookup = (Lookup*)handle;
+            if (thread != 0)
+                pthread_join(thread, null);
+            addresses = null;
             int result = lookup->Result;
             byte* list = lookup->List;
             free(lookup);

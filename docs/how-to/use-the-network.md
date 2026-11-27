@@ -5,12 +5,17 @@ index: 30
 
 # Use the network
 
-`lib/Net.cs` and `lib/Sockets.cs` have .NET's `System.Net` and `System.Net.Sockets`: `IPAddress`,
-`IPEndPoint`, `Dns`, `Socket`, `TcpListener`, `TcpClient`, `UdpClient` and `NetworkStream`. Code written
-against them compiles here. The sockets work with [fibers](use-fibers.html): a call that would wait parks
-its fiber and lets the others run, so one thread can serve many connections with a fiber each. There are
-no callbacks and no `async`. `samples/Network.cs` runs every example below, over loopback, so it needs no
-network.
+`lib/Net.cs`, `lib/Sockets.cs` and `lib/SocketsAsync.cs` have .NET's `System.Net` and
+`System.Net.Sockets`: `IPAddress`, `IPEndPoint`, `Dns`, `Socket`, `TcpListener`, `TcpClient`, `UdpClient`
+and `NetworkStream`. Code written against them compiles here. There are two ways to wait for the network,
+and they mix:
+
+- **Fibers.** A call that would wait parks its [fiber](use-fibers.html) and lets the others run, so one
+  thread can serve many connections with a fiber each.
+- **Async methods.** `ReadAsync`, `AcceptTcpClientAsync` and the rest return a task to `await`, and
+  waiting costs no fiber at all (see [Async methods](#async-methods)).
+
+`samples/Network.cs` runs every example below, over loopback, so it needs no network.
 
 Networking works on Linux, macOS and Windows.
 
@@ -209,14 +214,42 @@ static bool ServeGuarded(TcpClient client)
 Writing to a connection the other end has closed returns an error, not the SIGPIPE signal that would
 otherwise end a Unix program.
 
-There are no timeouts yet: a fiber waiting on a peer that has gone silent waits until something
-changes. To give up on it, close its socket from another fiber, such as one that sleeps for the time
-you allow. The waiting call wakes up and fails with `OperationAborted`, or its stream's `Read`
-returns 0. Closing wakes the waiter before the system can give the socket's number to a new socket, so
-the waiter never sees another connection's data. A `throw` outside any `Catch.Run` still ends the
-whole program, every fiber included, and so does a bug such as an index out of range. To survive
-that, run the program under something that restarts it, such as systemd or a container's restart
-policy.
+Closing a socket from another fiber also gives up on it: the waiting call wakes up and fails with
+`OperationAborted`, or its stream's `Read` returns 0. Closing wakes the waiter before the system can give
+the socket's number to a new socket, so the waiter never sees another connection's data. A `throw`
+outside any `Catch.Run` still ends the whole program, every fiber included, and so does a bug such
+as an index out of range. To survive that, run the program under something that restarts it, such
+as systemd or a container's restart policy.
+
+## Timeouts
+
+A peer that goes silent would keep its reader waiting for ever. `ReadTimeout` and `WriteTimeout` on a
+`NetworkStream` (`ReceiveTimeout` and `SendTimeout` on a `Socket` or `TcpClient`) set how long, in
+milliseconds, a call waits:
+
+<!-- sample: samples/Network.cs timeouts -->
+```csharp
+// A read that waits longer than ReadTimeout returns 0, with Error
+// TimedOut. The connection stays open, and the next read goes on.
+var timed = new TcpListener(IPAddress.Loopback, 0);
+timed.Start();
+using var silent = new TcpClient();
+silent.Connect(IPAddress.Loopback, ((IPEndPoint)timed.LocalEndpoint).Port);
+using TcpClient other = timed.AcceptTcpClient();
+NetworkStream patient = silent.GetStream();
+patient.ReadTimeout = 50; // milliseconds
+Span<byte> one = stackalloc byte[1];
+int got = patient.Read(one);
+// got is 0, and patient.Error is SocketError.TimedOut
+```
+
+As with a broken connection, a timed-out `Read` returns 0 and sets `Error`. Unlike one, it leaves the
+connection as it was, so the next `Read` waits again. A timed-out `Send` returns how many bytes went
+before it gave up. `Receive` and `Send` with `out SocketError` give `TimedOut`, and those without throw a
+`SocketException`, as in .NET. In a fiber the other fibers run during the wait, and outside
+one the thread waits.
+
+Connecting has no timeout of its own, as in .NET: give `ConnectAsync` a `CancellationToken`.
 
 ## UDP
 
@@ -260,12 +293,94 @@ plain call. `TryGetHostAddresses` returns the reason (`HostNotFound`, `TryAgain`
 ending the program. `Socket.Connect(host, port)` and `new TcpClient(host, port)` look the name up and
 try each address in turn.
 
+## Async methods
+
+Every waiting call has its .NET async twin: `ReadAsync` and `WriteAsync` on `NetworkStream`, and
+`ReceiveAsync`, `SendAsync`, `AcceptAsync`, `ConnectAsync`, `ReceiveFromAsync` and `SendToAsync` on
+`Socket`. `TcpListener` has `AcceptTcpClientAsync`, `TcpClient` has `ConnectAsync`, `UdpClient` has
+`ReceiveAsync` and `SendAsync`, and `Dns` has `GetHostAddressesAsync`. They take `Memory<byte>` where
+the blocking calls take a span, because an async method can't keep a span across an `await`. An array
+converts to one, and `AsMemory` takes a piece of it. Here is the echo server again, with an async method
+per connection instead of a fiber:
+
+<!-- sample: samples/Network.cs async-serve -->
+```csharp
+// The async way: each connection is an async method rather than a
+// fiber. A wait costs no fiber, so thousands of connections can wait
+// at once.
+static async Task ServeAsync(TcpClient client)
+{
+    using NetworkStream stream = client.GetStream();
+    byte[] buffer = new byte[512];
+    int n;
+    while ((n = await stream.ReadAsync(buffer)) > 0)
+        await stream.WriteAsync(buffer.AsMemory(0, n));
+}
+```
+
+A call that can finish at once does, with no task made. One that has to wait costs no fiber: the socket
+joins the list `Fiber.Run` polls, and when it's ready, `Fiber.Run` finishes the operation and completes
+its task. A waiting connection then costs only its async method's state, a few hundred bytes, against a
+fiber's stack. Each socket reuses one task for its receives and one for its sends, so once a loop of
+`ReadAsync` and `WriteAsync` is going, it allocates nothing. The sample checks that. As in .NET, await
+each `ValueTask` once.
+
+A token cancels the wait. On a `Socket`, `TcpListener` or `TcpClient`, canceling cancels the task, as in
+.NET, and awaiting a canceled task ends the program (see [Use async and await](use-fibers.html)). A
+server can't afford that per connection, so `NetworkStream` treats a cancel the way it treats a timeout:
+`ReadAsync` returns 0 and `Error` says why. Its `ReadTimeout` and `WriteTimeout` apply to the async
+calls too, which .NET's don't:
+
+<!-- sample: samples/Network.cs cancel -->
+```csharp
+// Canceled or timed out, NetworkStream's ReadAsync returns 0, and
+// Error says why; the stream stays usable. So a timeout doesn't
+// need an await of a canceled task, which would end the program.
+byte[] buffer = new byte[16];
+using (var cts = new CancellationTokenSource(30))
+{
+    int n = await a.ReadAsync(buffer, cts.Token);
+    // n is 0, and a.Error is SocketError.OperationAborted
+    Check("canceled read", n == 0 && a.Error == SocketError.OperationAborted);
+}
+a.ReadTimeout = 30; // milliseconds, for ReadAsync too
+int timedOut = await a.ReadAsync(buffer);
+// timedOut is 0, and a.Error is SocketError.TimedOut
+```
+
+Closing a socket wakes what waits on it. A `NetworkStream` call returns 0 with `Error`
+`OperationAborted`. A `Socket`, `TcpListener` or `UdpClient` task is canceled, where .NET's would fault.
+To stop an accept loop, stop the listener (or cancel its token), and await the accept as a plain `Task`
+with `SuppressThrowing`:
+
+<!-- sample: samples/Network.cs stop -->
+```csharp
+// Stopping the listener cancels the accept that waits on it. Awaited
+// as a plain Task with SuppressThrowing, a canceled task doesn't end
+// the program: the loop looks at IsCanceled instead.
+Task<TcpClient> next = pair.AcceptTcpClientAsync();
+pair.Stop();
+await ((Task)next).ConfigureAwait(
+    ConfigureAwaitOptions.SuppressThrowing);
+bool stopped = next.IsCanceled; // true
+```
+
+Some other differences from .NET:
+
+- **One at a time.** A socket takes one receive and one send at a time. Starting a second
+  `ReceiveAsync` while one waits ends the program; .NET would queue it.
+- **Failures.** On a `Socket` they end the program when they happen, as an unobserved fault would
+  when awaited. `NetworkStream` returns 0 and sets `Error`, as its `Read` does.
+- **Name lookups.** `Dns.GetHostAddressesAsync` runs the system's resolver on a thread of its own. If its
+  token is canceled, the lookup itself carries on in the background.
+
 ## How it works
 
 Every socket is non-blocking underneath. When a call would wait, the socket and what it waits for (to
-read, or to write) go on the fiber, and the fiber parks. When no fiber is ready to run, `Fiber.Run`
-waits in `poll` until a socket is ready or the earliest sleeper's time comes. While fibers are busy, it
-also checks the sockets every 64 switches without waiting.
+read, or to write) go on the fiber, and the fiber parks. An async operation goes on the same list, in
+place of a fiber. When no fiber is ready to run, `Fiber.Run` waits in `poll` until a socket is ready, the
+earliest sleeper's time comes, or a timeout runs out. While fibers are busy, it also checks the sockets
+every 64 switches without waiting.
 
 The C library's socket functions are called with Linux's numbers and struct layouts. macOS's differ, and
 `lib/Sockets.cs` knows both. On Windows, `win/runtime.c` answers the same calls through Winsock.
@@ -274,8 +389,7 @@ The C library's socket functions are called with Linux's numbers and struct layo
 
 - **TLS (HTTPS):** it needs a crypto library.
 - **HTTP:** `HttpClient` and a server.
-- **Timeouts:** `ReceiveTimeout` and `SendTimeout`.
-- **`Select` and the async methods:** fibers take their place.
+- **`Select` and `SocketAsyncEventArgs`:** fibers and the async methods take their place.
 - **Other systems:** WebAssembly (WASI preview 1 can't open sockets), DOS, UEFI and microcontrollers have
   no sockets. A program that uses them there fails to link.
 

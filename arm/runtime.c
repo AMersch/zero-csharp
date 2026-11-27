@@ -90,6 +90,14 @@ int pthread_create(void *thread, void *attributes, void *(*start)(void *), void 
     return 38; // ENOSYS
 }
 
+// No pipes (lib/FileAsync.cs then reads and writes files without its I/O
+// thread, blocking, as there are no threads either).
+int pipe(int fds[2])
+{
+    (void)fds;
+    return -1;
+}
+
 int sched_yield(void) { return 0; }
 
 int pthread_join(void *thread, void **result)

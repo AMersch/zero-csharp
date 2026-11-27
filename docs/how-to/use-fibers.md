@@ -409,6 +409,36 @@ Code ported from .NET that catches `OperationCanceledException` has to be change
 .NET: cast to `Task` first. Fibers' own waits take a token too: `Fiber.Sleep(ms, token)` and
 `channel.Receive(out value, token)` return `false` if canceled.
 
+## Use another clock
+
+`TimeProvider` (`lib/TimeProvider.cs`) is .NET 8's way to give code its time from outside. Code that
+waits with `Task.Delay(delay, timeProvider)`, `new CancellationTokenSource(delay, timeProvider)` or
+`new PeriodicTimer(period, timeProvider)`, and measures with `GetTimestamp` and `GetElapsedTime`, runs on
+the real clock when given `TimeProvider.System`. A test can give it a fake clock instead, whose time moves
+only when the test says, so code that waits an hour is checked at once. `ManualTime` in
+`samples/Timers.cs` is one, in some 80 lines, like .NET's `FakeTimeProvider`:
+
+<!-- sample: samples/Timers.cs fake-time -->
+```csharp
+var time = new ManualTime();
+Task delay = Task.Delay(TimeSpan.FromHours(1), time);
+time.Advance(TimeSpan.FromMinutes(59));
+bool early = delay.IsCompleted;     // false
+time.Advance(TimeSpan.FromMinutes(1));
+bool done = delay.IsCompleted;      // true
+```
+
+A provider of your own overrides `GetTimestamp`, `TimestampFrequency`, `GetUtcNow` and `CreateTimer`.
+The waits above then run on the timers it creates. The system's timers are `System.Threading.Timer`s,
+which fire inside `Fiber.Run`. Driving a fake clock from a test fires the timers at once, so the
+tasks they complete are done when `Advance` returns. The async methods waiting on them carry on at the
+next `Fiber.Run`, or the next `await` outside a fiber.
+
+Three things differ from .NET. `GetUtcNow` returns a `CalendarTime`, since there is no `DateTimeOffset`.
+There's no `LocalTimeZone`, because there are no time zones. And there's no
+`Task.WaitAsync(timeout, timeProvider)`: a timed-out wait would fault its task, and tasks here can't
+fault. Use `Task.WhenAny` with `Task.Delay(timeout, timeProvider)` instead.
+
 ## Use scratch memory and arenas
 
 Each fiber has its own `Arena.Scratch` arena, made on its first `Scratch` call and destroyed when the

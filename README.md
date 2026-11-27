@@ -74,7 +74,9 @@ More: [Coming from .NET](https://onurgumus.github.io/zero-csharp/get-started/com
 | Raspberry Pi Pico 2 (Cortex-M33), in QEMU | `./build.sh --pico2` | 9 KB to 88 KB of flash |
 | Arduino Uno R4 (Cortex-M4, 32 KB of RAM), in QEMU | `./build.sh --r4` | 9 KB to 62 KB of flash |
 
-The sizes leave out Llama, which carries its model and is about 1.1 MB everywhere. WebAssembly, DOS
+The sizes leave out Llama, which carries its model and is about 1.1 MB everywhere. Windows programs
+are built and tested under Wine, and CI then runs them again on Windows itself, with page heap
+checking every heap access. WebAssembly, DOS
 and the Commodore 64 go through [NativeAOT-LLVM](https://github.com/dotnet/runtimelab/tree/feature/NativeAOT-LLVM)
 instead of bflat's own code generator. The DOS build runs under the HX DOS extender and is tested on
 an emulated 386 with 4 MB. A UEFI program is started by the PC's firmware, from a USB stick or in QEMU,
@@ -128,9 +130,47 @@ unsafe { frame.Reset(); }                    // SAFETY: line is not used after t
 ```
 
 Freeing is `unsafe`, because it is what can leave a pointer dangling. `OpenScope()` frees what a
-`using` block allocated, and `OpenObjectScope()` does the same for ordinary `new`, closures and
-string concatenation inside the block. `Arena.DebugChecks` catches collections used after their memory
-was freed. See [Memory without a GC](https://onurgumus.github.io/zero-csharp/concepts/memory.html) and
+`using` block allocated.
+
+### Ordinary `new` in an arena
+
+Code that wasn't written for arenas allocates the ordinary way: `new`, a lambda that captures a
+variable, `a + b` on strings. Without a GC, each of those is a `calloc` that is never freed. Inside
+an object scope they all go into the arena instead, so the same code stops leaking:
+
+```csharp
+Arena scratch = Arena.Create(4096);
+for (int round = 0; round < 1000; round++)
+{
+    Arena.ObjectScope objects;
+    // SAFETY: nothing created inside is used after the block.
+    unsafe { objects = scratch.OpenObjectScope(); }
+    using (objects)
+    {
+        int[] cells = new int[16];               // an array
+        int offset = round;
+        Func<int, int> shift = x => x + offset;  // a closure and delegate
+        string text = Name() + "!";              // a new string
+        Use(cells, shift, text);
+    }   // cells, shift and text are freed here
+}
+```
+
+The block can call code you didn't write, and its objects land in the arena too. A thousand rounds
+leave the heap where it was and the arena at a single block. `AllocateObjectsHere()` does the same
+without freeing when the block ends, for an arena you `Reset` yourself. A scope applies only to the
+thread that opens it, so each thread of a parallel loop can use an arena of its own.
+
+### Catching mistakes
+
+`Arena.DebugChecks` is off by default. Set it first thing in `Main` while testing: arenas created
+after that fill freed memory with `0xDD`, so a stale pointer reads garbage instead of old data that
+looks right, and a collection used after its memory was freed (reset, or grown after `Save()` and
+used after `Restore()`) stops the program with a message. For an arena an object scope has used,
+`Reset`, `Restore` and `Destroy` also check that no static field points into what they free. Raw pointers carry nothing to check against, so with the
+checks off a stale one goes unnoticed.
+
+See [Memory without a GC](https://onurgumus.github.io/zero-csharp/concepts/memory.html) and
 [Strings without a GC](https://onurgumus.github.io/zero-csharp/concepts/strings.html).
 
 ## In this repository
